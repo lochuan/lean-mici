@@ -468,7 +468,29 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   }
 }
 
-struct CustomReserved10 @0xcb9fd56c7057593a {
+struct LateralAvoidanceSP @0xcb9fd56c7057593a {
+  active @0 :Bool;
+  yTarget @1 :Float32;       # m, + left
+  yCurrent @2 :Float32;      # m, measured ego offset from lane center, + left
+  demandLeft @3 :Float32;    # 0..1
+  demandRight @4 :Float32;   # 0..1
+  modelBiasExtra @5 :Float32;  # m, Phase 1 source contribution
+  objects @6 :List(Object);
+
+  struct Object {
+    source @0 :Source;
+    classId @1 :Int32;       # -1 = unknown (radar only)
+    x @2 :Float32;           # m, forward
+    y @3 :Float32;           # m, + left
+    demand @4 :Float32;      # contribution 0..1
+    score @5 :Float32;       # detection confidence (radar = 1.0)
+  }
+
+  enum Source {
+    model @0;
+    radar @1;
+    vision @2;
+  }
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {
