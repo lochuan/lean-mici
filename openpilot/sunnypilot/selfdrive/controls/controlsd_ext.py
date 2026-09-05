@@ -16,6 +16,7 @@ from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.selfdrive.controls.lib.blinker_pause_lateral import BlinkerPauseLateral
+from openpilot.sunnypilot.selfdrive.controls.lib.lateral_avoidance import LateralAvoidancePlanner, fill_lateral_avoidance_msg
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_v0 import LatControlTorque as LatControlTorqueV0
 
 
@@ -26,13 +27,15 @@ class ControlsExt(ModelStateBase):
     self.params = params
     self._param_update_time: float = 0.0
     self.blinker_pause_lateral = BlinkerPauseLateral()
+    self.lateral_avoidance = LateralAvoidancePlanner()
+    self._la_publish_frame = 0
 
     cloudlog.info("controlsd_ext is waiting for CarParamsSP")
     self.CP_SP = messaging.log_from_bytes(params.get("CarParamsSP", block=True), custom.CarParamsSP)
     cloudlog.info("controlsd_ext got CarParamsSP")
 
-    self.sm_services_ext = ['radarState', 'selfdriveStateSP']
-    self.pm_services_ext = ['carControlSP']
+    self.sm_services_ext = ['radarState', 'selfdriveStateSP', 'radarTracks']
+    self.pm_services_ext = ['carControlSP', 'lateralAvoidanceSP']
 
   def initialize_lateral_control(self, lac, CI, dt):
     enforce_torque_control = self.params.get_bool("EnforceTorqueControl")
@@ -114,6 +117,25 @@ class ControlsExt(ModelStateBase):
 
     pm.send('carControlSP', cc_sp_send)
 
+  def update_lateral_avoidance(self, model_v2, CS, lat_active: bool) -> None:
+    self.lateral_avoidance.update(
+      model_v2,
+      self.sm['radarTracks'].points,
+      CS.vEgo,
+      lat_active,
+      CS.leftBlinker, CS.rightBlinker,
+      CS.leftBlindspot, CS.rightBlindspot,
+    )
+
+  def publish_lateral_avoidance(self, pm: messaging.PubMaster) -> None:
+    self._la_publish_frame += 1
+    if self._la_publish_frame % 5 != 0:
+      return
+    msg = messaging.new_message('lateralAvoidanceSP')
+    fill_lateral_avoidance_msg(msg.lateralAvoidanceSP, self.lateral_avoidance)
+    pm.send('lateralAvoidanceSP', msg)
+
   def run_ext(self, sm: messaging.SubMaster, pm: messaging.PubMaster) -> None:
     CC_SP = self.state_control_ext(sm)
     self.publish_ext(CC_SP, sm, pm)
+    self.publish_lateral_avoidance(pm)
