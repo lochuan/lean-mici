@@ -493,7 +493,20 @@ struct LateralAvoidanceSP @0xcb9fd56c7057593a {
   }
 }
 
-struct CustomReserved11 @0xc2243c65e0340384 {
+struct VRUDetectionsSP @0xc2243c65e0340384 {
+  frameId @0 :UInt32;
+  timestampSof @1 :UInt64;
+  modelExecutionTime @2 :Float32;
+  detections @3 :List(VRUDetectionSP);
+
+  struct VRUDetectionSP {
+    classId @0 :Int32;    # COCO class id
+    score @1 :Float32;    # detection confidence
+    x @2 :Float32;        # m, forward (road frame, ego at origin)
+    y @3 :Float32;        # m, + left (road frame)
+    trackId @4 :UInt32;
+    vx @5 :Float32;       # m/s, ego-relative forward velocity (from tracker)
+  }
 }
 
 struct CustomReserved12 @0x9ccdc8676701b412 {
