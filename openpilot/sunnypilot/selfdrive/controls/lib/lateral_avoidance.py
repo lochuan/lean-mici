@@ -105,6 +105,7 @@ class LateralAvoidancePlanner:
     self._engaged = False
     self._enter_timer = 0.0
     self._exit_timer = 0.0
+    # k_nudge drops to zero immediately on gate-out (conservative); the envelope only drives state/telemetry
     self.k_nudge = 0.0
     self.y_target = 0.0
     self.demand_left = 0.0
@@ -160,12 +161,13 @@ class LateralAvoidancePlanner:
     self.demand_left = demand_left
     self.demand_right = demand_right
 
-    if left_blindspot or right_blindspot:
+    req_left = max(bias if bias > 0.0 else 0.0, radar_dl * self.max_offset)
+    req_right = max(-bias if bias < 0.0 else 0.0, radar_dr * self.max_offset)
+    net_offset = req_left - req_right
+    if left_blindspot and net_offset > 0.0:
       net_offset = 0.0
-    else:
-      req_left = max(bias if bias > 0.0 else 0.0, radar_dl * self.max_offset)
-      req_right = max(-bias if bias < 0.0 else 0.0, radar_dr * self.max_offset)
-      net_offset = req_left - req_right
+    if right_blindspot and net_offset < 0.0:
+      net_offset = 0.0
 
     strength = max(demand_left, demand_right)
     if strength > DEMAND_ENTER:

@@ -134,6 +134,13 @@ class TestLateralAvoidancePlanner(OpenpilotTestCase):
     drive(p, 0.1, points=make_points(RIGHT_TARGET), left_bs=True)
     assert p.y_target == 0.0
 
+  def test_bsm_away_side_not_suppressed(self, mocker):
+    p = planner(mocker)
+    drive(p, STEADY, points=make_points(RIGHT_TARGET))
+    assert p.y_target > 0.0
+    drive(p, 0.1, points=make_points(RIGHT_TARGET), right_bs=True)
+    assert p.y_target > 0.0  # moving left, away from a right-side target, is not blocked by right BSM
+
   def test_lane_width_sanity(self, mocker):
     p = planner(mocker)
     drive(p, STEADY, model_v2=mock_model_v2(ll_left=0.6, ll_right=-0.6), points=make_points(RIGHT_TARGET))
@@ -180,3 +187,15 @@ class TestLateralAvoidancePlanner(OpenpilotTestCase):
     assert la.objects[0].source == 1  # radar
     assert la.objects[0].classId == -1
     assert abs(la.objects[0].y - (-2.0)) < 1e-6
+
+
+class TestLateralAvoidanceDisabledByDefault(OpenpilotTestCase):
+  def test_feature_off_inert_with_real_params(self):
+    p = LateralAvoidancePlanner()
+    model_v2 = mock_model_v2()
+    points = make_points(RIGHT_TARGET)
+    for _ in range(500):  # ~5 s at 100 Hz
+      p.update(model_v2, points, V_EGO, True, False, False, False, False)
+    assert not p.active
+    assert p.k_nudge == 0.0
+    assert p.y_target == 0.0
