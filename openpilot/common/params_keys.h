@@ -166,6 +166,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"IsReleaseSpBranch", {CLEAR_ON_MANAGER_START, BOOL}},
     {"LastGPSPositionLLK", {PERSISTENT, STRING}},
     {"LeadDepartAlert", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"LateralAvoidanceEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"LateralAvoidanceLineMargin", {PERSISTENT | BACKUP, FLOAT, "0.30"}},  // meters
+    {"LateralAvoidanceMaxOffset", {PERSISTENT | BACKUP, FLOAT, "0.40"}},  // meters
+    {"LateralAvoidanceModelBiasEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"LateralAvoidanceTruckEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"LateralAvoidanceVRUEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"LateralAvoidanceVRUMargin", {PERSISTENT | BACKUP, FLOAT, "1.00"}},  // meters
     {"MaxTimeOffroad", {PERSISTENT | BACKUP, INT, "1800"}},
     {"ModelRunnerTypeCache", {CLEAR_ON_ONROAD_TRANSITION, INT}},
     {"OffroadMode", {CLEAR_ON_MANAGER_START, BOOL}},
