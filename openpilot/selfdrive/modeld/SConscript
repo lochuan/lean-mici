@@ -41,6 +41,9 @@ tg_devices = { # which device to put jit inputs to at runtime
   'openpilot.selfdrive.modeld.dmonitoringmodeld': {
     'default': {'DEV': tg_backend}
   },
+  'openpilot.sunnypilot.modeld_v2.vrudetectord': {
+    'default': {'DEV': tg_backend}
+  },
 }
 
 USBGPU = usbgpu_present()
@@ -145,3 +148,6 @@ def tg_compile(flags, model_name):
 
 if not os.getenv('SKIP_TINYGRAD_COMPILE'):
   tg_compile(tg_flags, 'dmonitoring_model')
+  # NPY_IMG=1 keeps the 'images' input on NPY at compile time so the daemon can
+  # use the dmonitoring-style zero-copy numpy input pattern
+  tg_compile(tg_flags + ' NPY_IMG=1', 'vru_detect')
