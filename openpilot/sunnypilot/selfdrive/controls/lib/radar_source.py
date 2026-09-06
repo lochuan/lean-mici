@@ -70,8 +70,8 @@ class RadarSource:
         self.demand_right = max(self.demand_right, demand)
       else:
         self.demand_left = max(self.demand_left, demand)
-      self.objects.append({'source': 'radar', 'classId': -1, 'x': d_rel, 'y': y_rel,
-                           'demand': demand, 'score': 1.0})
+      self.objects.append({'source': 'radar', 'classId': -1, 'trackId': tid,
+                           'x': d_rel, 'y': y_rel, 'demand': demand, 'score': 1.0})
 
     for tid in list(self._track_frames.keys()):
       if tid not in seen:

@@ -12,6 +12,7 @@ from openpilot.common.realtime import DT_CTRL
 
 from openpilot.sunnypilot.selfdrive.controls.lib.model_bias_source import ModelBiasSource, EXTRA_OFFSET_LIMIT
 from openpilot.sunnypilot.selfdrive.controls.lib.radar_source import RadarSource
+from openpilot.sunnypilot.selfdrive.controls.lib.vision_source import VisionSource
 
 LaneChangeState = log.LaneChangeState
 
@@ -57,6 +58,7 @@ class LateralAvoidancePlanner:
 
     self.model_bias_source = ModelBiasSource()
     self.radar_source = RadarSource()
+    self.vision_source = VisionSource()
 
     self.k_nudge = 0.0
     self.y_target = 0.0
@@ -99,6 +101,7 @@ class LateralAvoidancePlanner:
     self._exit_timer = 0.0
     self.model_bias_source.reset()
     self.radar_source.reset()
+    self.vision_source.reset()
 
   def _decay(self) -> None:
     self._envelope = max(0.0, self._envelope - DT_CTRL / RAMP_DOWN_TIME)
@@ -112,7 +115,7 @@ class LateralAvoidancePlanner:
     self.demand_right = 0.0
     self.active = self._envelope > 0.0
 
-  def update(self, model_v2, radar_points, v_ego: float, lat_active: bool,
+  def update(self, model_v2, radar_points, vru_detections, v_ego: float, lat_active: bool,
              left_blinker: bool, right_blinker: bool, left_blindspot: bool, right_blindspot: bool) -> None:
     self.update_params()
 
@@ -144,14 +147,18 @@ class LateralAvoidancePlanner:
     self.model_bias_source.update(model_v2.position, lane_lines, lane_line_probs,
                                   float(model_v2.action.desiredCurvature), v_ego)
     self.radar_source.update(radar_points, d_left, d_right, self.truck_enabled)
+    self.vision_source.update(vru_detections, radar_points, lane_lines, v_ego,
+                              self.vru_margin, self.vru_enabled, self.truck_enabled)
 
     bias = self.model_bias_source.extra_offset if self.model_bias_enabled else 0.0
     bias_demand = abs(bias) / EXTRA_OFFSET_LIMIT
     radar_dl = self.radar_source.demand_left if self.truck_enabled else 0.0
     radar_dr = self.radar_source.demand_right if self.truck_enabled else 0.0
+    vision_dl = self.vision_source.demand_left
+    vision_dr = self.vision_source.demand_right
 
-    demand_left = max(bias_demand if bias > 0.0 else 0.0, radar_dl)
-    demand_right = max(bias_demand if bias < 0.0 else 0.0, radar_dr)
+    demand_left = max(bias_demand if bias > 0.0 else 0.0, radar_dl, vision_dl)
+    demand_right = max(bias_demand if bias < 0.0 else 0.0, radar_dr, vision_dr)
 
     if left_blindspot:
       demand_left = 0.0
@@ -161,8 +168,8 @@ class LateralAvoidancePlanner:
     self.demand_left = demand_left
     self.demand_right = demand_right
 
-    req_left = max(bias if bias > 0.0 else 0.0, radar_dl * self.max_offset)
-    req_right = max(-bias if bias < 0.0 else 0.0, radar_dr * self.max_offset)
+    req_left = max(bias if bias > 0.0 else 0.0, radar_dl * self.max_offset, vision_dl * self.max_offset)
+    req_right = max(-bias if bias < 0.0 else 0.0, radar_dr * self.max_offset, vision_dr * self.max_offset)
     net_offset = req_left - req_right
     if left_blindspot and net_offset > 0.0:
       net_offset = 0.0
@@ -197,7 +204,8 @@ class LateralAvoidancePlanner:
     self.y_target = y_target
 
     self.active = self._envelope > 0.0
-    self.objects = self.radar_source.objects
+    self.objects = [o for o in self.radar_source.objects
+                    if o['trackId'] not in self.vision_source.matched_radar_track_ids] + self.vision_source.objects
 
     if self.active:
       lookahead = max(v_ego * T_LOOKAHEAD, L_MIN)

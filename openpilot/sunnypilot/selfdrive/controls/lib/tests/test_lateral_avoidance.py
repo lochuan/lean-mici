@@ -4,6 +4,8 @@ Copyright (c) 2021-, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
+import numpy as np
+
 from opendbc.car.structs import car
 from openpilot.cereal import log, messaging
 from openpilot.common.realtime import DT_CTRL
@@ -16,6 +18,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.lateral_avoidance import (
   RAMP_UP_TIME, ENTER_TIME,
 )
 from openpilot.sunnypilot.selfdrive.controls.lib.model_bias_source import BIAS_SIGN_FRAMES
+from openpilot.sunnypilot.selfdrive.controls.lib.vision_source import VisionSource
 
 X_IDXS = ModelConstants.X_IDXS
 
@@ -66,16 +69,26 @@ def make_points(specs):
 RIGHT_TARGET = [(1, 15.0, -2.0, 0.0)]  # gap = 0.2 -> demand 0.8
 
 
-def update(p, model_v2=None, points=None, v_ego=V_EGO, lat_active=True,
+def update(p, model_v2=None, points=None, dets=None, v_ego=V_EGO, lat_active=True,
            left_blinker=False, right_blinker=False, left_bs=False, right_bs=False):
   p.update(model_v2 if model_v2 is not None else mock_model_v2(),
-           points if points is not None else [], v_ego, lat_active,
-           left_blinker, right_blinker, left_bs, right_bs)
+           points if points is not None else [],
+           dets if dets is not None else [],
+           v_ego, lat_active, left_blinker, right_blinker, left_bs, right_bs)
 
 
 def drive(p, seconds, **kwargs):
   for _ in range(int(seconds / DT_CTRL) + 1):
     update(p, **kwargs)
+
+
+class Det:
+  def __init__(self, class_id, score, x, y, vx=0.0):
+    self.classId = class_id
+    self.score = score
+    self.x = x
+    self.y = y
+    self.vx = vx
 
 
 class TestLateralAvoidancePlanner(OpenpilotTestCase):
@@ -188,6 +201,21 @@ class TestLateralAvoidancePlanner(OpenpilotTestCase):
     assert la.objects[0].classId == -1
     assert abs(la.objects[0].y - (-2.0)) < 1e-6
 
+  def test_vision_drives_avoidance(self, mocker):
+    p = planner(mocker)
+    dets = [Det(1, 0.8, 15.0, -2.5)]
+    drive(p, STEADY, points=[], dets=dets)
+    assert p.active
+    assert p.y_target > 0.0   # move left away from right-side VRU
+    assert len(p.objects) == 1 and p.objects[0]['source'] == 'vision'
+
+  def test_vision_matches_dedupe_radar(self, mocker):
+    p = planner(mocker)
+    pts = make_points([(42, 15.0, -2.3, 0.0)])
+    dets = [Det(2, 0.8, 15.0, -2.5)]
+    drive(p, STEADY, points=pts, dets=dets)
+    assert len(p.objects) == 1  # radar track matched by vision -> only vision object remains
+
 
 class TestLateralAvoidanceDisabledByDefault(OpenpilotTestCase):
   def test_feature_off_inert_with_real_params(self):
@@ -195,7 +223,71 @@ class TestLateralAvoidanceDisabledByDefault(OpenpilotTestCase):
     model_v2 = mock_model_v2()
     points = make_points(RIGHT_TARGET)
     for _ in range(500):  # ~5 s at 100 Hz
-      p.update(model_v2, points, V_EGO, True, False, False, False, False)
+      p.update(model_v2, points, [], V_EGO, True, False, False, False, False)
     assert not p.active
     assert p.k_nudge == 0.0
     assert p.y_target == 0.0
+
+
+class TestVisionSource(OpenpilotTestCase):
+  def make_lines(self, left=1.8, right=-1.8):
+    m = mock_model_v2(ll_left=left, ll_right=right)
+    return m.laneLines
+
+  def test_vru_right_side_demands_left(self):
+    src = VisionSource()
+    src.update([Det(1, 0.8, 15.0, -2.5)], [], self.make_lines(), 25.0, 1.0, True, True)
+    # center_gap = 2.5 - 1.8 = 0.7; eff = 0.7 - 0.5 = 0.2; demand = (1.0-0.2)/1.0 = 0.8
+    np.testing.assert_allclose(src.demand_left, 0.8, atol=1e-6)
+    assert src.demand_right == 0.0
+    assert len(src.objects) == 1 and src.objects[0]['source'] == 'vision'
+
+  def test_vru_far_no_demand(self):
+    src = VisionSource()
+    src.update([Det(1, 0.8, 15.0, -3.5)], [], self.make_lines(), 25.0, 1.0, True, True)
+    assert src.demand_left == 0.0 and src.objects == []
+
+  def test_vru_left_side_demands_right(self):
+    src = VisionSource()
+    src.update([Det(1, 0.8, 15.0, 2.5)], [], self.make_lines(), 25.0, 1.0, True, True)
+    np.testing.assert_allclose(src.demand_right, 0.8, atol=1e-6)
+
+  def test_truck_unfused_uses_vx(self):
+    src = VisionSource()
+    # parallel truck: center 3.7, half 1.3 -> eff gap = 3.7-1.8-1.3 = 0.6; demand = 0.8-0.2*0.6
+    src.update([Det(7, 0.9, 5.0, -3.7, vx=0.0)], [], self.make_lines(), 25.0, 1.0, True, True)
+    np.testing.assert_allclose(src.demand_left, 0.8 - 0.2 * 0.6, atol=1e-6)
+
+  def test_truck_oncoming_excluded(self):
+    src = VisionSource()
+    src.update([Det(7, 0.9, 5.0, -3.7, vx=-20.0)], [], self.make_lines(), 5.0, 1.0, True, True)
+    assert src.demand_left == 0.0  # vx < -(v_ego + 5) = -10
+
+  def test_truck_fused_with_radar(self):
+    src = VisionSource()
+    pts = make_points([(42, 5.0, -3.7, -1.0)])
+    src.update([Det(7, 0.9, 4.5, -3.3, vx=0.0)], pts, self.make_lines(), 25.0, 1.0, True, True)
+    obj = src.objects[0]
+    np.testing.assert_allclose([obj['x'], obj['y']], [5.0, -3.7], atol=1e-6)  # radar position wins
+    assert src.matched_radar_track_ids == {42}
+    np.testing.assert_allclose(src.demand_left, 0.8 - 0.2 * 0.6, atol=1e-6)
+
+  def test_car_straddling(self):
+    src = VisionSource()
+    # center 2.4, half 0.95 -> eff = 2.4-1.8-0.95 = -0.35 -> demand 1.0
+    src.update([Det(2, 0.8, 10.0, -2.4)], [], self.make_lines(), 25.0, 1.0, True, True)
+    np.testing.assert_allclose(src.demand_left, 1.0, atol=1e-6)
+
+  def test_vru_disabled(self):
+    src = VisionSource()
+    src.update([Det(1, 0.8, 15.0, -2.5)], [], self.make_lines(), 25.0, 1.0, False, True)
+    assert src.demand_left == 0.0
+
+  def test_lane_line_interpolated(self):
+    src = VisionSource()
+    lines = self.make_lines()
+    # mutate right line to slope: -1.8 @ x=0 -> -2.8 @ x=100
+    lines[2].y = [-1.8 - x / 100.0 for x in lines[2].x]
+    src.update([Det(1, 0.8, 50.0, -3.0)], [], lines, 25.0, 1.0, True, True)
+    # right edge at x=50: -2.3; center_gap = 3.0-2.3 = 0.7; eff = 0.2 -> demand 0.8
+    np.testing.assert_allclose(src.demand_left, 0.8, atol=1e-6)

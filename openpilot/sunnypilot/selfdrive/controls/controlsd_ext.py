@@ -34,7 +34,7 @@ class ControlsExt(ModelStateBase):
     self.CP_SP = messaging.log_from_bytes(params.get("CarParamsSP", block=True), custom.CarParamsSP)
     cloudlog.info("controlsd_ext got CarParamsSP")
 
-    self.sm_services_ext = ['radarState', 'selfdriveStateSP', 'radarTracks']
+    self.sm_services_ext = ['radarState', 'selfdriveStateSP', 'radarTracks', 'vruDetectionsSP']
     self.pm_services_ext = ['carControlSP', 'lateralAvoidanceSP']
 
   def initialize_lateral_control(self, lac, CI, dt):
@@ -121,6 +121,7 @@ class ControlsExt(ModelStateBase):
     self.lateral_avoidance.update(
       model_v2,
       self.sm['radarTracks'].points,
+      self.sm['vruDetectionsSP'].detections,
       CS.vEgo,
       lat_active,
       CS.leftBlinker, CS.rightBlinker,
