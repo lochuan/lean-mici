@@ -70,6 +70,13 @@ class TestTracker(OpenpilotTestCase):
     ids2 = {d['trackId'] for d in r2}
     assert ids2 == {d['trackId'] for d in r3}
 
+  def test_same_frame_duplicates_not_associated(self):
+    t = VRUTracker()
+    (r1, r2, r3) = drive(t, [[(1, 0.9, 15.0, -2.5), (1, 0.9, 16.0, -2.5)], [], [(1, 0.9, 15.1, -2.5)]])
+    assert r1 == [] and r2 == []          # same-frame dupes get separate tracks, neither published
+    assert len(r3) == 1                   # nearest track reacquired, hits=2 by real persistence
+    np.testing.assert_allclose([r3[0]['x'], r3[0]['y']], [15.0 + ALPHA * 0.1, -2.5], atol=1e-9)
+
   def test_reset(self):
     t = VRUTracker()
     drive(t, [[(1, 0.9, 15.0, -2.5)]] * 2)

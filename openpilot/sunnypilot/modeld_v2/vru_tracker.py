@@ -22,18 +22,20 @@ class VRUTracker:
 
   def update(self, detections) -> list[dict]:
     assigned: set[int] = set()
+    associable = list(self.tracks.items())
+    new_tracks: dict[int, dict] = {}
     for det in detections:
       best_tid, best_d = None, ASSOC_GATE
-      for tid, tr in self.tracks.items():
+      for tid, tr in associable:
         if tid in assigned or tr['classId'] != det.classId:
           continue
         d = ((tr['x'] - det.x) ** 2 + (tr['y'] - det.y) ** 2) ** 0.5
         if d < best_d:
           best_tid, best_d = tid, d
       if best_tid is None:
-        self.tracks[self._next_id] = {'classId': det.classId, 'score': det.score,
-                                      'x': float(det.x), 'y': float(det.y), 'vx': 0.0, 'vy': 0.0,
-                                      'hits': 1, 'misses': 0}
+        new_tracks[self._next_id] = {'classId': det.classId, 'score': det.score,
+                                     'x': float(det.x), 'y': float(det.y), 'vx': 0.0, 'vy': 0.0,
+                                     'hits': 1, 'misses': 0}
         self._next_id += 1
       else:
         assigned.add(best_tid)
@@ -48,6 +50,7 @@ class VRUTracker:
         tr['score'] = det.score
         tr['hits'] += 1
         tr['misses'] = 0
+    self.tracks.update(new_tracks)
 
     for tid in list(self.tracks.keys()):
       if tid not in assigned:
