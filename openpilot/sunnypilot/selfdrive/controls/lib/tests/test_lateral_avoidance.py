@@ -15,7 +15,7 @@ from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.sunnypilot.selfdrive.controls.lib.lateral_avoidance import (
   LateralAvoidancePlanner, fill_lateral_avoidance_msg,
   T_LOOKAHEAD, L_MIN, K_NUDGE_LIMIT, MIN_SPEED,
-  RAMP_UP_TIME, ENTER_TIME,
+  RAMP_UP_TIME, RAMP_DOWN_TIME, ENTER_TIME, EXIT_TIME,
 )
 from openpilot.sunnypilot.selfdrive.controls.lib.model_bias_source import BIAS_SIGN_FRAMES
 from openpilot.sunnypilot.selfdrive.controls.lib.vision_source import VisionSource
@@ -215,6 +215,16 @@ class TestLateralAvoidancePlanner(OpenpilotTestCase):
     dets = [Det(2, 0.8, 15.0, -2.5)]
     drive(p, STEADY, points=pts, dets=dets)
     assert len(p.objects) == 1  # radar track matched by vision -> only vision object remains
+
+  def test_stale_vision_detections_release_demand(self, mocker):
+    # controlsd passes [] when vruDetectionsSP goes stale (daemon dead); demand must decay back
+    p = planner(mocker)
+    dets = [Det(7, 0.9, 15.0, -3.7)]  # right-side truck
+    drive(p, STEADY, points=[], dets=dets)
+    assert p.y_target > 0.0
+    drive(p, EXIT_TIME + RAMP_DOWN_TIME + 0.5, points=[], dets=[])
+    assert p.demand_left == 0.0 and p.demand_right == 0.0
+    assert p.objects == [] and p.y_target == 0.0 and not p.active
 
 
 class TestLateralAvoidanceDisabledByDefault(OpenpilotTestCase):

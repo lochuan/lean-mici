@@ -43,6 +43,7 @@ class VRUDetector:
     self.projector: GroundProjector | None = None
     self.cam_w = cam_w
     self.cam_h = cam_h
+    self._warned_unknown_cam = False
 
   def update_projector(self, sm: SubMaster) -> bool:
     if not (sm.seen['deviceState'] and sm.seen['wideRoadCameraState']):
@@ -50,6 +51,9 @@ class VRUDetector:
     key = (str(sm['deviceState'].deviceType), str(sm['wideRoadCameraState'].sensor))
     cam_cfg = DEVICE_CAMERAS.get(key)
     if cam_cfg is None or cam_cfg.wide_road.focal_length == 0.0:
+      if not self._warned_unknown_cam:
+        cloudlog.warning("vrudetectord: unknown/invalid wide camera config, projector unavailable")
+        self._warned_unknown_cam = True
       return False
     calib = sm['extrinsicsCalibration']
     if sm.seen['extrinsicsCalibration']:

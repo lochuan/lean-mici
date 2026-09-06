@@ -118,10 +118,12 @@ class ControlsExt(ModelStateBase):
     pm.send('carControlSP', cc_sp_send)
 
   def update_lateral_avoidance(self, model_v2, CS, lat_active: bool) -> None:
+    # if the vrudetectord daemon is gone (param toggled off / crash), drop its stale last message
+    vru_detections = self.sm['vruDetectionsSP'].detections if self.sm.alive['vruDetectionsSP'] else []
     self.lateral_avoidance.update(
       model_v2,
       self.sm['radarTracks'].points,
-      self.sm['vruDetectionsSP'].detections,
+      vru_detections,
       CS.vEgo,
       lat_active,
       CS.leftBlinker, CS.rightBlinker,
