@@ -94,6 +94,9 @@ def is_stock_model(started, params, CP: car.CarParams) -> bool:
 def mapd_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   return bool(os.path.exists(Paths.mapd_root()))
 
+def lateral_avoidance_vru(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return started and params.get_bool("LateralAvoidanceEnabled") and params.get_bool("LateralAvoidanceVRUEnabled")
+
 def uploader_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   if not params.get_bool("OnroadUploads"):
     return only_offroad(started, params, CP)
@@ -180,6 +183,9 @@ procs += [
 
   # locationd
   NativeProcess("locationd_llk", "openpilot/sunnypilot/selfdrive/locationd", ["./locationd"], only_onroad),
+
+  # lateral avoidance
+  PythonProcess("vrudetectord", "openpilot.sunnypilot.modeld_v2.vrudetectord", lateral_avoidance_vru),
 ]
 
 if os.path.exists("../../sunnypilot/sunnylink/uploader.py"):
