@@ -14,8 +14,6 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.simple_kalman import KF1D
 
 from opendbc.car import structs
-from opendbc.car.hyundai.values import HyundaiFlags
-from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
 
 
 # Default lead acceleration decay set to 50% at 1s
@@ -184,9 +182,12 @@ def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capn
 
 def get_custom_yrel(CP: structs.CarParams, CP_SP: structs.CarParamsSP, lead_dict: dict[str, Any],
                     lead_msg: capnp._DynamicStructReader) -> dict[str, Any]:
-  if CP.brand == "hyundai" and (CP_SP.flags & HyundaiFlagsSP.ENHANCED_SCC or
-                                CP.flags & (HyundaiFlags.CANFD_CAMERA_SCC | HyundaiFlags.CAMERA_SCC)):
-    lead_dict['yRel'] = float(-lead_msg.y[0])
+  if CP.brand == "hyundai":
+    from opendbc.car.hyundai.values import HyundaiFlags
+    from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
+    if (CP_SP.flags & HyundaiFlagsSP.ENHANCED_SCC or
+        CP.flags & (HyundaiFlags.CANFD_CAMERA_SCC | HyundaiFlags.CAMERA_SCC)):
+      lead_dict['yRel'] = float(-lead_msg.y[0])
 
   return lead_dict
 

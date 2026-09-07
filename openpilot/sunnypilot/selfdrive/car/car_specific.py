@@ -8,7 +8,6 @@ See the LICENSE.md file in the root directory for more details.
 from openpilot.cereal import log, custom
 from opendbc.car import structs
 
-from opendbc.car.chrysler.values import RAM_DT
 from openpilot.selfdrive.selfdrived.events import Events
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 
@@ -28,6 +27,7 @@ class CarSpecificEventsSP:
     events_sp = EventsSP()
 
     if self.CP.brand == 'chrysler':
+      from opendbc.car.chrysler.values import RAM_DT
       if self.CP.carFingerprint in RAM_DT:
         # remove belowSteerSpeed event from CarSpecificEvents as RAM_DT uses a different logic
         if events.has(EventName.belowSteerSpeed):

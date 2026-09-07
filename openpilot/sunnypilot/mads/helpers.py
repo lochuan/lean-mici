@@ -8,8 +8,6 @@ See the LICENSE.md file in the root directory for more details.
 from openpilot.common.params import Params
 from opendbc.car import structs
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
-from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP, HyundaiSafetyFlagsSP
-from opendbc.sunnypilot.car.tesla.values import MadsScreenButtonType, TeslaFlagsSP
 
 
 MADS_NO_ACC_MAIN_BUTTON = ("rivian", "tesla")
@@ -25,6 +23,7 @@ def get_mads_limited_brands(CP: structs.CarParams, CP_SP: structs.CarParamsSP, p
   if CP.brand == 'rivian':
     return True
   if CP.brand == 'tesla':
+    from opendbc.sunnypilot.car.tesla.values import MadsScreenButtonType, TeslaFlagsSP
     if not CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
       return True
     screen_button = int(params.get("TeslaMadsScreenButton", return_default=True))
@@ -57,6 +56,7 @@ def set_car_specific_params(CP: structs.CarParams, CP_SP: structs.CarParamsSP, p
   if CP.brand == "hyundai":
     # TODO-SP: This should be separated from MADS module for future implementations
     #          Use "HyundaiLongitudinalMainCruiseToggleable" param
+    from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP, HyundaiSafetyFlagsSP
     hyundai_cruise_main_toggleable = True
     if hyundai_cruise_main_toggleable:
       CP_SP.flags |= HyundaiFlagsSP.LONGITUDINAL_MAIN_CRUISE_TOGGLEABLE.value
