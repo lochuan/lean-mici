@@ -59,9 +59,7 @@ class UIState(UIStateSP):
         "deviceState",
         "pandaStates",
         "carParams",
-        "driverMonitoringState",
         "carState",
-        "driverStateV2",
         "narrowRoadCameraState",
         "wideRoadCameraState",
         "managerState",
@@ -86,7 +84,6 @@ class UIState(UIStateSP):
     # Core state variables
     self.is_metric: bool = self.params.get_bool("IsMetric")
     self.is_release = False  # self.params.get_bool("IsReleaseBranch")
-    self.always_on_dm: bool = self.params.get_bool("AlwaysOnDM")
     self.experimental_mode: bool = self.params.get_bool("ExperimentalMode")
     self.experimental_mode_confirmed: bool = self.params.get_bool("ExperimentalModeConfirmed")
     self.chestnut_present: bool = False
@@ -248,7 +245,6 @@ class UIState(UIStateSP):
 
     self.recording_audio = self.params.get_bool("RecordAudio") and self.started
     self.is_metric = self.params.get_bool("IsMetric")
-    self.always_on_dm = self.params.get_bool("AlwaysOnDM")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
     self.experimental_mode_confirmed = self.params.get_bool("ExperimentalModeConfirmed")
     if not self.chestnut_compiled:

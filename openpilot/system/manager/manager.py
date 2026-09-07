@@ -46,9 +46,6 @@ def manager_init() -> None:
     if not os.path.exists(prebuilt_path):
       open(prebuilt_path, 'x').close()
 
-  if params.get_bool("RecordFrontLock"):
-    params.put_bool("RecordFront", True, block=True)
-
   if not PC:
     run_migration(params)
 

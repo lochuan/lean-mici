@@ -5,7 +5,6 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 from openpilot.selfdrive.ui.layouts.settings.device import DeviceLayout
-from openpilot.selfdrive.ui.onroad.cabin_camera_dialog import CabinCameraDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.common.hardware import HARDWARE
 from openpilot.system.ui.lib.application import gui_app
@@ -78,13 +77,8 @@ class DeviceLayoutSP(DeviceLayout):
       inline=True,
     )
 
-    self._quiet_mode_and_dcam = dual_button_item_sp(
-      left_text=lambda: tr("Quiet Mode"),
-      right_text=lambda: tr("Driver Camera Preview"),
-      left_callback=lambda: ui_state.params.put_bool("QuietMode", not ui_state.params.get_bool("QuietMode")),
-      right_callback=lambda: gui_app.push_widget(CabinCameraDialog())
-    )
-    self._quiet_mode_and_dcam.action_item.right_button.set_button_style(ButtonStyle.NORMAL)
+    self._quiet_mode_btn = button_item_sp(lambda: tr("Quiet Mode"), lambda: tr("TOGGLE"),
+                                          callback=lambda: ui_state.params.put_bool("QuietMode", not ui_state.params.get_bool("QuietMode")))
 
     self._reg_and_training = dual_button_item_sp(
       left_text=lambda: tr("Regulatory"),
@@ -94,12 +88,8 @@ class DeviceLayoutSP(DeviceLayout):
     )
     self._reg_and_training.action_item.right_button.set_button_style(ButtonStyle.NORMAL)
 
-    self._onroad_uploads_and_reset_settings = dual_button_item_sp(
-      left_text=lambda: tr("Onroad Uploads"),
-      left_callback=lambda: ui_state.params.put_bool("OnroadUploads", not ui_state.params.get_bool("OnroadUploads")),
-      right_text=lambda: tr("Reset Settings"),
-      right_callback=self._reset_settings
-    )
+    self._reset_settings_btn = button_item_sp(lambda: tr("Reset Settings"), lambda: tr("RESET"),
+                                              callback=self._reset_settings)
 
     self._power_buttons = dual_button_item_sp(
       left_text=lambda: tr("Reboot"),
@@ -113,8 +103,6 @@ class DeviceLayoutSP(DeviceLayout):
       LineSeparator(),
       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
       LineSeparator(),
-      self._pair_device_btn,
-      LineSeparator(),
       self._reset_calib_btn,
       LineSeparator(),
       button_item_sp(lambda: tr("Change Language"), lambda: tr("CHANGE"), callback=self._show_language_dialog),
@@ -123,9 +111,9 @@ class DeviceLayoutSP(DeviceLayout):
       LineSeparator(),
       self._max_time_offroad,
       LineSeparator(height=10),
-      self._quiet_mode_and_dcam,
+      self._quiet_mode_btn,
       self._reg_and_training,
-      self._onroad_uploads_and_reset_settings,
+      self._reset_settings_btn,
       Spacer(10),
       LineSeparator(height=10),
       self._power_buttons,
@@ -207,15 +195,9 @@ class DeviceLayoutSP(DeviceLayout):
       self._scroller._items.insert(0, self._always_offroad_btn)
 
     # Quiet Mode button
-    self._quiet_mode_and_dcam.action_item.left_button.set_button_style(ButtonStyle.PRIMARY if ui_state.params.get_bool("QuietMode") else ButtonStyle.NORMAL)
-
-    # Onroad Uploads
-    self._onroad_uploads_and_reset_settings.action_item.left_button.set_button_style(
-      ButtonStyle.PRIMARY if ui_state.params.get_bool("OnroadUploads") else ButtonStyle.NORMAL
-    )
+    self._quiet_mode_btn.action_item._button.set_button_style(ButtonStyle.PRIMARY if ui_state.params.get_bool("QuietMode") else ButtonStyle.NORMAL)
 
     # Offroad only buttons
-    self._quiet_mode_and_dcam.action_item.right_button.set_enabled(ui_state.is_offroad())
     self._reg_and_training.action_item.left_button.set_enabled(ui_state.is_offroad())
     self._reg_and_training.action_item.right_button.set_enabled(ui_state.is_offroad())
-    self._onroad_uploads_and_reset_settings.action_item.right_button.set_enabled(ui_state.is_offroad())
+    self._reset_settings_btn.action_item.set_enabled(ui_state.is_offroad())

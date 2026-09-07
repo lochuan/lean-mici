@@ -95,13 +95,6 @@ def calibration_incomplete_alert(CP: car.CarParams, CS: car.CarState, sm: messag
     Priority.LOWEST, VisualAlert.none, AudibleAlert.none, .2)
 
 
-def too_distracted_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
-  if sm['driverMonitoringState'].lockout:
-    mins_left = sm['driverMonitoringState'].lockoutMinutesRemaining
-    return NoEntryAlert("Too Distracted", f"{mins_left} minute{'s' if mins_left != 1 else ''} Left", priority=Priority.HIGH)
-  return NoEntryAlert("Pay Attention to Engage", priority=Priority.HIGH)
-
-
 # *** debug alerts ***
 
 def out_of_space_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
@@ -341,54 +334,6 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 1.8),
   },
 
-  EventName.driverDistracted1: {
-    ET.PERMANENT: Alert(
-      "Pay Attention",
-      "",
-      AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.none, AudibleAlert.preAlert, .1),
-  },
-
-  EventName.driverDistracted2: {
-    ET.PERMANENT: Alert(
-      "Pay Attention",
-      "Driver Distracted",
-      AlertStatus.userPrompt, AlertSize.mid,
-      Priority.MID, VisualAlert.steerRequired, AudibleAlert.promptDistracted, .1),
-  },
-
-  EventName.driverDistracted3: {
-    ET.PERMANENT: Alert(
-      "DISENGAGE IMMEDIATELY",
-      "Driver Distracted",
-      AlertStatus.critical, AlertSize.full,
-      Priority.HIGH, VisualAlert.steerRequired, AudibleAlert.warningImmediate, .1),
-  },
-
-  EventName.driverUnresponsive1: {
-    ET.PERMANENT: Alert(
-      "Touch Steering Wheel: No Face Detected",
-      "",
-      AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.none, .1),
-  },
-
-  EventName.driverUnresponsive2: {
-    ET.PERMANENT: Alert(
-      "Touch Steering Wheel",
-      "Driver Unresponsive",
-      AlertStatus.userPrompt, AlertSize.mid,
-      Priority.MID, VisualAlert.steerRequired, AudibleAlert.promptDistracted, .1),
-  },
-
-  EventName.driverUnresponsive3: {
-    ET.PERMANENT: Alert(
-      "DISENGAGE IMMEDIATELY",
-      "Driver Unresponsive",
-      AlertStatus.critical, AlertSize.full,
-      Priority.HIGH, VisualAlert.steerRequired, AudibleAlert.warningImmediate, .1),
-  },
-
   EventName.manualRestart: {
     ET.WARNING: Alert(
       "TAKE CONTROL",
@@ -613,10 +558,6 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.SOFT_DISABLE: soft_disable_alert("Sensor Data Invalid"),
   },
 
-  EventName.tooDistracted: {
-    ET.NO_ENTRY: too_distracted_alert,
-  },
-
   EventName.excessiveActuation: {
     ET.SOFT_DISABLE: soft_disable_alert("Excessive Actuation"),
     ET.NO_ENTRY: NoEntryAlert("Excessive Actuation"),
@@ -838,20 +779,6 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
 if HARDWARE.get_device_type() == 'mici':
   EVENTS.update({
-    EventName.driverDistracted1: {
-      ET.PERMANENT: Alert(
-        "Pay Attention",
-        "",
-        AlertStatus.normal, AlertSize.small,
-        Priority.LOW, VisualAlert.none, AudibleAlert.preAlert, 2),
-    },
-    EventName.driverDistracted2: {
-      ET.PERMANENT: Alert(
-        "Pay Attention",
-        "Driver Distracted",
-        AlertStatus.userPrompt, AlertSize.mid,
-        Priority.MID, VisualAlert.steerRequired, AudibleAlert.promptDistracted, 1),
-    },
     EventName.resumeRequired: {
       ET.WARNING: Alert(
         "Press Resume",

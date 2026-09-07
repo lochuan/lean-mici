@@ -23,9 +23,6 @@ STEP_RECTS = [rl.Rectangle(104, 800, 633, 175), rl.Rectangle(1835, 0, 2159, 1080
               rl.Rectangle(1336, 438, 490, 393), rl.Rectangle(1835, 0, 2159, 1080), rl.Rectangle(1835, 0, 2159, 1080),
               rl.Rectangle(87, 795, 1187, 186)]
 
-DM_RECORD_STEP = 9
-DM_RECORD_YES_RECT = rl.Rectangle(695, 794, 558, 187)
-
 RESTART_TRAINING_RECT = rl.Rectangle(87, 795, 472, 186)
 
 
@@ -62,14 +59,8 @@ class TrainingGuide(Widget):
 
   def _handle_mouse_release(self, mouse_pos):
     if rl.check_collision_point_rec(mouse_pos, STEP_RECTS[self._step]):
-      # Record DM camera?
-      if self._step == DM_RECORD_STEP:
-        yes = rl.check_collision_point_rec(mouse_pos, DM_RECORD_YES_RECT)
-        print(f"putting RecordFront to {yes}")
-        ui_state.params.put_bool("RecordFront", yes, block=True)
-
       # Restart training?
-      elif self._step == len(self._image_paths) - 1:
+      if self._step == len(self._image_paths) - 1:
         if rl.check_collision_point_rec(mouse_pos, RESTART_TRAINING_RECT):
           self._step = -1
 
