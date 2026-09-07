@@ -7,7 +7,6 @@ from enum import Enum
 from sentry_sdk.integrations.threading import ThreadingIntegration
 
 from openpilot.common.params import Params
-from openpilot.system.athena.registration import UNREGISTERED_DONGLE_ID
 from openpilot.common.hardware import HARDWARE
 from openpilot.common.hardware.hw import Paths
 from openpilot.common.swaglog import cloudlog
@@ -15,6 +14,9 @@ from openpilot.common.version import get_build_metadata, get_version
 
 
 CRASHES_DIR = Paths.crash_log_root()
+
+# comma registration removed: local stand-in for the athena constant
+UNREGISTERED_DONGLE_ID = "UnregisteredDevice"
 
 
 class SentryProject(Enum):

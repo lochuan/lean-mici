@@ -35,9 +35,8 @@ dependencies = [
   "comma-deps-git-lfs",
   "comma-deps-gcc-arm-none-eabi",
 
-  # athena
+  # pigeond GPS assist downloads (comma API auth)
   "PyJWT[crypto]",
-  "websocket_client",
 
   # joystickd
   "inputs",
