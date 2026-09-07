@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/venv/bin/python
 import datetime
 import os
 import signal

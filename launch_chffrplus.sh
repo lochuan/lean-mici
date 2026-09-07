@@ -77,7 +77,6 @@ function launch {
   ln -sfn msgq_repo/msgq msgq
   ln -sfn opendbc_repo/opendbc opendbc
   ln -sfn rednose_repo/rednose rednose
-  ln -sfn teleoprtc_repo/teleoprtc teleoprtc
   ln -sfn tinygrad_repo/tinygrad tinygrad
 
   # hardware specific init
