@@ -23,7 +23,6 @@ from openpilot.system.ui.widgets import Widget
 
 METER_TO_FOOT = 3.28084
 METER_TO_MILE = 0.000621371
-AHEAD_THRESHOLD = 5
 SET_SPEED_NA = 255
 KM_TO_MILE = 0.621371
 
@@ -146,18 +145,7 @@ class SpeedLimitRenderer(Widget, SpeedLimitAlertRenderer):
       self.speed_limit_source = resolver.source
       self.speed_limit_assist_state = assist.state
 
-    if sm.updated["liveMapDataSP"]:
-      lmd = sm["liveMapDataSP"]
-      self.speed_limit_ahead_valid = lmd.speedLimitAheadValid
-      self.speed_limit_ahead = lmd.speedLimitAhead * self.speed_conv
-      self.speed_limit_ahead_dist = lmd.speedLimitAheadDistance
-
-      if self.speed_limit_ahead_dist < self.speed_limit_ahead_dist_prev and self.speed_limit_ahead_frame < AHEAD_THRESHOLD:
-        self.speed_limit_ahead_frame += 1
-      elif self.speed_limit_ahead_dist > self.speed_limit_ahead_dist_prev and self.speed_limit_ahead_frame > 0:
-        self.speed_limit_ahead_frame -= 1
-
-      self.speed_limit_ahead_dist_prev = self.speed_limit_ahead_dist
+    # liveMapDataSP ahead-limits only come from mapd (trimmed)
 
     controls_state = sm['controlsState']
     car_state = sm["carState"]
