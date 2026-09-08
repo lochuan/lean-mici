@@ -3,7 +3,6 @@ from abc import abstractmethod, ABC
 from dataclasses import dataclass, fields
 
 from openpilot.cereal import log
-from openpilot.common.esim.base import LPABase
 
 NetworkType = log.DeviceState.NetworkType
 NetworkStrength = log.DeviceState.NetworkStrength
@@ -96,18 +95,6 @@ class HardwareBase(ABC):
 
   def get_network_type(self):
     return NetworkType.none
-
-  def get_sim_info(self):
-    return {
-      'sim_id': '',
-      'mcc_mnc': None,
-      'network_type': ["Unknown"],
-      'sim_state': ["ABSENT"],
-      'data_connected': False
-    }
-
-  def get_sim_lpa(self) -> LPABase:
-    raise NotImplementedError("SIM LPA not available")
 
   def get_network_strength(self, network_type):
     return NetworkStrength.unknown

@@ -10,7 +10,6 @@ from pathlib import Path
 from openpilot.cereal import log
 from openpilot.common.utils import sudo_read, sudo_write
 from openpilot.common.gpio import gpio_set, gpio_init, get_irqs_for_action
-from openpilot.common.esim.base import LPABase
 from openpilot.common.hardware.base import HardwareBase, ThermalConfig, ThermalZone
 from openpilot.common.hardware.comma.pins import GPIO
 from openpilot.common.hardware.comma.amplifier import Amplifier
@@ -141,21 +140,6 @@ class HardwareComma(HardwareBase):
       elif nt == 'gsm':
         return NetworkType.cell2G
     return NetworkType.none
-
-  def get_sim_info(self):
-    ms = self.get_modem_state()
-    sim_id = ms.get('iccid', '')
-    return {
-      'sim_id': sim_id,
-      'mcc_mnc': ms.get('mcc_mnc') or None,
-      'network_type': ["Unknown"],
-      'sim_state': ["ABSENT"] if not sim_id else ["READY"],
-      'data_connected': ms.get('connected', False),
-    }
-
-  def get_sim_lpa(self) -> LPABase:
-    from openpilot.common.esim.lpa import LPA
-    return LPA()
 
   def get_imei(self):
     return self.get_modem_state().get('imei', '')
@@ -426,4 +410,3 @@ if __name__ == "__main__":
   t = HardwareComma()
   t.initialize_hardware()
   t.set_power_save(False)
-  print(t.get_sim_info())
