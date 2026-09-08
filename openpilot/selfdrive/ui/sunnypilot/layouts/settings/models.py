@@ -13,7 +13,7 @@ from openpilot.cereal import custom
 from openpilot.sunnypilot.models.helpers import ACTIVE_BUNDLE_KEYS, get_selected_bundle, resolve_bundle_by_ref
 from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.ui_state import device, ui_state
-from openpilot.selfdrive.ui.sunnypilot.model_info import big_model_state, bundles_for_source, carrying_model, default_model_name, queued_name
+from openpilot.selfdrive.ui.sunnypilot.model_info import bundles_for_source, carrying_model, default_model_name, queued_name
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets import DialogResult, Widget
@@ -59,12 +59,6 @@ class ModelsLayout(Widget):
       callback=lambda: self._open_source_dialog("qcom")
     )
 
-    self.big_model_item = ListItemSP(
-      title=tr("Big Model"),
-      action_item=ScrollingButtonAction(tr("SELECT")),
-      callback=lambda: self._open_source_dialog("chestnut")
-    )
-
     self.download_item = download_status_item(lambda: tr("Download") if self._downloading else tr("Model Status"))
 
     self.refresh_item = button_item(tr("Refresh Model List"), tr("REFRESH"), "",
@@ -106,7 +100,7 @@ class ModelsLayout(Widget):
                                         1, None, True, "", style.BUTTON_ACTION_WIDTH, None, True,
                                         lambda v: f"{v / 100:.2f} m")
 
-    self.items = [self.small_model_item, self.big_model_item, self.cancel_download_item, self.download_item, self.refresh_item, self.clear_cache_item,
+    self.items = [self.small_model_item, self.cancel_download_item, self.download_item, self.refresh_item, self.clear_cache_item,
                   self.lane_turn_desire_toggle, self.lane_turn_value_control, self.lagd_toggle, self.delay_control, self.camera_offset]
 
   def _update_lagd_description(self, lagd_toggle: bool):
@@ -171,26 +165,16 @@ class ModelsLayout(Widget):
     self._verifying = any(getattr(p.status, 'raw', p.status) == ds.verifying for p in progresses)
 
   def _slot_segments(self):
-    """small and big slots side by side; green marks the slot whose pick is actually
-    driving (runner-matched, so a failed Default big greens neither slot), an empty
-    slot shows its default."""
-    big_state = big_model_state()
+    """small slot; green marks the pick that is actually driving."""
     carry_source, carry_internal, _ = carrying_model()
     segments = []
-    for source, label in (("qcom", tr("small")), ("chestnut", tr("big"))):
-      if segments:
-        segments.append(("|", rl.GRAY, None, None))
-      bundle = get_selected_bundle(ui_state.params, source)
-      name = bundle.internalName if bundle else default_model_name(source)
-      color = ON_COLOR if (source == carry_source and name == carry_internal) else rl.LIGHTGRAY
-      name = "● " + name
-      if source == "chestnut":
-        if big_state == 'failed':
-          color = rl.RED
-        elif big_state == 'loading':
-          color = rl.GOLD
-      segments.append((label, rl.GRAY, None, None))
-      segments.append((name, color, None, None))
+    source, label = "qcom", tr("small")
+    bundle = get_selected_bundle(ui_state.params, source)
+    name = bundle.internalName if bundle else default_model_name(source)
+    color = ON_COLOR if (source == carry_source and name == carry_internal) else rl.LIGHTGRAY
+    name = "● " + name
+    segments.append((label, rl.GRAY, None, None))
+    segments.append((name, color, None, None))
     return segments
 
   @staticmethod
@@ -205,27 +189,8 @@ class ModelsLayout(Widget):
       item.set_description("")
 
   def _status_note(self) -> str:
-    """The failover story for the Model Status row. One-way big -> small, and the
-    fallback is runner-matched: a Default big can only fall back to the Default
-    small (stock modeld), a custom big has no automatic fallback yet."""
-    if not ui_state.chestnut_present:
-      return ""
-    big_bundle = get_selected_bundle(ui_state.params, "chestnut")
-    big_name = big_bundle.internalName if big_bundle else default_model_name("chestnut")
-    big_is_default = big_bundle is None
-    fallback_name = default_model_name("qcom")
-    state = big_model_state()
-    if state == 'failed':
-      if big_is_default:
-        return tr("Big model unavailable, {} is driving until the next drive.").format(fallback_name)
-      return tr("Big model unavailable until the next drive.")
-    if state == 'loading':
-      if big_is_default:
-        return tr("{} drives until the big model is ready.").format(fallback_name)
-      return tr("Getting the big model ready.")
-    if big_is_default:
-      return tr("{} will drive. If it fails during a drive, {} takes over until the next drive.").format(big_name, fallback_name)
-    return tr("{} will drive when the chestnut is ready.").format(big_name)
+    """Model status note (small model only in lean build)."""
+    return ""
 
   @staticmethod
   def _download_row_state(progresses, name: str) -> dict:
@@ -261,7 +226,7 @@ class ModelsLayout(Widget):
       ui_state.params.put("ModelManager_DownloadRef", selected_bundle.ref)
 
   def _resolve_selected_bundle(self, ref):
-    source_bundles = {source: bundles_for_source(source) for source in ("qcom", "chestnut")}
+    source_bundles = {"qcom": bundles_for_source("qcom")}
     resolved = resolve_bundle_by_ref(ref, source_bundles)
     return resolved[0] if resolved else None
 
@@ -329,7 +294,7 @@ class ModelsLayout(Widget):
     self._handle_bundle_download_progress()
 
     carry_source, _, carry_display = carrying_model()
-    for item, item_source in ((self.small_model_item, "qcom"), (self.big_model_item, "chestnut")):
+    for item, item_source in ((self.small_model_item, "qcom"),):
       bundle = get_selected_bundle(ui_state.params, item_source)
       name = bundle.displayName if bundle else default_model_name(item_source)
       color = ON_COLOR if (item_source == carry_source and name == carry_display) else style.ITEM_TEXT_VALUE_COLOR
@@ -342,7 +307,6 @@ class ModelsLayout(Widget):
 
     offroad = ui_state.is_offroad()
     self.small_model_item.action_item.set_enabled(offroad)
-    self.big_model_item.action_item.set_enabled(offroad)
     self.small_model_item.set_description("" if offroad else tr("Only available when vehicle is off, or always offroad mode is on"))
 
   def _render(self, rect):

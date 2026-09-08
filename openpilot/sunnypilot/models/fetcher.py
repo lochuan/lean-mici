@@ -139,11 +139,9 @@ class ModelCache:
 class ModelFetcher:
   """Handles fetching and caching of model data from remote source"""
   MODEL_URL = "https://raw.githubusercontent.com/sunnypilot/sunnypilot-models/refs/heads/gh-pages/docs/driving_models_v22.json"
-  MODEL_URL_CHESTNUT = "https://raw.githubusercontent.com/sunnypilot/sunnypilot-models/refs/heads/gh-pages/docs/driving_models_chestnut_v25.json"
 
   MODEL_SOURCES = {
     "qcom": (MODEL_URL, ""),
-    "chestnut": (MODEL_URL_CHESTNUT, "_Chestnut"),
   }
 
   def __init__(self, params: Params):
@@ -156,12 +154,11 @@ class ModelFetcher:
     self._refetched: set[str] = set()
     self.params.put("ModelManager_ActiveJson", {
       "qcom": self.MODEL_URL,
-      "chestnut": self.MODEL_URL_CHESTNUT,
     }, block=True)
 
   @staticmethod
-  def active_source(chestnut_present: bool) -> str:
-    return "chestnut" if chestnut_present else "qcom"
+  def active_source() -> str:
+    return "qcom"
 
   def _fetch_and_cache_models(self, source: str) -> list[custom.ModelManagerSP.ModelBundle] | None:
     """Fetches fresh model data from remote and updates cache.
@@ -200,8 +197,6 @@ class ModelFetcher:
   @staticmethod
   def _cache_matches_source(source: str, cached_data: dict) -> bool:
     bundles = cached_data.get("bundles", [])
-    if source == "chestnut":
-      return any(bundle.get("is_big") is True for bundle in bundles)
     return not any(bundle.get("is_big") is True for bundle in bundles)
 
   def get_bundles_for_source(self, source: str) -> list[custom.ModelManagerSP.ModelBundle]:
@@ -261,10 +256,9 @@ def get_cached_bundles(params: Params, source: str) -> list[custom.ModelManagerS
 
 
 if __name__ == "__main__":
-  from openpilot.selfdrive.modeld.helpers import chestnut_present
   params = Params()
   model_fetcher = ModelFetcher(params)
-  bundles = model_fetcher.get_bundles_for_source(ModelFetcher.active_source(chestnut_present()))
+  bundles = model_fetcher.get_bundles_for_source(ModelFetcher.active_source())
   for bundle in bundles:
     for model in bundle.models:
       model_overrides = {override.key: override.value for override in bundle.overrides}

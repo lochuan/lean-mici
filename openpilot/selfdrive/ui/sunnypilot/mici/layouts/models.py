@@ -11,7 +11,7 @@ from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog
 from openpilot.sunnypilot.models.helpers import ACTIVE_BUNDLE_KEYS, get_selected_bundle
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton
 from openpilot.selfdrive.ui.ui_state import ui_state, device
-from openpilot.selfdrive.ui.sunnypilot.model_info import (active_source, big_model_state, bundles_for_source, carrying_model,
+from openpilot.selfdrive.ui.sunnypilot.model_info import (active_source, bundles_for_source, carrying_model,
                                                            default_model_name, model_info, queued_name)
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.multilang import tr
@@ -20,22 +20,11 @@ from openpilot.system.ui.widgets.label import UnifiedLabel
 from openpilot.system.ui.widgets.scroller import NavScroller
 
 def _model_info() -> tuple[str, str, str]:
-  """(active model, info header, info text) for the panel. Runner-matched: the
-  active line names what actually drives, and a notable big-model state takes
-  the info pair."""
-  source, active_name, other_name = model_info()
-  state = big_model_state()
+  """(active model, info header, info text) for the panel."""
+  source, active_name, _other_name = model_info()
   _, _, carry_display = carrying_model()
-  if carry_display is None:
-    big = get_selected_bundle(ui_state.params, "chestnut")
-    carry_display = big.displayName if big else default_model_name("chestnut")
   active_text = (carry_display or active_name).lower()
-  if state == 'failed':
-    return active_text, tr("big model"), tr("unavailable")
-  if state == 'loading':
-    return active_text, tr("big model"), tr("getting ready")
-  header = tr("small model") if source == "chestnut" else tr("big model")
-  return active_text, header, other_name.lower()
+  return active_text, tr("small model"), ""
 
 
 class CurrentModelInfo(Widget):
@@ -113,7 +102,7 @@ class ModelsLayoutMici(NavScroller):
 
     hardware_btns = []
     active = active_source()
-    for source, label in (("qcom", tr("small models")), ("chestnut", tr("big models"))):
+    for source, label in (("qcom", tr("small models")),):
       bundle = get_selected_bundle(ui_state.params, source)
       value = (bundle.internalName if bundle else default_model_name(source)).lower()
       if source == active:
