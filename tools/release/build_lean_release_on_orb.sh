@@ -162,14 +162,13 @@ git worktree prune
 git update-ref -d refs/heads/$BUILD_BRANCH 2>/dev/null || true
 git update-ref refs/heads/$BUILD_BRANCH HEAD
 git worktree add --detach /tmp/opilot-release $BUILD_BRANCH
-# 从 SOURCE_BRANCH 取干净源码（worktree checkout），再叠加构建产物。
-# 必须把 .so/.elf/.bin 提交进 release 分支：设备 OTA 的 git clean -xdff
-# 会删掉未跟踪/被忽略文件（updated.py fetch_update），tracked 的产物才存活。
-(cd \$HOME/opilot && find . \( -name \"*.so\" -o -name \"*.elf\" -o -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0) | tar --null -T - -cf - | tar -x -C /tmp/opilot-release
+# 叠加构建产物：全部 ELF（含无后缀 daemon、版本化 .so.X）+ panda 固件 .bin/.bin.signed（裸二进制非 ELF）。
+# 产物 tracked 进 release 分支：设备 OTA 的 git clean -xdff 会删未跟踪/被忽略文件（updated.py fetch_update）。
+# 注意：不推 prebuilt——camerad 等 comma_arm64 专属可执行文件容器构建不出（无 /AGNOS、无 QCOM 相机栈），
+# 必须靠设备端 build.py 首启构建（/data/scons_cache 有缓存，很快）。
+(cd \$HOME/opilot && { find . \( -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0; python3 tools/release/elf_find.py; } | tar --null -T - -cf -) | tar -x -C /tmp/opilot-release
 # 产物兜底校验：缺失说明叠加失败，拒绝推裸源码 release
 test -f /tmp/opilot-release/openpilot/common/libparams_c.so || { echo \"FATAL: build artifact overlay failed\"; exit 1; }
-# release 标记
-touch /tmp/opilot-release/prebuilt
 cd /tmp/opilot-release
 # release commit
 VERSION=\$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' openpilot/sunnypilot/common/version.h | head -1)
