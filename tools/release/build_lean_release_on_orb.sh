@@ -25,6 +25,8 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 SOURCE_DIR="$(git -C "$DIR" rev-parse --show-toplevel)"
 ORB_MACHINE="${ORB_MACHINE:-opilotbuild}"
 SOURCE_BRANCH="${SOURCE_BRANCH:-lean-sp-master}"
+RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
+BUILD_BRANCH="build-mici"
 DEVICE="${DEVICE:-comma@10.205.161.33}"
 DEVICE_DIR="/data/openpilot"
 
@@ -58,10 +60,14 @@ if [ ! -f "$HOME/.local/bin/uv" ]; then
   echo "[init] installing uv..."
   curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
+# git 身份 + SSH remote（push 认证，幂等）
+git config --global user.email "kevin@lochuan.dev" 2>/dev/null || true
+git config --global user.name "kevin" 2>/dev/null || true
 # clone（幂等：首次 clone，之后复用）
 if [ ! -d "$HOME/opilot" ]; then
   echo "[init] cloning repo..."
-  cd "$HOME" && git clone --recurse-submodules https://github.com/lochuan/lean-mici.git opilot
+  cd "$HOME" && git clone --recurse-submodules git@github.com:lochuan/lean-mici.git opilot
+  git -C "$HOME/opilot" remote set-url origin git@github.com:lochuan/lean-mici.git
 fi
 # uv venv + 依赖（官方 uv sync --all-extras：读 pyproject.toml 全依赖，
 # 依赖变化时自动同步，不手动列）
@@ -130,24 +136,56 @@ scons -j$(nproc) panda/
 echo "[build] panda OK"
 '
 
-# --- 6. 产物 rsync 到设备（容器→设备 ssh 管道）---
+# --- 6. push lean-release 分支（容器 worktree 出 release commit）---
+echo "[-] push $RELEASE_BRANCH T=$SECONDS"
+$SSH "
+set -e
+cd \$HOME/opilot
+# worktree 隔离 release commit（不污染 dev 树）
+if git worktree remove --force /tmp/opilot-release 2>/dev/null; then :; fi
+git worktree prune
+git update-ref -d refs/heads/$BUILD_BRANCH 2>/dev/null || true
+git update-ref refs/heads/$BUILD_BRANCH HEAD
+git worktree add --detach /tmp/opilot-release $BUILD_BRANCH
+# 从 SOURCE_BRANCH 取干净源码（git archive，无 submodule/LFS/未跟踪文件）
+git archive $SOURCE_BRANCH | tar -x -C /tmp/opilot-release
+# release 标记
+touch /tmp/opilot-release/prebuilt
+cd /tmp/opilot-release
+# release commit
+VERSION=\$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' openpilot/sunnypilot/common/version.h | head -1)
+git -c core.compression=0 -c gc.auto=0 add -f .
+git -c core.compression=0 -c gc.auto=0 commit -m \"openpilot v\$VERSION lean release\" || true
+# push 到 fork 的 lean-release 分支（origin = lochuan/lean-mici）
+# 100MB 大 commit，GitHub 可能限流断连，重试 3 次
+for i in 1 2 3; do
+  if git push -f origin $BUILD_BRANCH:$RELEASE_BRANCH 2>&1; then
+    echo \"[release] pushed $RELEASE_BRANCH (attempt $i)\"
+    break
+  fi
+  echo \"[release] push attempt $i failed, retrying...\"
+  sleep 5
+done
+git worktree remove --force /tmp/opilot-release 2>/dev/null || true
+"
+
+# --- 7. 设备 checkout lean-release + 重启冒烟 ---
 if [ -z "$SKIP_DEVICE" ]; then
-  echo "[-] rsync to device T=$SECONDS"
-  # 容器 tar → mac ssh 管道 → 设备 tar 解包（容器和设备同 LAN）
-  ssh "default@$ORB_MACHINE@orb" "tar czf - -C \$HOME/opilot \
-    openpilot launch_chffrplus.sh launch_env.sh SConstruct SConscript 2>/dev/null" \
-    | ssh "$DEVICE" "tar xzf - -C $DEVICE_DIR"
+  echo "[-] device checkout $RELEASE_BRANCH T=$SECONDS"
   ssh "$DEVICE" "
     cd $DEVICE_DIR
+    git fetch origin $RELEASE_BRANCH 2>/dev/null || git fetch https://github.com/lochuan/lean-mici.git $RELEASE_BRANCH
+    git checkout -f $RELEASE_BRANCH 2>/dev/null || git checkout -b $RELEASE_BRANCH FETCH_HEAD
+    git reset --hard FETCH_HEAD
     ln -sfn msgq_repo/msgq msgq 2>/dev/null
     ln -sfn opendbc_repo/opendbc opendbc 2>/dev/null
     ln -sfn rednose_repo/rednose rednose 2>/dev/null
     ln -sfn tinygrad_repo/tinygrad tinygrad 2>/dev/null
     touch prebuilt
-    echo '[device] activated'
+    echo \"[device] activated at \$(git rev-parse --short HEAD)\"
   "
 
-  # --- 7. 重启 comma + offroad 冒烟 ---
+  # --- 8. 重启 comma + offroad 冒烟 ---
   echo "[-] restart comma T=$SECONDS"
   ssh "$DEVICE" '
     pkill -9 -f "manager.py" 2>/dev/null || true
