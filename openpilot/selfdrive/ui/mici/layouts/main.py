@@ -100,10 +100,6 @@ class MiciMainLayout(Scroller):
     super()._render(self._rect)
 
   def _handle_transitions(self):
-    # Don't pop if onboarding
-    if gui_app.widget_in_stack(self._onboarding_window):
-      return
-
     if ui_state.started != self._prev_onroad:
       self._prev_onroad = ui_state.started
 
@@ -126,10 +122,6 @@ class MiciMainLayout(Scroller):
     self._prev_standstill = CS.standstill
 
   def _on_interactive_timeout(self):
-    # Don't pop if onboarding
-    if gui_app.widget_in_stack(self._onboarding_window):
-      return
-
     if ui_state.started:
       # Don't pop if at standstill
       if not ui_state.sm["carState"].standstill:
