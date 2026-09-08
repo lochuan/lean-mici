@@ -144,8 +144,10 @@ git worktree prune
 git update-ref -d refs/heads/$BUILD_BRANCH 2>/dev/null || true
 git update-ref refs/heads/$BUILD_BRANCH HEAD
 git worktree add --detach /tmp/opilot-release $BUILD_BRANCH
-# 从 SOURCE_BRANCH 取干净源码（git archive，无 submodule/LFS/未跟踪文件）
-git archive $SOURCE_BRANCH | tar -x -C /tmp/opilot-release
+# 从 SOURCE_BRANCH 取干净源码（worktree checkout），再叠加构建产物。
+# 必须把 .so/.elf/.bin 提交进 release 分支：设备 OTA 的 git clean -xdff
+# 会删掉未跟踪/被忽略文件（updated.py fetch_update），tracked 的产物才存活。
+(cd $HOME/opilot && find . \( -name "*.so" -o -name "*.elf" -o -name "*.bin" -o -name "*.bin.signed" \) -not -path "./.git/*" -print0) | tar --null -T - -cf - | tar -x -C /tmp/opilot-release
 # release 标记
 touch /tmp/opilot-release/prebuilt
 cd /tmp/opilot-release
