@@ -173,6 +173,17 @@ class LanlinkApp:
   async def index(self, request: web.Request) -> web.Response:
     return web.FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
+  @routes.get("/static/{filename}")
+  async def static_file(self, request: web.Request) -> web.Response:
+    # no-cache：OTA 换版后浏览器不能靠启发式缓存拿到旧 JS/HTML
+    safe = os.path.normpath(request.match_info["filename"])
+    path = os.path.join(STATIC_DIR, safe)
+    if os.path.commonpath([STATIC_DIR, path]) == STATIC_DIR and os.path.isfile(path):
+      resp = web.FileResponse(path)
+      resp.headers["Cache-Control"] = "no-cache"
+      return resp
+    raise web.HTTPNotFound()
+
 
 def create_app() -> web.Application:
   app = web.Application(client_max_size=2 * 1024 * 1024)
@@ -188,7 +199,6 @@ def create_app() -> web.Application:
   # 绑定实例方法后逐条注册（RouteTableDef 存的是未绑定函数）
   for route in routes:
     app.router.add_route(route.method, route.path, getattr(state, route.handler.__name__))
-  app.router.add_static("/static/", STATIC_DIR)
   app.middlewares.append(auth_middleware)
   return app
 

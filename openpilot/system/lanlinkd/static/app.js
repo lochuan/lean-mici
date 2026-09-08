@@ -216,8 +216,19 @@ async function putSetting(key, value) {
     await api(`/api/params/${key}`, { method: "PUT", body: JSON.stringify({ value: String(value) }) });
     paramsAll[key] = String(value);
     const item = findItem(key);
-    if (item && item.needs_onroad_cycle) alert("已保存，重启 openpilot 后生效");
-  } catch (e) { alert(e.message); }
+    if (item && item.needs_onroad_cycle) toast("已保存，重启 openpilot 后生效");
+    else toast("设置成功");
+  } catch (e) { toast(e.message, true); }
+}
+
+let toastTimer = null;
+function toast(msg, isErr = false) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.classList.toggle("err", isErr);
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2000);
 }
 
 // ---------- events ----------
