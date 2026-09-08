@@ -133,6 +133,23 @@ scons -j$(nproc) panda/
 echo "[build] panda OK"
 '
 
+# --- 5.5 submodule 产物守卫：bump 指针后必须把新构建产物提交进 fork 仓库，
+#     否则设备端 submodule update --init 拿到的是 fork 里旧的/缺失的 .so/.bin ---
+echo "[-] submodule artifact guard T=$SECONDS"
+$SSH '
+cd $HOME/opilot
+status=0
+for sm in msgq_repo opendbc_repo panda rednose_repo tinygrad_repo; do
+  dirty=$(git -C "$sm" status --porcelain | grep -E "\.so$|\.bin$|\.bin\.signed$|\.elf$" || true)
+  if [ -n "$dirty" ]; then
+    echo "[warn] submodule $sm 构建产物未提交进 fork 仓库（设备端拿不到）："
+    echo "$dirty"
+    status=1
+  fi
+done
+echo "[guard] submodule artifact check done (status=$status)"
+'
+
 # --- 6. push lean-release 分支（容器 worktree 出 release commit）---
 echo "[-] push $RELEASE_BRANCH T=$SECONDS"
 $SSH "
