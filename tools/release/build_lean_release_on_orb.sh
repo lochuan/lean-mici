@@ -154,6 +154,7 @@ echo "[guard] submodule artifact check done (status=$status)"
 echo "[-] push $RELEASE_BRANCH T=$SECONDS"
 $SSH "
 set -e
+set -o pipefail
 cd \$HOME/opilot
 # worktree 隔离 release commit（不污染 dev 树）
 if git worktree remove --force /tmp/opilot-release 2>/dev/null; then :; fi
@@ -164,7 +165,9 @@ git worktree add --detach /tmp/opilot-release $BUILD_BRANCH
 # 从 SOURCE_BRANCH 取干净源码（worktree checkout），再叠加构建产物。
 # 必须把 .so/.elf/.bin 提交进 release 分支：设备 OTA 的 git clean -xdff
 # 会删掉未跟踪/被忽略文件（updated.py fetch_update），tracked 的产物才存活。
-(cd $HOME/opilot && find . \( -name "*.so" -o -name "*.elf" -o -name "*.bin" -o -name "*.bin.signed" \) -not -path "./.git/*" -print0) | tar --null -T - -cf - | tar -x -C /tmp/opilot-release
+(cd \$HOME/opilot && find . \( -name \"*.so\" -o -name \"*.elf\" -o -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0) | tar --null -T - -cf - | tar -x -C /tmp/opilot-release
+# 产物兜底校验：缺失说明叠加失败，拒绝推裸源码 release
+test -f /tmp/opilot-release/openpilot/common/libparams_c.so || { echo \"FATAL: build artifact overlay failed\"; exit 1; }
 # release 标记
 touch /tmp/opilot-release/prebuilt
 cd /tmp/opilot-release
