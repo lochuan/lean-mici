@@ -47,6 +47,9 @@ dependencies = [
 
   # ui
   "comma-deps-raylib",
+
+  # lanlinkd web service
+  "aiohttp",
 ]
 
 [project.optional-dependencies]

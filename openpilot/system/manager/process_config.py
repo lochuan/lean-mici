@@ -42,6 +42,10 @@ def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
 def use_copyparty(started, params, CP: car.CarParams) -> bool:
   return bool(params.get_bool("EnableCopyparty"))
 
+def lanlink_run(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # offroad+onroad 常驻：LAN 访问的价值恰在停车时
+  return params.get_bool("LanLinkEnabled")
+
 def or_(*fns):
   return lambda *args: operator.or_(*(fn(*args) for fn in fns))
 
@@ -51,6 +55,7 @@ def and_(*fns):
 procs = [
   NativeProcess("loggerd", "openpilot/system/loggerd", ["./loggerd"], logging),
   PythonProcess("logmessaged", "openpilot.system.logmessaged", always_run),
+  PythonProcess("lanlinkd", "openpilot.system.lanlinkd.lanlinkd", lanlink_run),
 
   NativeProcess("camerad", "openpilot/system/camerad", ["./camerad"], only_onroad),
   PythonProcess("proclogd", "openpilot.system.proclogd", only_onroad, enabled=platform.system() != "Darwin"),
