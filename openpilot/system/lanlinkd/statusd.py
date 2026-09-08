@@ -3,6 +3,7 @@
 import threading
 
 from openpilot.cereal import messaging
+from openpilot.common.swaglog import cloudlog
 
 from openpilot.system.lanlinkd.status_snapshot import build_capabilities, build_snapshot
 
@@ -18,16 +19,24 @@ class StatusCache:
     self._capabilities: dict = {}
 
   def run(self, exit_event: threading.Event) -> None:
-    sm = messaging.SubMaster(SERVICES)
+    try:
+      sm = messaging.SubMaster(SERVICES)
+    except Exception:
+      cloudlog.exception("lanlink statusd: SubMaster init failed")
+      return
     cp = None
     while not exit_event.is_set():
       sm.update(1000)
-      if sm.updated['carParams']:
-        cp = sm['carParams']
-      # 首轮必构建（否则空 dict 永锁默认值）；carParams 更新时重建
-      caps = build_capabilities(cp, None, self._device_type) \
-        if (sm.updated['carParams'] or not self._capabilities) else self._capabilities
-      snap = build_snapshot({name: sm[name] for name in SERVICES}, self._version_info, caps)
+      try:
+        if sm.updated['carParams']:
+          cp = sm['carParams']
+        # 首轮必构建（否则空 dict 永锁默认值）；carParams 更新时重建
+        caps = build_capabilities(cp, None, self._device_type) \
+          if (sm.updated['carParams'] or not self._capabilities) else self._capabilities
+        snap = build_snapshot({name: sm[name] for name in SERVICES}, self._version_info, caps)
+      except Exception:
+        cloudlog.exception("lanlink statusd: snapshot build failed")
+        continue
       with self._lock:
         self._snapshot = snap
         self._capabilities = caps
