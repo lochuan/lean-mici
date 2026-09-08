@@ -24,7 +24,7 @@ set -x
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 SOURCE_DIR="$(git -C "$DIR" rev-parse --show-toplevel)"
 ORB_MACHINE="${ORB_MACHINE:-opilotbuild}"
-SOURCE_BRANCH="${SOURCE_BRANCH:-lean-sp-master}"
+SOURCE_BRANCH="${SOURCE_BRANCH:-lean-master}"
 RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
 BUILD_BRANCH="build-mici"
 DEVICE="${DEVICE:-comma@10.205.161.33}"
