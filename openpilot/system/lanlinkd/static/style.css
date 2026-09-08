@@ -28,7 +28,7 @@ button.danger { background:var(--err); }
 .switch.on::after { left:22px; }
 .desc { color:var(--dim); font-size:12px; padding:0 12px 8px; }
 #auth-msg { color:var(--err); }
-h3.sep { color:var(--dim); font-size:13px; margin:18px 0 6px; }
+h3.sep { color:var(--fg); font-size:17px; font-weight:600; margin:22px 0 8px; }
 #toast { position:fixed; top:14px; right:14px; z-index:99; background:var(--acc); color:#fff; padding:10px 16px; border-radius:10px; font-size:14px; opacity:0; transform:translateY(-8px); transition:.25s; pointer-events:none; }
 #toast.show { opacity:1; transform:none; }
 #toast.err { background:var(--err); }
