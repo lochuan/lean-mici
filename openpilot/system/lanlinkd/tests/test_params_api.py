@@ -1,8 +1,10 @@
+import json
+
 import pytest
 
 from openpilot.system.lanlinkd.params_api import (
-  BLOCKED_PARAMS, VERSION_KEY, delete_param, list_params, read_param,
-  type_name, validate_value, write_param)
+  BLOCKED_PARAMS, VERSION_KEY, delete_param, list_params, read_all, read_param,
+  type_name, to_str, validate_value, write_param)
 
 BOOL, STRING, INT, FLOAT, JSON, BYTES = 1, 0, 2, 3, 5, 6  # common/params.h ParamKeyType
 
@@ -127,3 +129,81 @@ def test_blocked_params_contains_critical_keys():
           "DoReboot", "DoShutdown", "DoUninstall",
           "AccessToken", "SecOCKey", "AssistNowToken",
           "LanLinkEnabled"} <= BLOCKED_PARAMS
+
+
+class BytesFakeStore:
+  """mimics libparams_c: all_keys()/get() return bytes, put() requires bytes"""
+  def __init__(self, initial=None, types=None):
+    self.data = {k.encode(): v.encode() for k, v in (initial or {}).items()}
+    self.types = {k.encode(): v for k, v in (types or {}).items()}
+    self.versions = 0
+
+  def all_keys(self):
+    return list(self.data.keys())
+
+  def get(self, key, block=False, return_default=False):
+    if isinstance(key, str):
+      key = key.encode()
+    return self.data.get(key)
+
+  def get_type(self, key):
+    if isinstance(key, str):
+      key = key.encode()
+    return self.types.get(key, STRING)
+
+  def put(self, key, dat, block=False):
+    if isinstance(key, str):
+      key = key.encode()
+    assert isinstance(dat, (bytes, type(None))), "C store requires bytes"
+    self.data[key] = dat
+    if key == VERSION_KEY.encode():
+      self.versions += 1
+
+  def remove(self, key):
+    if isinstance(key, str):
+      key = key.encode()
+    self.data.pop(key, None)
+
+
+@pytest.fixture
+def bytes_store():
+  return BytesFakeStore(
+    initial={"IsMetric": "1", "GithubSshKeys": "ssh-ed25519 AAAA", "LanLinkParamsVersion": "7"},
+    types={"IsMetric": BOOL, "GithubSshKeys": STRING, "LanLinkParamsVersion": INT})
+
+
+class TestBytesStore:
+  """real AGNOS Params returns bytes; the API boundary must expose str"""
+
+  def test_to_str(self):
+    assert to_str(b"abc") == "abc"
+    assert to_str("abc") == "abc"
+    assert to_str(None) is None
+
+  def test_list_keys_are_str_and_json_safe(self, bytes_store):
+    listing = list_params(bytes_store)
+    assert listing["IsMetric"] == {"type": "BOOL", "blocked": False}
+    assert listing["GithubSshKeys"] == {"type": "STRING", "blocked": True}
+    json.dumps(listing)
+
+  def test_read_returns_str(self, bytes_store):
+    assert read_param(bytes_store, "IsMetric") == (200, "1")
+
+  def test_read_all_str_values_excludes_blocked(self, bytes_store):
+    all_params = read_all(bytes_store)
+    assert all_params["IsMetric"] == "1"
+    assert "GithubSshKeys" not in all_params
+    json.dumps(all_params)
+
+  def test_write_finds_bytes_key_and_puts_bytes(self, bytes_store):
+    assert write_param(bytes_store, "IsMetric", "0")[0] == 204
+    assert bytes_store.data[b"IsMetric"] == b"0"
+    assert write_param(bytes_store, "NoSuchKey", "1")[0] == 404
+
+  def test_write_bumps_version_from_bytes(self, bytes_store):
+    assert write_param(bytes_store, "IsMetric", "0")[0] == 204
+    assert bytes_store.data[VERSION_KEY.encode()] == b"8"
+
+  def test_delete_finds_bytes_key(self, bytes_store):
+    assert delete_param(bytes_store, "IsMetric")[0] == 204
+    assert b"IsMetric" not in bytes_store.data

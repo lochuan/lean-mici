@@ -53,13 +53,28 @@ def validate_value(type_name_str: str, value: str) -> bool:
 
 
 def _bump_version(store) -> None:
-  current = store.get(VERSION_KEY) or "0"
-  store.put(VERSION_KEY, str(int(current) + 1), block=True)
+  current = to_str(store.get(VERSION_KEY)) or "0"
+  store.put(VERSION_KEY, str(int(current) + 1).encode("utf-8"), block=True)
+
+
+def to_str(x) -> str | None:
+  # AGNOS Params（libparams_c）的 all_keys()/get() 返回 bytes，API 边界统一转 str
+  if x is None:
+    return None
+  return x.decode("utf-8", "replace") if isinstance(x, (bytes, bytearray)) else str(x)
+
+
+def _all_str_keys(store) -> set[str]:
+  return {to_str(k) for k in store.all_keys()}
 
 
 def list_params(store) -> dict[str, dict]:
-  return {key: {"type": type_name(store.get_type(key)), "blocked": key in BLOCKED_PARAMS}
+  return {to_str(key): {"type": type_name(store.get_type(key)), "blocked": to_str(key) in BLOCKED_PARAMS}
           for key in store.all_keys()}
+
+
+def read_all(store) -> dict[str, str]:
+  return {to_str(key): to_str(store.get(key)) for key in store.all_keys() if to_str(key) not in BLOCKED_PARAMS}
 
 
 def read_param(store, key: str) -> tuple[int, str | None]:
@@ -69,17 +84,17 @@ def read_param(store, key: str) -> tuple[int, str | None]:
   value = store.get(key)
   if value is None:
     return 404, None
-  return 200, value
+  return 200, to_str(value)
 
 
 def write_param(store, key: str, value: str) -> tuple[int, str]:
   if key in BLOCKED_PARAMS:
     return 403, "blocked"
-  if key not in store.all_keys():
+  if key not in _all_str_keys(store):
     return 404, "unknown key"
   if not validate_value(type_name(store.get_type(key)), value):
     return 400, "invalid value for type"
-  store.put(key, value, block=True)
+  store.put(key, value.encode("utf-8"), block=True)
   _bump_version(store)
   return 204, ""
 
@@ -87,7 +102,7 @@ def write_param(store, key: str, value: str) -> tuple[int, str]:
 def delete_param(store, key: str) -> tuple[int, None]:
   if key in BLOCKED_PARAMS:
     return 403, None
-  if key not in store.all_keys():
+  if key not in _all_str_keys(store):
     return 404, None
   store.remove(key)
   _bump_version(store)

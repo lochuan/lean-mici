@@ -32,7 +32,7 @@ class LanlinkApp:
     self.params = Params()
     self.sessions = SessionStore()
     self.throttle = LoginThrottle()
-    self.version_info = {k: self.params.get(k) or "" for k in VERSION_PARAMS}
+    self.version_info = {k: params_api.to_str(self.params.get(k)) or "" for k in VERSION_PARAMS}
     self.cache = StatusCache(self.version_info, device_type="pc" if PC else HARDWARE.get_device_type())
     self.exit_event = threading.Event()
     self._settings_ui: dict | None = None
@@ -109,9 +109,7 @@ class LanlinkApp:
   async def params_all(self, request: web.Request) -> web.Response:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    listing = params_api.list_params(self.params)
-    return web.json_response({
-      key: self.params.get(key) for key, meta in listing.items() if not meta["blocked"]})
+    return web.json_response(params_api.read_all(self.params))
 
   @routes.get("/api/params/{key}")
   async def params_get(self, request: web.Request) -> web.Response:
@@ -141,7 +139,7 @@ class LanlinkApp:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     snap = self.cache.snapshot()
-    snap["paramsVersion"] = self.params.get(params_api.VERSION_KEY)
+    snap["paramsVersion"] = params_api.to_str(self.params.get(params_api.VERSION_KEY))
     return web.json_response(snap)
 
   @routes.get("/api/capabilities")
