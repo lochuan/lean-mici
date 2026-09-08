@@ -86,7 +86,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LocationFilterInitialState", {PERSISTENT, BYTES}},
     {"LateralManeuverMode", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"LanLinkPasswordHash", {PERSISTENT | DONT_LOG, STRING}},
-    {"LanLinkEnabled", {PERSISTENT, BOOL, "1"}},
+    {"LanLinkEnabled", {PERSISTENT, BOOL, "0"}},
     {"LanLinkParamsVersion", {PERSISTENT, INT, "0"}},
     {"LongitudinalManeuverMode", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"LongitudinalPersonality", {PERSISTENT | BACKUP, INT, std::to_string(static_cast<int>(cereal::LongitudinalPersonality::STANDARD))}},
