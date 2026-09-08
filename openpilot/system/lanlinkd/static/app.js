@@ -136,7 +136,8 @@ async function renderSettings() {
   $("view-settings").innerHTML = `<div id="settings-pages">` +
     (settingsCache.panels || []).map(panel =>
       `<h3 class="sep">${panel.label || panel.id}</h3>` +
-      (panel.sections || []).map(sec => renderSection(sec)).join("")
+      (panel.sections || []).map(sec => renderSection(sec)).join("") +
+      (panel.sub_panels || []).map(sp => renderSubPanel(sp, true)).join("")
     ).join("") +
     (vehicle ? renderSection({ title: vehicle.title, description: vehicle.description, items: vehicle.items }) : "") +
     `</div>`;
@@ -184,7 +185,14 @@ function ruleOk(rules) {
 function renderSection(sec) {
   if (sec.visibility && !ruleOk(sec.visibility)) return "";
   const secEnabled = ruleOk(sec.enablement);
-  const rows = (sec.items || []).map(item => {
+  const rows = renderItems(sec.items, secEnabled);
+  const subs = (sec.sub_panels || []).map(sp => renderSubPanel(sp, secEnabled)).join("");
+  return (sec.title ? `<h3 class="sep">${sec.title}</h3>` : "") + rows + subs +
+    (sec.description ? `<p class="desc">${sec.description}</p>` : "");
+}
+
+function renderItems(items, secEnabled) {
+  return (items || []).map(item => {
     const key = item.key, m = meta[key] || {};
     if (!ruleOk(item.visibility)) return "";
     if (m.blocked || item.blocked) return "";
@@ -207,8 +215,13 @@ function renderSection(sec) {
         <div style="flex:1"><div class="k">${item.title || key}</div>
         ${item.description ? `<div class="desc">${item.description}</div>` : ""}</div>${control}</div>`;
   }).join("");
-  return (sec.title ? `<h3 class="sep">${sec.title}</h3>` : "") + rows +
-    (sec.description ? `<p class="desc">${sec.description}</p>` : "");
+}
+
+function renderSubPanel(sp, secEnabled) {
+  // 上游 schema：SubPanel 由 trigger_key/trigger_condition 触发才显示；无条件恒显
+  if (sp.trigger_condition && !ruleOk([sp.trigger_condition])) return "";
+  return `<div class="sub-panel"><div class="sub-label">${sp.label || sp.id}</div>` +
+    renderItems(sp.items, secEnabled) + `</div>`;
 }
 
 async function flipSetting(key, el) {
@@ -218,18 +231,18 @@ async function flipSetting(key, el) {
 }
 
 function findItem(key) {
-  // 在 panels + vehicle_settings（含 sub_panels）里查找设置项
-  const walk = (node) => {
+  // 在 panels（sections + sub_panels）+ vehicle_settings 里查找设置项
+  const walkNode = (node) => {
     for (const item of (node.items || [])) if (item.key === key) return item;
-    for (const sub of (node.sub_panels || [])) { const hit = walk(sub); if (hit) return hit; }
+    for (const sub of (node.sub_panels || [])) { const hit = walkNode(sub); if (hit) return hit; }
     return null;
   };
   for (const panel of ((settingsCache || {}).panels || [])) {
-    const hit = walk(panel);
-    if (hit) return hit;
+    for (const sec of (panel.sections || [])) { const hit = walkNode(sec); if (hit) return hit; }
+    for (const sp of (panel.sub_panels || [])) { const hit = walkNode(sp); if (hit) return hit; }
   }
   for (const brand of Object.values((settingsCache || {}).vehicle_settings || {})) {
-    const hit = walk(brand);
+    const hit = walkNode(brand);
     if (hit) return hit;
   }
   return null;

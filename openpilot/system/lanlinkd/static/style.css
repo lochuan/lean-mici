@@ -27,4 +27,6 @@ button.danger { background:var(--err); }
 .desc { color:var(--dim); font-size:12px; padding:0 12px 8px; }
 #auth-msg { color:var(--err); }
 h3.sep { color:var(--dim); font-size:13px; margin:18px 0 6px; }
+.sub-panel { margin:4px 0 8px 10px; padding-left:12px; border-left:2px solid #2a3138; }
+.sub-label { color:var(--dim); font-size:12px; font-weight:600; margin:8px 0 2px 2px; }
 a { color:var(--acc); }
