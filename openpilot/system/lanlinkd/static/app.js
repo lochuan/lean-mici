@@ -187,8 +187,7 @@ function renderSection(sec) {
   const secEnabled = ruleOk(sec.enablement);
   const rows = renderItems(sec.items, secEnabled);
   const subs = (sec.sub_panels || []).map(sp => renderSubPanel(sp, secEnabled)).join("");
-  return (sec.title ? `<h3 class="sep">${sec.title}</h3>` : "") + rows + subs +
-    (sec.description ? `<p class="desc">${sec.description}</p>` : "");
+  return (sec.title ? `<h3 class="sep">${sec.title}</h3>` : "") + rows + subs;
 }
 
 function renderItems(items, secEnabled) {
@@ -202,18 +201,23 @@ function renderItems(items, secEnabled) {
     let control = "";
     if (item.widget === "toggle") {
       control = `<div class="switch ${String(value) === "1" ? "on" : ""}" ${enabled ? "" : "hidden"} onclick="flipSetting('${key}', this)"></div>`;
-    } else if (item.widget === "option" && (item.choices || item.options)) {
+    } else if ((item.widget === "option" || item.widget === "multiple_button") && (item.choices || item.options)) {
       const opts = item.choices || item.options;
       control = `<select ${enabled ? "" : "disabled"} onchange="putSetting('${key}', this.value)">` +
         opts.map(o => `<option value="${o.value ?? o}" ${String(value) === String(o.value ?? o) ? "selected" : ""}>${o.label ?? o}</option>`).join("") + `</select>`;
+    } else if (item.widget === "option" && item.min != null && item.max != null) {
+      // 数值选项：min/max/step/unit（相机偏移、软件延迟等）
+      const step = item.step || 1;
+      const unit = (item.unit && typeof item.unit === "object") ? (paramsAll["IsMetric"] === "1" ? item.unit.metric : item.unit.imperial) : (item.unit || "");
+      control = `<input type="number" min="${item.min}" max="${item.max}" step="${step}" value="${value ?? ""}" ${enabled ? "" : "disabled"} onchange="putSetting('${key}', this.value)" class="num-input">` +
+        (unit ? `<span class="badge">${unit}</span>` : "");
     } else if (item.widget === "info") {
       control = `<span class="badge">${value ?? ""}</span>`;
-    } else { // multiple_button / button：v1 灰显占位
+    } else { // button / 未知控件：v1 灰显占位
       control = `<span class="badge">车机端设置</span>`;
     }
     return `<div class="row ${enabled ? "" : "disabled"}" style="cursor:default">
-        <div style="flex:1"><div class="k">${item.title || key}</div>
-        ${item.description ? `<div class="desc">${item.description}</div>` : ""}</div>${control}</div>`;
+        <div style="flex:1"><div class="k">${item.title || key}</div></div>${control}</div>`;
   }).join("");
 }
 

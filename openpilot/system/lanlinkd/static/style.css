@@ -17,6 +17,8 @@ button.danger { background:var(--err); }
 .stat b { display:block; font-size:20px; }
 .stat span { color:var(--dim); font-size:12px; }
 .row { display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--card); border-radius:10px; margin:6px 0; cursor:pointer; }
+.row select, .row .num-input { width:auto; max-width:160px; margin:0; flex-shrink:0; }
+.row .num-input { width:110px; }
 .row .k { flex:1; word-break:break-all; }
 .row .badge { color:var(--dim); font-size:11px; border:1px solid #2a3138; border-radius:6px; padding:2px 6px; }
 .row.disabled { opacity:.4; }
