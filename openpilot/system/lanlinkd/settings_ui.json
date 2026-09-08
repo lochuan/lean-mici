@@ -1097,55 +1097,10 @@
           "description": "",
           "items": [
             {
-              "key": "OpenpilotEnabledToggle",
-              "widget": "toggle",
-              "needs_onroad_cycle": true,
-              "title": "Enable sunnypilot",
-              "description": "Use the sunnypilot system for adaptive cruise control and lane keep driver assistance. Your attention is required at all times to use this feature.",
-              "enablement": [
-                {
-                  "type": "offroad_only"
-                }
-              ]
-            },
-            {
-              "key": "IsLdwEnabled",
-              "widget": "toggle",
-              "title": "Enable Lane Departure Warnings",
-              "description": "Receive alerts to steer back into the lane when your vehicle drifts over a detected lane line without a turn signal activated while driving over 31 mph (50 km/h)."
-            },
-            {
-              "key": "AlwaysOnDM",
-              "widget": "toggle",
-              "title": "Always-On Driver Monitoring",
-              "description": "Enable driver monitoring even when sunnypilot is not engaged."
-            },
-            {
               "key": "IsMetric",
               "widget": "toggle",
               "title": "Use Metric System",
               "description": "Display speed in km/h instead of mph."
-            }
-          ]
-        },
-        {
-          "id": "recording",
-          "title": "Recording",
-          "description": "Camera and audio recording during drives",
-          "items": [
-            {
-              "key": "RecordFront",
-              "widget": "toggle",
-              "needs_onroad_cycle": true,
-              "title": "Record and Upload Driver Camera",
-              "description": "Upload data from the driver facing camera and help improve the driver monitoring algorithm."
-            },
-            {
-              "key": "RecordAudio",
-              "widget": "toggle",
-              "needs_onroad_cycle": true,
-              "title": "Record and Upload Microphone Audio",
-              "description": "Record and store microphone audio while driving. The audio will be included in the dashcam video in comma connect."
             }
           ]
         }
@@ -1250,17 +1205,6 @@
                   "label": "30h (Default)"
                 }
               ]
-            }
-          ]
-        },
-        {
-          "id": "language",
-          "title": "Language",
-          "items": [
-            {
-              "key": "LanguageSetting",
-              "widget": "info",
-              "title": "Language"
             }
           ]
         }
@@ -1376,80 +1320,6 @@
               "key": "ShowDebugInfo",
               "widget": "toggle",
               "title": "UI Debug Mode"
-            }
-          ]
-        },
-        {
-          "id": "test_maneuvers",
-          "title": "Test Maneuvers",
-          "description": "DANGER: enabling these maneuvers replaces normal driving behavior with deterministic test sequences. Each toggle requires explicit confirmation per write. Use only in a closed environment.",
-          "visibility": [
-            {
-              "type": "any",
-              "conditions": [
-                {
-                  "type": "capability",
-                  "field": "is_development",
-                  "equals": true
-                },
-                {
-                  "type": "capability",
-                  "field": "is_sp_release",
-                  "equals": true
-                }
-              ]
-            }
-          ],
-          "enablement": [
-            {
-              "type": "any",
-              "conditions": [
-                {
-                  "type": "capability",
-                  "field": "is_development",
-                  "equals": true
-                },
-                {
-                  "type": "param",
-                  "key": "ShowAdvancedControls",
-                  "equals": true
-                }
-              ]
-            }
-          ],
-          "attestation_required": true,
-          "items": [
-            {
-              "key": "LateralManeuverMode",
-              "widget": "toggle",
-              "title": "[TEST] Lateral Maneuver Mode",
-              "description": "Replaces normal lateral control with a deterministic test sequence. NOT for road use.",
-              "enablement": [
-                {
-                  "type": "not_engaged"
-                },
-                {
-                  "type": "capability",
-                  "field": "torque_allowed",
-                  "equals": true
-                }
-              ]
-            },
-            {
-              "key": "LongitudinalManeuverMode",
-              "widget": "toggle",
-              "title": "[TEST] Longitudinal Maneuver Mode",
-              "description": "Replaces normal longitudinal control with a deterministic test sequence. NOT for road use.",
-              "enablement": [
-                {
-                  "type": "not_engaged"
-                },
-                {
-                  "type": "capability",
-                  "field": "has_longitudinal_control",
-                  "equals": true
-                }
-              ]
             }
           ]
         },
