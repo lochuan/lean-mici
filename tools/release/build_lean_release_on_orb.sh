@@ -155,8 +155,9 @@ git -c core.compression=0 -c gc.auto=0 add -f .
 git -c core.compression=0 -c gc.auto=0 commit -m \"openpilot v\$VERSION lean release\" || true
 # push 到 fork 的 lean-release 分支（origin = lochuan/lean-mici）
 # 100MB 大 commit，GitHub 可能限流断连，重试 3 次
+# 注意：release commit 在 worktree 的 detached HEAD 上，推 HEAD 而不是 build-mici
 for i in 1 2 3; do
-  if git push -f origin $BUILD_BRANCH:$RELEASE_BRANCH 2>&1; then
+  if git push -f origin HEAD:$RELEASE_BRANCH 2>&1; then
     echo \"[release] pushed $RELEASE_BRANCH (attempt $i)\"
     break
   fi
