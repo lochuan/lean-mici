@@ -403,10 +403,6 @@ def hardware_thread(end_event, hw_queue) -> None:
     msg.deviceState.started = started_ts is not None and not offroad_mode
     msg.deviceState.startedMonoTime = int(1e9*(started_ts or 0))
 
-    last_ping = params.get("LastAthenaPingTime")
-    if last_ping is not None:
-      msg.deviceState.lastAthenaPingTime = last_ping
-
     msg.deviceState.thermalStatus = thermal_status
     pm.send("deviceState", msg)
 

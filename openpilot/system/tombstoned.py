@@ -9,7 +9,6 @@ import time
 import glob
 from typing import NoReturn
 
-import openpilot.system.sentry as sentry
 from openpilot.common.hardware.hw import Paths
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.version import get_build_metadata
@@ -112,13 +111,12 @@ def report_tombstone_apport(fn):
     if not found:
       crash_function = stacktrace_s[1]
 
-    # Remove arguments that can contain pointers to make sentry one-liner unique
+    # Remove arguments that can contain pointers to keep the crash line unique
     crash_function = " ".join(x for x in crash_function.split(' ')[1:] if not x.startswith('0x'))
     crash_function = re.sub(r'\(.*?\)', '', crash_function)
 
   contents = stacktrace + "\n\n" + contents
   message = message + " - " + crash_function
-  sentry.report_tombstone(fn, message, contents)
 
   # Copy crashlog to upload folder
   clean_path = path.replace('/', '_')
@@ -141,8 +139,7 @@ def report_tombstone_apport(fn):
 
 
 def main() -> NoReturn:
-  should_report = sentry.init(sentry.SentryProject.SELFDRIVE_NATIVE)
-
+def main() -> NoReturn:
   # Clear apport folder on start, otherwise duplicate crashes won't register
   clear_apport_folder()
   initial_tombstones = set(get_tombstones())
@@ -151,14 +148,6 @@ def main() -> NoReturn:
     now_tombstones = set(get_tombstones())
 
     for fn, _ in (now_tombstones - initial_tombstones):
-      # clear logs if we're not interested in them
-      if not should_report:
-        try:
-          os.remove(fn)
-        except Exception:
-          pass
-        continue
-
       try:
         cloudlog.info(f"reporting new tombstone {fn}")
         if fn.endswith(".crash"):

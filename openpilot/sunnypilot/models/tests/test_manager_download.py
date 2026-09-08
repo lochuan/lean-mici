@@ -26,8 +26,7 @@ from openpilot.selfdrive.test.helpers import http_server_context
 from openpilot.sunnypilot.models import manager as manager_module
 from openpilot.sunnypilot.models.fetcher import ModelFetcher, get_cached_bundles
 from openpilot.sunnypilot.models import helpers
-from openpilot.sunnypilot.models.helpers import (get_active_bundle, get_active_source, get_selected_bundle,
-                                                  resolve_bundle_by_ref, validate_active_bundles)
+from openpilot.sunnypilot.models.helpers import resolve_bundle_by_ref
 from openpilot.sunnypilot.models.manager import ModelManagerSP
 
 CHUNK_BODIES = [b'A' * 5000, b'B' * 5000, b'C' * 3000]
@@ -392,28 +391,12 @@ class TestManagerDownload(ManagerDownloadTestBase):
       asyncio.run(self.manager._download_bundle(self._bundle, self.dest, "qcom"))
 
       assert "ModelManager_ActiveBundle" in store, "qcom download must write the qcom slot"
-      assert "ModelManager_ActiveBundleChestnut" not in store, "qcom download must not touch the chestnut slot"
       assert self.manager.selected_bundle.status == custom.ModelManagerSP.DownloadStatus.downloaded
       assert self.manager.active_bundle is not None and self.manager.active_bundle.ref == "test-ref"
       assert self.manager.active_bundle.status == custom.ModelManagerSP.DownloadStatus.downloaded
       chunk_names = [get_chunk_name(artifact.fileName, i, len(artifact.chunks)) for i in range(len(artifact.chunks))]
       missing = [c for c in chunk_names if not os.path.isfile(os.path.join(self.dest, c))]
       assert missing == [], f"chunks missing from the cache: {missing}"
-    self.run_with_server(body)
-
-  def test_download_writes_chestnut_slot(self):
-    """A download resolved to the chestnut source writes the chestnut active bundle slot only."""
-    def body():
-      self.make_artifact(chunked=True)
-      self._bundle.ref = "big-ref"
-      self._bundle.minimumSelectorVersion = helpers.REQUIRED_JSON_VERSION
-      params, store = self._make_params_with_store()
-      self.manager.params = params
-      asyncio.run(self.manager._download_bundle(self._bundle, self.dest, "chestnut"))
-
-      assert "ModelManager_ActiveBundleChestnut" in store, "chestnut download must write the chestnut slot"
-      assert "ModelManager_ActiveBundle" not in store, "chestnut download must not touch the qcom slot"
-      assert self.manager.selected_bundle.status == custom.ModelManagerSP.DownloadStatus.downloaded
     self.run_with_server(body)
 
 
@@ -447,14 +430,10 @@ class TestResolveBundleByRef(OpenpilotTestCase):
 
   def test_qcom_ref_resolves_to_qcom_slot(self):
     small = self._bundle("small")
-    assert resolve_bundle_by_ref("small", {"qcom": [small], "chestnut": []}) == (small, "qcom")
-
-  def test_chestnut_ref_resolves_to_chestnut_slot(self):
-    big = self._bundle("big")
-    assert resolve_bundle_by_ref("big", {"qcom": [], "chestnut": [big]}) == (big, "chestnut")
+    assert resolve_bundle_by_ref("small", {"qcom": [small]}) == (small, "qcom")
 
   def test_unknown_ref_returns_none(self):
-    source_bundles = {"qcom": [self._bundle("small")], "chestnut": []}
+    source_bundles = {"qcom": [self._bundle("small")]}
     assert resolve_bundle_by_ref("nope", source_bundles) is None
 
 
@@ -504,17 +483,6 @@ class TestModelFetcherSources(OpenpilotTestCase):
     params.get.side_effect = get
     return params
 
-  def test_active_source_follows_chestnut_presence(self):
-    assert ModelFetcher.active_source(False) == "qcom"
-    assert ModelFetcher.active_source(True) == "chestnut"
-
-  def test_get_bundles_for_source_returns_each_source(self):
-    params = self._make_params({"bundles": [manifest_bundle("small", "aaa")]},
-                               {"bundles": [manifest_bundle("big", "bbb", is_big=True)]})
-    fetcher = ModelFetcher(params)
-    assert [bundle.ref for bundle in fetcher.get_bundles_for_source("qcom")] == ["aaa"]
-    assert [bundle.ref for bundle in fetcher.get_bundles_for_source("chestnut")] == ["bbb"]
-
   def test_get_bundles_for_source_unknown(self):
     assert ModelFetcher(mock.MagicMock()).get_bundles_for_source("bogus") == []
 
@@ -522,9 +490,7 @@ class TestModelFetcherSources(OpenpilotTestCase):
     params = self._make_params({"bundles": [manifest_bundle("small", "aaa")]},
                                {"bundles": [manifest_bundle("big", "bbb", is_big=True)]})
     qcom_bundles = get_cached_bundles(params, "qcom")
-    chestnut_bundles = get_cached_bundles(params, "chestnut")
     assert [b.ref for b in qcom_bundles] == ["aaa"]
-    assert [b.ref for b in chestnut_bundles] == ["bbb"]
     assert qcom_bundles[0].displayName == "SMALL"
 
   def test_get_cached_bundles_empty_when_missing(self):
@@ -535,16 +501,6 @@ class TestModelFetcherSources(OpenpilotTestCase):
 
   def test_get_cached_bundles_unknown_source(self):
     assert get_cached_bundles(mock.MagicMock(), "bogus") == []
-
-  def test_active_json_has_both_urls(self):
-    params = mock.MagicMock()
-    ModelFetcher(params)
-    active_json_calls = [call for call in params.put.call_args_list if call.args[0] == "ModelManager_ActiveJson"]
-    assert active_json_calls, "expected ModelManager_ActiveJson to be written"
-    assert active_json_calls[-1].args[1] == {
-      "qcom": ModelFetcher.MODEL_URL,
-      "chestnut": ModelFetcher.MODEL_URL_CHESTNUT,
-    }
 
 
 
@@ -584,22 +540,12 @@ class TestSourceCacheIntegrity(OpenpilotTestCase):
       bundles = fetcher.get_bundles_for_source("qcom")
     assert [bundle.ref for bundle in bundles] == ["aaa"]
 
-  def test_chestnut_cache_without_big_models_is_refetched(self):
-    params = self._make_params({"bundles": [manifest_bundle("small", "aaa")]},
-                               {"bundles": [manifest_bundle("big2", "ccc")]})
-    fetcher = ModelFetcher(params)
-    fetched = self._fetched(manifest_bundle("big", "bbb", is_big=True))
-    with mock.patch.object(fetcher, "_fetch_and_cache_models", return_value=fetched):
-      bundles = fetcher.get_bundles_for_source("chestnut")
-    assert [bundle.ref for bundle in bundles] == ["bbb"]
-
   def test_matching_caches_are_used_without_fetch(self):
     params = self._make_params({"bundles": [manifest_bundle("small", "aaa")]},
                                {"bundles": [manifest_bundle("big", "bbb", is_big=True)]})
     fetcher = ModelFetcher(params)
     with mock.patch.object(fetcher, "_fetch_and_cache_models", side_effect=AssertionError("cache should be used")):
       assert [bundle.ref for bundle in fetcher.get_bundles_for_source("qcom")] == ["aaa"]
-      assert [bundle.ref for bundle in fetcher.get_bundles_for_source("chestnut")] == ["bbb"]
 
   def test_stale_version_cache_is_refetched(self):
     """A source-matching cache whose bundles are all filtered by the selector version
@@ -641,143 +587,6 @@ class TestSourceCacheIntegrity(OpenpilotTestCase):
       bundles = fetcher.get_bundles_for_source("qcom")
     fetch.assert_called_once_with("qcom")
     assert [bundle.ref for bundle in bundles] == ["aaa"]
-
-
-class TestActiveBundleValidation(OpenpilotTestCase):
-  """Validation is per-slot: a failed fetch (empty bundle list) must not reset a slot,
-  and resetting one slot must not stomp the runner cache derived from the other."""
-
-  def setUp(self):
-    super().setUp()
-    helpers._LAST_VALIDATED_RAW.clear()
-
-  @staticmethod
-  def _raw_bundle(ref: str, runner: int | None = None) -> dict:
-    bundle = custom.ModelManagerSP.ModelBundle.new_message()
-    bundle.ref = ref
-    bundle.minimumSelectorVersion = helpers.REQUIRED_JSON_VERSION
-    if runner is not None:
-      bundle.runner = runner
-    return bundle.to_dict()
-
-  def _params(self, qcom=None, chestnut=None):
-    params = mock.MagicMock()
-
-    def get(key, *args, **kwargs):
-      return {"ModelManager_ActiveBundle": qcom, "ModelManager_ActiveBundleChestnut": chestnut}.get(key)
-
-    params.get.side_effect = get
-    return params
-
-  def test_empty_catalog_does_not_reset_slot(self):
-    params = self._params(qcom=self._raw_bundle("small"))
-    with mock.patch("openpilot.sunnypilot.models.helpers.chestnut_present", return_value=False):
-      validate_active_bundles(params, {"qcom": [], "chestnut": []})
-    params.remove.assert_not_called()
-
-  def test_reset_recomputes_runner_from_surviving_slot(self):
-    tinygrad = int(custom.ModelManagerSP.Runner.tinygrad)
-    big_raw = self._raw_bundle("big", runner=tinygrad)
-    params = self._params(qcom=self._raw_bundle("gone"), chestnut=big_raw)
-    catalog = {"qcom": [custom.ModelManagerSP.ModelBundle(**self._raw_bundle("other"))],
-               "chestnut": [custom.ModelManagerSP.ModelBundle(**big_raw)]}
-    with mock.patch("openpilot.sunnypilot.models.helpers.chestnut_present", return_value=True):
-      validate_active_bundles(params, catalog)
-    params.remove.assert_called_once_with("ModelManager_ActiveBundle")
-    runner_puts = [call for call in params.put.call_args_list if call.args[0] == "ModelRunnerTypeCache"]
-    assert [call.args[1] for call in runner_puts] == [tinygrad]
-
-
-class TestActiveBundleSelection(OpenpilotTestCase):
-  """The effective active bundle is the active source's slot: chestnut when a GPU is
-  present, qcom otherwise. An empty active slot means the hardware default (stock
-  runner), never the other slot's pick - modeld_v2 requires a real bundle."""
-
-  @staticmethod
-  def _raw_bundle(ref: str) -> dict:
-    bundle = custom.ModelManagerSP.ModelBundle.new_message()
-    bundle.ref = ref
-    bundle.minimumSelectorVersion = helpers.REQUIRED_JSON_VERSION
-    return bundle.to_dict()
-
-  def _params(self, qcom=None, chestnut=None):
-    params = mock.MagicMock()
-
-    def get(key, *args, **kwargs):
-      if key == "ModelManager_ActiveBundle":
-        return qcom
-      if key == "ModelManager_ActiveBundleChestnut":
-        return chestnut
-      return None
-
-    params.get.side_effect = get
-    return params
-
-  def test_selected_bundle_is_per_slot(self):
-    params = self._params(qcom=self._raw_bundle("small"), chestnut=self._raw_bundle("big"))
-    assert get_selected_bundle(params, "qcom").ref == "small"
-    assert get_selected_bundle(params, "chestnut").ref == "big"
-
-  def test_no_gpu_uses_qcom_slot(self):
-    params = self._params(qcom=self._raw_bundle("small"), chestnut=self._raw_bundle("big"))
-    with mock.patch("openpilot.sunnypilot.models.helpers.chestnut_present", return_value=False):
-      assert get_active_bundle(params).ref == "small"
-
-  def test_gpu_uses_chestnut_slot(self):
-    params = self._params(qcom=self._raw_bundle("small"), chestnut=self._raw_bundle("big"))
-    with mock.patch("openpilot.sunnypilot.models.helpers.chestnut_present", return_value=True):
-      assert get_active_bundle(params).ref == "big"
-
-  def test_gpu_without_big_selection_is_hardware_default(self):
-    params = self._params(qcom=self._raw_bundle("small"), chestnut=None)
-    with mock.patch("openpilot.sunnypilot.models.helpers.chestnut_present", return_value=True):
-      assert get_active_bundle(params) is None
-
-
-class TestEffectiveSource(OpenpilotTestCase):
-  """One gate decides the active source. With no flags it is runtime truth (GPU
-  attached); display callers (mici) pass the ui_state flags, which additionally
-  require the big model to be loading, active, or the device offroad. The active
-  bundle is simply the selected bundle of that source."""
-
-  @staticmethod
-  def _raw_bundle(ref: str) -> dict:
-    bundle = custom.ModelManagerSP.ModelBundle.new_message()
-    bundle.ref = ref
-    bundle.minimumSelectorVersion = helpers.REQUIRED_JSON_VERSION
-    return bundle.to_dict()
-
-  def test_runtime_no_gpu(self):
-    with mock.patch("openpilot.sunnypilot.models.helpers.chestnut_present", return_value=False):
-      assert get_active_source() == "qcom"
-
-  def test_runtime_gpu_present(self):
-    with mock.patch("openpilot.sunnypilot.models.helpers.chestnut_present", return_value=True):
-      assert get_active_source() == "chestnut"
-
-  def test_display_offroad_gpu_present_shows_big(self):
-    assert get_active_source(chestnut=True, chestnut_active=False, chestnut_loading=False, offroad=True) == "chestnut"
-
-  def test_display_onroad_gpu_loading_shows_big(self):
-    assert get_active_source(chestnut=True, chestnut_active=False, chestnut_loading=True, offroad=False) == "chestnut"
-
-  def test_display_onroad_gpu_active_shows_big(self):
-    assert get_active_source(chestnut=True, chestnut_active=True, chestnut_loading=False, offroad=False) == "chestnut"
-
-  def test_display_onroad_gpu_idle_shows_small(self):
-    assert get_active_source(chestnut=True, chestnut_active=False, chestnut_loading=False, offroad=False) == "qcom"
-
-  def test_display_active_none_is_idle(self):
-    assert get_active_source(chestnut=True, chestnut_active=None, chestnut_loading=False, offroad=False) == "qcom"
-
-  def test_active_bundle_follows_source(self):
-    params = mock.MagicMock()
-    params.get.side_effect = lambda key: {"ModelManager_ActiveBundle": self._raw_bundle("small"),
-                                          "ModelManager_ActiveBundleChestnut": self._raw_bundle("big")}.get(key)
-    with mock.patch("openpilot.sunnypilot.models.helpers.chestnut_present", return_value=False):
-      assert get_active_bundle(params).ref == "small"
-    assert get_selected_bundle(params, get_active_source(chestnut=True, chestnut_active=False,
-                                                         chestnut_loading=False, offroad=True)).ref == "big"
 
 
 @unittest.skipUnless(os.environ.get('RUN_INTEGRATION_TESTS'), 'requires external network')

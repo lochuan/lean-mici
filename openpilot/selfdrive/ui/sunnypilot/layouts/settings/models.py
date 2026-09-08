@@ -63,7 +63,6 @@ class ModelsLayout(Widget):
 
     self.refresh_item = button_item(tr("Refresh Model List"), tr("REFRESH"), "",
                                     lambda: (ui_state.params.put("ModelManager_LastSyncTime", 0),
-                                             ui_state.params.put("ModelManager_LastSyncTime_Chestnut", 0),
                                              gui_app.push_widget(alert_dialog(tr("Fetching Latest Models")))))
 
     self.clear_cache_item = ListItemSP(

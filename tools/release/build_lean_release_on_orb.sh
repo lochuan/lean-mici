@@ -71,9 +71,9 @@ fi
 cd "$HOME/opilot"
 export UV_PROJECT_ENVIRONMENT="$HOME/venv"
 uv sync --all-extras
-# 验证构建依赖
+# 验证构建依赖（msgq 的 C 扩展 ipc_pyx 由 scons 构建，init 阶段不检查）
 "$HOME/venv/bin/python" -c "
-import SCons,acados,capnproto,eigen,ffmpeg,json11,ncurses,zeromq,zstandard,bootstrap_icons,raylib,imgui,msgq,opendbc,tinygrad
+import SCons,acados,capnproto,eigen,ffmpeg,json11,ncurses,zeromq,zstandard,bootstrap_icons,raylib,imgui,opendbc,tinygrad
 print(\"[init] deps OK\")
 "
 echo "[init] done"

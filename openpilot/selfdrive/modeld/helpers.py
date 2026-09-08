@@ -9,9 +9,8 @@ MODELS_DIR = Path(__file__).resolve().parent / 'models'
 TG_INPUT_DEVICES_PATH = MODELS_DIR / 'tg_input_devices.json'
 
 
-def modeld_pkl_path(chestnut: bool = False):
-  prefix = 'big_' if chestnut else ''
-  return MODELS_DIR / f'{prefix}driving_tinygrad.pkl'
+def modeld_pkl_path():
+  return MODELS_DIR / 'driving_tinygrad.pkl'
 
 def dump_oob(obj, f):
   with tempfile.TemporaryFile(dir=".") as tmp:
