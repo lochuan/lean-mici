@@ -1,22 +1,21 @@
 #!/usr/bin/env bash
 #
-# build_lean_release_on_orb.sh — OrbStack 容器构建 lean-sp release（mac 上跑）
+# build_lean_release_on_orb.sh — OrbStack 容器构建 lean release（mac 上跑）
 #
 # 镜像官方 tools/release/build_release.sh 流程，用 OrbStack Ubuntu 24.04 ARM64
 # 容器构建（和 AGNOS 同 distro/GLIBC，产物直接可上设备）：
 #   - 容器持久层：工具链 + uv venv 只装一次（首次 init），之后复用
 #   - 每次构建：git 干净同步 + 清构建产物（.o/.so/__pycache__）+ scons -j$(nproc)
 #   - SKIP_TINYGRAD_COMPILE=1（tinygrad ONNX 解析 bug，模型用 CI 预构建）
-#   - 产物 rsync 到设备 /data/openpilot + 重启冒烟
+#   - 构建产物推 lean-release 分支（设备自己 checkout lean-release 跑）
 #
 # 用法（mac 上跑）:
 #   ./tools/release/build_lean_release_on_orb.sh
 #
 # 环境变量:
-#   ORB_MACHINE   (默认 opilotbuild)   OrbStack 机器名
-#   SOURCE_BRANCH (默认 lean-sp-master) 构建分支
-#   DEVICE        (默认 comma@10.205.161.33) 目标设备
-#   SKIP_DEVICE=1                       跳过推设备+重启（只构建）
+#   ORB_MACHINE    (默认 opilotbuild)   OrbStack 机器名
+#   SOURCE_BRANCH  (默认 lean-master)   构建分支
+#   RELEASE_BRANCH (默认 lean-release)  推目标分支
 #
 set -e
 set -x
@@ -27,8 +26,6 @@ ORB_MACHINE="${ORB_MACHINE:-opilotbuild}"
 SOURCE_BRANCH="${SOURCE_BRANCH:-lean-master}"
 RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
 BUILD_BRANCH="build-mici"
-DEVICE="${DEVICE:-comma@10.205.161.33}"
-DEVICE_DIR="/data/openpilot"
 
 echo "=== OrbStack lean release build === T=$SECONDS"
 echo "SOURCE_DIR=$SOURCE_DIR"
@@ -168,34 +165,5 @@ for i in 1 2 3; do
 done
 git worktree remove --force /tmp/opilot-release 2>/dev/null || true
 "
-
-# --- 7. 设备 checkout lean-release + 重启冒烟 ---
-if [ -z "$SKIP_DEVICE" ]; then
-  echo "[-] device checkout $RELEASE_BRANCH T=$SECONDS"
-  ssh "$DEVICE" "
-    cd $DEVICE_DIR
-    git fetch origin $RELEASE_BRANCH 2>/dev/null || git fetch https://github.com/lochuan/lean-mici.git $RELEASE_BRANCH
-    git checkout -f $RELEASE_BRANCH 2>/dev/null || git checkout -b $RELEASE_BRANCH FETCH_HEAD
-    git reset --hard FETCH_HEAD
-    ln -sfn msgq_repo/msgq msgq 2>/dev/null
-    ln -sfn opendbc_repo/opendbc opendbc 2>/dev/null
-    ln -sfn rednose_repo/rednose rednose 2>/dev/null
-    ln -sfn tinygrad_repo/tinygrad tinygrad 2>/dev/null
-    touch prebuilt
-    echo \"[device] activated at \$(git rev-parse --short HEAD)\"
-  "
-
-  # --- 8. 重启 comma + offroad 冒烟 ---
-  echo "[-] restart comma T=$SECONDS"
-  ssh "$DEVICE" '
-    pkill -9 -f "manager.py" 2>/dev/null || true
-    pkill -9 -f "hardwared.py|ui.py|statsd.py|models_manager|logmessaged|tombstoned|camerad|encoderd" 2>/dev/null || true
-    sleep 2
-    sudo systemctl restart comma
-    sleep 30
-    echo "[device] offroad smoke:"
-    tmux capture-pane -t comma:0.0 -p 2>/dev/null | grep -vE "FPS dropped|raylib: FONT|^[0-9]+$|^$" | tail -5
-  '
-fi
 
 echo "=== done T=$SECONDS ==="
