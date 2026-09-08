@@ -30,7 +30,6 @@ async function enter() {
   $("view-auth").hidden = true; $("tabs").hidden = false;
   switchTab("status");
   meta = await api("/api/params");
-  renderParams("");
   clearInterval(statusTimer);
   statusTimer = setInterval(pollStatus, 5000);
   pollStatus();
@@ -40,9 +39,7 @@ async function enter() {
 function switchTab(name) {
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll(".tabview").forEach(v => v.hidden = v.id !== `view-${name}`);
-  if (name === "params") renderParams($("param-search").value);
   if (name === "settings") renderSettings();
-  if (name === "logs") renderLogs();
 }
 
 // ---------- status ----------
@@ -84,44 +81,6 @@ async function pollStatus() {
     $("view-status").innerHTML = `<div class="grid">` + cards.map(
       ([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join("") + `</div>`;
   } catch (e) { $("conn").textContent = "连接失败"; }
-}
-
-// ---------- params ----------
-function renderParams(filter) {
-  const keys = Object.keys(meta).filter(k => !meta[k].blocked && k.toLowerCase().includes((filter || "").toLowerCase())).sort();
-  $("param-list").innerHTML = keys.map(k => `
-    <div class="row" onclick="editParam('${k}')">
-      <span class="k">${k}</span>
-      <span class="badge">${meta[k].type}${meta[k]._missing ? " · 未注册" : ""}</span>
-    </div>`).join("") || "<p class='desc'>无匹配</p>";
-}
-
-async function editParam(key) {
-  const { value } = await api(`/api/params/${key}`);
-  const m = meta[key];
-  const body = m.type === "BOOL"
-    ? `<button class="switch ${value === "1" ? "on" : ""}" id="pv" onclick="this.classList.toggle('on')"></button>`
-    : `<textarea id="pv" rows="4">${value ?? ""}</textarea>`;
-  $("view-params").innerHTML = `
-    <div class="card"><h3>${key}</h3>${body}
-    <p class="desc">类型 ${m.type}；修改立即写入（部分参数需重启 openpilot 生效）</p>
-    <button onclick="saveParam('${key}')">保存</button>
-    <button class="danger" onclick="delParam('${key}')">删除</button>
-    <button onclick="renderParams($('param-search').value)">返回</button></div>`;
-}
-
-async function saveParam(key) {
-  let v;
-  if (meta[key].type === "BOOL") v = $("pv").classList.contains("on") ? "1" : "0";
-  else v = $("pv").value;
-  await api(`/api/params/${key}`, { method: "PUT", body: JSON.stringify({ value: v }) });
-  renderParams($("param-search").value);
-}
-
-async function delParam(key) {
-  if (!confirm(`确认删除 ${key}？`)) return;
-  await api(`/api/params/${key}`, { method: "DELETE" });
-  renderParams($("param-search").value);
 }
 
 // ---------- settings ----------
@@ -261,33 +220,6 @@ async function putSetting(key, value) {
   } catch (e) { alert(e.message); }
 }
 
-// ---------- logs ----------
-async function downloadLog(route) {
-  try {
-    // <a href> 无法带 Bearer 头 → fetch+blob 触发保存
-    const res = await fetch(`/api/logs/${route}/1/qlog.zst`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "qlog.zst";
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-  } catch (e) { alert(`下载失败: ${e.message}`); }
-}
-
-async function renderLogs() {
-  const routes = await api("/api/logs");
-  $("view-logs").innerHTML = routes.map(r => `
-    <div class="row"><div style="flex:1">
-      <div class="k">${r.route}</div>
-      <div class="desc">${r.segments} 段 · ${(r.size / 1048576).toFixed(1)} MB · ${new Date(r.mtime * 1000).toLocaleString()}</div>
-      <div class="desc"><a href="javascript:void(0)" onclick="downloadLog('${r.route}')">qlog.zst</a></div>
-    </div></div>`).join("") || "<p class='desc'>暂无日志</p>";
-}
-
 // ---------- events ----------
 $("login-btn").onclick = async () => {
   try {
@@ -306,7 +238,6 @@ $("setup-btn").onclick = async () => {
   } catch (e) { $("auth-msg").textContent = e.message; }
 };
 document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => switchTab(b.dataset.tab));
-$("param-search").oninput = () => renderParams($("param-search").value);
 
 async function boot() {
   if (token) {
