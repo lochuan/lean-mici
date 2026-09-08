@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# build_orb_release.sh — OrbStack 容器构建 lean-sp release（mac 上跑）
+# build_lean_release_on_orb.sh — OrbStack 容器构建 lean-sp release（mac 上跑）
 #
 # 镜像官方 tools/release/build_release.sh 流程，用 OrbStack Ubuntu 24.04 ARM64
 # 容器构建（和 AGNOS 同 distro/GLIBC，产物直接可上设备）：
@@ -10,7 +10,7 @@
 #   - 产物 rsync 到设备 /data/openpilot + 重启冒烟
 #
 # 用法（mac 上跑）:
-#   ./tools/release/build_orb_release.sh
+#   ./tools/release/build_lean_release_on_orb.sh
 #
 # 环境变量:
 #   ORB_MACHINE   (默认 opilotbuild)   OrbStack 机器名
