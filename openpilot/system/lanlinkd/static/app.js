@@ -51,7 +51,7 @@ let paramsVersionPrimed = false;
 async function pollStatus() {
   try {
     const s = await api("/api/status");
-    $("conn").textContent = `已连接 · ${s.system.version} @ ${s.system.branch}`;
+    $("conn").textContent = `已连接 · ${s.system.version} @ ${s.system.branch} ${s.system.commit || ""}`;
     if (s.paramsVersion !== undefined && s.paramsVersion !== lastParamsVersion) {
       // 车机端改了参数 → 刷新本页缓存，设置页改动可见（首轮只记录基线）
       const first = !paramsVersionPrimed;
@@ -150,10 +150,11 @@ function renderSection(sec) {
 }
 
 function renderItems(items, secEnabled) {
-  return (items || []).map(item => {
+  const out = [];
+  const emit = (item, isSub) => {
     const key = item.key, m = meta[key] || {};
-    if (!ruleOk(item.visibility)) return "";
-    if (m.blocked || item.blocked) return "";
+    if (!ruleOk(item.visibility)) return;
+    if (m.blocked || item.blocked) return;
     const missing = item._missing || m._missing;
     const value = paramsAll[key];
     const enabled = secEnabled && ruleOk(item.enablement) && !missing;
@@ -175,9 +176,13 @@ function renderItems(items, secEnabled) {
     } else { // button / 未知控件：v1 灰显占位
       control = `<span class="badge">车机端设置</span>`;
     }
-    return `<div class="row ${enabled ? "" : "disabled"}" style="cursor:default">
-        <div style="flex:1"><div class="k">${item.title || key}</div></div>${control}</div>`;
-  }).join("");
+    out.push(`<div class="row ${enabled ? "" : "disabled"}${isSub ? " sub-item" : ""}" style="cursor:default">
+        <div style="flex:1"><div class="k">${item.title || key}</div></div>${control}</div>`);
+    // 条目级子选项（sub_items），如转向灯暂停的车速阈值/延迟
+    (item.sub_items || []).forEach(sub => emit(sub, true));
+  };
+  (items || []).forEach(item => emit(item, false));
+  return out.join("");
 }
 
 function renderSubPanel(sp, secEnabled) {
