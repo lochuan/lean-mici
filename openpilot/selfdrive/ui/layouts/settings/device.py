@@ -6,7 +6,6 @@ from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.selfdrive.ui.layouts.onboarding import TrainingGuide
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.multilang import multilang, tr, tr_noop
 from openpilot.system.ui.widgets import Widget, DialogResult
@@ -22,7 +21,6 @@ if gui_app.sunnypilot_ui():
 # Description constants
 DESCRIPTIONS = {
   'reset_calibration': tr_noop("sunnypilot requires the device to be mounted within 4° left or right and within 5° up or 9° down."),
-  'review_guide': tr_noop("Review the rules, features, and limitations of sunnypilot"),
 }
 
 
@@ -33,7 +31,6 @@ class DeviceLayout(Widget):
     self._params = Params()
     self._select_language_dialog: MultiOptionDialog | None = None
     self._fcc_dialog: HtmlModal | None = None
-    self._training_guide: TrainingGuide | None = None
 
     items = self._initialize_items()
     self._scroller = Scroller(items, line_separator=True, spacing=0)
@@ -52,8 +49,6 @@ class DeviceLayout(Widget):
       text_item(lambda: tr("Dongle ID"), self._params.get("DongleId") or (lambda: tr("N/A"))),
       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
       self._reset_calib_btn,
-      button_item(lambda: tr("Review Training Guide"), lambda: tr("REVIEW"), lambda: tr(DESCRIPTIONS['review_guide']),
-                  self._on_review_training_guide, enabled=ui_state.is_offroad),
       button_item(lambda: tr("Regulatory"), lambda: tr("VIEW"), callback=self._on_regulatory, enabled=ui_state.is_offroad),
       button_item(lambda: tr("Change Language"), lambda: tr("CHANGE"), callback=self._show_language_dialog),
       self._power_off_btn,
@@ -178,8 +173,3 @@ class DeviceLayout(Widget):
     if not self._fcc_dialog:
       self._fcc_dialog = HtmlModal(os.path.join(BASEDIR, "openpilot/selfdrive/assets/offroad/fcc.html"))
     gui_app.push_widget(self._fcc_dialog)
-
-  def _on_review_training_guide(self):
-    if not self._training_guide:
-      self._training_guide = TrainingGuide()
-    gui_app.push_widget(self._training_guide)

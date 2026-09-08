@@ -5,15 +5,8 @@ import unittest
 # FIXME: known small leaks not worth worrying about at the moment
 KNOWN_LEAKS = {
   "openpilot.selfdrive.ui.mici.onroad.cabin_camera_dialog.CabinCameraView",
-  "openpilot.selfdrive.ui.mici.layouts.onboarding.TermsPage",
-  "openpilot.selfdrive.ui.mici.layouts.onboarding.TrainingGuide",
-  "openpilot.selfdrive.ui.mici.layouts.onboarding.DeclinePage",
-  "openpilot.selfdrive.ui.mici.layouts.onboarding.OnboardingWindow",
   "openpilot.selfdrive.ui.onroad.driver_state.DriverStateRenderer",
   "openpilot.selfdrive.ui.onroad.cabin_camera_dialog.CabinCameraDialog",
-  "openpilot.selfdrive.ui.layouts.onboarding.TermsPage",
-  "openpilot.selfdrive.ui.layouts.onboarding.DeclinePage",
-  "openpilot.selfdrive.ui.layouts.onboarding.OnboardingWindow",
   "openpilot.system.ui.widgets.confirm_dialog.ConfirmDialog",
   "openpilot.system.ui.widgets.label.Label",
   "openpilot.system.ui.widgets.button.Button",
@@ -50,7 +43,6 @@ class TestWidgetLeaks(OpenpilotTestCase):
     from openpilot.system.ui.lib.application import gui_app
 
     # mici dialogs
-    from openpilot.selfdrive.ui.mici.layouts.onboarding import TrainingGuide as MiciTrainingGuide, OnboardingWindow as MiciOnboardingWindow
     from openpilot.selfdrive.ui.mici.onroad.cabin_camera_dialog import CabinCameraDialog as MiciCabinCameraDialog
     from openpilot.selfdrive.ui.mici.widgets.pairing_dialog import PairingDialog as MiciPairingDialog
     from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigConfirmationDialog, BigInputDialog
@@ -58,7 +50,6 @@ class TestWidgetLeaks(OpenpilotTestCase):
 
     # tici dialogs
     from openpilot.selfdrive.ui.onroad.cabin_camera_dialog import CabinCameraDialog as TiciCabinCameraDialog
-    from openpilot.selfdrive.ui.layouts.onboarding import OnboardingWindow as TiciOnboardingWindow
     from openpilot.selfdrive.ui.widgets.pairing_dialog import PairingDialog as TiciPairingDialog
     from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
     from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
@@ -72,14 +63,12 @@ class TestWidgetLeaks(OpenpilotTestCase):
     for ctor in (
       # mici
       MiciCabinCameraDialog, MiciPairingDialog,
-      lambda: MiciTrainingGuide(lambda: None),
-      lambda: MiciOnboardingWindow(lambda: None),
       lambda: BigDialog("test", "test"),
       lambda: BigConfirmationDialog("test", gui_app.texture("icons_mici/settings/network/new/trash.png", 54, 64), lambda: None),
       lambda: BigInputDialog("test"),
       lambda: MiciFccModal(text="test"),
       # tici
-      TiciCabinCameraDialog, TiciOnboardingWindow, TiciPairingDialog, Keyboard,
+      TiciCabinCameraDialog, TiciPairingDialog, Keyboard,
       lambda: ConfirmDialog("test", "ok"),
       lambda: MultiOptionDialog("test", ["a", "b"]),
       lambda: HtmlModal(text="test"),

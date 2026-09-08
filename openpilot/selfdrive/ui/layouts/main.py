@@ -8,7 +8,6 @@ from openpilot.selfdrive.ui.layouts.home import HomeLayout
 from openpilot.selfdrive.ui.layouts.settings.settings import SettingsLayout, PanelType
 from openpilot.selfdrive.ui.onroad.augmented_road_view import AugmentedRoadView
 from openpilot.selfdrive.ui.ui_state import device, ui_state
-from openpilot.selfdrive.ui.layouts.onboarding import OnboardingWindow
 from openpilot.selfdrive.ui.body.layouts.onroad import BodyLayout
 
 if gui_app.sunnypilot_ui():
@@ -48,11 +47,6 @@ class MainLayout(Widget):
     self._setup_callbacks()
 
     gui_app.push_widget(self)
-
-    # Start onboarding if terms or training not completed, make sure to push after self
-    self._onboarding_window = OnboardingWindow()
-    if not self._onboarding_window.completed:
-      gui_app.push_widget(self._onboarding_window)
 
   def _render(self, _):
     self._handle_onroad_transition()

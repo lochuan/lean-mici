@@ -14,12 +14,8 @@ VERSION_KEY = "LanLinkParamsVersion"
 # 继承上游 sunnylinkd BLOCKED_PARAMS（9 项）+ 本地安全项
 BLOCKED_PARAMS = {
   "AdbEnabled",
-  "CompletedSunnylinkConsentVersion",
-  "CompletedTrainingVersion",
   "GithubUsername",       # 可被用于提权 SSH
   "GithubSshKeys",        # 直接 SSH 注入
-  "HasAcceptedTerms",
-  "HasAcceptedTermsSP",
   "OnroadCycleRequested",  # 防远程触发循环上电
   "ParamsVersion",         # 设备管理计数
   # LANLink 本地新增

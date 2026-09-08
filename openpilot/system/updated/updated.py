@@ -29,13 +29,6 @@ FINALIZED = os.path.join(STAGING_ROOT, "finalized")
 
 OVERLAY_INIT = Path(os.path.join(BASEDIR, ".overlay_init"))
 
-# do not allow to engage after this many hours onroad and this many routes
-HOURS_NO_CONNECTIVITY_MAX = 27
-ROUTES_NO_CONNECTIVITY_MAX = 84
-# send an offroad prompt after this many hours onroad and this many routes
-HOURS_NO_CONNECTIVITY_PROMPT = 23
-ROUTES_NO_CONNECTIVITY_PROMPT = 80
-
 
 class UserRequest:
   NONE = 0
@@ -255,23 +248,13 @@ class Updater:
   def get_commit_hash(self, path: str = OVERLAY_MERGED) -> str:
     return run(["git", "rev-parse", "HEAD"], path).rstrip()
 
-  def set_params(self, update_success: bool, failed_count: int, exception: str | None) -> None:
+  def set_params(self, failed_count: int, exception: str | None) -> None:
     self.params.put("UpdateFailedCount", failed_count, block=True)
     self.params.put("UpdaterTargetBranch", self.target_branch, block=True)
 
     self.params.put_bool("UpdaterFetchAvailable", self.update_available, block=True)
     if len(self.branches):
       self.params.put("UpdaterAvailableBranches", ','.join(self.branches.keys()), block=True)
-
-    last_uptime_onroad = self.params.get("UptimeOnroad", return_default=True)
-    last_route_count = self.params.get("RouteCount", return_default=True)
-    if update_success:
-      self.params.put("LastUpdateTime", datetime.datetime.now(datetime.UTC).replace(tzinfo=None), block=True)
-      self.params.put("LastUpdateUptimeOnroad", last_uptime_onroad, block=True)
-      self.params.put("LastUpdateRouteCount", last_route_count, block=True)
-    else:
-      last_uptime_onroad = self.params.get("LastUpdateUptimeOnroad", return_default=True)
-      last_route_count = self.params.get("LastUpdateRouteCount", return_default=True)
 
     if exception is None:
       self.params.remove("LastUpdateException")
@@ -306,11 +289,8 @@ class Updater:
     self.params.put_bool("UpdateAvailable", self.update_ready, block=True)
 
     # Handle user prompt
-    for alert in ("Offroad_UpdateFailed", "Offroad_ConnectivityNeeded", "Offroad_ConnectivityNeededPrompt"):
-      set_offroad_alert(alert, False)
+    set_offroad_alert("Offroad_UpdateFailed", False)
 
-    dt_uptime_onroad = (self.params.get("UptimeOnroad", return_default=True) - last_uptime_onroad) / (60*60)
-    dt_route_count = self.params.get("RouteCount", return_default=True) - last_route_count
     build_metadata = get_build_metadata()
     if failed_count > 15 and exception is not None and self.has_internet:
       if build_metadata.tested_channel:
@@ -318,12 +298,6 @@ class Updater:
       else:
         extra_text = exception
       set_offroad_alert("Offroad_UpdateFailed", True, extra_text=extra_text)
-    elif failed_count > 0:
-      if dt_uptime_onroad > HOURS_NO_CONNECTIVITY_MAX and dt_route_count > ROUTES_NO_CONNECTIVITY_MAX:
-        set_offroad_alert("Offroad_ConnectivityNeeded", True)
-      elif dt_uptime_onroad > HOURS_NO_CONNECTIVITY_PROMPT and dt_route_count > ROUTES_NO_CONNECTIVITY_PROMPT:
-        remaining = max(HOURS_NO_CONNECTIVITY_MAX - dt_uptime_onroad, 1)
-        set_offroad_alert("Offroad_ConnectivityNeededPrompt", True, extra_text=f"{remaining} hour{'' if remaining == 1 else 's'}.")
 
   def check_for_update(self) -> None:
     cloudlog.info("checking for updates")
@@ -438,7 +412,7 @@ def main() -> None:
         init_overlay()
 
         # ensure we have some params written soon after startup
-        updater.set_params(False, update_failed_count, exception)
+        updater.set_params(update_failed_count, exception)
 
         if not system_time_valid() or first_run:
           first_run = False
@@ -479,8 +453,7 @@ def main() -> None:
 
       try:
         params.put("UpdaterState", "idle", block=True)
-        update_successful = (update_failed_count == 0)
-        updater.set_params(update_successful, update_failed_count, exception)
+        updater.set_params(update_failed_count, exception)
       except Exception:
         cloudlog.exception("uncaught updated exception while setting params, shouldn't happen")
 

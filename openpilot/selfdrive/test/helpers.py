@@ -9,7 +9,6 @@ from functools import wraps
 import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.system.manager.process_config import managed_processes
-from openpilot.common.version import training_version, terms_version
 
 
 def set_params_enabled():
@@ -17,8 +16,6 @@ def set_params_enabled():
   os.environ['LOGPRINT'] = "debug"
 
   params = Params()
-  params.put("HasAcceptedTerms", terms_version, block=True)
-  params.put("CompletedTrainingVersion", training_version, block=True)
   params.put_bool("OpenpilotEnabledToggle", True, block=True)
 
   # valid calib

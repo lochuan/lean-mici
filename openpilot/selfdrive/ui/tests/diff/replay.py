@@ -14,7 +14,6 @@ from openpilot.common.params import Params
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.ui.tests.diff.diff import DIFF_OUT_DIR
 from openpilot.system.updated.updated import parse_release_notes
-from openpilot.common.version import terms_version, training_version, terms_version_sp
 
 LayoutVariant = Literal["mici", "tizi"]
 
@@ -24,13 +23,10 @@ HEADLESS = os.getenv("WINDOWED", "0") != "1"
 
 def setup_state():
   params = Params()
-  params.put("HasAcceptedTerms", terms_version, block=True)
-  params.put("CompletedTrainingVersion", training_version, block=True)
   params.put("DongleId", "test123456789", block=True)
   # Combined description for layouts that still use it (BIG home, settings/software)
   params.put("UpdaterCurrentDescription", "0.10.1 / test-branch / abc1234 / Nov 30", block=True)
   params.put("UpdaterCurrentReleaseNotes", parse_release_notes(BASEDIR), block=True)
-  params.put("HasAcceptedTermsSP", terms_version_sp, block=True)
   # Params for mici home
   params.put("Version", "0.10.1", block=True)
   params.put("GitBranch", "test-branch", block=True)
