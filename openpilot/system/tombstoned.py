@@ -139,7 +139,6 @@ def report_tombstone_apport(fn):
 
 
 def main() -> NoReturn:
-def main() -> NoReturn:
   # Clear apport folder on start, otherwise duplicate crashes won't register
   clear_apport_folder()
   initial_tombstones = set(get_tombstones())
