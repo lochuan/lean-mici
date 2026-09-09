@@ -249,6 +249,11 @@ def create_app() -> web.Application:
 
 
 def main() -> None:
+  # 默认关闭：仅当 UI（LanLinkEnabled）开启时提供服务。manager 已按 param 门控，
+  # 这里再自保护一层，防其它启动链路误拉起（UI 关闭时立刻退出）
+  if not Params().get_bool("LanLinkEnabled"):
+    cloudlog.info("lanlinkd: LanLinkEnabled off, exiting")
+    return
   cloudlog.info("lanlinkd starting on 0.0.0.0:8088")
   web.run_app(create_app(), host="0.0.0.0", port=8088, print=None)
 
