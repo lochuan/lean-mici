@@ -11,29 +11,22 @@
   <h1>LANLink</h1>
   <span id="conn" class="conn">…</span>
 </header>
-<main id="main">
-  <section id="view-auth">
-    <div class="card" id="card-setup" hidden>
-      <h2>首次使用 · 设置密码</h2>
-      <input id="setup-pw1" type="password" placeholder="新密码（≥6 位）">
-      <input id="setup-pw2" type="password" placeholder="重复新密码">
-      <button id="setup-btn">设置并登录</button>
-    </div>
-    <div class="card" id="card-login">
-      <h2>登录</h2>
-      <input id="login-pw" type="password" placeholder="密码">
-      <button id="login-btn">登录</button>
-      <p id="auth-msg"></p>
-    </div>
-  </section>
-  <nav id="tabs" hidden>
-    <button data-tab="status" class="on">状态</button>
-    <button data-tab="settings">设置</button>
-  </nav>
-  <section id="view-status" class="tabview" hidden></section>
-  <section id="view-settings" class="tabview" hidden></section>
-</main>
+<main id="app"></main>
+<section id="view-auth" hidden>
+  <div class="card" id="card-setup" hidden>
+    <h2>首次使用 · 设置密码</h2>
+    <input id="setup-pw1" type="password" placeholder="新密码（≥6 位）">
+    <input id="setup-pw2" type="password" placeholder="重复新密码">
+    <button id="setup-btn">设置并登录</button>
+  </div>
+  <div class="card" id="card-login">
+    <h2>登录</h2>
+    <input id="login-pw" type="password" placeholder="密码">
+    <button id="login-btn">登录</button>
+    <p id="auth-msg"></p>
+  </div>
+</section>
 <div id="toast"></div>
-<script src="/static/app.js"></script>
+<script type="module" src="/static/js/app.js"></script>
 </body>
 </html>
