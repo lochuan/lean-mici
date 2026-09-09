@@ -1,6 +1,38 @@
 from types import SimpleNamespace as NS
 
+from opendbc.car.structs import car
+from openpilot.cereal import messaging, custom
+
 from openpilot.system.lanlinkd.status_snapshot import build_capabilities, build_snapshot
+
+
+def cp_bytes(**kw) -> bytes:
+  return car.CarParams.new_message(**kw).to_bytes()
+
+
+def cp_sp_bytes(**kw) -> bytes:
+  return custom.CarParamsSP.new_message(**kw).to_bytes()
+
+
+class FakeParams:
+  """duck-type Params：get 返回 python 值（JSON->dict, BYTES->bytes），get_bool bool。"""
+
+  def __init__(self, data=None, bools=None):
+    self.data = data or {}
+    self.bools = bools or {}
+
+  def get(self, key):
+    return self.data.get(key)
+
+  def get_bool(self, key):
+    return bool(self.bools.get(key, False))
+
+
+def angle_cp_params():
+  return FakeParams(data={"CarParamsPersistent": cp_bytes(
+    steerControlType="angle", openpilotLongitudinalControl=True,
+    brand="toyota", pcmCruise=True, enableBsm=True,
+    alphaLongitudinalAvailable=False)})
 
 
 class TestBuildSnapshot:
@@ -62,38 +94,89 @@ class TestBuildSnapshot:
 
 
 class TestBuildCapabilities:
-  def test_none_cp_defaults(self):
-    caps = build_capabilities(None, NS(), device_type="pc")
+  def test_empty_params_all_defaults(self):
+    caps = build_capabilities(FakeParams(), device_type="pc")
     assert caps["protocol_version"] == 1
     assert caps["device_type"] == "pc"
+    assert caps["brand"] == ""
+    assert caps["steer_control_type"] == ""
+    assert caps["torque_allowed"] is False
     assert caps["has_longitudinal_control"] is False
-    assert caps["stock_longitudinal"] is True
-    assert caps["is_development"] is True
-    assert len(caps) == 19  # 对齐上游字段数
-
-  def test_device_type_mici(self):
-    # 设备上由 HARDWARE.get_device_type() 传入真实硬件标识
-    caps = build_capabilities(None, NS(), device_type="mici")
-    assert caps["device_type"] == "mici"
-
-  def test_longitudinal_control_only_from_openpilot_long(self):
-    # F4：openpilotLongitudinalControl 才表示 openpilot 控纵向；
-    # lean-master/Sienna lateral-only 下 stock CP 的 hasLongitudinalControl=True 但 openpilot 未接管
-    CP = NS(hasLongitudinalControl=True, openpilotLongitudinalControl=False)
-    caps = build_capabilities(CP, NS(), device_type="mici")
-    assert caps["has_longitudinal_control"] is False
-    assert caps["stock_longitudinal"] is True
-
-    CP = NS(openpilotLongitudinalControl=True)
-    caps = build_capabilities(CP, NS(), device_type="mici")
-    assert caps["has_longitudinal_control"] is True
     assert caps["stock_longitudinal"] is False
+    assert caps["is_development"] is False
+    assert len(caps) == 19
 
-  def test_steer_control_type_enum_normalized(self):
-    class FakeEnum:
-      def __init__(self, raw):
-        self.raw = raw
+  def test_angle_steering_from_persistent_cp(self):
+    caps = build_capabilities(angle_cp_params(), device_type="mici")
+    assert caps["steer_control_type"] == "angle"
+    assert caps["torque_allowed"] is False
+    assert caps["brand"] == "toyota"
+    assert caps["has_longitudinal_control"] is True
+    assert caps["pcm_cruise"] is True
+    assert caps["enable_bsm"] is True
+    assert caps["has_stop_and_go"] is True
+    assert caps["alpha_long_available"] is False
 
-    CP = NS(steerControlType=FakeEnum(3))
-    caps = build_capabilities(CP, NS(), device_type="mici")
-    assert caps["steer_control_type"] == 3
+  def test_torque_steering_and_alpha_long(self):
+    p = FakeParams(
+      data={"CarParamsPersistent": cp_bytes(
+        steerControlType="torque", alphaLongitudinalAvailable=True,
+        openpilotLongitudinalControl=False)},
+      bools={"AlphaLongitudinalEnabled": True})
+    caps = build_capabilities(p, device_type="mici")
+    assert caps["steer_control_type"] == "torque"
+    assert caps["torque_allowed"] is True
+    assert caps["alpha_long_available"] is True
+    assert caps["has_longitudinal_control"] is True
+
+  def test_alpha_available_false_uses_cp_long(self):
+    p = FakeParams(data={"CarParamsPersistent": cp_bytes(
+      steerControlType="torque", alphaLongitudinalAvailable=False,
+      openpilotLongitudinalControl=True)})
+    caps = build_capabilities(p, device_type="mici")
+    assert caps["has_longitudinal_control"] is True
+
+  def test_bundle_brand_wins_over_cp(self):
+    p = FakeParams(data={
+      "CarPlatformBundle": {"brand": "toyota", "platform": "TOYOTA_SIENNA_4TH_GEN"},
+      "CarParamsPersistent": cp_bytes(steerControlType="angle", brand="hyundai")})
+    caps = build_capabilities(p, device_type="mici")
+    assert caps["brand"] == "toyota"
+
+  def test_icbm_from_sp_params(self):
+    p = FakeParams(
+      data={"CarParamsSPPersistent": cp_sp_bytes(
+        intelligentCruiseButtonManagementAvailable=True)},
+      bools={"IntelligentCruiseButtonManagement": True})
+    caps = build_capabilities(p, device_type="mici")
+    assert caps["icbm_available"] is True
+    assert caps["has_icbm"] is True
+
+  def test_icbm_available_without_enabled(self):
+    p = FakeParams(data={"CarParamsSPPersistent": cp_sp_bytes(
+      intelligentCruiseButtonManagementAvailable=True)})
+    caps = build_capabilities(p, device_type="mici")
+    assert caps["icbm_available"] is True
+    assert caps["has_icbm"] is False
+
+  def test_lean_fork_brand_flags_stay_false(self):
+    # lean fork opendbc 仅 Toyota：hyundai/subaru/tesla 专属能力恒 False
+    caps = build_capabilities(FakeParams(), device_type="mici")
+    assert caps["hyundai_alpha_long_available"] is False
+    assert caps["subaru_has_sng"] is False
+    assert caps["tesla_has_vehicle_bus"] is False
+
+  def test_bool_params_flags(self):
+    p = FakeParams(bools={"IsReleaseSpBranch": True, "ToyotaEnforceStockLongitudinal": True})
+    caps = build_capabilities(p, device_type="mici")
+    assert caps["is_sp_release"] is True
+    assert caps["is_release"] is False
+    assert caps["stock_longitudinal"] is True
+
+  def test_corrupt_bytes_falls_back_to_defaults(self):
+    p = FakeParams(data={"CarParamsPersistent": b"\x00garbage",
+                         "CarParamsSPPersistent": b"\x00garbage"})
+    caps = build_capabilities(p, device_type="mici")
+    assert caps["steer_control_type"] == ""
+    assert caps["brand"] == ""
+    assert caps["icbm_available"] is False

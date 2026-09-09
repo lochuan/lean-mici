@@ -36,7 +36,8 @@ class TestStatusdRun:
         raise RuntimeError("boom")
       return {"stale": False}
 
-    cache = StatusCache({"Version": "0.11.2"}, "tici")
+    cache = StatusCache({"Version": "0.11.2"}, "tici",
+                        params=NS(get=lambda k: None, get_bool=lambda k: False))
     with patch.object(statusd.messaging, "SubMaster", fake_cls), \
          patch.object(statusd, "build_snapshot", flaky_snapshot), \
          patch.object(statusd, "build_capabilities", lambda *a, **k: {}):
@@ -49,6 +50,7 @@ class TestStatusdRun:
     def boom(services):
       raise RuntimeError("ctor failed")
 
-    cache = StatusCache({"Version": "0.11.2"}, "tici")
+    cache = StatusCache({"Version": "0.11.2"}, "tici",
+                        params=NS(get=lambda k: None, get_bool=lambda k: False))
     with patch.object(statusd.messaging, "SubMaster", boom):
       cache.run(threading.Event())
