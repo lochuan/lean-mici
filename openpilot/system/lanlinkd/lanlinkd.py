@@ -11,6 +11,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.hardware.hw import Paths
 from openpilot.system.lanlinkd import logs as logs_mod
+from openpilot.system.lanlinkd import models_api
 from openpilot.system.lanlinkd import params_api
 from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd.auth import (
@@ -132,6 +133,50 @@ class LanlinkApp:
       return _json_error(401, "unauthorized")
     code, _ = params_api.delete_param(self.params, request.match_info["key"])
     return (web.Response(status=204) if code == 204 else _json_error(code, "denied"))
+
+  # ---- models ----
+  @routes.get("/api/models")
+  async def models_get(self, request: web.Request) -> web.Response:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    return web.json_response(models_api.models_state(self.params, self.cache.download(), Paths.model_root()))
+
+  @routes.post("/api/models/select")
+  async def models_select(self, request: web.Request) -> web.Response:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    body = await request.json()
+    code, msg = models_api.select(self.params, str(body.get("ref", "")))
+    return (web.Response(status=204) if code == 204 else _json_error(code, msg))
+
+  @routes.post("/api/models/cancel")
+  async def models_cancel(self, request: web.Request) -> web.Response:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    code, msg = models_api.cancel(self.params)
+    return (web.Response(status=204) if code == 204 else _json_error(code, msg))
+
+  @routes.post("/api/models/refresh")
+  async def models_refresh(self, request: web.Request) -> web.Response:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    code, msg = models_api.refresh(self.params)
+    return (web.Response(status=204) if code == 204 else _json_error(code, msg))
+
+  @routes.post("/api/models/clear_cache")
+  async def models_clear_cache(self, request: web.Request) -> web.Response:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    code, msg = models_api.clear_cache(self.params)
+    return (web.Response(status=204) if code == 204 else _json_error(code, msg))
+
+  @routes.post("/api/models/fav")
+  async def models_fav(self, request: web.Request) -> web.Response:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    body = await request.json()
+    code, msg = models_api.set_fav(self.params, str(body.get("ref", "")), bool(body.get("on")))
+    return (web.Response(status=204) if code == 204 else _json_error(code, msg))
 
   # ---- status / capabilities / settings / logs ----
   @routes.get("/api/status")
