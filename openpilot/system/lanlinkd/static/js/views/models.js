@@ -1,4 +1,5 @@
-// 模型页：当前模型卡 / 下载卡 / 操作行 / 搜索 / 分组列表。2s 轮询（离开页面停止）。
+// 模型页：当前模型卡 / 下载卡 / 操作行 / 搜索 / 分组列表。
+// 轮询只局部更新（mm-live/model-list），不重渲染骨架——避免打断输入与折叠状态。
 import { api } from "../api.js";
 import { esc, toast } from "../components.js";
 import { setCleanup } from "../router.js";
@@ -13,39 +14,60 @@ let timer = null;
 let bound = false;
 let filter = "";
 let favOnly = false;
+const folded = new Set();
 
 export async function renderModels(app) {
   setCleanup(() => { clearInterval(timer); timer = null; });
   if (!bound) {
     app.addEventListener("click", modelsClick);
     app.addEventListener("change", modelsChange);
+    document.addEventListener("input", modelSearchInput);
     bound = true;
   }
   app.innerHTML = `<div id="models-view"><div class="empty-state">加载中…</div></div>`;
   try {
-    await paint();
+    await repaint(true);
   } catch (e) { toast(e.message, true); }
   if (!timer) {
     timer = setInterval(async () => {
-      try { await paint(); } catch (_) { /* 单次轮询失败静默，下轮重试 */ }
+      try { await repaint(false); } catch (_) { /* 单次轮询失败静默，下轮重试 */ }
     }, 2000);
   }
 }
 
-async function paint() {
+async function repaint(full) {
   const m = await api("/api/models");
   const view = document.getElementById("models-view");
   if (!view) return; // 已离开页面
-  view.innerHTML = modelsHTML(m);
+  if (full) view.innerHTML = skeleton(m);
+  const live = document.getElementById("mm-live");
+  if (live) live.innerHTML = liveHTML(m);
+  const list = document.getElementById("model-list");
+  if (list) list.innerHTML = listHTML(m);
 }
 
-function modelsHTML(m) {
+function skeleton(m) {
+  return `
+  <div class="panel-head"><a class="back" href="#/">← 返回</a><h2>模型</h2></div>
+  <div id="mm-live"></div>
+  <div class="mm-actions">
+    <button data-act="refresh">刷新列表</button>
+    <button data-act="clear">清空缓存</button>
+    <label style="align-self:center;color:var(--dim);font-size:13px">
+      <input type="checkbox" id="fav-only" data-act="favonly" style="width:auto;margin:0 4px 0 0" ${favOnly ? "checked" : ""}>只看收藏
+    </label>
+    <span style="align-self:center;color:var(--dim);font-size:12px;margin-left:auto">缓存 ${m.cache_size_mb} MB</span>
+  </div>
+  <input id="model-search" class="search" placeholder="搜索模型…" value="${esc(filter)}" autocomplete="off">
+  <div id="model-list"></div>`;
+}
+
+function liveHTML(m) {
   const activeName = m.active ? m.active.displayName : `${m.default_model}（默认）`;
   const queuedName = m.queued_ref && (!m.active || m.queued_ref !== m.active.ref)
     ? (nameByRef(m, m.queued_ref) || m.queued_ref) : null;
   const dl = m.download && ["downloading", "verifying", "failed"].includes(m.download.status) ? m.download : null;
   return `
-  <div class="panel-head"><a class="back" href="#/">← 返回</a><h2>模型</h2></div>
   <div class="mm-active">
     <div class="k" style="color:var(--dim);font-size:12px">当前模型</div>
     <div class="name">${esc(activeName)}</div>
@@ -57,17 +79,7 @@ function modelsHTML(m) {
       <button data-act="default">恢复默认</button>
     </div>
   </div>
-  ${dl ? downloadHTML(dl) : ""}
-  <div class="mm-actions">
-    <button data-act="refresh">刷新列表</button>
-    <button data-act="clear">清空缓存</button>
-    <label style="align-self:center;color:var(--dim);font-size:13px">
-      <input type="checkbox" id="fav-only" data-act="favonly" style="width:auto;margin:0 4px 0 0" ${favOnly ? "checked" : ""}>只看收藏
-    </label>
-    <span style="align-self:center;color:var(--dim);font-size:12px;margin-left:auto">缓存 ${m.cache_size_mb} MB</span>
-  </div>
-  <input id="model-search" class="search" placeholder="搜索模型…" value="${esc(filter)}" autocomplete="off">
-  <div id="model-list">${listHTML(m)}</div>`;
+  ${dl ? downloadHTML(dl) : ""}`;
 }
 
 function tag(t) { return `<span class="badge">${esc(t)}</span>`; }
@@ -105,8 +117,8 @@ function listHTML(m) {
     // fav 置顶于各自分组
     const arr = [...folders[folder]].sort((a, b) => (Number(b.fav) - Number(a.fav)) || (b.index - a.index));
     return `<div class="mm-group">
-      <button data-act="fold">${esc(folder)} <span class="count">${arr.length}</span></button>
-      <div class="mm-group-items">${arr.map(rowHTML).join("")}</div>
+      <button data-act="fold" data-folder="${esc(folder)}">${esc(folder)} <span class="count">${arr.length}</span></button>
+      <div class="mm-group-items" ${folded.has(folder) ? "hidden" : ""}>${arr.map(rowHTML).join("")}</div>
     </div>`;
   }).join("");
 }
@@ -127,11 +139,13 @@ function modelsClick(e) {
   if (star) {
     e.stopPropagation();
     api("/api/models/fav", { method: "POST", body: JSON.stringify({ ref: star.dataset.ref, on: star.dataset.on === "1" }) })
-      .then(() => paint()).catch(err => toast(err.message, true));
+      .then(() => repaint(false)).catch(err => toast(err.message, true));
     return;
   }
   const fold = e.target.closest('[data-act="fold"]');
   if (fold) {
+    const f = fold.dataset.folder;
+    if (folded.has(f)) folded.delete(f); else folded.add(f);
     const items = fold.parentElement.querySelector(".mm-group-items");
     if (items) items.hidden = !items.hidden;
     return;
@@ -142,7 +156,7 @@ function modelsClick(e) {
   if (a === "default") {
     if (confirm("恢复默认模型？当前所选模型将被停用。")) {
       api("/api/models/select", { method: "POST", body: JSON.stringify({ ref: "Default" }) })
-        .then(() => { toast("已恢复默认，下载完成后自动激活"); paint(); })
+        .then(() => { toast("已恢复默认，下载完成后自动激活"); repaint(false); })
         .catch(err => toast(err.message, true));
     }
   } else if (a === "refresh") {
@@ -151,22 +165,22 @@ function modelsClick(e) {
   } else if (a === "clear") {
     if (confirm("清空模型缓存？保留当前激活模型的文件。")) {
       api("/api/models/clear_cache", { method: "POST", body: "{}" })
-        .then(() => { toast("已请求清空缓存"); paint(); })
+        .then(() => { toast("已请求清空缓存"); repaint(false); })
         .catch(err => toast(err.message, true));
     }
   } else if (a === "cancel") {
     api("/api/models/cancel", { method: "POST", body: "{}" })
-      .then(() => { toast("已取消下载"); paint(); })
+      .then(() => { toast("已取消下载"); repaint(false); })
       .catch(err => toast(err.message, true));
   } else if (a === "retry") {
     api("/api/models/select", { method: "POST", body: JSON.stringify({ ref: act.dataset.ref }) })
-      .then(() => paint()).catch(err => toast(err.message, true));
+      .then(() => repaint(false)).catch(err => toast(err.message, true));
   } else {
     const row = act.closest(".mm-row");
     if (row && !row.classList.contains("active")) {
       if (confirm(`切换到「${row.dataset.modelname}」？将自动下载并激活。`)) {
         api("/api/models/select", { method: "POST", body: JSON.stringify({ ref: row.dataset.ref }) })
-          .then(() => { toast("已排队下载，完成后自动激活"); paint(); })
+          .then(() => { toast("已排队下载，完成后自动激活"); repaint(false); })
           .catch(err => toast(err.message, true));
       }
     }
@@ -176,5 +190,15 @@ function modelsClick(e) {
 function modelsChange(e) {
   const el = e.target.closest("[data-act]");
   if (!el) return;
-  if (el.dataset.act === "favonly") { favOnly = el.checked; paint().catch(err => toast(err.message, true)); }
+  if (el.dataset.act === "favonly") { favOnly = el.checked; repaint(false).catch(err => toast(err.message, true)); }
+}
+
+function modelSearchInput(e) {
+  if (!e.target || e.target.id !== "model-search") return;
+  filter = e.target.value;
+  // 局部刷新列表，不动搜索框（保焦点）
+  api("/api/models").then(m => {
+    const list = document.getElementById("model-list");
+    if (list) list.innerHTML = listHTML(m);
+  }).catch(() => {});
 }
