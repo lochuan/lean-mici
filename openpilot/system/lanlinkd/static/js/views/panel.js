@@ -4,8 +4,23 @@ import { store, ensureData, findItem } from "../store.js";
 import { evalRules } from "../rules.js";
 import { esc, toast } from "../components.js";
 
+const closedSubs = new Set(); // sub-panel 折叠状态（跨重渲染保留）
+
 export async function renderPanel(app, id) {
   await ensureData();
+  if (!app.dataset.subBound) {
+    app.addEventListener("click", (e) => {
+      const st = e.target.closest(".sub-toggle");
+      if (!st) return;
+      const sid = st.dataset.sub;
+      if (closedSubs.has(sid)) closedSubs.delete(sid); else closedSubs.add(sid);
+      const items = st.parentElement.querySelector(".sub-items");
+      if (items) items.hidden = closedSubs.has(sid);
+      const arrow = st.querySelector(".arrow");
+      if (arrow) arrow.textContent = closedSubs.has(sid) ? "▸" : "▾";
+    });
+    app.dataset.subBound = "1";
+  }
   const panel = ((store.settings || {}).panels || []).find(p => p.id === id);
   app.innerHTML = "";
   const wrap = document.createElement("div");
@@ -16,8 +31,19 @@ export async function renderPanel(app, id) {
   }
   const head = document.createElement("div");
   head.className = "panel-head";
-  head.innerHTML = `<a class="back" href="#/">← 返回</a><h2>${esc(panel ? (panel.label || panel.id) : "车辆")}</h2>`;
+  head.innerHTML = `<a class="back" href="#/">←</a>` +
+    `<div style="flex:1"><h2>${esc(panel ? (panel.label || panel.id) : "车辆")}</h2>` +
+    (panel && panel.description ? `<div class="pdesc">${esc(panel.description)}</div>` : "") + `</div>` +
+    `<button class="refresh" title="刷新">↻</button>`;
   app.appendChild(head);
+  head.querySelector(".refresh").onclick = async () => {
+    try {
+      store.loaded = false; // 强制重拉 settings/caps/params/meta
+      await ensureData();
+      toast("已刷新");
+      await renderPanel(app, id);
+    } catch (e) { toast(e.message, true); }
+  };
 
   const body = document.createElement("div");
   body.id = "panel-body";
@@ -85,16 +111,18 @@ function rowHTML(item, key, value, enabled, reason, isSub) {
     control = `<div class="ctl"><span class="badge">车机端设置</span></div>`;
   }
   return `<div class="row ${enabled ? "" : "disabled"}${isSub ? " sub-item" : ""}" data-rowkey="${esc(key)}" style="cursor:default">
-      <div style="flex:1"><div class="k">${esc(item.title || key)}</div>
+      <div style="flex:1"><div class="k">${esc(item.title || key)}${item.needs_onroad_cycle ? ` <span class="badge reboot">重启生效</span>` : ""}</div>
         ${item.description ? `<div class="reason">${esc(item.description)}</div>` : ""}
         ${reason ? `<div class="reason">· ${esc(reason)}</div>` : ""}</div>${control}</div>`;
 }
 
 function renderSubPanel(sp, secEnabled) {
-  // 上游 schema：SubPanel 由 trigger_condition 触发才显示；无条件恒显
+  // 上游 schema：SubPanel 由 trigger_condition 触发才显示；无条件恒显。
+  // 对齐 sunnylink.ai：sub-panel 为可折叠分组（默认展开，状态跨重渲染保留）
   if (sp.trigger_condition && !evalRules([sp.trigger_condition]).ok) return "";
-  return `<div class="sub-panel"><div class="sub-label">${esc(sp.label || sp.id)}</div>` +
-    renderItems(sp.items, secEnabled) + `</div>`;
+  const sid = sp.id || sp.label;
+  return `<div class="sub-panel"><button class="sub-toggle" data-sub="${esc(sid)}">${esc(sp.label || sp.id)}<span class="arrow">${closedSubs.has(sid) ? "▸" : "▾"}</span></button>` +
+    `<div class="sub-items" ${closedSubs.has(sid) ? "hidden" : ""}>` + renderItems(sp.items, secEnabled) + `</div></div>`;
 }
 
 export async function toggleSetting(key) {

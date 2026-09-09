@@ -79,3 +79,12 @@ main { padding: 12px 14px 32px; }
 .mm-row .star { background: none; padding: 4px 6px; font-size: 16px; color: var(--dim); }
 .mm-row .star.on { color: #f5c542; }
 .empty-state { color: var(--dim); text-align: center; padding: 28px 12px; }
+/* sunnylink.ai 对齐：面板描述 / 刷新 / 重启徽标 / 可折叠 sub-panel */
+.panel-head h2 { font-size: 18px; margin: 0; }
+.panel-head .pdesc { color: var(--dim); font-size: 12px; margin-top: 2px; }
+.panel-head .refresh { background: #232a31; color: var(--fg); padding: 6px 10px; font-size: 15px; border-radius: 8px; flex-shrink: 0; }
+.badge.reboot { color: #f5a623; border-color: #4a3b1e; background: rgba(245, 166, 35, .08); margin-left: 6px; }
+.sub-panel { margin: 10px 0; }
+.sub-toggle { width: 100%; text-align: left; background: #1e242a; color: var(--fg); padding: 12px 14px; border-radius: 10px; display: flex; justify-content: space-between; font-size: 14px; border: 0; cursor: pointer; }
+.sub-toggle .arrow { color: var(--dim); }
+.sub-items { padding: 4px 0 0 0; }
