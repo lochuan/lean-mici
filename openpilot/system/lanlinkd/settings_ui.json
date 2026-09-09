@@ -7,7 +7,6 @@
       "label": "转向",
       "icon": "steering_wheel",
       "order": 1,
-      "remote_configurable": true,
       "sections": [
         {
           "id": "mads",
@@ -558,7 +557,6 @@
       "label": "显示",
       "icon": "display",
       "order": 3,
-      "remote_configurable": true,
       "sections": [
         {
           "id": "brightness_timeout",
@@ -857,7 +855,6 @@
       "label": "视觉",
       "icon": "visuals",
       "order": 4,
-      "remote_configurable": true,
       "sections": [
         {
           "id": "hud_elements",
@@ -1046,7 +1043,6 @@
       "label": "通用",
       "icon": "toggles",
       "order": 5,
-      "remote_configurable": true,
       "sections": [
         {
           "id": "core_toggles",
@@ -1066,7 +1062,6 @@
       "label": "设备",
       "icon": "device",
       "order": 6,
-      "remote_configurable": true,
       "sections": [
         {
           "id": "general",
@@ -1166,7 +1161,6 @@
       "label": "软件",
       "icon": "software",
       "order": 7,
-      "remote_configurable": true,
       "sections": [
         {
           "id": "updates",
@@ -1196,7 +1190,6 @@
       "label": "开发者",
       "icon": "developer",
       "order": 9,
-      "remote_configurable": true,
       "sections": [
         {
           "id": "connectivity",
@@ -1356,7 +1349,6 @@
       "label": "模型",
       "icon": "models",
       "order": 10,
-      "remote_configurable": false,
       "sections": [
         {
           "id": "model_behavior",
