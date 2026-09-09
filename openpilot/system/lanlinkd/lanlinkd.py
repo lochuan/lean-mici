@@ -218,10 +218,11 @@ class LanlinkApp:
   async def index(self, request: web.Request) -> web.Response:
     return web.FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
-  @routes.get("/static/{filename}")
+  @routes.get("/static/{path:.+}")
   async def static_file(self, request: web.Request) -> web.Response:
     # no-cache：OTA 换版后浏览器不能靠启发式缓存拿到旧 JS/HTML
-    safe = os.path.normpath(request.match_info["filename"])
+    # {path:.+} 支持多段路径（js/views/*.js ESM 子目录）
+    safe = os.path.normpath(request.match_info["path"])
     path = os.path.join(STATIC_DIR, safe)
     if os.path.commonpath([STATIC_DIR, path]) == STATIC_DIR and os.path.isfile(path):
       resp = web.FileResponse(path)
