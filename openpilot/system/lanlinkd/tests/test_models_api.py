@@ -72,6 +72,23 @@ class TestModelsState:
     assert b0["displayName"] == "Model B" and b0["folder"] == "2026 World" and b0["fav"] is False
     assert b0["index"] == 2 and b0["runner"] == "snpe"
 
+  def test_string_version_fields_from_manifest(self):
+    # 设备实测：manifest 的 minimum_selector_version/generation 是字符串
+    raw = cache_param(bundle("ref-a", "Model A"))
+    raw["bundles"][0]["minimum_selector_version"] = "19"
+    raw["bundles"][0]["generation"] = "4"
+    p = FakeParams(data={"ModelManager_ModelsCache": raw})
+    st = models_api.models_state(p, None, "/nonexistent")
+    assert [b["ref"] for b in st["bundles"]] == ["ref-a"]
+    assert st["bundles"][0]["generation"] == 4
+
+  def test_bad_version_dropped(self):
+    raw = cache_param(bundle("ref-bad", "Bad"))
+    raw["bundles"][0]["minimum_selector_version"] = "abc"
+    p = FakeParams(data={"ModelManager_ModelsCache": raw})
+    st = models_api.models_state(p, None, "/nonexistent")
+    assert st["bundles"] == []
+
   def test_active_and_favs(self):
     p = FakeParams(data={
       "ModelManager_ModelsCache": cache_param(bundle("ref-a", "Model A"), bundle("ref-b", "Model B")),

@@ -28,8 +28,14 @@ def _bump(store) -> None:
 def _bundles_from_cache(cache) -> list[dict]:
   out = []
   for b in (cache if isinstance(cache, dict) else {}).get("bundles", []):
-    if isinstance(b, dict) and b.get("minimum_selector_version") == REQUIRED_JSON_VERSION:
-      out.append(b)
+    if not isinstance(b, dict):
+      continue
+    try:
+      # manifest 里 minimum_selector_version 可能是字符串（fetcher 解析时才 int() 转换）
+      if int(b.get("minimum_selector_version") or 0) == REQUIRED_JSON_VERSION:
+        out.append(b)
+    except (TypeError, ValueError):
+      continue
   return out
 
 
