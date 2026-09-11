@@ -1,0 +1,122 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* LANLink 主题。
+ *
+ * 基色取自 sunnylink 实测计算样式（browser.inspect，2026-09-11）：
+ *   body #101010 / aside #181818 / border #2c2c2c / text #ececec
+ * 变量沿用它的 --sl-* 命名，方便与原站对照；在此基底上做了更现代的处理
+ * （分层表面、accent 辉光、更清晰的层级），暗黑极客风保持一致。
+ */
+
+@theme {
+  --color-sl-bg: #101010;
+  --color-sl-surface: #181818;
+  --color-sl-surface-2: #1e1e1e;
+  --color-sl-surface-3: #242424;
+  --color-sl-border: #2c2c2c;
+  --color-sl-border-strong: #3a3a3a;
+
+  --color-sl-text-1: #ececec;
+  --color-sl-text-2: #a3a3a3;
+  --color-sl-text-3: #6e6e6e;
+
+  /* accent：青绿，极客感且与危险色（红/黄）区分度高 */
+  --color-sl-accent: #4ade80;
+  --color-sl-accent-hover: #22c55e;
+  --color-sl-accent-muted: #4ade801f;
+  --color-sl-accent-text: #052e16;
+
+  --color-sl-warn: #fbbf24;
+  --color-sl-danger: #f87171;
+  --color-sl-info: #60a5fa;
+
+  --font-sans: "Inter Variable", Inter, -apple-system, system-ui, "Segoe UI",
+    Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+
+  --radius-sl: 0.75rem;
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-color: var(--color-sl-border);
+  }
+
+  html {
+    background-color: var(--color-sl-bg);
+    color-scheme: dark;
+    /* 车机屏幕在阳光下看，需要禁用系统的自动放大并保证点击区域 */
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: var(--color-sl-bg);
+    color: var(--color-sl-text-1);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 键盘可达性：车机用触摸，但局域网多半是手机/电脑访问 */
+  :focus-visible {
+    outline: 2px solid var(--color-sl-accent);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-sl-bg);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-sl-border-strong);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #4a4a4a;
+  }
+
+  /* 尊重系统的减少动效设置 */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* 卡片表面：细边框 + 轻微内高光，避免纯黑上纯色块的廉价感 */
+  .sl-card {
+    background-color: var(--color-sl-surface);
+    border: 1px solid var(--color-sl-border);
+    border-radius: var(--radius-sl);
+    box-shadow:
+      0 1px 0 0 #ffffff08 inset,
+      0 1px 2px 0 #00000040;
+  }
+
+  .sl-hairline {
+    border-bottom: 1px solid var(--color-sl-border);
+  }
+
+  /* 等宽数字：状态数值刷新时不跳动 */
+  .sl-tabular {
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
+  }
+
+  .sl-glow {
+    box-shadow: 0 0 0 1px var(--color-sl-accent-muted), 0 0 24px -8px var(--color-sl-accent);
+  }
+}

@@ -14,6 +14,11 @@ blacklist = [
 
   "matlab.*.md",
 
+  # LANLink 前端只发构建产物（openpilot/system/lanlinkd/static/）。
+  # 源码、npm 依赖清单、构建配置都留在仓库里供开发用，但设备上没有 Node，
+  # 带上去只是白占空间。
+  "^openpilot/system/lanlinkd/web/",
+
   # no LFS or submodules in release
   ".lfsconfig",
   ".gitattributes",
