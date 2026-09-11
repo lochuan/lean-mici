@@ -37,9 +37,7 @@ def launcher(proc: str, name: str) -> None:
     cloudlog.warning(f"child {proc} got SIGINT")
   except Exception:
     # can't install the crash handler because sys.excepthook doesn't play nice
-    # with threads, so catch it here. log to swaglog so the traceback survives
-    # (child stderr only reaches the tmux pane and is lost on reboot)
-    cloudlog.exception(f"child {proc} crashed")
+    # with threads, so catch it here.
     raise
 
 
