@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# harvest_device_prebuilt.sh — pull device-built native artifacts from a comma
-# device and stage them under release/prebuilt/arm64.
+# harvest_device_prebuilt.sh — pull device-built artifacts from a comma device
+# and stage them under release/prebuilt/arm64.
 #
-# The release must not ship container-built ELF files as runtime artifacts.
-# This script therefore harvests the complete native artifact set from a device
-# that has already built it with its own AGNOS toolchain.
+# Two classes of artifact cannot be cross-built and must come from a device
+# that has built them with its own AGNOS toolchain:
+#   1. native ELFs — container glibc/ABI differs from AGNOS.
+#   2. driving_tinygrad.pkl — holds tinygrad JIT kernels compiled for the
+#      device's QCOM backend; a container build (DEV=CPU) is unusable.
+#
+# Prerequisite: the device must have built both, i.e. it booted without a
+# `prebuilt` marker and ran build.py (full scons, no SKIP_TINYGRAD_COMPILE).
 #
 # Usage:
 #   ./tools/release/harvest_device_prebuilt.sh
@@ -44,6 +49,33 @@ for f in $files; do
   scp -q -o BatchMode=yes "$DEVICE:/data/openpilot/$f" "$DEST/$f"
 done
 
+# Non-ELF data artifacts (driving model pkl chunks). The pkl embeds tinygrad
+# kernels compiled for the device's QCOM backend, so it cannot be cross-built;
+# it must come from the device just like the native ELFs.
+echo "[-] pulling device data artifacts"
+# Globs can overlap (chunk* also matches chunkmanifest), so dedupe before scp;
+# these are ~45MB each and we don't want to transfer any of them twice.
+matches=""
+for pattern in $(python3 "$DIR/release_lib.py" data-artifact-globs); do
+  found=$(ssh -o BatchMode=yes "$DEVICE" "ls -1 /data/openpilot/$pattern 2>/dev/null" || true)
+  matches="$matches$found
+"
+done
+matches=$(printf '%s' "$matches" | sed '/^$/d' | sort -u)
+data_found=0
+for m in $matches; do
+  rel="${m#/data/openpilot/}"
+  mkdir -p "$DEST/$(dirname "$rel")"
+  scp -q -o BatchMode=yes "$DEVICE:$m" "$DEST/$rel"
+  data_found=$((data_found + 1))
+done
+if [ "$data_found" -eq 0 ]; then
+  echo "FATAL: no driving model pkl found on device." >&2
+  echo "       Build it there first (scons without SKIP_TINYGRAD_COMPILE), then re-run." >&2
+  exit 1
+fi
+echo "     data artifacts: $data_found file(s)"
+
 echo "[-] validating artifacts"
 hash=$(./tools/release/prebuilt_native_hash.sh "$src")
 python3 "$DIR/release_lib.py" write-manifest "$src" "$hash"
@@ -54,5 +86,7 @@ echo "     native_hash=$hash"
 echo "     next:"
 echo "       git add release/prebuilt"
 echo "       git add -f release/prebuilt/arm64/openpilot/common/libparams_c.so"
+echo "       # model pkl chunks are gitignored (*.pkl*), so force-add them too:"
+echo "       git add -f release/prebuilt/arm64/openpilot/selfdrive/modeld/models/"
 echo "       git commit -m 'release: refresh device prebuilts'"
 echo "       git push fork lean-master"

@@ -7,8 +7,23 @@
 # 只从 release/prebuilt/arm64 里经过校验后overlay：
 #   - 容器持久层：工具链 + uv venv 只装一次（首次 init），之后复用
 #   - 每次构建：git 干净同步 + 清构建产物 + scons -j$(nproc)
-#   - SKIP_TINYGRAD_COMPILE=1（tinygrad ONNX 解析 bug，模型用 CI 预构建）
+#   - SKIP_TINYGRAD_COMPILE=1（模型 pkl 必须在设备上编，见下）
 #   - 构建产物推 lean-release 分支（设备自己 checkout lean-release 跑）
+#
+# ── 哪些产物必须在 comma 设备上构建 ───────────────────────────────────────
+# 1) native ELF（.so / 无后缀 daemon）：容器 glibc/ABI 与 AGNOS 不一致。
+# 2) 驾驶模型 driving_tinygrad.pkl：内含 tinygrad 编译后的 JIT 内核。
+#    SConscript 按 arch 选后端——设备是 DEV=QCOM，容器/mac 是 DEV=CPU，
+#    因此容器编出来的 pkl 在设备上用不了。这也是保留 SKIP_TINYGRAD_COMPILE=1 的原因。
+# 两类都经 harvest_device_prebuilt.sh 从设备取回，写入 release/prebuilt/arm64
+# 并由 release_lib.py 校验（ELF 查架构，pkl 查 sha256）后 overlay。
+#
+# 可以交叉编译的：纯 Python、capnp 生成物、panda 固件（裸 .bin，不依赖 ABI）。
+#
+# 防陈旧机制：release_lib.py 的 NATIVE_INPUT_PATHS 把上述产物的全部构建输入
+# （含 driving_supercombo.onnx、compile_modeld.py、tinygrad_repo）纳入 native_hash。
+# 任一输入变动 → hash 不匹配 → prebuilt 被拒 → 本次 release 不含 prebuilt，
+# 设备首启自行 scons 全量重建（含 pkl）。切勿为了"构建更快"放宽这个校验。
 #
 # 用法（mac 上跑）:
 #   ./tools/release/build_lean_release_on_orb.sh
@@ -17,6 +32,8 @@
 #   ORB_MACHINE    (默认 opilotbuild)   OrbStack 机器名
 #   SOURCE_BRANCH  (默认 lean-master)   构建分支
 #   RELEASE_BRANCH (默认 lean-release)  推目标分支
+#   SKIP_SMOKE_GATE=1                   跳过设备 smoke 门禁（不推荐）
+#   SMOKE_DURATION (默认 60)            smoke 时长（秒）
 #
 set -e
 set -x
@@ -218,6 +235,20 @@ git worktree remove --force /tmp/opilot-release 2>/dev/null || true
 "
 
 echo "=== done T=$SECONDS ==="
+
+# --- 6.5 发布门禁：设备 onroad smoke 必须通过 ---
+# 2026-09-09 实车事故：smoke 已报 SMOKE: FAIL（selfdriveState msgs: 0），
+# 但没人看结果，坏包照样上了车。默认强制执行；SKIP_SMOKE_GATE=1 可显式跳过。
+if [ "${SKIP_SMOKE_GATE:-0}" = "1" ]; then
+  echo "[release] WARN: smoke gate skipped by SKIP_SMOKE_GATE=1" >&2
+else
+  echo "[-] smoke gate T=$SECONDS"
+  echo "    注意：设备需已更新到本次 release 才有意义"
+  if ! "$DIR/smoke_gate.sh" "${SMOKE_DURATION:-60}"; then
+    echo "FATAL: smoke gate failed — release 已推送但请勿上车，先修复" >&2
+    exit 1
+  fi
+fi
 
 # --- 7. 结尾汇总：prebuilt 校验失败时，醒目提醒 harvest 流程 ---
 if $SSH 'test -f /tmp/opilot-no-prebuilt' 2>/dev/null; then

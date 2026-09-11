@@ -112,9 +112,38 @@ class TestConstants(unittest.TestCase):
       "opendbc_repo",
       "rednose_repo",
       "panda",
+      # driving model pkl inputs
+      "openpilot/selfdrive/modeld/SConscript",
+      "openpilot/selfdrive/modeld/compile_modeld.py",
+      "openpilot/selfdrive/modeld/get_model_metadata.py",
+      "openpilot/selfdrive/modeld/helpers.py",
+      "openpilot/selfdrive/modeld/models",
+      "tinygrad_repo",
     }
     self.assertEqual(set(NATIVE_INPUT_PATHS), expected)
     self.assertEqual(len(NATIVE_INPUT_PATHS), len(expected))
+
+  def test_model_pkl_inputs_feed_native_hash(self):
+    """A stale pkl must never ship: its build inputs must invalidate native_hash.
+
+    The pkl embeds tinygrad kernels compiled from driving_supercombo.onnx, so a
+    change to the model, the compiler, or tinygrad has to force a re-harvest.
+    """
+    for rel in (
+      "openpilot/selfdrive/modeld/models/driving_supercombo.onnx",
+      "openpilot/selfdrive/modeld/compile_modeld.py",
+      "openpilot/selfdrive/modeld/get_model_metadata.py",
+      "openpilot/selfdrive/modeld/SConscript",
+      "tinygrad_repo",
+    ):
+      covered = [p for p in NATIVE_INPUT_PATHS if rel == p or rel.startswith(p + "/")]
+      self.assertTrue(covered, f"{rel} does not feed native_hash")
+
+  def test_every_artifact_has_a_native_input(self):
+    """Each shipped binary must have its source tracked, or it can go stale."""
+    for artifact in ARTIFACT_PATHS:
+      covered = [p for p in NATIVE_INPUT_PATHS if artifact == p or artifact.startswith(p + "/")]
+      self.assertTrue(covered, f"{artifact} has no corresponding native input path")
 
 
 class TestElfValidation(unittest.TestCase):
@@ -210,6 +239,79 @@ class TestManifestAndArtifactValidation(unittest.TestCase):
       self.assertIn("ARM64", reason)
 
 
+class TestDataArtifacts(unittest.TestCase):
+  """The driving model pkl ships as a non-ELF prebuilt: checksum-verified only.
+
+  It embeds tinygrad kernels compiled for the device's QCOM backend, so it
+  cannot be cross-built in the release container.
+  """
+
+  PKL = "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk01of02"
+
+  def test_validate_artifact_accepts_non_elf_when_elf_not_required(self):
+    with tempfile.TemporaryDirectory() as td:
+      p = Path(td) / "driving_tinygrad.pkl.chunk01of02"
+      p.write_bytes(b"not an elf, just pickled kernels")
+      ok, reason = validate_artifact(p, require_elf=False)
+      self.assertTrue(ok, reason)
+
+  def test_validate_artifact_still_rejects_non_elf_by_default(self):
+    with tempfile.TemporaryDirectory() as td:
+      p = Path(td) / "lib.so"
+      p.write_bytes(b"not an elf")
+      ok, reason = validate_artifact(p)
+      self.assertFalse(ok)
+      self.assertIn("ARM64", reason)
+
+  def test_data_artifact_checksum_is_enforced(self):
+    with tempfile.TemporaryDirectory() as td:
+      p = Path(td) / "chunk"
+      p.write_bytes(b"payload")
+      ok, reason = validate_artifact(p, expected_sha256="0" * 64, require_elf=False)
+      self.assertFalse(ok)
+      self.assertIn("checksum", reason)
+
+  def test_manifest_records_data_files_separately(self):
+    with tempfile.TemporaryDirectory() as td:
+      dest = Path(td)
+      elf = dest / "openpilot/common/libparams_c.so"
+      elf.parent.mkdir(parents=True)
+      elf.write_bytes(elf_bytes(183))
+      pkl = dest / self.PKL
+      pkl.parent.mkdir(parents=True)
+      pkl.write_bytes(b"kernels")
+
+      write_manifest(dest, "abc123", "def456", ["openpilot/common/libparams_c.so"], [self.PKL])
+      manifest = read_manifest(dest / "MANIFEST")
+      self.assertEqual(manifest["data_files"], self.PKL)
+      self.assertNotIn(self.PKL, manifest["files"])
+      self.assertIn(f"sha256.{self.PKL}", manifest)
+
+  def test_manifest_omits_data_files_key_when_absent(self):
+    with tempfile.TemporaryDirectory() as td:
+      dest = Path(td)
+      elf = dest / "openpilot/common/libparams_c.so"
+      elf.parent.mkdir(parents=True)
+      elf.write_bytes(elf_bytes(183))
+      write_manifest(dest, "abc123", "def456", ["openpilot/common/libparams_c.so"])
+      self.assertNotIn("data_files", read_manifest(dest / "MANIFEST"))
+
+  def test_find_data_artifacts_matches_pkl_chunks(self):
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      models = root / "openpilot/selfdrive/modeld/models"
+      models.mkdir(parents=True)
+      (models / "driving_tinygrad.pkl.chunk01of02").write_bytes(b"a")
+      (models / "driving_tinygrad.pkl.chunk02of02").write_bytes(b"b")
+      (models / "driving_tinygrad.pkl.chunkmanifest").write_bytes(b"2")
+      (models / "driving_supercombo.onnx").write_bytes(b"ignored")
+
+      found = release_lib.find_data_artifacts(root)
+      self.assertEqual(len(found), 3)
+      self.assertTrue(all("driving_tinygrad.pkl" in f for f in found))
+      self.assertFalse(any("onnx" in f for f in found))
+
+
 class TestOverlayPrebuilt(unittest.TestCase):
   def _make_repo(self, td: Path) -> Path:
     repo = td / "repo"
@@ -239,14 +341,55 @@ class TestOverlayPrebuilt(unittest.TestCase):
     )
     return worktree
 
-  def _populate_prebuilt(self, worktree: Path, machine: int = 183) -> None:
+  def _populate_prebuilt(self, worktree: Path, machine: int = 183, with_data: bool = True) -> None:
     prebuilt_root = worktree / "release/prebuilt/arm64"
     for rel in ARTIFACT_PATHS:
       src = prebuilt_root / rel
       src.parent.mkdir(parents=True, exist_ok=True)
       src.write_bytes(elf_bytes(machine))
+    data_files: list[str] = []
+    if with_data:
+      pkl = prebuilt_root / "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk01of02"
+      pkl.parent.mkdir(parents=True, exist_ok=True)
+      pkl.write_bytes(b"pickled tinygrad kernels")
+      data_files = release_lib.find_data_artifacts(prebuilt_root)
     native_hash = compute_native_hash(worktree, "HEAD")
-    write_manifest(prebuilt_root, "abc123", native_hash, list(ARTIFACT_PATHS))
+    write_manifest(prebuilt_root, "abc123", native_hash, list(ARTIFACT_PATHS), data_files)
+
+  def test_overlay_ships_data_artifacts(self):
+    """The model pkl must land in the worktree alongside the native ELFs."""
+    with tempfile.TemporaryDirectory() as td:
+      repo = self._make_repo(Path(td))
+      worktree = self._make_worktree(Path(td), repo)
+      self._populate_prebuilt(worktree, with_data=True)
+      ok, reason = overlay_prebuilt(repo, worktree)
+      self.assertTrue(ok, reason)
+      pkl = worktree / "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk01of02"
+      self.assertTrue(pkl.exists(), "model pkl chunk was not overlaid")
+      self.assertEqual(pkl.read_bytes(), b"pickled tinygrad kernels")
+
+  def test_overlay_fails_when_model_pkl_absent(self):
+    """Shipping without the built-in pkl leaves modeld with no fallback."""
+    with tempfile.TemporaryDirectory() as td:
+      repo = self._make_repo(Path(td))
+      worktree = self._make_worktree(Path(td), repo)
+      self._populate_prebuilt(worktree, with_data=False)
+      ok, reason = overlay_prebuilt(repo, worktree)
+      self.assertFalse(ok)
+      self.assertIn("driving model pkl", reason)
+      self.assertFalse((worktree / "prebuilt").exists())
+
+  def test_overlay_fails_on_corrupt_data_artifact(self):
+    with tempfile.TemporaryDirectory() as td:
+      repo = self._make_repo(Path(td))
+      worktree = self._make_worktree(Path(td), repo)
+      self._populate_prebuilt(worktree, with_data=True)
+      pkl = worktree / "release/prebuilt/arm64/openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk01of02"
+      pkl.write_bytes(b"corrupted")
+      ok, reason = overlay_prebuilt(repo, worktree)
+      self.assertFalse(ok)
+      self.assertIn("checksum", reason)
+      self.assertFalse((worktree / "prebuilt").exists())
 
   def test_overlay_succeeds_with_valid_artifacts(self):
     with tempfile.TemporaryDirectory() as td:

@@ -35,6 +35,15 @@ ARTIFACT_PATHS: tuple[str, ...] = (
   "openpilot/system/loggerd/loggerd",
 )
 
+# Non-ELF runtime artifacts that must also be produced on comma hardware.
+# The built-in driving model pkl holds tinygrad JIT kernels compiled for the
+# device's QCOM backend, so a container/mac build (DEV=CPU) is not usable.
+# These are validated by checksum only; is_arm64_elf() does not apply.
+DATA_ARTIFACT_GLOBS: tuple[str, ...] = (
+  "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunkmanifest",
+  "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk*",
+)
+
 # Build inputs that can invalidate the native artifact set.
 NATIVE_INPUT_PATHS: tuple[str, ...] = (
   "SConstruct",
@@ -51,6 +60,14 @@ NATIVE_INPUT_PATHS: tuple[str, ...] = (
   "opendbc_repo",
   "rednose_repo",
   "panda",
+  # Inputs that determine the built-in driving model pkl. Without these, a
+  # model or compiler change would silently ship a stale pkl.
+  "openpilot/selfdrive/modeld/SConscript",
+  "openpilot/selfdrive/modeld/compile_modeld.py",
+  "openpilot/selfdrive/modeld/get_model_metadata.py",
+  "openpilot/selfdrive/modeld/helpers.py",
+  "openpilot/selfdrive/modeld/models",
+  "tinygrad_repo",
 )
 
 PREBUILT_DIR = Path("release/prebuilt/arm64")
@@ -126,14 +143,18 @@ def sha256_file(path: Path) -> str:
   return digest.hexdigest()
 
 
-def write_manifest(dest: Path, source_commit: str, native_hash: str, files: list[str]) -> None:
+def write_manifest(dest: Path, source_commit: str, native_hash: str, files: list[str],
+                   data_files: list[str] | None = None) -> None:
   """Write ``PREBUILT_MANIFEST`` for artifacts already staged under ``dest``."""
+  data_files = data_files or []
   lines = [
     f"source_commit={source_commit}",
     f"native_hash={native_hash}",
     f"files={' '.join(files)}",
   ]
-  for rel in files:
+  if data_files:
+    lines.append(f"data_files={' '.join(data_files)}")
+  for rel in [*files, *data_files]:
     path = dest / rel
     if not path.is_file():
       raise FileNotFoundError(f"missing artifact: {rel}")
@@ -154,11 +175,15 @@ def read_manifest(path: Path) -> dict[str, str]:
   return manifest
 
 
-def validate_artifact(path: Path, expected_sha256: str | None = None) -> tuple[bool, str]:
-  """Validate one harvested native artifact."""
+def validate_artifact(path: Path, expected_sha256: str | None = None, require_elf: bool = True) -> tuple[bool, str]:
+  """Validate one harvested artifact.
+
+  ``require_elf`` is False for data artifacts (e.g. the model pkl chunks),
+  which are checksum-verified but are not ELF files.
+  """
   if not path.is_file():
     return False, f"missing artifact: {path}"
-  if not is_arm64_elf(path):
+  if require_elf and not is_arm64_elf(path):
     return False, f"not an ARM64 ELF: {path}"
   if expected_sha256 is not None:
     actual = sha256_file(path)
@@ -194,12 +219,20 @@ def overlay_prebuilt(repo_root: Path, worktree: Path) -> tuple[bool, str]:
   files = manifest.get("files", "").split()
   if not files:
     return False, "manifest has no artifact files"
+  data_files = manifest.get("data_files", "").split()
+  # The built-in driving model pkl is required: without it modeld has no
+  # fallback and a device with no downloaded model cannot start at all.
+  if not any("driving_tinygrad.pkl" in f for f in data_files):
+    return False, (
+      "manifest has no driving model pkl; re-run "
+      + "tools/release/harvest_device_prebuilt.sh after building it on the device"
+    )
 
   staged: list[tuple[Path, Path]] = []
-  for rel in files:
+  for rel, require_elf in [*((f, True) for f in files), *((f, False) for f in data_files)]:
     src = prebuilt_root / rel
     expected = manifest.get(f"sha256.{rel}")
-    ok, reason = validate_artifact(src, expected)
+    ok, reason = validate_artifact(src, expected, require_elf=require_elf)
     if not ok:
       return False, reason
     staged.append((src, worktree / rel))
@@ -211,6 +244,16 @@ def overlay_prebuilt(repo_root: Path, worktree: Path) -> tuple[bool, str]:
   (worktree / "prebuilt").touch()
   shutil.rmtree(worktree / "release/prebuilt")
   return True, "ok"
+
+
+def find_data_artifacts(root: Path) -> list[str]:
+  """Resolve DATA_ARTIFACT_GLOBS against ``root``, returning sorted relative paths."""
+  found: set[str] = set()
+  for pattern in DATA_ARTIFACT_GLOBS:
+    for path in root.glob(pattern):
+      if path.is_file():
+        found.add(str(path.relative_to(root)))
+  return sorted(found)
 
 
 def _repo_root() -> Path:
@@ -226,6 +269,7 @@ def main() -> int:
   hash_parser.add_argument("commit", nargs="?", default="HEAD")
 
   sub.add_parser("artifact-paths", help="print native artifact paths")
+  sub.add_parser("data-artifact-globs", help="print non-ELF data artifact globs")
   sub.add_parser("validate-artifacts", help="validate staged prebuilt artifacts")
 
   manifest_parser = sub.add_parser(
@@ -253,6 +297,11 @@ def main() -> int:
       print(rel)
     return 0
 
+  if args.command == "data-artifact-globs":
+    for pattern in DATA_ARTIFACT_GLOBS:
+      print(pattern)
+    return 0
+
   if args.command == "validate-artifacts":
     prebuilt_root = repo_root / PREBUILT_DIR
     manifest_path = prebuilt_root / MANIFEST_NAME
@@ -265,11 +314,13 @@ def main() -> int:
     if not files:
       print("manifest has no artifact files", file=sys.stderr)
       return 1
+    data_files = manifest.get("data_files", "").split()
     failed = False
-    for rel in files:
+    for rel, require_elf in [*((f, True) for f in files), *((f, False) for f in data_files)]:
       ok, reason = validate_artifact(
         prebuilt_root / rel,
         manifest.get(f"sha256.{rel}"),
+        require_elf=require_elf,
       )
       if not ok:
         print(reason, file=sys.stderr)
@@ -277,11 +328,13 @@ def main() -> int:
     return 1 if failed else 0
 
   if args.command == "write-manifest":
+    prebuilt_root = repo_root / PREBUILT_DIR
     write_manifest(
-      repo_root / PREBUILT_DIR,
+      prebuilt_root,
       args.source_commit,
       args.native_hash,
       list(ARTIFACT_PATHS),
+      find_data_artifacts(prebuilt_root),
     )
     return 0
 
