@@ -22,6 +22,9 @@ class ControlsExt:
   def __init__(self, CP: structs.CarParams, params: Params):
     self.CP = CP
     self.params = params
+    # initialized here so state_control can use it before the first get_params_sp refresh
+    # (was provided by the removed ModelStateBase in big-model builds)
+    self.lat_delay = params.get("LagdValueCache", return_default=True)
     self._param_update_time: float = 0.0
     self.blinker_pause_lateral = BlinkerPauseLateral()
 
