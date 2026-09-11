@@ -101,9 +101,15 @@ echo "[-] clean build artifacts T=$SECONDS"
 $SSH '
 set -e
 cd "$HOME/opilot"
-find . \( -name "*.o" -o -name "*.so" -o -name "*.pyc" -o -name "*.a" -o -name "*.os" \) \
+find . \( -name "*.o" -o -name "*.so" -o -name "*.so.*" -o -name "*.pyc" -o -name "*.a" -o -name "*.os" \) \
   -not -path "./.git/*" -delete 2>/dev/null || true
 find . -name "__pycache__" -not -path "./.git/*" -type d -exec rm -rf {} + 2>/dev/null || true
+# 无后缀 ELF 可执行文件 + 版本化 .so.X 也要清（如 loggerd/encoderd/libqpOASES_e.so.3.1）：
+# lean 裁剪删掉 SConscript target 后旧二进制会残留（encoderd 就是这么混进 release 的）。
+# 只清主仓库，不动 submodule（fork 里有 tracked 产物，由 scons 全量重建覆盖）。
+python3 tools/release/elf_find.py \
+  | grep -zv -E "^\./(msgq_repo|opendbc_repo|panda|rednose_repo|tinygrad_repo|openpilot/sunnypilot/neural_network_data)/" \
+  | xargs -0r rm -f
 rm -f .sconsign.dblite 2>/dev/null || true
 echo "[clean] build artifacts removed"
 '
@@ -166,9 +172,33 @@ git worktree add --detach /tmp/opilot-release $BUILD_BRANCH
 # 产物 tracked 进 release 分支：设备 OTA 的 git clean -xdff 会删未跟踪/被忽略文件（updated.py fetch_update）。
 # 注意：不推 prebuilt——camerad 等 comma_arm64 专属可执行文件容器构建不出（无 /AGNOS、无 QCOM 相机栈），
 # 必须靠设备端 build.py 首启构建（/data/scons_cache 有缓存，很快）。
-(cd \$HOME/opilot && { find . \( -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0; python3 tools/release/elf_find.py; } | tar --null -T - -cf -) | tar -x -C /tmp/opilot-release
+# loggerd 同理排除：容器版链接容器 ffmpeg（libav*.so.61），AGNOS 上无对应库（实测 exit 127 起不来），
+# 交由设备端 build.py 原生链接重建。
+(cd $HOME/opilot && { find . \( -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0; python3 tools/release/elf_find.py; } | grep -zv -E \"^\./openpilot/system/loggerd/(loggerd|encoderd)$\" | tar --null -T - -cf -) | tar -x -C /tmp/opilot-release
 # 产物兜底校验：缺失说明叠加失败，拒绝推裸源码 release
 test -f /tmp/opilot-release/openpilot/common/libparams_c.so || { echo \"FATAL: build artifact overlay failed\"; exit 1; }
+# 回归守卫：被裁剪/ABI 不兼容的二进制不得混入 release
+test ! -e /tmp/opilot-release/openpilot/system/loggerd/encoderd || { echo \"FATAL: stale encoderd leaked into release\"; exit 1; }
+test ! -e /tmp/opilot-release/openpilot/system/loggerd/loggerd || { echo \"FATAL: container loggerd leaked into release\"; exit 1; }
+# 回收产物 overlay：设备原生构建的 camerad/loggerd（camerad 容器构建不出；
+# loggerd 容器版 ABI 不兼容已在上面排除）。native 源码树哈希未变 → 随 release 发
+# prebuilt 标记，设备开机跳过 build.py（省 ~9s）；哈希不匹配 → 回退设备端首启原生重建。
+PREBUILT_DIR=release/prebuilt/arm64
+if [ -f /tmp/opilot-release/\$PREBUILT_DIR/MANIFEST ]; then
+  want=\$(grep '^native_hash=' /tmp/opilot-release/\$PREBUILT_DIR/MANIFEST | cut -d= -f2)
+  have=\$(\$HOME/opilot/tools/release/prebuilt_native_hash.sh HEAD)
+  if [ \"\$want\" = \"\$have\" ]; then
+    for f in openpilot/system/camerad/camerad openpilot/system/loggerd/loggerd; do
+      cp /tmp/opilot-release/\$PREBUILT_DIR/\$f /tmp/opilot-release/\$f
+    done
+    touch /tmp/opilot-release/prebuilt
+    echo \"[release] prebuilt shipped (native sources unchanged)\"
+  else
+    echo \"[release] WARN: native sources changed since harvest, no prebuilt (device rebuilds on first boot)\"
+  fi
+fi
+# release 分支不带回收暂存目录（只带就位后的二进制）
+rm -rf /tmp/opilot-release/release/prebuilt
 cd /tmp/opilot-release
 # release commit
 VERSION=\$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' openpilot/sunnypilot/common/version.h | head -1)
