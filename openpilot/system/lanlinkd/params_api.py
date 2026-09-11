@@ -141,6 +141,11 @@ def read_param(store, key: str) -> tuple[int, str | None]:
   if key in BLOCKED_PARAMS and key != VERSION_KEY:
     # spec §5.3：版本计数网页可读，用于感知车机端改动
     return 403, None
+  # 必须先查 key 是否存在，不能依赖 get() 返回 None：真实 Params.get() 对未知 key
+  # 抛 UnknownKeyName（common/params.py check_key），只有 fake store 才返回 None。
+  # 少了这一行，GET /api/params/<未知key> 在设备上是 500 而非 404。
+  if key not in _all_str_keys(store):
+    return 404, None
   value = store.get(key)
   if value is None:
     return 404, None

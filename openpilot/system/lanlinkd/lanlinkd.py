@@ -1,10 +1,22 @@
 # system/lanlinkd/lanlinkd.py
-"""LANLink daemon：局域网版 sunnylink（无云）。aiohttp 装配层。"""
+"""LANLink daemon：局域网版 sunnylink（无云）。Sanic 装配层。
+
+为什么是 Sanic 而不是 aiohttp：aiohttp 曾由 AGNOS venv 提供，19.6 起被移除，
+于是 lanlinkd 在设备上直接 ModuleNotFoundError（CI 仍绿，因为 CI 的 venv 有）。
+现在 Web 框架由 tools/install_device_pydeps.sh 钉版安装进 /data/pydeps，
+不再依赖 AGNOS 碰巧带了什么。
+
+为什么 single_process=True（见 main()）：Sanic 默认起多 worker 进程，而
+SessionStore / LoginThrottle 是**进程内内存状态**。多 worker 下同一 token 只在签发它
+的那个进程有效，登录会随机失效，防爆破计数也会被稀释成 worker 份数倍。
+"""
 import json
 import os
 import threading
 
-from aiohttp import web
+from sanic import Sanic
+from sanic.request import Request
+from sanic.response import HTTPResponse, empty, file, json as json_response
 
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
@@ -20,12 +32,16 @@ from openpilot.system.lanlinkd.statusd import StatusCache
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 VERSION_PARAMS = ("Version", "GitBranch", "GitCommit")
+MAX_BODY_BYTES = 2 * 1024 * 1024
 
-routes = web.RouteTableDef()
+# 无需 token 的路径。auth 中间件是唯一的准入判断点，所以这张表就是完整的
+# 公开面——审计时只看这里，不必翻每个 handler。
+PUBLIC_PATHS = ("/", "/api/login", "/api/setup")
+PUBLIC_PREFIXES = ("/static/", "/assets/")
 
 
-def _json_error(status: int, message: str) -> web.Response:
-  return web.json_response({"error": message}, status=status)
+def _json_error(status: int, message: str) -> HTTPResponse:
+  return json_response({"error": message}, status=status)
 
 
 class LanlinkApp:
@@ -40,9 +56,19 @@ class LanlinkApp:
     threading.Thread(target=self.cache.run, args=(self.exit_event,), name="lanlink_status", daemon=True).start()
 
   # ---- helpers ----
-  def _authorized(self, request: web.Request) -> bool:
+  def _authorized(self, request: Request) -> bool:
     auth = request.headers.get("Authorization", "")
     return auth.startswith("Bearer ") and self.sessions.validate(auth.removeprefix("Bearer "))
+
+  @staticmethod
+  def _body(request: Request) -> dict:
+    # Sanic 的 request.json 对非法 JSON 抛 BadRequest(400)；此处统一成空 dict，
+    # 让各 handler 自己按缺字段返回 400，错误信息比框架默认的更具体。
+    try:
+      body = request.json
+    except Exception:
+      return {}
+    return body if isinstance(body, dict) else {}
 
   def _key_exists(self, key: str) -> bool:
     try:
@@ -58,37 +84,32 @@ class LanlinkApp:
     return self._settings_ui
 
   # ---- auth endpoints ----
-  @routes.post("/api/setup")
-  async def setup(self, request: web.Request) -> web.Response:
+  async def setup(self, request: Request) -> HTTPResponse:
     if self.params.get("LanLinkPasswordHash"):
       return _json_error(409, "password already set")
-    body = await request.json()
-    password = str(body.get("password", ""))
+    password = str(self._body(request).get("password", ""))
     if len(password) < MIN_PASSWORD_LEN:
       return _json_error(400, f"password must be >= {MIN_PASSWORD_LEN} chars")
     self.params.put("LanLinkPasswordHash", hash_password(password), block=True)
-    return web.Response(status=204)
+    return empty(status=204)
 
-  @routes.post("/api/login")
-  async def login(self, request: web.Request) -> web.Response:
+  async def login(self, request: Request) -> HTTPResponse:
     stored = self.params.get("LanLinkPasswordHash")
     if not stored:
       return _json_error(409, "password not set")
     locked, remaining = self.throttle.is_locked()
     if locked:
       return _json_error(429, f"locked, retry in {remaining}s")
-    body = await request.json()
-    if not verify_password(str(body.get("password", "")), stored):
+    if not verify_password(str(self._body(request).get("password", "")), stored):
       self.throttle.record_failure()
       return _json_error(401, "wrong password")
     self.throttle.reset()
-    return web.json_response({"token": self.sessions.issue()})
+    return json_response({"token": self.sessions.issue()})
 
-  @routes.post("/api/password")
-  async def change_password(self, request: web.Request) -> web.Response:
+  async def change_password(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    body = await request.json()
+    body = self._body(request)
     stored = self.params.get("LanLinkPasswordHash")
     if not verify_password(str(body.get("old", "")), stored or ""):
       return _json_error(401, "wrong old password")
@@ -97,155 +118,179 @@ class LanlinkApp:
       return _json_error(400, f"password must be >= {MIN_PASSWORD_LEN} chars")
     self.params.put("LanLinkPasswordHash", hash_password(new), block=True)
     self.sessions.revoke_all()  # 全端下线，需重新登录
-    return web.Response(status=204)
+    return empty(status=204)
 
   # ---- params endpoints ----
-  @routes.get("/api/params")
-  async def params_list(self, request: web.Request) -> web.Response:
+  async def params_list(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    return web.json_response(params_api.list_params(self.params))
+    return json_response(params_api.list_params(self.params))
 
-  @routes.get("/api/params/_all")
-  async def params_all(self, request: web.Request) -> web.Response:
+  async def params_all(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    return web.json_response(params_api.read_all(self.params))
+    return json_response(params_api.read_all(self.params))
 
-  @routes.get("/api/params/{key}")
-  async def params_get(self, request: web.Request) -> web.Response:
+  async def params_get(self, request: Request, key: str) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    code, value = params_api.read_param(self.params, request.match_info["key"])
-    return (web.json_response({"value": value}) if code == 200 else _json_error(code, "denied"))
+    code, value = params_api.read_param(self.params, key)
+    return (json_response({"value": value}) if code == 200 else _json_error(code, "denied"))
 
-  @routes.put("/api/params/{key}")
-  async def params_put(self, request: web.Request) -> web.Response:
+  async def params_put(self, request: Request, key: str) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    body = await request.json()
-    code, message = params_api.write_param(self.params, request.match_info["key"], str(body.get("value", "")))
-    return (web.Response(status=204) if code == 204 else _json_error(code, message))
+    code, message = params_api.write_param(self.params, key, str(self._body(request).get("value", "")))
+    return (empty(status=204) if code == 204 else _json_error(code, message))
 
-  @routes.delete("/api/params/{key}")
-  async def params_delete(self, request: web.Request) -> web.Response:
+  async def params_delete(self, request: Request, key: str) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    code, _ = params_api.delete_param(self.params, request.match_info["key"])
-    return (web.Response(status=204) if code == 204 else _json_error(code, "denied"))
+    code, _ = params_api.delete_param(self.params, key)
+    return (empty(status=204) if code == 204 else _json_error(code, "denied"))
 
   # ---- models ----
-  @routes.get("/api/models")
-  async def models_get(self, request: web.Request) -> web.Response:
+  async def models_get(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    return web.json_response(models_api.models_state(self.params, self.cache.download(), Paths.model_root()))
+    return json_response(models_api.models_state(self.params, self.cache.download(), Paths.model_root()))
 
-  @routes.post("/api/models/select")
-  async def models_select(self, request: web.Request) -> web.Response:
+  async def models_select(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    body = await request.json()
-    code, msg = models_api.select(self.params, str(body.get("ref", "")))
-    return (web.Response(status=204) if code == 204 else _json_error(code, msg))
+    code, msg = models_api.select(self.params, str(self._body(request).get("ref", "")))
+    return (empty(status=204) if code == 204 else _json_error(code, msg))
 
-  @routes.post("/api/models/cancel")
-  async def models_cancel(self, request: web.Request) -> web.Response:
+  async def models_cancel(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     code, msg = models_api.cancel(self.params)
-    return (web.Response(status=204) if code == 204 else _json_error(code, msg))
+    return (empty(status=204) if code == 204 else _json_error(code, msg))
 
-  @routes.post("/api/models/refresh")
-  async def models_refresh(self, request: web.Request) -> web.Response:
+  async def models_refresh(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     code, msg = models_api.refresh(self.params)
-    return (web.Response(status=204) if code == 204 else _json_error(code, msg))
+    return (empty(status=204) if code == 204 else _json_error(code, msg))
 
-  @routes.post("/api/models/clear_cache")
-  async def models_clear_cache(self, request: web.Request) -> web.Response:
+  async def models_clear_cache(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     code, msg = models_api.clear_cache(self.params)
-    return (web.Response(status=204) if code == 204 else _json_error(code, msg))
+    return (empty(status=204) if code == 204 else _json_error(code, msg))
 
-  @routes.post("/api/models/fav")
-  async def models_fav(self, request: web.Request) -> web.Response:
+  async def models_fav(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    body = await request.json()
+    body = self._body(request)
     code, msg = models_api.set_fav(self.params, str(body.get("ref", "")), bool(body.get("on")))
-    return (web.Response(status=204) if code == 204 else _json_error(code, msg))
+    return (empty(status=204) if code == 204 else _json_error(code, msg))
 
   # ---- status / capabilities / settings / logs ----
-  @routes.get("/api/status")
-  async def status(self, request: web.Request) -> web.Response:
+  async def status(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     snap = self.cache.snapshot()
     snap["paramsVersion"] = params_api.to_str(self.params.get(params_api.VERSION_KEY))
-    return web.json_response(snap)
+    return json_response(snap)
 
-  @routes.get("/api/capabilities")
-  async def capabilities(self, request: web.Request) -> web.Response:
+  async def capabilities(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    return web.json_response(self.cache.capabilities())
+    return json_response(self.cache.capabilities())
 
-  @routes.get("/api/settings_ui")
-  async def settings_ui(self, request: web.Request) -> web.Response:
+  async def settings_ui(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    return web.json_response(self._settings())
+    return json_response(self._settings())
 
-  @routes.get("/api/logs")
-  async def logs_list(self, request: web.Request) -> web.Response:
+  async def logs_list(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    return web.json_response(logs_mod.list_routes(Paths.log_root()))
+    return json_response(logs_mod.list_routes(Paths.log_root()))
 
-  @routes.get("/api/logs/{route}/{fname:.+}")
-  async def logs_file(self, request: web.Request) -> web.Response:
+  async def logs_file(self, request: Request, route: str, fname: str) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
-    path = logs_mod.resolve_log_file(Paths.log_root(), request.match_info["route"], request.match_info["fname"])
+    path = logs_mod.resolve_log_file(Paths.log_root(), route, fname)
     if path is None:
       return _json_error(404, "not found")
-    return web.FileResponse(path)
+    return await file(path)
+
   # ---- static ----
-  @routes.get("/")
-  async def index(self, request: web.Request) -> web.Response:
-    return web.FileResponse(os.path.join(STATIC_DIR, "index.html"))
+  async def index(self, request: Request) -> HTTPResponse:
+    return await self._serve_static("index.html")
 
-  @routes.get("/static/{path:.+}")
-  async def static_file(self, request: web.Request) -> web.Response:
-    # no-cache：OTA 换版后浏览器不能靠启发式缓存拿到旧 JS/HTML
-    # {path:.+} 支持多段路径（js/views/*.js ESM 子目录）
-    safe = os.path.normpath(request.match_info["path"])
-    path = os.path.join(STATIC_DIR, safe)
-    if os.path.commonpath([STATIC_DIR, path]) == STATIC_DIR and os.path.isfile(path):
-      resp = web.FileResponse(path)
-      resp.headers["Cache-Control"] = "no-cache"
-      return resp
-    raise web.HTTPNotFound()
+  async def static_file(self, request: Request, path: str) -> HTTPResponse:
+    return await self._serve_static(path)
+
+  async def asset_file(self, request: Request, path: str) -> HTTPResponse:
+    # Vite 产出 /assets/*，文件名自带内容 hash，可长缓存
+    return await self._serve_static(os.path.join("assets", path), immutable=True)
+
+  async def _serve_static(self, rel: str, immutable: bool = False) -> HTTPResponse:
+    # 路径穿越防护：normpath 后必须仍在 STATIC_DIR 内
+    resolved = os.path.normpath(os.path.join(STATIC_DIR, rel))
+    if os.path.commonpath([STATIC_DIR, resolved]) != STATIC_DIR or not os.path.isfile(resolved):
+      return _json_error(404, "not found")
+    # hash 命名的 assets 可长缓存；index.html / 无 hash 文件必须 no-cache，
+    # 否则 OTA 换版后浏览器靠启发式缓存拿到旧 UI 却配新 API。
+    # header key 必须小写：sanic.response.file() 内部用 headers.setdefault("cache-control", ...)，
+    # 大写 key 不会命中它的 setdefault，两个值都会发出去（Cache-Control: no-cache, no-cache）。
+    cache = "public, max-age=31536000, immutable" if immutable else "no-cache"
+    return await file(resolved, headers={"cache-control": cache})
 
 
-def create_app() -> web.Application:
-  app = web.Application(client_max_size=2 * 1024 * 1024)
+# 唯一的路由表。放在一处便于审计"哪些路径存在、哪些是公开的"。
+ROUTES: tuple[tuple[str, str, str], ...] = (
+  ("POST", "/api/setup", "setup"),
+  ("POST", "/api/login", "login"),
+  ("POST", "/api/password", "change_password"),
+  ("GET", "/api/params", "params_list"),
+  ("GET", "/api/params/_all", "params_all"),
+  ("GET", "/api/params/<key:str>", "params_get"),
+  ("PUT", "/api/params/<key:str>", "params_put"),
+  ("DELETE", "/api/params/<key:str>", "params_delete"),
+  ("GET", "/api/models", "models_get"),
+  ("POST", "/api/models/select", "models_select"),
+  ("POST", "/api/models/cancel", "models_cancel"),
+  ("POST", "/api/models/refresh", "models_refresh"),
+  ("POST", "/api/models/clear_cache", "models_clear_cache"),
+  ("POST", "/api/models/fav", "models_fav"),
+  ("GET", "/api/status", "status"),
+  ("GET", "/api/capabilities", "capabilities"),
+  ("GET", "/api/settings_ui", "settings_ui"),
+  ("GET", "/api/logs", "logs_list"),
+  ("GET", "/api/logs/<route:str>/<fname:path>", "logs_file"),
+  ("GET", "/", "index"),
+  ("GET", "/static/<path:path>", "static_file"),
+  ("GET", "/assets/<path:path>", "asset_file"),
+)
+
+
+def is_public(path: str) -> bool:
+  return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
+
+
+def create_app(name: str = "lanlinkd") -> Sanic:
+  app = Sanic(name)
+  app.config.REQUEST_MAX_SIZE = MAX_BODY_BYTES
+  app.config.ACCESS_LOG = False
+  # 设备是局域网内单用户访问，keepalive 超时无需长挂
+  app.config.KEEP_ALIVE_TIMEOUT = 15
+
   state = LanlinkApp()
+  app.ctx.state = state
 
-  @web.middleware
-  async def auth_middleware(request: web.Request, handler):
-    public = request.path in ("/", "/api/login", "/api/setup") or request.path.startswith("/static/")
-    if not public and not state._authorized(request):
+  for method, path, handler_name in ROUTES:
+    app.add_route(getattr(state, handler_name), path, methods=[method], name=handler_name)
+
+  @app.on_request
+  async def auth_middleware(request: Request):
+    if not is_public(request.path) and not state._authorized(request):
       return _json_error(401, "unauthorized")
-    return await handler(request)
+    return None
 
-  # 绑定实例方法后逐条注册（RouteTableDef 存的是未绑定函数）
-  for route in routes:
-    app.router.add_route(route.method, route.path, getattr(state, route.handler.__name__))
-  app.middlewares.append(auth_middleware)
   return app
 
 
@@ -256,7 +301,9 @@ def main() -> None:
     cloudlog.info("lanlinkd: LanLinkEnabled off, exiting")
     return
   cloudlog.info("lanlinkd starting on 0.0.0.0:8088")
-  web.run_app(create_app(), host="0.0.0.0", port=8088, print=None)
+  # single_process=True 是必须的，不是调优：session/throttle 是进程内状态，
+  # 多 worker 会让登录随机失效、防爆破计数被稀释。详见模块 docstring。
+  create_app().run(host="0.0.0.0", port=8088, single_process=True, motd=False)
 
 
 if __name__ == "__main__":
