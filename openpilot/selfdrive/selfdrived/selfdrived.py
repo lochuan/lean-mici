@@ -146,6 +146,8 @@ class SelfdriveD(CruiseHelper):
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
+    self.ignored_processes = set()  # lean: no optional procs to ignore (upstream ignores mapd)
+
     # Determine startup event
     is_remote = build_metadata.openpilot.comma_remote or build_metadata.openpilot.sunnypilot_remote
     self.startup_event = EventName.startup if is_remote and build_metadata.tested_channel else EventName.startupMaster
