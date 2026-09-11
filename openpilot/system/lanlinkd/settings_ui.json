@@ -1,1647 +1,2127 @@
 {
-  "$schema": "./settings_ui.schema.json",
-  "schema_version": "1.0",
-  "panels": [
+ "$schema": "./settings_ui.schema.json",
+ "schema_version": "1.0",
+ "panels": [
+  {
+   "id": "steering",
+   "label": "转向",
+   "icon": "steering_wheel",
+   "order": 1,
+   "sections": [
     {
-      "id": "steering",
-      "label": "转向",
-      "icon": "steering_wheel",
-      "order": 1,
-      "sections": [
+     "id": "mads",
+     "title": "MADS 模块化辅助驾驶",
+     "items": [
+      {
+       "key": "Mads",
+       "widget": "toggle",
+       "title": "启用 MADS 模块化辅助驾驶",
+       "enablement": [
         {
-          "id": "mads",
-          "title": "MADS 模块化辅助驾驶",
-          "items": [
-            {
-              "key": "Mads",
-              "widget": "toggle",
-              "title": "启用 MADS 模块化辅助驾驶",
-              "enablement": [
-                {
-                  "type": "offroad_only"
-                }
-              ]
-            }
-          ],
-          "sub_panels": [
-            {
-              "id": "mads_settings",
-              "label": "MADS 设置",
-              "trigger_key": "Mads",
-              "trigger_condition": {
-                "type": "param",
-                "key": "Mads",
-                "equals": true
-              },
-              "items": [
-                {
-                  "key": "MadsMainCruiseAllowed",
-                  "widget": "toggle",
-                  "title": "与主巡航联动",
-                  "enablement": [
-                    {
-                      "type": "offroad_only"
-                    },
-                    {
-                      "type": "not",
-                      "condition": {
-                        "type": "any",
-                        "conditions": [
-                          {
-                            "type": "capability",
-                            "field": "brand",
-                            "equals": "rivian"
-                          },
-                          {
-                            "type": "all",
-                            "conditions": [
-                              {
-                                "type": "capability",
-                                "field": "brand",
-                                "equals": "tesla"
-                              },
-                              {
-                                "type": "not",
-                                "condition": {
-                                  "type": "capability",
-                                  "field": "tesla_has_vehicle_bus",
-                                  "equals": true
-                                }
-                              }
-                            ]
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                },
-                {
-                  "key": "MadsUnifiedEngagementMode",
-                  "widget": "toggle",
-                  "title": "统一激活模式 (UEM)",
-                  "enablement": [
-                    {
-                      "type": "offroad_only"
-                    },
-                    {
-                      "type": "not",
-                      "condition": {
-                        "type": "any",
-                        "conditions": [
-                          {
-                            "type": "capability",
-                            "field": "brand",
-                            "equals": "rivian"
-                          },
-                          {
-                            "type": "all",
-                            "conditions": [
-                              {
-                                "type": "capability",
-                                "field": "brand",
-                                "equals": "tesla"
-                              },
-                              {
-                                "type": "not",
-                                "condition": {
-                                  "type": "capability",
-                                  "field": "tesla_has_vehicle_bus",
-                                  "equals": true
-                                }
-                              }
-                            ]
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                },
-                {
-                  "key": "MadsSteeringMode",
-                  "widget": "multiple_button",
-                  "title": "刹车踏板转向模式",
-                  "options": [
-                    {
-                      "value": 0,
-                      "label": "保持激活",
-                      "enablement": [
-                        {
-                          "type": "not",
-                          "condition": {
-                            "type": "any",
-                            "conditions": [
-                              {
-                                "type": "capability",
-                                "field": "brand",
-                                "equals": "rivian"
-                              },
-                              {
-                                "type": "all",
-                                "conditions": [
-                                  {
-                                    "type": "capability",
-                                    "field": "brand",
-                                    "equals": "tesla"
-                                  },
-                                  {
-                                    "type": "not",
-                                    "condition": {
-                                      "type": "capability",
-                                      "field": "tesla_has_vehicle_bus",
-                                      "equals": true
-                                    }
-                                  }
-                                ]
-                              }
-                            ]
-                          }
-                        }
-                      ]
-                    },
-                    {
-                      "value": 1,
-                      "label": "暂停",
-                      "enablement": [
-                        {
-                          "type": "not",
-                          "condition": {
-                            "type": "any",
-                            "conditions": [
-                              {
-                                "type": "capability",
-                                "field": "brand",
-                                "equals": "rivian"
-                              },
-                              {
-                                "type": "all",
-                                "conditions": [
-                                  {
-                                    "type": "capability",
-                                    "field": "brand",
-                                    "equals": "tesla"
-                                  },
-                                  {
-                                    "type": "not",
-                                    "condition": {
-                                      "type": "capability",
-                                      "field": "tesla_has_vehicle_bus",
-                                      "equals": true
-                                    }
-                                  }
-                                ]
-                              }
-                            ]
-                          }
-                        }
-                      ]
-                    },
-                    {
-                      "value": 2,
-                      "label": "退出"
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "offroad_only"
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        },
+         "type": "offroad_only"
+        }
+       ]
+      }
+     ],
+     "sub_panels": [
+      {
+       "id": "mads_settings",
+       "label": "MADS 设置",
+       "trigger_key": "Mads",
+       "trigger_condition": {
+        "type": "param",
+        "key": "Mads",
+        "equals": true
+       },
+       "items": [
         {
-          "id": "blinker",
-          "title": "转向灯",
-          "items": [
-            {
-              "key": "BlinkerPauseLateralControl",
-              "widget": "toggle",
-              "title": "打转向灯时暂停横向控制",
-              "sub_items": [
-                {
-                  "key": "BlinkerMinLateralControlSpeed",
-                  "widget": "option",
-                  "title": "暂停横向控制的最低车速",
-                  "min": 0,
-                  "max": 255,
-                  "step": 5,
-                  "unit": {
-                    "metric": "km/h",
-                    "imperial": "mph"
-                  },
-                  "enablement": [
-                    {
-                      "type": "param",
-                      "key": "BlinkerPauseLateralControl",
-                      "equals": true
-                    }
-                  ]
-                },
-                {
-                  "key": "BlinkerLateralReengageDelay",
-                  "widget": "option",
-                  "title": "转向灯后延迟",
-                  "min": 0,
-                  "max": 10,
-                  "step": 1,
-                  "unit": "second",
-                  "enablement": [
-                    {
-                      "type": "param",
-                      "key": "BlinkerPauseLateralControl",
-                      "equals": true
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "id": "torque",
-          "title": "扭矩控制",
-          "enablement": [
-            {
+         "key": "MadsMainCruiseAllowed",
+         "widget": "toggle",
+         "title": "与主巡航联动",
+         "enablement": [
+          {
+           "type": "offroad_only"
+          },
+          {
+           "type": "not",
+           "condition": {
+            "type": "any",
+            "conditions": [
+             {
               "type": "capability",
-              "field": "torque_allowed",
-              "equals": true
-            }
-          ],
-          "items": [
-            {
-              "key": "EnforceTorqueControl",
-              "widget": "toggle",
-              "title": "强制扭矩横向控制",
-              "visibility": [
-                {
-                  "type": "not",
-                  "condition": {
-                    "type": "capability",
-                    "field": "steer_control_type",
-                    "equals": "angle"
-                  }
-                }
-              ],
-              "enablement": [
-                {
-                  "type": "offroad_only"
-                },
-                {
-                  "type": "capability",
-                  "field": "torque_allowed",
-                  "equals": true
-                },
-                {
-                  "type": "param",
-                  "key": "NeuralNetworkLateralControl",
-                  "equals": false
-                }
-              ]
-            }
-          ],
-          "sub_panels": [
-            {
-              "id": "torque_settings",
-              "label": "扭矩控制设置",
-              "trigger_key": "EnforceTorqueControl",
-              "trigger_condition": {
-                "type": "param",
-                "key": "EnforceTorqueControl",
-                "equals": true
-              },
-              "items": [
-                {
-                  "key": "LateralJerkTorqueController",
-                  "widget": "toggle",
-                  "title": "横向 Jerk 扭矩控制器",
-                  "visibility": [
-                    {
-                      "type": "not",
-                      "condition": {
-                        "type": "capability",
-                        "field": "steer_control_type",
-                        "equals": "angle"
-                      }
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "offroad_only"
-                    },
-                    {
-                      "type": "param",
-                      "key": "NeuralNetworkLateralControl",
-                      "equals": false
-                    }
-                  ]
-                },
-                {
-                  "key": "LiveTorqueParamsToggle",
-                  "widget": "toggle",
-                  "title": "自整定",
-                  "enablement": [
-                    {
-                      "type": "offroad_only"
-                    }
-                  ]
-                },
-                {
-                  "key": "LiveTorqueParamsRelaxedToggle",
-                  "widget": "toggle",
-                  "title": "放宽自整定限制 (Beta)",
-                  "enablement": [
-                    {
-                      "type": "offroad_only"
-                    },
-                    {
-                      "type": "param",
-                      "key": "LiveTorqueParamsToggle",
-                      "equals": true
-                    }
-                  ]
-                },
-                {
-                  "key": "CustomTorqueParams",
-                  "widget": "toggle",
-                  "title": "启用自定义整定",
-                  "enablement": [
-                    {
-                      "type": "offroad_only"
-                    }
-                  ]
-                },
-                {
-                  "key": "TorqueParamsOverrideEnabled",
-                  "widget": "toggle",
-                  "title": "手动实时整定",
-                  "enablement": [
-                    {
-                      "type": "offroad_only"
-                    },
-                    {
-                      "type": "param",
-                      "key": "CustomTorqueParams",
-                      "equals": true
-                    }
-                  ]
-                },
-                {
-                  "key": "TorqueParamsOverrideLatAccelFactor",
-                  "widget": "option",
-                  "title": "横向加速度因子",
-                  "title_param_suffix": {
-                    "param": "TorqueParamsOverrideEnabled",
-                    "values": {
-                      "true": "(Real-Time & Offline)",
-                      "false": "(Offline Only)"
-                    }
-                  },
-                  "min": 0.1,
-                  "max": 5.0,
-                  "step": 0.1,
-                  "unit": "m/s²",
-                  "enablement": [
-                    {
-                      "type": "param",
-                      "key": "CustomTorqueParams",
-                      "equals": true
-                    },
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "param",
-                          "key": "TorqueParamsOverrideEnabled",
-                          "equals": true
-                        },
-                        {
-                          "type": "offroad_only"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "key": "TorqueParamsOverrideFriction",
-                  "widget": "option",
-                  "title": "摩擦系数",
-                  "title_param_suffix": {
-                    "param": "TorqueParamsOverrideEnabled",
-                    "values": {
-                      "true": "(Real-Time & Offline)",
-                      "false": "(Offline Only)"
-                    }
-                  },
-                  "min": 0.0,
-                  "max": 1.0,
-                  "step": 0.01,
-                  "enablement": [
-                    {
-                      "type": "param",
-                      "key": "CustomTorqueParams",
-                      "equals": true
-                    },
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "param",
-                          "key": "TorqueParamsOverrideEnabled",
-                          "equals": true
-                        },
-                        {
-                          "type": "offroad_only"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "key": "TorqueControlTune",
-                  "widget": "multiple_button",
-                  "title": "扭矩整定版本",
-                  "options": [
-                    {
-                      "value": "",
-                      "label": "默认"
-                    },
-                    {
-                      "value": 1.0,
-                      "label": "v1.0"
-                    },
-                    {
-                      "value": 0.0,
-                      "label": "v0.0"
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "offroad_only"
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "id": "lane_change",
-          "title": "变道",
-          "items": [
-            {
-              "key": "AutoLaneChangeTimer",
-              "widget": "option",
-              "title": "转向灯自动变道",
-              "details": "Please use caution when using this feature. Only use the blinker when traffic and road conditions permit.",
-              "options": [
-                {
-                  "value": -1,
-                  "label": "关闭"
-                },
-                {
-                  "value": 0,
-                  "label": "轻拨"
-                },
-                {
-                  "value": 1,
-                  "label": "免拨"
-                },
-                {
-                  "value": 2,
-                  "label": "0.5 秒"
-                },
-                {
-                  "value": 3,
-                  "label": "1 秒"
-                },
-                {
-                  "value": 4,
-                  "label": "2 秒"
-                },
-                {
-                  "value": 5,
-                  "label": "3 秒"
-                }
-              ]
-            },
-            {
-              "key": "RoadEdgeLaneChangeEnabled",
-              "widget": "toggle",
-              "title": "路沿检测禁止变道"
-            },
-            {
-              "key": "AutoLaneChangeBsmDelay",
-              "widget": "toggle",
-              "title": "自动变道：盲区延迟",
-              "enablement": [
-                {
-                  "type": "capability",
-                  "field": "enable_bsm",
-                  "equals": true
-                },
-                {
-                  "type": "param_compare",
-                  "key": "AutoLaneChangeTimer",
-                  "op": ">",
-                  "value": 0
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "display",
-      "label": "显示",
-      "icon": "display",
-      "order": 3,
-      "sections": [
-        {
-          "id": "brightness_timeout",
-          "title": "亮度与超时",
-          "items": [
-            {
-              "key": "OnroadScreenOffBrightness",
-              "widget": "multiple_button",
-              "title": "行车亮度",
-              "options": [
-                {
-                  "value": 0,
-                  "label": "自动（默认）"
-                },
-                {
-                  "value": 1,
-                  "label": "自动（暗）"
-                },
-                {
-                  "value": 2,
-                  "label": "熄屏"
-                },
-                {
-                  "value": 3,
-                  "label": "5%"
-                },
-                {
-                  "value": 4,
-                  "label": "10%"
-                },
-                {
-                  "value": 5,
-                  "label": "15%"
-                },
-                {
-                  "value": 6,
-                  "label": "20%"
-                },
-                {
-                  "value": 7,
-                  "label": "25%"
-                },
-                {
-                  "value": 8,
-                  "label": "30%"
-                },
-                {
-                  "value": 9,
-                  "label": "35%"
-                },
-                {
-                  "value": 10,
-                  "label": "40%"
-                },
-                {
-                  "value": 11,
-                  "label": "45%"
-                },
-                {
-                  "value": 12,
-                  "label": "50%"
-                },
-                {
-                  "value": 13,
-                  "label": "55%"
-                },
-                {
-                  "value": 14,
-                  "label": "60%"
-                },
-                {
-                  "value": 15,
-                  "label": "65%"
-                },
-                {
-                  "value": 16,
-                  "label": "70%"
-                },
-                {
-                  "value": 17,
-                  "label": "75%"
-                },
-                {
-                  "value": 18,
-                  "label": "80%"
-                },
-                {
-                  "value": 19,
-                  "label": "85%"
-                },
-                {
-                  "value": 20,
-                  "label": "90%"
-                },
-                {
-                  "value": 21,
-                  "label": "95%"
-                },
-                {
-                  "value": 22,
-                  "label": "100%"
-                }
-              ]
-            },
-            {
-              "key": "OnroadScreenOffTimer",
-              "widget": "multiple_button",
-              "title": "熄屏延时",
-              "options": [
-                {
-                  "value": 0,
-                  "label": "常亮"
-                },
-                {
-                  "value": 3,
-                  "label": "3 秒"
-                },
-                {
-                  "value": 5,
-                  "label": "5 秒"
-                },
-                {
-                  "value": 10,
-                  "label": "10 秒"
-                },
-                {
-                  "value": 15,
-                  "label": "15 秒"
-                },
-                {
-                  "value": 30,
-                  "label": "30 秒"
-                },
-                {
-                  "value": 60,
-                  "label": "1 分钟"
-                },
-                {
-                  "value": 180,
-                  "label": "3 分钟"
-                },
-                {
-                  "value": 300,
-                  "label": "5 分钟"
-                },
-                {
-                  "value": 600,
-                  "label": "10 分钟"
-                }
-              ],
-              "enablement": [
-                {
-                  "type": "not",
-                  "condition": {
-                    "type": "any",
-                    "conditions": [
-                      {
-                        "type": "param",
-                        "key": "OnroadScreenOffBrightness",
-                        "equals": 0
-                      },
-                      {
-                        "type": "param",
-                        "key": "OnroadScreenOffBrightness",
-                        "equals": 1
-                      }
-                    ]
-                  }
-                }
-              ]
-            },
-            {
-              "key": "InteractivityTimeout",
-              "widget": "multiple_button",
-              "title": "交互超时",
-              "options": [
-                {
-                  "value": 0,
-                  "label": "默认"
-                },
-                {
-                  "value": 10,
-                  "label": "10 秒"
-                },
-                {
-                  "value": 20,
-                  "label": "20 秒"
-                },
-                {
-                  "value": 30,
-                  "label": "30 秒"
-                },
-                {
-                  "value": 40,
-                  "label": "40 秒"
-                },
-                {
-                  "value": 50,
-                  "label": "50 秒"
-                },
-                {
-                  "value": 60,
-                  "label": "1 分钟"
-                },
-                {
-                  "value": 70,
-                  "label": "1 分钟"
-                },
-                {
-                  "value": 80,
-                  "label": "1 分钟"
-                },
-                {
-                  "value": 90,
-                  "label": "1 分钟"
-                },
-                {
-                  "value": 100,
-                  "label": "1 分钟"
-                },
-                {
-                  "value": 110,
-                  "label": "1 分钟"
-                },
-                {
-                  "value": 120,
-                  "label": "2 分钟"
-                }
-              ]
-            },
-            {
-              "key": "ScreenSaverEnabled",
-              "widget": "toggle",
-              "title": "屏保"
-            },
-            {
-              "key": "ScreenSaverTimeout",
-              "widget": "multiple_button",
-              "title": "屏保时长",
-              "options": [
-                {
-                  "value": 60,
-                  "label": "1 分钟"
-                },
-                {
-                  "value": 120,
-                  "label": "2 分钟"
-                },
-                {
-                  "value": 180,
-                  "label": "3 分钟"
-                },
-                {
-                  "value": 240,
-                  "label": "4 分钟"
-                },
-                {
-                  "value": 300,
-                  "label": "5 分钟"
-                },
-                {
-                  "value": 360,
-                  "label": "6 分钟"
-                },
-                {
-                  "value": 420,
-                  "label": "7 分钟"
-                },
-                {
-                  "value": 480,
-                  "label": "8 分钟"
-                },
-                {
-                  "value": 540,
-                  "label": "9 分钟"
-                },
-                {
-                  "value": 600,
-                  "label": "10 分钟"
-                }
-              ],
-              "enablement": [
-                {
-                  "type": "param",
-                  "key": "ScreenSaverEnabled",
-                  "equals": true
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "visuals",
-      "label": "视觉",
-      "icon": "visuals",
-      "order": 4,
-      "sections": [
-        {
-          "id": "hud_elements",
-          "title": "HUD 元素",
-          "items": [
-            {
-              "key": "BlindSpot",
-              "widget": "toggle",
-              "title": "显示盲区预警"
-            },
-            {
-              "key": "TorqueBar",
-              "widget": "toggle",
-              "title": "转向弧"
-            },
-            {
-              "key": "ShowTurnSignals",
-              "widget": "toggle",
-              "title": "显示转向灯"
-            },
-            {
-              "key": "RoadNameToggle",
-              "widget": "toggle",
-              "title": "显示路名",
-              "visibility": [
-                {
-                  "type": "not",
-                  "condition": {
-                    "type": "capability",
-                    "field": "device_type",
-                    "equals": "mici"
-                  }
-                }
-              ]
-            },
-            {
-              "key": "StandstillTimer",
-              "widget": "toggle",
-              "title": "静止计时器",
-              "visibility": [
-                {
-                  "type": "not",
-                  "condition": {
-                    "type": "capability",
-                    "field": "device_type",
-                    "equals": "mici"
-                  }
-                }
-              ]
-            },
-            {
-              "key": "RocketFuel",
-              "widget": "toggle",
-              "title": "实时加速度条",
-              "visibility": [
-                {
-                  "type": "not",
-                  "condition": {
-                    "type": "capability",
-                    "field": "device_type",
-                    "equals": "mici"
-                  }
-                }
-              ]
-            },
-            {
-              "key": "ChevronInfo",
-              "widget": "option",
-              "title": "箭头下方显示信息",
-              "options": [
-                {
-                  "value": 0,
-                  "label": "关闭"
-                },
-                {
-                  "value": 1,
-                  "label": "距离"
-                },
-                {
-                  "value": 2,
-                  "label": "车速"
-                },
-                {
-                  "value": 3,
-                  "label": "时间"
-                },
-                {
-                  "value": 4,
-                  "label": "全部"
-                }
-              ],
-              "visibility": [
-                {
-                  "type": "not",
-                  "condition": {
-                    "type": "capability",
-                    "field": "device_type",
-                    "equals": "mici"
-                  }
-                }
-              ],
-              "enablement": [
-                {
-                  "type": "capability",
-                  "field": "has_longitudinal_control",
-                  "equals": true
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "id": "developer_ui",
-          "title": "调试显示",
-          "visibility": [
-            {
-              "type": "not",
-              "condition": {
+              "field": "brand",
+              "equals": "rivian"
+             },
+             {
+              "type": "all",
+              "conditions": [
+               {
                 "type": "capability",
-                "field": "device_type",
-                "equals": "mici"
-              }
-            }
-          ],
-          "items": [
-            {
-              "key": "DevUIInfo",
-              "widget": "option",
-              "title": "调试界面",
-              "options": [
-                {
-                  "value": 0,
-                  "label": "关闭"
-                },
-                {
-                  "value": 1,
-                  "label": "底部"
-                },
-                {
-                  "value": 2,
-                  "label": "右侧"
-                },
-                {
-                  "value": 3,
-                  "label": "右侧和底部"
+                "field": "brand",
+                "equals": "tesla"
+               },
+               {
+                "type": "not",
+                "condition": {
+                 "type": "capability",
+                 "field": "tesla_has_vehicle_bus",
+                 "equals": true
                 }
+               }
               ]
-            },
-            {
-              "key": "TrueVEgoUI",
-              "widget": "toggle",
-              "title": "车速表：始终显示真实车速"
-            },
-            {
-              "key": "HideVEgoUI",
-              "widget": "toggle",
-              "title": "车速表：行车界面隐藏"
-            }
-          ]
+             }
+            ]
+           }
+          }
+         ]
         },
         {
-          "id": "alerts_extras",
-          "title": "提示与特效",
-          "items": [
-            {
-              "key": "GreenLightAlert",
-              "widget": "toggle",
-              "title": "绿灯提醒 (Beta)"
-            },
-            {
-              "key": "LeadDepartAlert",
-              "widget": "toggle",
-              "title": "前车起步提醒 (Beta)"
-            },
-            {
-              "key": "RainbowMode",
-              "widget": "toggle",
-              "title": "特斯拉彩虹模式"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "toggles",
-      "label": "通用",
-      "icon": "toggles",
-      "order": 5,
-      "sections": [
-        {
-          "id": "core_toggles",
-          "title": "",
-          "items": [
-            {
-              "key": "IsMetric",
-              "widget": "toggle",
-              "title": "使用公制单位"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "device",
-      "label": "设备",
-      "icon": "device",
-      "order": 6,
-      "sections": [
-        {
-          "id": "general",
-          "title": "通用",
-          "items": [
-            {
-              "key": "OffroadMode",
-              "widget": "toggle",
-              "title": "强制离线模式"
-            },
-            {
-              "key": "DeviceBootMode",
-              "widget": "option",
-              "title": "唤醒行为",
-              "options": [
-                {
-                  "value": 0,
-                  "label": "标准"
-                },
-                {
-                  "value": 1,
-                  "label": "始终离线"
+         "key": "MadsUnifiedEngagementMode",
+         "widget": "toggle",
+         "title": "统一激活模式 (UEM)",
+         "enablement": [
+          {
+           "type": "offroad_only"
+          },
+          {
+           "type": "not",
+           "condition": {
+            "type": "any",
+            "conditions": [
+             {
+              "type": "capability",
+              "field": "brand",
+              "equals": "rivian"
+             },
+             {
+              "type": "all",
+              "conditions": [
+               {
+                "type": "capability",
+                "field": "brand",
+                "equals": "tesla"
+               },
+               {
+                "type": "not",
+                "condition": {
+                 "type": "capability",
+                 "field": "tesla_has_vehicle_bus",
+                 "equals": true
                 }
+               }
               ]
-            },
-            {
-              "key": "QuietMode",
-              "widget": "toggle",
-              "title": "安静模式"
-            },
-            {
-              "key": "OnroadUploads",
-              "widget": "toggle",
-              "title": "行车上传"
-            },
-            {
-              "key": "MaxTimeOffroad",
-              "widget": "option",
-              "title": "离线最长时间",
-              "options": [
-                {
-                  "value": 0,
-                  "label": "常亮"
-                },
-                {
-                  "value": 5,
-                  "label": "5 分钟"
-                },
-                {
-                  "value": 10,
-                  "label": "10 分钟"
-                },
-                {
-                  "value": 15,
-                  "label": "15 分钟"
-                },
-                {
-                  "value": 30,
-                  "label": "30 分钟"
-                },
-                {
-                  "value": 60,
-                  "label": "1 小时"
-                },
-                {
-                  "value": 120,
-                  "label": "2 小时"
-                },
-                {
-                  "value": 180,
-                  "label": "3h"
-                },
-                {
-                  "value": 300,
-                  "label": "5 小时"
-                },
-                {
-                  "value": 600,
-                  "label": "10 小时"
-                },
-                {
-                  "value": 1440,
-                  "label": "24 小时"
-                },
-                {
-                  "value": 1800,
-                  "label": "30 小时（默认）"
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "software",
-      "label": "软件",
-      "icon": "software",
-      "order": 7,
-      "sections": [
-        {
-          "id": "updates",
-          "title": "更新",
-          "items": [
-            {
-              "key": "DisableUpdates",
-              "widget": "toggle",
-              "title": "禁用更新",
-              "enablement": [
-                {
-                  "type": "offroad_only"
-                },
-                {
-                  "type": "param",
-                  "key": "ShowAdvancedControls",
-                  "equals": true
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "developer",
-      "label": "开发者",
-      "icon": "developer",
-      "order": 9,
-      "sections": [
-        {
-          "id": "connectivity",
-          "title": "连接",
-          "items": [
-            {
-              "key": "AdbEnabled",
-              "widget": "toggle",
-              "blocked": true,
-              "title": "启用 ADB",
-              "enablement": [
-                {
-                  "type": "offroad_only"
-                }
-              ]
-            },
-            {
-              "key": "SshEnabled",
-              "widget": "toggle",
-              "blocked": true,
-              "title": "启用 SSH"
-            },
-            {
-              "key": "JoystickDebugMode",
-              "widget": "toggle",
-              "title": "摇杆调试模式",
-              "enablement": [
-                {
-                  "type": "offroad_only"
-                }
-              ]
-            },
-            {
-              "key": "AlphaLongitudinalEnabled",
-              "widget": "toggle",
-              "needs_onroad_cycle": true,
-              "title": "sunnypilot 纵向控制 (Alpha)",
-              "visibility": [
-                {
-                  "type": "all",
-                  "conditions": [
-                    {
-                      "type": "capability",
-                      "field": "alpha_long_available",
-                      "equals": true
-                    },
-                    {
-                      "type": "not",
-                      "condition": {
-                        "type": "capability",
-                        "field": "has_icbm",
-                        "equals": true
-                      }
-                    }
-                  ]
-                }
-              ],
-              "enablement": [
-                {
-                  "type": "not_engaged"
-                }
-              ]
-            },
-            {
-              "key": "ShowDebugInfo",
-              "widget": "toggle",
-              "title": "界面调试模式"
-            }
-          ]
+             }
+            ]
+           }
+          }
+         ]
         },
         {
-          "id": "advanced_services",
-          "title": "高级设置",
-          "items": [
+         "key": "MadsSteeringMode",
+         "widget": "multiple_button",
+         "title": "刹车踏板转向模式",
+         "options": [
+          {
+           "value": 0,
+           "label": "保持激活",
+           "enablement": [
             {
-              "key": "ShowAdvancedControls",
-              "widget": "toggle",
-              "title": "显示高级选项"
-            },
-            {
-              "key": "EnableGithubRunner",
-              "widget": "toggle",
-              "title": "GitHub Runner 服务",
-              "visibility": [
-                {
-                  "type": "not",
-                  "condition": {
-                    "type": "capability",
-                    "field": "is_sp_release",
-                    "equals": true
-                  }
-                }
-              ],
-              "enablement": [
-                {
-                  "type": "param",
-                  "key": "ShowAdvancedControls",
-                  "equals": true
-                }
-              ]
-            },
-            {
-              "key": "EnableCopyparty",
-              "widget": "toggle",
-              "title": "copyparty 文件服务",
-              "enablement": [
-                {
-                  "type": "param",
-                  "key": "ShowAdvancedControls",
-                  "equals": true
-                }
-              ]
-            },
-            {
-              "key": "QuickBootToggle",
-              "widget": "toggle",
-              "title": "快速启动模式",
-              "visibility": [
-                {
-                  "type": "not",
-                  "condition": {
-                    "type": "any",
-                    "conditions": [
-                      {
-                        "type": "capability",
-                        "field": "is_sp_release",
-                        "equals": true
-                      },
-                      {
-                        "type": "capability",
-                        "field": "is_development",
-                        "equals": true
-                      }
-                    ]
-                  }
-                }
-              ],
-              "enablement": [
-                {
-                  "type": "param",
-                  "key": "DisableUpdates",
-                  "equals": true
-                },
-                {
-                  "type": "param",
-                  "key": "ShowAdvancedControls",
-                  "equals": true
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "models",
-      "label": "模型",
-      "icon": "models",
-      "order": 10,
-      "sections": [
-        {
-          "id": "model_behavior",
-          "title": "模型行为",
-          "items": [
-            {
-              "key": "LaneTurnDesire",
-              "widget": "toggle",
-              "title": "使用转向意愿"
-            },
-            {
-              "key": "LaneTurnValue",
-              "widget": "option",
-              "title": "转向意愿速度",
-              "min": 0,
-              "max": 20,
-              "step": 1,
-              "unit": {
-                "metric": "km/h",
-                "imperial": "mph"
-              },
-              "enablement": [
-                {
-                  "type": "param",
-                  "key": "LaneTurnDesire",
-                  "equals": true
-                },
-                {
-                  "type": "param",
-                  "key": "ShowAdvancedControls",
-                  "equals": true
-                }
-              ]
-            },
-            {
-              "key": "LagdToggle",
-              "widget": "toggle",
-              "title": "在线学习转向延迟"
-            },
-            {
-              "key": "LagdToggleDelay",
-              "widget": "option",
-              "title": "软件延迟",
-              "min": 0.05,
-              "max": 0.5,
-              "step": 0.01,
-              "enablement": [
-                {
-                  "type": "not",
-                  "condition": {
-                    "type": "param",
-                    "key": "LagdToggle",
-                    "equals": true
-                  }
-                },
-                {
-                  "type": "param",
-                  "key": "ShowAdvancedControls",
-                  "equals": true
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "id": "lateral_control",
-          "title": "横向控制",
-          "items": [
-            {
-              "key": "NeuralNetworkLateralControl",
-              "widget": "toggle",
-              "title": "神经网络横向控制 (NNLC)",
-              "visibility": [
-                {
-                  "type": "not",
-                  "condition": {
-                    "type": "capability",
-                    "field": "steer_control_type",
-                    "equals": "angle"
-                  }
-                }
-              ],
-              "enablement": [
-                {
-                  "type": "offroad_only"
-                },
-                {
+             "type": "not",
+             "condition": {
+              "type": "any",
+              "conditions": [
+               {
+                "type": "capability",
+                "field": "brand",
+                "equals": "rivian"
+               },
+               {
+                "type": "all",
+                "conditions": [
+                 {
                   "type": "capability",
-                  "field": "torque_allowed",
-                  "equals": true
-                },
-                {
-                  "type": "param",
-                  "key": "EnforceTorqueControl",
-                  "equals": false
-                },
-                {
-                  "type": "param",
-                  "key": "LateralJerkTorqueController",
-                  "equals": false
-                }
+                  "field": "brand",
+                  "equals": "tesla"
+                 },
+                 {
+                  "type": "not",
+                  "condition": {
+                   "type": "capability",
+                   "field": "tesla_has_vehicle_bus",
+                   "equals": true
+                  }
+                 }
+                ]
+               }
               ]
+             }
             }
-          ]
-        },
-        {
-          "id": "camera",
-          "title": "相机",
-          "items": [
+           ]
+          },
+          {
+           "value": 1,
+           "label": "暂停",
+           "enablement": [
             {
-              "key": "CameraOffset",
-              "widget": "option",
-              "title": "相机偏移",
-              "min": -0.35,
-              "max": 0.35,
-              "step": 0.01,
-              "unit": "meters",
-              "enablement": [
-                {
-                  "type": "param",
-                  "key": "ShowAdvancedControls",
-                  "equals": true
-                }
+             "type": "not",
+             "condition": {
+              "type": "any",
+              "conditions": [
+               {
+                "type": "capability",
+                "field": "brand",
+                "equals": "rivian"
+               },
+               {
+                "type": "all",
+                "conditions": [
+                 {
+                  "type": "capability",
+                  "field": "brand",
+                  "equals": "tesla"
+                 },
+                 {
+                  "type": "not",
+                  "condition": {
+                   "type": "capability",
+                   "field": "tesla_has_vehicle_bus",
+                   "equals": true
+                  }
+                 }
+                ]
+               }
               ]
+             }
             }
-          ]
+           ]
+          },
+          {
+           "value": 2,
+           "label": "退出"
+          }
+         ],
+         "enablement": [
+          {
+           "type": "offroad_only"
+          }
+         ]
         }
-      ]
+       ]
+      }
+     ]
+    },
+    {
+     "id": "blinker",
+     "title": "转向灯",
+     "items": [
+      {
+       "key": "BlinkerPauseLateralControl",
+       "widget": "toggle",
+       "title": "打转向灯时暂停横向控制",
+       "sub_items": [
+        {
+         "key": "BlinkerMinLateralControlSpeed",
+         "widget": "option",
+         "title": "暂停横向控制的最低车速",
+         "min": 0,
+         "max": 255,
+         "step": 5,
+         "unit": {
+          "metric": "km/h",
+          "imperial": "mph"
+         },
+         "enablement": [
+          {
+           "type": "param",
+           "key": "BlinkerPauseLateralControl",
+           "equals": true
+          }
+         ]
+        },
+        {
+         "key": "BlinkerLateralReengageDelay",
+         "widget": "option",
+         "title": "转向灯后延迟",
+         "min": 0,
+         "max": 10,
+         "step": 1,
+         "unit": "second",
+         "enablement": [
+          {
+           "type": "param",
+           "key": "BlinkerPauseLateralControl",
+           "equals": true
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "torque",
+     "title": "扭矩控制",
+     "enablement": [
+      {
+       "type": "capability",
+       "field": "torque_allowed",
+       "equals": true
+      }
+     ],
+     "items": [
+      {
+       "key": "EnforceTorqueControl",
+       "widget": "toggle",
+       "title": "强制扭矩横向控制",
+       "visibility": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "capability",
+          "field": "steer_control_type",
+          "equals": "angle"
+         }
+        }
+       ],
+       "enablement": [
+        {
+         "type": "offroad_only"
+        },
+        {
+         "type": "capability",
+         "field": "torque_allowed",
+         "equals": true
+        },
+        {
+         "type": "param",
+         "key": "NeuralNetworkLateralControl",
+         "equals": false
+        }
+       ]
+      }
+     ],
+     "sub_panels": [
+      {
+       "id": "torque_settings",
+       "label": "扭矩控制设置",
+       "trigger_key": "EnforceTorqueControl",
+       "trigger_condition": {
+        "type": "param",
+        "key": "EnforceTorqueControl",
+        "equals": true
+       },
+       "items": [
+        {
+         "key": "LateralJerkTorqueController",
+         "widget": "toggle",
+         "title": "横向 Jerk 扭矩控制器",
+         "visibility": [
+          {
+           "type": "not",
+           "condition": {
+            "type": "capability",
+            "field": "steer_control_type",
+            "equals": "angle"
+           }
+          }
+         ],
+         "enablement": [
+          {
+           "type": "offroad_only"
+          },
+          {
+           "type": "param",
+           "key": "NeuralNetworkLateralControl",
+           "equals": false
+          }
+         ]
+        },
+        {
+         "key": "LiveTorqueParamsToggle",
+         "widget": "toggle",
+         "title": "自整定",
+         "enablement": [
+          {
+           "type": "offroad_only"
+          }
+         ]
+        },
+        {
+         "key": "LiveTorqueParamsRelaxedToggle",
+         "widget": "toggle",
+         "title": "放宽自整定限制 (Beta)",
+         "enablement": [
+          {
+           "type": "offroad_only"
+          },
+          {
+           "type": "param",
+           "key": "LiveTorqueParamsToggle",
+           "equals": true
+          }
+         ]
+        },
+        {
+         "key": "CustomTorqueParams",
+         "widget": "toggle",
+         "title": "启用自定义整定",
+         "enablement": [
+          {
+           "type": "offroad_only"
+          }
+         ]
+        },
+        {
+         "key": "TorqueParamsOverrideEnabled",
+         "widget": "toggle",
+         "title": "手动实时整定",
+         "enablement": [
+          {
+           "type": "offroad_only"
+          },
+          {
+           "type": "param",
+           "key": "CustomTorqueParams",
+           "equals": true
+          }
+         ]
+        },
+        {
+         "key": "TorqueParamsOverrideLatAccelFactor",
+         "widget": "option",
+         "title": "横向加速度因子",
+         "title_param_suffix": {
+          "param": "TorqueParamsOverrideEnabled",
+          "values": {
+           "true": "(Real-Time & Offline)",
+           "false": "(Offline Only)"
+          }
+         },
+         "min": 0.1,
+         "max": 5.0,
+         "step": 0.1,
+         "unit": "m/s²",
+         "enablement": [
+          {
+           "type": "param",
+           "key": "CustomTorqueParams",
+           "equals": true
+          },
+          {
+           "type": "any",
+           "conditions": [
+            {
+             "type": "param",
+             "key": "TorqueParamsOverrideEnabled",
+             "equals": true
+            },
+            {
+             "type": "offroad_only"
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "key": "TorqueParamsOverrideFriction",
+         "widget": "option",
+         "title": "摩擦系数",
+         "title_param_suffix": {
+          "param": "TorqueParamsOverrideEnabled",
+          "values": {
+           "true": "(Real-Time & Offline)",
+           "false": "(Offline Only)"
+          }
+         },
+         "min": 0.0,
+         "max": 1.0,
+         "step": 0.01,
+         "enablement": [
+          {
+           "type": "param",
+           "key": "CustomTorqueParams",
+           "equals": true
+          },
+          {
+           "type": "any",
+           "conditions": [
+            {
+             "type": "param",
+             "key": "TorqueParamsOverrideEnabled",
+             "equals": true
+            },
+            {
+             "type": "offroad_only"
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "key": "TorqueControlTune",
+         "widget": "multiple_button",
+         "title": "扭矩整定版本",
+         "options": [
+          {
+           "value": "",
+           "label": "默认"
+          },
+          {
+           "value": 1.0,
+           "label": "v1.0"
+          },
+          {
+           "value": 0.0,
+           "label": "v0.0"
+          }
+         ],
+         "enablement": [
+          {
+           "type": "offroad_only"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "lane_change",
+     "title": "变道",
+     "items": [
+      {
+       "key": "AutoLaneChangeTimer",
+       "widget": "option",
+       "title": "转向灯自动变道",
+       "details": "Please use caution when using this feature. Only use the blinker when traffic and road conditions permit.",
+       "options": [
+        {
+         "value": -1,
+         "label": "关闭"
+        },
+        {
+         "value": 0,
+         "label": "轻拨"
+        },
+        {
+         "value": 1,
+         "label": "免拨"
+        },
+        {
+         "value": 2,
+         "label": "0.5 秒"
+        },
+        {
+         "value": 3,
+         "label": "1 秒"
+        },
+        {
+         "value": 4,
+         "label": "2 秒"
+        },
+        {
+         "value": 5,
+         "label": "3 秒"
+        }
+       ]
+      },
+      {
+       "key": "RoadEdgeLaneChangeEnabled",
+       "widget": "toggle",
+       "title": "路沿检测禁止变道"
+      },
+      {
+       "key": "AutoLaneChangeBsmDelay",
+       "widget": "toggle",
+       "title": "自动变道：盲区延迟",
+       "enablement": [
+        {
+         "type": "capability",
+         "field": "enable_bsm",
+         "equals": true
+        },
+        {
+         "type": "param_compare",
+         "key": "AutoLaneChangeTimer",
+         "op": ">",
+         "value": 0
+        }
+       ]
+      }
+     ]
     }
-  ],
-  "vehicle_settings": {
-    "hyundai": {
-      "title": "现代 / 起亚 / 捷尼赛思",
-      "items": [
+   ]
+  },
+  {
+   "id": "cruise",
+   "label": "巡航",
+   "icon": "cruise_control",
+   "order": 2,
+   "remote_configurable": true,
+   "description": "纵向控制、限速与巡航行为",
+   "sections": [
+    {
+     "id": "core_cruise_features",
+     "title": "",
+     "description": "",
+     "items": [
+      {
+       "key": "ExperimentalMode",
+       "widget": "toggle",
+       "title": "实验模式",
+       "enablement": [
         {
-          "key": "HyundaiLongitudinalTuning",
-          "widget": "multiple_button",
-          "title": "自定义纵向整定",
-          "options": [
-            {
-              "value": 0,
-              "label": "关闭"
-            },
-            {
-              "value": 1,
-              "label": "动态"
-            },
-            {
-              "value": 2,
-              "label": "预测"
-            }
-          ],
-          "visibility": [
-            {
-              "type": "capability",
-              "field": "hyundai_alpha_long_available",
-              "equals": true
-            }
-          ],
-          "enablement": [
-            {
-              "type": "offroad_only"
-            },
-            {
-              "type": "capability",
-              "field": "has_longitudinal_control",
-              "equals": true
-            }
-          ]
+         "type": "capability",
+         "field": "has_longitudinal_control",
+         "equals": true
         }
-      ]
-    },
-    "subaru": {
-      "title": "斯巴鲁",
-      "items": [
+       ]
+      },
+      {
+       "key": "DynamicExperimentalControl",
+       "widget": "toggle",
+       "title": "动态实验控制",
+       "description": "由模型决定何时使用 sunnypilot ACC 或端到端纵向控制。",
+       "visibility": [
         {
-          "key": "SubaruStopAndGo",
-          "widget": "toggle",
-          "title": "走走停停 (Beta)",
-          "enablement": [
-            {
-              "type": "offroad_only"
-            },
-            {
-              "type": "capability",
-              "field": "has_stop_and_go",
-              "equals": true
-            }
-          ]
+         "type": "capability",
+         "field": "has_longitudinal_control",
+         "equals": true
+        }
+       ],
+       "enablement": [
+        {
+         "type": "capability",
+         "field": "has_longitudinal_control",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "DisengageOnAccelerator",
+       "widget": "toggle",
+       "title": "踩油门时退出纵向控制",
+       "description": "启用后，踩下油门踏板将退出纵向控制。"
+      },
+      {
+       "key": "LongitudinalPersonality",
+       "widget": "multiple_button",
+       "title": "驾驶风格",
+       "description": "推荐标准。激进模式下跟车更近、油门刹车更积极；放松模式下与前车保持更远距离。在支持的车型上，可用方向盘车距键循环切换。",
+       "options": [
+        {
+         "value": 0,
+         "label": "激进"
         },
         {
-          "key": "SubaruStopAndGoManualParkingBrake",
-          "widget": "toggle",
-          "title": "手刹车型走走停停 (Beta)",
-          "enablement": [
-            {
-              "type": "offroad_only"
-            },
-            {
-              "type": "capability",
-              "field": "has_stop_and_go",
-              "equals": true
-            }
-          ]
-        }
-      ]
-    },
-    "tesla": {
-      "title": "特斯拉",
-      "items": [
-        {
-          "key": "TeslaCoopSteering",
-          "widget": "toggle",
-          "title": "协同转向 (Beta)",
-          "enablement": [
-            {
-              "type": "offroad_only"
-            }
-          ]
+         "value": 1,
+         "label": "标准"
         },
         {
-          "key": "TeslaMadsScreenButton",
-          "widget": "multiple_button",
-          "title": "MADS 屏幕手势",
-          "options": [
-            {
-              "value": 0,
-              "label": "关闭"
-            },
-            {
-              "value": 1,
-              "label": "三指"
-            },
-            {
-              "value": 2,
-              "label": "四指"
-            },
-            {
-              "value": 3,
-              "label": "五指"
-            }
-          ],
-          "visibility": [
-            {
-              "type": "capability",
-              "field": "tesla_has_vehicle_bus",
-              "equals": true
-            }
-          ],
-          "enablement": [
-            {
-              "type": "offroad_only"
-            }
-          ]
+         "value": 2,
+         "label": "放松"
         }
-      ]
-    },
-    "toyota": {
-      "title": "丰田 / 雷克萨斯",
-      "items": [
+       ],
+       "enablement": [
         {
-          "key": "ToyotaEnforceStockLongitudinal",
-          "widget": "toggle",
-          "needs_onroad_cycle": true,
-          "title": "强制原厂纵向控制",
-          "enablement": [
-            {
-              "type": "not_engaged"
-            }
-          ]
+         "type": "capability",
+         "field": "has_longitudinal_control",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "IntelligentCruiseButtonManagement",
+       "widget": "toggle",
+       "title": "智能巡航按键管理 (ICBM) (Alpha)",
+       "visibility": [
+        {
+         "type": "capability",
+         "field": "icbm_available",
+         "equals": true
+        }
+       ],
+       "enablement": [
+        {
+         "type": "offroad_only"
         },
         {
-          "key": "ToyotaStopAndGoHack",
-          "widget": "toggle",
-          "needs_onroad_cycle": true,
-          "title": "走走停停增强 (Alpha)",
-          "enablement": [
-            {
-              "type": "not_engaged"
-            },
-            {
-              "type": "capability",
-              "field": "has_longitudinal_control",
-              "equals": true
-            },
-            {
-              "type": "param",
-              "key": "ToyotaEnforceStockLongitudinal",
-              "equals": false
-            }
-          ]
+         "type": "not",
+         "condition": {
+          "type": "capability",
+          "field": "has_longitudinal_control",
+          "equals": true
+         }
         }
-      ]
+       ]
+      }
+     ]
+    },
+    {
+     "id": "custom_acc_increments",
+     "title": "自定义 ACC 速度步进",
+     "description": "",
+     "enablement": [
+      {
+       "type": "offroad_only"
+      },
+      {
+       "type": "any",
+       "conditions": [
+        {
+         "type": "all",
+         "conditions": [
+          {
+           "type": "capability",
+           "field": "has_longitudinal_control",
+           "equals": true
+          },
+          {
+           "type": "not",
+           "condition": {
+            "type": "capability",
+            "field": "pcm_cruise",
+            "equals": true
+           }
+          }
+         ]
+        },
+        {
+         "type": "capability",
+         "field": "has_icbm",
+         "equals": true
+        }
+       ]
+      }
+     ],
+     "items": [
+      {
+       "key": "CustomAccIncrementsEnabled",
+       "widget": "toggle",
+       "title": "启用自定义 ACC 速度步进",
+       "enablement": [
+        {
+         "type": "offroad_only"
+        },
+        {
+         "type": "any",
+         "conditions": [
+          {
+           "type": "all",
+           "conditions": [
+            {
+             "type": "capability",
+             "field": "has_longitudinal_control",
+             "equals": true
+            },
+            {
+             "type": "not",
+             "condition": {
+              "type": "capability",
+              "field": "pcm_cruise",
+              "equals": true
+             }
+            }
+           ]
+          },
+          {
+           "type": "capability",
+           "field": "has_icbm",
+           "equals": true
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "sub_panels": [
+      {
+       "id": "custom_acc_intervals",
+       "label": "自定义 ACC 速度步进设置",
+       "trigger_key": "CustomAccIncrementsEnabled",
+       "trigger_condition": {
+        "type": "param",
+        "key": "CustomAccIncrementsEnabled",
+        "equals": true
+       },
+       "items": [
+        {
+         "key": "CustomAccShortPressIncrement",
+         "widget": "option",
+         "title": "短按步进",
+         "min": 1,
+         "max": 10,
+         "step": 1,
+         "enablement": [
+          {
+           "type": "param",
+           "key": "CustomAccIncrementsEnabled",
+           "equals": true
+          }
+         ]
+        },
+        {
+         "key": "CustomAccLongPressIncrement",
+         "widget": "option",
+         "title": "长按步进",
+         "min": 1,
+         "max": 10,
+         "step": 1,
+         "enablement": [
+          {
+           "type": "param",
+           "key": "CustomAccIncrementsEnabled",
+           "equals": true
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "speed_limits",
+     "title": "限速",
+     "description": "限速识别与偏移行为",
+     "items": [],
+     "sub_panels": [
+      {
+       "id": "speed_limit_settings",
+       "label": "限速设置",
+       "trigger_key": "SpeedLimitMode",
+       "items": [
+        {
+         "key": "SpeedLimitMode",
+         "widget": "multiple_button",
+         "title": "限速辅助模式",
+         "options": [
+          {
+           "value": 0,
+           "label": "关闭"
+          },
+          {
+           "value": 1,
+           "label": "仅提示"
+          },
+          {
+           "value": 2,
+           "label": "警告"
+          },
+          {
+           "value": 3,
+           "label": "辅助",
+           "enablement": [
+            {
+             "type": "any",
+             "conditions": [
+              {
+               "type": "capability",
+               "field": "has_longitudinal_control",
+               "equals": true
+              },
+              {
+               "type": "capability",
+               "field": "has_icbm",
+               "equals": true
+              }
+             ]
+            },
+            {
+             "type": "not",
+             "condition": {
+              "type": "capability",
+              "field": "brand",
+              "equals": "rivian"
+             }
+            },
+            {
+             "type": "not",
+             "condition": {
+              "type": "all",
+              "conditions": [
+               {
+                "type": "capability",
+                "field": "brand",
+                "equals": "tesla"
+               },
+               {
+                "type": "capability",
+                "field": "is_sp_release",
+                "equals": true
+               }
+              ]
+             }
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "key": "SpeedLimitPolicy",
+         "widget": "multiple_button",
+         "title": "限速数据来源",
+         "options": [
+          {
+           "value": 0,
+           "label": "仅车辆信号"
+          },
+          {
+           "value": 1,
+           "label": "仅地图数据"
+          },
+          {
+           "value": 2,
+           "label": "车辆信号优先"
+          },
+          {
+           "value": 3,
+           "label": "地图数据优先"
+          },
+          {
+           "value": 4,
+           "label": "综合"
+          }
+         ]
+        },
+        {
+         "key": "SpeedLimitOffsetType",
+         "widget": "multiple_button",
+         "title": "限速偏移类型",
+         "options": [
+          {
+           "value": 0,
+           "label": "关闭"
+          },
+          {
+           "value": 1,
+           "label": "固定值"
+          },
+          {
+           "value": 2,
+           "label": "百分比"
+          }
+         ]
+        },
+        {
+         "key": "SpeedLimitValueOffset",
+         "widget": "option",
+         "title": "限速偏移值",
+         "min": -30,
+         "max": 30,
+         "step": 1,
+         "unit": {
+          "metric": "km/h",
+          "imperial": "mph"
+         },
+         "visibility": [
+          {
+           "type": "param_compare",
+           "key": "SpeedLimitOffsetType",
+           "op": ">",
+           "value": 0
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "smart_cruise",
+     "title": "智能巡航控制",
+     "description": "",
+     "enablement": [
+      {
+       "type": "any",
+       "conditions": [
+        {
+         "type": "capability",
+         "field": "has_longitudinal_control",
+         "equals": true
+        },
+        {
+         "type": "capability",
+         "field": "has_icbm",
+         "equals": true
+        }
+       ]
+      }
+     ],
+     "items": [
+      {
+       "key": "SmartCruiseControlVision",
+       "widget": "toggle",
+       "title": "视觉",
+       "description": "使用视觉路径预测，估算通过前方弯道的合适速度。",
+       "visibility": [
+        {
+         "type": "any",
+         "conditions": [
+          {
+           "type": "capability",
+           "field": "has_longitudinal_control",
+           "equals": true
+          },
+          {
+           "type": "capability",
+           "field": "has_icbm",
+           "equals": true
+          }
+         ]
+        }
+       ],
+       "enablement": [
+        {
+         "type": "any",
+         "conditions": [
+          {
+           "type": "capability",
+           "field": "has_longitudinal_control",
+           "equals": true
+          },
+          {
+           "type": "capability",
+           "field": "has_icbm",
+           "equals": true
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "key": "SmartCruiseControlMap",
+       "widget": "toggle",
+       "title": "地图",
+       "description": "使用地图数据，估算通过前方弯道的合适速度。",
+       "visibility": [
+        {
+         "type": "any",
+         "conditions": [
+          {
+           "type": "capability",
+           "field": "has_longitudinal_control",
+           "equals": true
+          },
+          {
+           "type": "capability",
+           "field": "has_icbm",
+           "equals": true
+          }
+         ]
+        }
+       ],
+       "enablement": [
+        {
+         "type": "any",
+         "conditions": [
+          {
+           "type": "capability",
+           "field": "has_longitudinal_control",
+           "equals": true
+          },
+          {
+           "type": "capability",
+           "field": "has_icbm",
+           "equals": true
+          }
+         ]
+        }
+       ]
+      }
+     ]
     }
+   ]
+  },
+  {
+   "id": "display",
+   "label": "显示",
+   "icon": "display",
+   "order": 3,
+   "sections": [
+    {
+     "id": "brightness_timeout",
+     "title": "亮度与超时",
+     "items": [
+      {
+       "key": "OnroadScreenOffBrightness",
+       "widget": "multiple_button",
+       "title": "行车亮度",
+       "options": [
+        {
+         "value": 0,
+         "label": "自动（默认）"
+        },
+        {
+         "value": 1,
+         "label": "自动（暗）"
+        },
+        {
+         "value": 2,
+         "label": "熄屏"
+        },
+        {
+         "value": 3,
+         "label": "5%"
+        },
+        {
+         "value": 4,
+         "label": "10%"
+        },
+        {
+         "value": 5,
+         "label": "15%"
+        },
+        {
+         "value": 6,
+         "label": "20%"
+        },
+        {
+         "value": 7,
+         "label": "25%"
+        },
+        {
+         "value": 8,
+         "label": "30%"
+        },
+        {
+         "value": 9,
+         "label": "35%"
+        },
+        {
+         "value": 10,
+         "label": "40%"
+        },
+        {
+         "value": 11,
+         "label": "45%"
+        },
+        {
+         "value": 12,
+         "label": "50%"
+        },
+        {
+         "value": 13,
+         "label": "55%"
+        },
+        {
+         "value": 14,
+         "label": "60%"
+        },
+        {
+         "value": 15,
+         "label": "65%"
+        },
+        {
+         "value": 16,
+         "label": "70%"
+        },
+        {
+         "value": 17,
+         "label": "75%"
+        },
+        {
+         "value": 18,
+         "label": "80%"
+        },
+        {
+         "value": 19,
+         "label": "85%"
+        },
+        {
+         "value": 20,
+         "label": "90%"
+        },
+        {
+         "value": 21,
+         "label": "95%"
+        },
+        {
+         "value": 22,
+         "label": "100%"
+        }
+       ]
+      },
+      {
+       "key": "OnroadScreenOffTimer",
+       "widget": "multiple_button",
+       "title": "熄屏延时",
+       "options": [
+        {
+         "value": 0,
+         "label": "常亮"
+        },
+        {
+         "value": 3,
+         "label": "3 秒"
+        },
+        {
+         "value": 5,
+         "label": "5 秒"
+        },
+        {
+         "value": 10,
+         "label": "10 秒"
+        },
+        {
+         "value": 15,
+         "label": "15 秒"
+        },
+        {
+         "value": 30,
+         "label": "30 秒"
+        },
+        {
+         "value": 60,
+         "label": "1 分钟"
+        },
+        {
+         "value": 180,
+         "label": "3 分钟"
+        },
+        {
+         "value": 300,
+         "label": "5 分钟"
+        },
+        {
+         "value": 600,
+         "label": "10 分钟"
+        }
+       ],
+       "enablement": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "any",
+          "conditions": [
+           {
+            "type": "param",
+            "key": "OnroadScreenOffBrightness",
+            "equals": 0
+           },
+           {
+            "type": "param",
+            "key": "OnroadScreenOffBrightness",
+            "equals": 1
+           }
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "key": "InteractivityTimeout",
+       "widget": "multiple_button",
+       "title": "交互超时",
+       "options": [
+        {
+         "value": 0,
+         "label": "默认"
+        },
+        {
+         "value": 10,
+         "label": "10 秒"
+        },
+        {
+         "value": 20,
+         "label": "20 秒"
+        },
+        {
+         "value": 30,
+         "label": "30 秒"
+        },
+        {
+         "value": 40,
+         "label": "40 秒"
+        },
+        {
+         "value": 50,
+         "label": "50 秒"
+        },
+        {
+         "value": 60,
+         "label": "1 分钟"
+        },
+        {
+         "value": 70,
+         "label": "1 分钟"
+        },
+        {
+         "value": 80,
+         "label": "1 分钟"
+        },
+        {
+         "value": 90,
+         "label": "1 分钟"
+        },
+        {
+         "value": 100,
+         "label": "1 分钟"
+        },
+        {
+         "value": 110,
+         "label": "1 分钟"
+        },
+        {
+         "value": 120,
+         "label": "2 分钟"
+        }
+       ]
+      },
+      {
+       "key": "ScreenSaverEnabled",
+       "widget": "toggle",
+       "title": "屏保"
+      },
+      {
+       "key": "ScreenSaverTimeout",
+       "widget": "multiple_button",
+       "title": "屏保时长",
+       "options": [
+        {
+         "value": 60,
+         "label": "1 分钟"
+        },
+        {
+         "value": 120,
+         "label": "2 分钟"
+        },
+        {
+         "value": 180,
+         "label": "3 分钟"
+        },
+        {
+         "value": 240,
+         "label": "4 分钟"
+        },
+        {
+         "value": 300,
+         "label": "5 分钟"
+        },
+        {
+         "value": 360,
+         "label": "6 分钟"
+        },
+        {
+         "value": 420,
+         "label": "7 分钟"
+        },
+        {
+         "value": 480,
+         "label": "8 分钟"
+        },
+        {
+         "value": 540,
+         "label": "9 分钟"
+        },
+        {
+         "value": 600,
+         "label": "10 分钟"
+        }
+       ],
+       "enablement": [
+        {
+         "type": "param",
+         "key": "ScreenSaverEnabled",
+         "equals": true
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "visuals",
+   "label": "视觉",
+   "icon": "visuals",
+   "order": 4,
+   "sections": [
+    {
+     "id": "hud_elements",
+     "title": "HUD 元素",
+     "items": [
+      {
+       "key": "BlindSpot",
+       "widget": "toggle",
+       "title": "显示盲区预警"
+      },
+      {
+       "key": "TorqueBar",
+       "widget": "toggle",
+       "title": "转向弧"
+      },
+      {
+       "key": "ShowTurnSignals",
+       "widget": "toggle",
+       "title": "显示转向灯"
+      },
+      {
+       "key": "RoadNameToggle",
+       "widget": "toggle",
+       "title": "显示路名",
+       "visibility": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "capability",
+          "field": "device_type",
+          "equals": "mici"
+         }
+        }
+       ]
+      },
+      {
+       "key": "StandstillTimer",
+       "widget": "toggle",
+       "title": "静止计时器",
+       "visibility": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "capability",
+          "field": "device_type",
+          "equals": "mici"
+         }
+        }
+       ]
+      },
+      {
+       "key": "RocketFuel",
+       "widget": "toggle",
+       "title": "实时加速度条",
+       "visibility": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "capability",
+          "field": "device_type",
+          "equals": "mici"
+         }
+        }
+       ]
+      },
+      {
+       "key": "ChevronInfo",
+       "widget": "option",
+       "title": "箭头下方显示信息",
+       "options": [
+        {
+         "value": 0,
+         "label": "关闭"
+        },
+        {
+         "value": 1,
+         "label": "距离"
+        },
+        {
+         "value": 2,
+         "label": "车速"
+        },
+        {
+         "value": 3,
+         "label": "时间"
+        },
+        {
+         "value": 4,
+         "label": "全部"
+        }
+       ],
+       "visibility": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "capability",
+          "field": "device_type",
+          "equals": "mici"
+         }
+        }
+       ],
+       "enablement": [
+        {
+         "type": "capability",
+         "field": "has_longitudinal_control",
+         "equals": true
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "developer_ui",
+     "title": "调试显示",
+     "visibility": [
+      {
+       "type": "not",
+       "condition": {
+        "type": "capability",
+        "field": "device_type",
+        "equals": "mici"
+       }
+      }
+     ],
+     "items": [
+      {
+       "key": "DevUIInfo",
+       "widget": "option",
+       "title": "调试界面",
+       "options": [
+        {
+         "value": 0,
+         "label": "关闭"
+        },
+        {
+         "value": 1,
+         "label": "底部"
+        },
+        {
+         "value": 2,
+         "label": "右侧"
+        },
+        {
+         "value": 3,
+         "label": "右侧和底部"
+        }
+       ]
+      },
+      {
+       "key": "TrueVEgoUI",
+       "widget": "toggle",
+       "title": "车速表：始终显示真实车速"
+      },
+      {
+       "key": "HideVEgoUI",
+       "widget": "toggle",
+       "title": "车速表：行车界面隐藏"
+      }
+     ]
+    },
+    {
+     "id": "alerts_extras",
+     "title": "提示与特效",
+     "items": [
+      {
+       "key": "GreenLightAlert",
+       "widget": "toggle",
+       "title": "绿灯提醒 (Beta)"
+      },
+      {
+       "key": "LeadDepartAlert",
+       "widget": "toggle",
+       "title": "前车起步提醒 (Beta)"
+      },
+      {
+       "key": "RainbowMode",
+       "widget": "toggle",
+       "title": "特斯拉彩虹模式"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "toggles",
+   "label": "通用",
+   "icon": "toggles",
+   "order": 5,
+   "sections": [
+    {
+     "id": "core_toggles",
+     "title": "",
+     "items": [
+      {
+       "key": "IsMetric",
+       "widget": "toggle",
+       "title": "使用公制单位"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "device",
+   "label": "设备",
+   "icon": "device",
+   "order": 6,
+   "sections": [
+    {
+     "id": "general",
+     "title": "通用",
+     "items": [
+      {
+       "key": "OffroadMode",
+       "widget": "toggle",
+       "title": "强制离线模式"
+      },
+      {
+       "key": "DeviceBootMode",
+       "widget": "option",
+       "title": "唤醒行为",
+       "options": [
+        {
+         "value": 0,
+         "label": "标准"
+        },
+        {
+         "value": 1,
+         "label": "始终离线"
+        }
+       ]
+      },
+      {
+       "key": "QuietMode",
+       "widget": "toggle",
+       "title": "安静模式"
+      },
+      {
+       "key": "OnroadUploads",
+       "widget": "toggle",
+       "title": "行车上传"
+      },
+      {
+       "key": "MaxTimeOffroad",
+       "widget": "option",
+       "title": "离线最长时间",
+       "options": [
+        {
+         "value": 0,
+         "label": "常亮"
+        },
+        {
+         "value": 5,
+         "label": "5 分钟"
+        },
+        {
+         "value": 10,
+         "label": "10 分钟"
+        },
+        {
+         "value": 15,
+         "label": "15 分钟"
+        },
+        {
+         "value": 30,
+         "label": "30 分钟"
+        },
+        {
+         "value": 60,
+         "label": "1 小时"
+        },
+        {
+         "value": 120,
+         "label": "2 小时"
+        },
+        {
+         "value": 180,
+         "label": "3h"
+        },
+        {
+         "value": 300,
+         "label": "5 小时"
+        },
+        {
+         "value": 600,
+         "label": "10 小时"
+        },
+        {
+         "value": 1440,
+         "label": "24 小时"
+        },
+        {
+         "value": 1800,
+         "label": "30 小时（默认）"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "software",
+   "label": "软件",
+   "icon": "software",
+   "order": 7,
+   "sections": [
+    {
+     "id": "updates",
+     "title": "更新",
+     "items": [
+      {
+       "key": "DisableUpdates",
+       "widget": "toggle",
+       "title": "禁用更新",
+       "enablement": [
+        {
+         "type": "offroad_only"
+        },
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "developer",
+   "label": "开发者",
+   "icon": "developer",
+   "order": 9,
+   "sections": [
+    {
+     "id": "connectivity",
+     "title": "连接",
+     "items": [
+      {
+       "key": "AdbEnabled",
+       "widget": "toggle",
+       "blocked": true,
+       "title": "启用 ADB",
+       "enablement": [
+        {
+         "type": "offroad_only"
+        }
+       ]
+      },
+      {
+       "key": "SshEnabled",
+       "widget": "toggle",
+       "blocked": true,
+       "title": "启用 SSH"
+      },
+      {
+       "key": "JoystickDebugMode",
+       "widget": "toggle",
+       "title": "摇杆调试模式",
+       "enablement": [
+        {
+         "type": "offroad_only"
+        }
+       ]
+      },
+      {
+       "key": "AlphaLongitudinalEnabled",
+       "widget": "toggle",
+       "needs_onroad_cycle": true,
+       "title": "sunnypilot 纵向控制 (Alpha)",
+       "visibility": [
+        {
+         "type": "all",
+         "conditions": [
+          {
+           "type": "capability",
+           "field": "alpha_long_available",
+           "equals": true
+          },
+          {
+           "type": "not",
+           "condition": {
+            "type": "capability",
+            "field": "has_icbm",
+            "equals": true
+           }
+          }
+         ]
+        }
+       ],
+       "enablement": [
+        {
+         "type": "not_engaged"
+        }
+       ]
+      },
+      {
+       "key": "ShowDebugInfo",
+       "widget": "toggle",
+       "title": "界面调试模式"
+      }
+     ]
+    },
+    {
+     "id": "advanced_services",
+     "title": "高级设置",
+     "items": [
+      {
+       "key": "ShowAdvancedControls",
+       "widget": "toggle",
+       "title": "显示高级选项"
+      },
+      {
+       "key": "EnableGithubRunner",
+       "widget": "toggle",
+       "title": "GitHub Runner 服务",
+       "visibility": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "capability",
+          "field": "is_sp_release",
+          "equals": true
+         }
+        }
+       ],
+       "enablement": [
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "EnableCopyparty",
+       "widget": "toggle",
+       "title": "copyparty 文件服务",
+       "enablement": [
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "QuickBootToggle",
+       "widget": "toggle",
+       "title": "快速启动模式",
+       "visibility": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "any",
+          "conditions": [
+           {
+            "type": "capability",
+            "field": "is_sp_release",
+            "equals": true
+           },
+           {
+            "type": "capability",
+            "field": "is_development",
+            "equals": true
+           }
+          ]
+         }
+        }
+       ],
+       "enablement": [
+        {
+         "type": "param",
+         "key": "DisableUpdates",
+         "equals": true
+        },
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "models",
+   "label": "模型",
+   "icon": "models",
+   "order": 10,
+   "sections": [
+    {
+     "id": "model_behavior",
+     "title": "模型行为",
+     "items": [
+      {
+       "key": "LaneTurnDesire",
+       "widget": "toggle",
+       "title": "使用转向意愿"
+      },
+      {
+       "key": "LaneTurnValue",
+       "widget": "option",
+       "title": "转向意愿速度",
+       "min": 0,
+       "max": 20,
+       "step": 1,
+       "unit": {
+        "metric": "km/h",
+        "imperial": "mph"
+       },
+       "enablement": [
+        {
+         "type": "param",
+         "key": "LaneTurnDesire",
+         "equals": true
+        },
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "LagdToggle",
+       "widget": "toggle",
+       "title": "在线学习转向延迟"
+      },
+      {
+       "key": "LagdToggleDelay",
+       "widget": "option",
+       "title": "软件延迟",
+       "min": 0.05,
+       "max": 0.5,
+       "step": 0.01,
+       "enablement": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "param",
+          "key": "LagdToggle",
+          "equals": true
+         }
+        },
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "lateral_control",
+     "title": "横向控制",
+     "items": [
+      {
+       "key": "NeuralNetworkLateralControl",
+       "widget": "toggle",
+       "title": "神经网络横向控制 (NNLC)",
+       "visibility": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "capability",
+          "field": "steer_control_type",
+          "equals": "angle"
+         }
+        }
+       ],
+       "enablement": [
+        {
+         "type": "offroad_only"
+        },
+        {
+         "type": "capability",
+         "field": "torque_allowed",
+         "equals": true
+        },
+        {
+         "type": "param",
+         "key": "EnforceTorqueControl",
+         "equals": false
+        },
+        {
+         "type": "param",
+         "key": "LateralJerkTorqueController",
+         "equals": false
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "camera",
+     "title": "相机",
+     "items": [
+      {
+       "key": "CameraOffset",
+       "widget": "option",
+       "title": "相机偏移",
+       "min": -0.35,
+       "max": 0.35,
+       "step": 0.01,
+       "unit": "meters",
+       "enablement": [
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
+      }
+     ]
+    }
+   ]
   }
+ ],
+ "vehicle_settings": {
+  "hyundai": {
+   "title": "现代 / 起亚 / 捷尼赛思",
+   "items": [
+    {
+     "key": "HyundaiLongitudinalTuning",
+     "widget": "multiple_button",
+     "title": "自定义纵向整定",
+     "options": [
+      {
+       "value": 0,
+       "label": "关闭"
+      },
+      {
+       "value": 1,
+       "label": "动态"
+      },
+      {
+       "value": 2,
+       "label": "预测"
+      }
+     ],
+     "visibility": [
+      {
+       "type": "capability",
+       "field": "hyundai_alpha_long_available",
+       "equals": true
+      }
+     ],
+     "enablement": [
+      {
+       "type": "offroad_only"
+      },
+      {
+       "type": "capability",
+       "field": "has_longitudinal_control",
+       "equals": true
+      }
+     ]
+    }
+   ]
+  },
+  "subaru": {
+   "title": "斯巴鲁",
+   "items": [
+    {
+     "key": "SubaruStopAndGo",
+     "widget": "toggle",
+     "title": "走走停停 (Beta)",
+     "enablement": [
+      {
+       "type": "offroad_only"
+      },
+      {
+       "type": "capability",
+       "field": "has_stop_and_go",
+       "equals": true
+      }
+     ]
+    },
+    {
+     "key": "SubaruStopAndGoManualParkingBrake",
+     "widget": "toggle",
+     "title": "手刹车型走走停停 (Beta)",
+     "enablement": [
+      {
+       "type": "offroad_only"
+      },
+      {
+       "type": "capability",
+       "field": "has_stop_and_go",
+       "equals": true
+      }
+     ]
+    }
+   ]
+  },
+  "tesla": {
+   "title": "特斯拉",
+   "items": [
+    {
+     "key": "TeslaCoopSteering",
+     "widget": "toggle",
+     "title": "协同转向 (Beta)",
+     "enablement": [
+      {
+       "type": "offroad_only"
+      }
+     ]
+    },
+    {
+     "key": "TeslaMadsScreenButton",
+     "widget": "multiple_button",
+     "title": "MADS 屏幕手势",
+     "options": [
+      {
+       "value": 0,
+       "label": "关闭"
+      },
+      {
+       "value": 1,
+       "label": "三指"
+      },
+      {
+       "value": 2,
+       "label": "四指"
+      },
+      {
+       "value": 3,
+       "label": "五指"
+      }
+     ],
+     "visibility": [
+      {
+       "type": "capability",
+       "field": "tesla_has_vehicle_bus",
+       "equals": true
+      }
+     ],
+     "enablement": [
+      {
+       "type": "offroad_only"
+      }
+     ]
+    }
+   ]
+  },
+  "toyota": {
+   "title": "丰田 / 雷克萨斯",
+   "items": [
+    {
+     "key": "ToyotaEnforceStockLongitudinal",
+     "widget": "toggle",
+     "needs_onroad_cycle": true,
+     "title": "强制原厂纵向控制",
+     "enablement": [
+      {
+       "type": "not_engaged"
+      }
+     ]
+    },
+    {
+     "key": "ToyotaStopAndGoHack",
+     "widget": "toggle",
+     "needs_onroad_cycle": true,
+     "title": "走走停停增强 (Alpha)",
+     "enablement": [
+      {
+       "type": "not_engaged"
+      },
+      {
+       "type": "capability",
+       "field": "has_longitudinal_control",
+       "equals": true
+      },
+      {
+       "type": "param",
+       "key": "ToyotaEnforceStockLongitudinal",
+       "equals": false
+      }
+     ]
+    }
+   ]
+  }
+ }
 }
