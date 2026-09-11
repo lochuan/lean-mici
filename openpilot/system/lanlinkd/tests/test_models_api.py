@@ -33,10 +33,20 @@ class FakeParams:
 
 
 def bundle(ref, name, folder="", index=0, gen=1):
+  # overrides 用**字典**形态，与设备上 ModelManager_ModelsCache 的真实结构一致
+  # （实测 {"folder": "Legacy Models", "lat": ".0", "long": ".3"}）。
+  # 之前这里写成 [{key,value}] 列表，把 _folder 的解析 bug 给掩盖住了。
   return {"ref": ref, "display_name": name, "short_name": name.lower().replace(" ", "_"),
           "index": index, "generation": gen, "environment": "release",
           "runner": "snpe", "is_20hz": False, "minimum_selector_version": 19,
-          "overrides": ([{"key": "folder", "value": folder}] if folder else [])}
+          "overrides": ({"folder": folder, "lat": ".0", "long": ".3"} if folder else {})}
+
+
+def bundle_capnp_overrides(ref, name, folder, index=0):
+  """overrides 的另一种形态：capnp 的 bundle.overrides 是 [{key,value}] 列表。"""
+  b = bundle(ref, name, index=index)
+  b["overrides"] = [{"key": "folder", "value": folder}]
+  return b
 
 
 def cache_param(*bundles):
@@ -71,6 +81,30 @@ class TestModelsState:
     b0 = st["bundles"][0]
     assert b0["displayName"] == "Model B" and b0["folder"] == "2026 World" and b0["fav"] is False
     assert b0["index"] == 2 and b0["runner"] == "snpe"
+
+  def test_folder_parsed_from_dict_overrides(self):
+    """overrides 是字典时也要取到分组名。
+
+    设备实测就是这种形态。解析错的后果不是少个字段：分组名全空，
+    77 个模型会挤进一个没有名字的组，等于没有分组。
+    """
+    raw = cache_param(bundle("r1", "M1", folder="Legacy Models", index=1))
+    p = FakeParams(data={"ModelManager_ModelsCache": raw})
+    st = models_api.models_state(p, None, "/nonexistent")
+    assert st["bundles"][0]["folder"] == "Legacy Models"
+
+  def test_folder_parsed_from_capnp_list_overrides(self):
+    # capnp 侧的 bundle.overrides 是 [{key,value}]，两种都要兼容
+    raw = cache_param(bundle_capnp_overrides("r1", "M1", "2026 World Models", index=1))
+    p = FakeParams(data={"ModelManager_ModelsCache": raw})
+    st = models_api.models_state(p, None, "/nonexistent")
+    assert st["bundles"][0]["folder"] == "2026 World Models"
+
+  def test_missing_overrides_yields_empty_folder(self):
+    raw = cache_param(bundle("r1", "M1", index=1))
+    p = FakeParams(data={"ModelManager_ModelsCache": raw})
+    st = models_api.models_state(p, None, "/nonexistent")
+    assert st["bundles"][0]["folder"] == ""
 
   def test_string_version_fields_from_manifest(self):
     # 设备实测：manifest 的 minimum_selector_version/generation 是字符串

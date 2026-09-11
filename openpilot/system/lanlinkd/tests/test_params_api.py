@@ -23,7 +23,10 @@ class FakeStore:
     self.versions = 0
 
   def all_keys(self):
-    return list(self.data.keys())
+    # 真 Params.all_keys() 返回的是 params_keys.h 的**静态注册表**，与有没有
+    # 设过值无关（设备实测：IsMetric 在 all_keys 里，但 get() 是 None）。
+    # 所以这里要把"已注册但未赋值"的 key 也算进来，否则测不出未设置态的行为。
+    return list({**{k: None for k in self.types}, **self.data}.keys())
 
   def get(self, key, block=False, return_default=False):
     k = key.encode() if isinstance(key, str) else key
@@ -180,6 +183,43 @@ class TestReadAll:
     assert "LanLinkParamsVersion" not in all_params
     assert "GithubSshKeys" not in all_params
     json.dumps(all_params)
+
+  def test_unset_bool_reports_zero_not_absent(self):
+    """已注册但未赋值的 BOOL 要报 "0"，不能省略。
+
+    设备实测：80 个 schema key 里有 17 个处于这种状态（IsMetric、
+    ExperimentalMode、EnforceTorqueControl…）。省略的话前端拿不到值，
+    "关闭"和"该 param 不存在"就分不开了，而后者会被渲染成禁用态。
+    device 侧到处用 params.get_bool()，它把未设置当 False，所以 "0"
+    才是真实语义。
+    """
+    s = FakeStore(initial={}, types={"ExperimentalMode": BOOL, "IsMetric": BOOL})
+    all_params = read_all(s)
+    assert all_params["ExperimentalMode"] == "0"
+    assert all_params["IsMetric"] == "0"
+
+  def test_unset_non_bool_stays_absent(self):
+    # 非 BOOL 没有可推导的默认值，猜一个反而会误导 UI
+    s = FakeStore(initial={}, types={"SomeText": STRING, "SomeNum": INT})
+    all_params = read_all(s)
+    assert "SomeText" not in all_params
+    assert "SomeNum" not in all_params
+
+
+class TestReadUnsetParam:
+  def test_unset_bool_reads_as_zero(self):
+    s = FakeStore(initial={}, types={"ExperimentalMode": BOOL})
+    assert read_param(s, "ExperimentalMode") == (200, "0")
+
+  def test_unset_non_bool_is_404(self):
+    s = FakeStore(initial={}, types={"SomeText": STRING})
+    code, _ = read_param(s, "SomeText")
+    assert code == 404
+
+  def test_unregistered_key_is_still_404(self):
+    s = FakeStore(initial={}, types={"ExperimentalMode": BOOL})
+    code, _ = read_param(s, "NotAParam")
+    assert code == 404
 
 
 class TestTypedRoundsTrip:

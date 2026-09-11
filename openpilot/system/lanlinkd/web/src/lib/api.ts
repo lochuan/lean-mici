@@ -6,7 +6,9 @@
  *  - 401 表示 token 失效（如设备侧改过密码会 revoke_all），要回登录页
  *  - blocked param 返回 403 而非静默跳过（与上游不同，见 FRONTEND_SPEC.md §1）
  */
-import type { Capabilities, ModelsState, ParamValues, SettingsSchema, StatusSnapshot } from "./schema";
+import type {
+  Capabilities, ModelsState, ParamValues, SettingsSchema, StatusSnapshot, VehicleState,
+} from "./schema";
 
 const TOKEN_KEY = "lanlink_token";
 
@@ -93,6 +95,11 @@ export const api = {
   refreshModels: () => post<null>("/api/models/refresh"),
   clearModelCache: () => post<null>("/api/models/clear_cache"),
   favModel: (ref: string, on: boolean) => post<null>("/api/models/fav", { ref, on }),
+
+  // ---- vehicle ----
+  vehicle: () => request<VehicleState>("/api/vehicle"),
+  // 空 name = 清除手动指定，回到自动识别
+  selectVehicle: (name: string) => post<null>("/api/vehicle/select", { name }),
 
   // ---- logs ----
   logs: () => request<unknown>("/api/logs"),

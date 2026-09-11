@@ -134,6 +134,14 @@ def read_all(store) -> dict[str, str]:
     value = store.get(key)
     if value is not None:
       out[k] = _value_to_api(value, type_name(store.get_type(key)))
+      continue
+    # 未设置过的 BOOL 要显式报成 "0"，不能整条省略。
+    # 设备侧到处用 params.get_bool()，它把"未设置"当 False（common/params.py），
+    # 所以 "0" 才是这个 param 的真实语义。省略的话前端分不清"关"和"不存在"：
+    # 本机 17/80 个 schema key 就是未设置状态，其中 ExperimentalMode、
+    # EnforceTorqueControl 还控制着整个子面板的进入条件。
+    if type_name(store.get_type(key)) == "BOOL":
+      out[k] = "0"
   return out
 
 
@@ -148,6 +156,10 @@ def read_param(store, key: str) -> tuple[int, str | None]:
     return 404, None
   value = store.get(key)
   if value is None:
+    # key 存在但没设过值。BOOL 报 "0"（与 get_bool 的语义一致，也与 read_all 一致）；
+    # 其他类型没有可推导的默认值，仍按"无内容"处理。
+    if type_name(store.get_type(key)) == "BOOL":
+      return 200, "0"
     return 404, None
   return 200, _value_to_api(value, type_name(store.get_type(key)))
 

@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -63,6 +64,45 @@ class TestFrontendPackagingBoundary(unittest.TestCase):
     """别把整个 lanlinkd 一起排除掉了。"""
     self.assertIn("openpilot/system/lanlinkd/lanlinkd.py", self.payload)
     self.assertIn("openpilot/system/lanlinkd/settings_ui.json", self.payload)
+
+
+class TestFrontendBuildIsCurrent(unittest.TestCase):
+  """产物随 git 提交，就必须防住"改了源码忘了构建"。
+
+  这个失败模式很安静：release 照常打包，设备上跑的是旧界面，没有任何报错。
+  """
+
+  def test_dist_matches_committed_sources(self):
+    r = subprocess.run(
+      ["python3", str(REPO_ROOT / "tools/build_lanlink_web.py"), "--check"],
+      cwd=REPO_ROOT, capture_output=True, text=True,
+    )
+    self.assertEqual(r.returncode, 0, f"前端产物与源码不一致：\n{r.stdout}\n{r.stderr}")
+
+  def test_build_hash_ships_with_the_release(self):
+    # 指纹文件本身要发到设备，否则设备上无从校验
+    self.assertIn("openpilot/system/lanlinkd/static/.build-hash", release_payload())
+
+  def test_no_orphaned_assets_are_tracked(self):
+    """assets/ 里不该有 index.html 没引用的文件。
+
+    Vite 文件名带内容 hash，而 outDir 是 emptyOutDir:false，旧产物会堆积。
+    一旦被 git add，就会**永久**随每个 release 发到设备，还带 immutable
+    长缓存。tools/build_lanlink_web.py 会在构建后清理。
+    """
+    static = REPO_ROOT / "openpilot/system/lanlinkd/static"
+    index = (static / "index.html").read_text()
+    referenced = set(re.findall(r"/assets/([A-Za-z0-9._\-]+)", index))
+    self.assertTrue(referenced, "index.html 没有引用任何 assets")
+
+    tracked_assets = {
+      Path(p).name for p in tracked_files()
+      if p.startswith("openpilot/system/lanlinkd/static/assets/")
+    }
+    self.assertEqual(
+      tracked_assets - referenced, set(),
+      "存在已失效但仍被 git 跟踪的产物；运行 tools/build_lanlink_web.py --build",
+    )
 
 
 if __name__ == "__main__":

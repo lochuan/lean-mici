@@ -26,6 +26,7 @@ from openpilot.system.lanlinkd import logs as logs_mod
 from openpilot.system.lanlinkd import models_api
 from openpilot.system.lanlinkd import params_api
 from openpilot.system.lanlinkd import settings as settings_mod
+from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd.auth import (
   MIN_PASSWORD_LEN, LoginThrottle, SessionStore, hash_password, verify_password)
 from openpilot.system.lanlinkd.statusd import StatusCache
@@ -186,6 +187,19 @@ class LanlinkApp:
     code, msg = models_api.set_fav(self.params, str(body.get("ref", "")), bool(body.get("on")))
     return (empty(status=204) if code == 204 else _json_error(code, msg))
 
+  # ---- vehicle（指纹 / 平台选择）----
+  async def vehicle_get(self, request: Request) -> HTTPResponse:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    return json_response(vehicle_api.vehicle_state(self.params))
+
+  async def vehicle_select(self, request: Request) -> HTTPResponse:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    name = str(self._body(request).get("name", ""))
+    code, msg = vehicle_api.select_platform(self.params, name)
+    return (empty(status=204) if code == 204 else _json_error(code, msg))
+
   # ---- status / capabilities / settings / logs ----
   async def status(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
@@ -257,6 +271,8 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/models/refresh", "models_refresh"),
   ("POST", "/api/models/clear_cache", "models_clear_cache"),
   ("POST", "/api/models/fav", "models_fav"),
+  ("GET", "/api/vehicle", "vehicle_get"),
+  ("POST", "/api/vehicle/select", "vehicle_select"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/capabilities", "capabilities"),
   ("GET", "/api/settings_ui", "settings_ui"),

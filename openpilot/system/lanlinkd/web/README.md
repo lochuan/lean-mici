@@ -27,6 +27,9 @@
 - `vite`、`@vitejs/plugin-vue` — 打包；产物直接写到 `../static/`。
 - `tailwindcss`、`@tailwindcss/vite` — 样式（v4，配置在 CSS 里，无 JS config）。
 - `typescript`、`vue-tsc`、`@types/node` — 类型检查（`npm run build` 前置）。
+  TypeScript **锁在 `~5.9`**：`vue-tsc` 3.x 只声明 `typescript >=5.0`，
+  于是 npm 会装上 7.x，而 7.x 移除了 `lib/tsc` 入口，`vue-tsc` 直接
+  `ERR_PACKAGE_PATH_NOT_EXPORTED` 崩掉。放宽这个版本会让类型检查失效。
 - `vitest` — 单测。
 
 **UI**
@@ -49,5 +52,18 @@ npm test                    # 单测
 npm run build               # 类型检查 + 构建到 ../static/
 ```
 
-改完前端**必须** `npm run build` 并把 `../static/` 的产物一起提交，
-否则设备上跑的还是旧界面。
+## 提交前必做
+
+产物随 git 提交，所以改完前端要把**源码和产物一起**提交：
+
+```bash
+git add openpilot/system/lanlinkd/web          # 先暂存源码（指纹按 git 索引算）
+tools/build_lanlink_web.py --build             # 构建 + 写 static/.build-hash
+git add openpilot/system/lanlinkd/static
+```
+
+`tools/build_lanlink_web.py --check` 会比对 `static/.build-hash` 与源码指纹，
+不一致即报错；`tools/release/test_release_files.py` 在测试里跑这个检查。
+
+这道防护是必要的：忘记构建不会有任何报错，release 照常打包，
+只是设备上跑的还是旧界面。

@@ -40,7 +40,17 @@ def _bundles_from_cache(cache) -> list[dict]:
 
 
 def _folder(b: dict) -> str:
-  return next((o.get("value", "") for o in b.get("overrides", []) or []
+  """取分组名（车内 UI 也按它分组，见 ui/sunnypilot/mici/layouts/models.py）。
+
+  overrides 在缓存 JSON 里是**字典**（实测：{"folder": "Legacy Models",
+  "lat": ".0", "long": ".3"}），不是 [{key,value}] 列表。而 capnp 的
+  bundle.overrides 才是带 .key/.value 的列表——两种形态都要认，否则分组名
+  全是空字符串，77 个模型会挤成一个没有名字的组。
+  """
+  ov = b.get("overrides") or {}
+  if isinstance(ov, dict):
+    return str(ov.get("folder", "") or "")
+  return next((o.get("value", "") for o in ov
                if isinstance(o, dict) and o.get("key") == "folder"), "")
 
 

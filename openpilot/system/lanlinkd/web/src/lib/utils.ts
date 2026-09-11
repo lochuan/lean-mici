@@ -6,6 +6,15 @@ export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
+/** schema 里少数单位是英文单词而非符号（"second"、"meters"），
+ *  在中文界面里紧跟数字显示很别扭（"0second"）。只改显示，不动 schema。 */
+const UNIT_LABELS: Record<string, string> = {
+  second: "秒",
+  seconds: "秒",
+  meters: "米",
+  meter: "米",
+};
+
 /** 单位解析：字符串或 {metric, imperial}，后者跟随 IsMetric 切换。
  *
  * 两种形态都在真实 schema 里出现（CameraOffset 用 "meters"，
@@ -16,8 +25,8 @@ export function resolveUnit(
   metric: boolean,
 ): string {
   if (!unit) return "";
-  if (typeof unit === "string") return unit;
-  return metric ? unit.metric : unit.imperial;
+  const raw = typeof unit === "string" ? unit : metric ? unit.metric : unit.imperial;
+  return UNIT_LABELS[raw] ?? raw;
 }
 
 /** 滑块数值显示：按 step 推断小数位，避免 0.30000000000000004 */
@@ -26,26 +35,4 @@ export function formatSliderValue(value: number, step: number | undefined): stri
   if (Number.isInteger(s) && Number.isInteger(value)) return String(value);
   const decimals = (String(s).split(".")[1] ?? "").length;
   return value.toFixed(decimals);
-}
-
-export function formatTemp(c: number | undefined): string {
-  return c === undefined ? "--" : `${c.toFixed(0)}°C`;
-}
-
-/** km/h 或 mph，输入是 m/s */
-export function formatSpeed(ms: number | undefined, metric: boolean): string {
-  if (ms === undefined) return "--";
-  return metric ? `${(ms * 3.6).toFixed(0)} km/h` : `${(ms * 2.236936).toFixed(0)} mph`;
-}
-
-export function formatBytes(n: number | undefined): string {
-  if (!n) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let v = n;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i += 1;
-  }
-  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }

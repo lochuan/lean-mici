@@ -2,11 +2,19 @@
 import json
 
 
+def _mark_item(item: dict, key_exists) -> None:
+  key = item.get("key")
+  if key and not key_exists(key):
+    item["_missing"] = True
+  # sub_items 是行内展开的子设置（如 BlinkerPauseLateralControl 的两个滑块），
+  # 也要检查：漏标的话前端会当它可用，写入时才 404。
+  for child in item.get("sub_items", []):
+    _mark_item(child, key_exists)
+
+
 def _walk_items(node: dict, key_exists) -> None:
   for item in node.get("items", []):
-    key = item.get("key")
-    if key and not key_exists(key):
-      item["_missing"] = True
+    _mark_item(item, key_exists)
   for sub in node.get("sub_panels", []):
     _walk_items(sub, key_exists)
 
