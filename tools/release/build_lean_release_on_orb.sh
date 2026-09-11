@@ -174,7 +174,7 @@ git worktree add --detach /tmp/opilot-release $BUILD_BRANCH
 # 必须靠设备端 build.py 首启构建（/data/scons_cache 有缓存，很快）。
 # loggerd 同理排除：容器版链接容器 ffmpeg（libav*.so.61），AGNOS 上无对应库（实测 exit 127 起不来），
 # 交由设备端 build.py 原生链接重建。
-(cd $HOME/opilot && { find . \( -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0; python3 tools/release/elf_find.py; } | grep -zv -E \"^\./openpilot/system/loggerd/(loggerd|encoderd)$\" | tar --null -T - -cf -) | tar -x -C /tmp/opilot-release
+(cd \$HOME/opilot && { find . \( -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0; python3 tools/release/elf_find.py; } | grep -zv -F -e './openpilot/system/loggerd/loggerd' -e './openpilot/system/loggerd/encoderd' | tar --null -T - -cf -) | tar -x -C /tmp/opilot-release
 # 产物兜底校验：缺失说明叠加失败，拒绝推裸源码 release
 test -f /tmp/opilot-release/openpilot/common/libparams_c.so || { echo \"FATAL: build artifact overlay failed\"; exit 1; }
 # 回归守卫：被裁剪/ABI 不兼容的二进制不得混入 release
