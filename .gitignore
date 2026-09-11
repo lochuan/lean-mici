@@ -104,3 +104,6 @@ SKILL.md
 !.idea/customTargets.xml
 !.idea/tools/*
 !.run/*
+
+# local worktrees
+.worktrees/
