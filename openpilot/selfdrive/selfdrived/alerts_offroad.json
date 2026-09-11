@@ -24,6 +24,10 @@
     "text": "Poor visibility detected for driver monitoring. Ensure the device has a clear view of the driver. This can be checked in the device settings. Extreme lighting conditions and/or unconventional mounting positions may also trigger this alert.",
     "severity": 0
   },
+  "Offroad_ModelUnavailable": {
+    "text": "Driving model failed to load, so openpilot cannot start. %1",
+    "severity": 1
+  },
   "Offroad_ExcessiveActuation": {
     "text": "Excessive %1 actuation detected on your last drive. Please visit https://community.sunnypilot.ai/ and share your device's Dongle ID for troubleshooting.",
     "severity": 1,

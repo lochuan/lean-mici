@@ -39,6 +39,11 @@ from tinygrad.engine.jit import TinyJit
 NV12Frame = namedtuple("NV12Frame", ['width', 'height', 'stride', 'y_height', 'uv_height', 'size'])
 MODELD_INPUTS = ['img_q', 'big_img_q', 'feat_q', 'desire_q', 'packed_npy_inputs']
 
+# Split models (vision + policy compiled separately) expose two JITs instead of a
+# single fused run_model: a per-camera-resolution warp and a shared run_policy.
+WARP_INPUTS = ['tfm', 'big_tfm']
+POLICY_INPUTS = ['img_q', 'big_img_q', 'feat_q', 'desire_q', 'packed_npy_inputs']
+
 
 def nv12_copy_size(stride: int, y_height: int, uv_height: int) -> int:
   # Retain the padded Y and UV plane storage, but skip the trailing kernel/guard allocation.
@@ -113,15 +118,101 @@ def make_frame_prepare(nv12: NV12Frame, model_w, model_h):
   return frame_prepare_tinygrad
 
 
-def get_policy_npy_shapes(input_shapes):
-  dp = input_shapes['desire_pulse']  # (1, 25, 8)
-  tc = input_shapes['traffic_convention']  # (1, 2)
-  at = input_shapes['action_t']  # (1, 2)
-  fb = input_shapes['features_buffer']  # (1, T-1, ...) e.g. (1, 24, 32, 512) with spatial features
-  feat_dim = math.prod(fb[2:])
+def _detect_desire_key(shapes):
+  """Supercombo calls it 'desire_pulse', split models call it 'desire'."""
+  return next((key for key in shapes if key.startswith('desire')), None)
+
+
+def _detect_vision_keys(shapes):
+  """Return (road_key, wide_key) for the narrow and wide camera inputs."""
+  img_keys = sorted(key for key in shapes if 'img' in key)
+  return (
+    next((key for key in img_keys if 'big' not in key), None),
+    next((key for key in img_keys if 'big' in key), None),
+  )
+
+
+def derive_frame_skip(vision_input_shapes, policy_input_shapes):
+  """Models carrying a full-rate features buffer (>=99 entries) run without temporal skipping."""
+  features_buffer = policy_input_shapes.get('features_buffer')
+  return 1 if not features_buffer or features_buffer[1] >= 99 else 4
+
+
+def get_policy_npy_shapes(input_shapes, is_supercombo=False):
+  # Ordering matters: run_model/run_policy split the packed buffer positionally.
+  # For supercombo this yields desire, traffic_convention, action_t, prev_feat.
+  desire_key = _detect_desire_key(input_shapes)
+  if desire_key is None:
+    raise ValueError("Desire key missing from input shapes.")
+
+  shapes = {'desire': (input_shapes[desire_key][2],)}
+  for key, shape in input_shapes.items():
+    if key != desire_key and key != 'features_buffer' and 'img' not in key:
+      shapes[key] = tuple(shape)
+
   # TODO prev_feat shouldn't exist and be handled inside the JIT, but corrupt on QCOM for now
-  shapes = {'desire': (dp[2],), 'traffic_convention': tuple(tc), 'action_t': tuple(at), 'prev_feat': (fb[0], feat_dim)}
+  if is_supercombo and 'features_buffer' in input_shapes:
+    fb = input_shapes['features_buffer']  # (1, T-1, ...) e.g. (1, 24, 32, 512) with spatial features
+    shapes['prev_feat'] = (fb[0], math.prod(fb[2:]))
+
   return shapes, [math.prod(s) for s in shapes.values()]
+
+
+def generate_queues_and_npy(input_shapes, frame_skip, device=None, is_supercombo=False):
+  """Allocate the runtime input queues and the numpy views used to refill them.
+
+  Unlike make_input_queues (supercombo, frames packed into one buffer for the
+  fused run_model JIT), split models warp frames separately, so no frame views
+  are returned here and tfm/big_tfm are exposed as their own NPY tensors.
+  """
+  device = Device.DEFAULT if device is None else device
+
+  road_key, _ = _detect_vision_keys(input_shapes)
+  if not road_key:
+    raise ValueError("Vision road key missing from input shapes.")
+  img_shape = input_shapes[road_key]
+  n_frames = img_shape[1] // 6
+  img_buf_shape = (frame_skip * (n_frames - 1) + 1, 6, img_shape[2], img_shape[3])
+
+  desire_key = _detect_desire_key(input_shapes)
+  if not desire_key:
+    raise ValueError("Desire key missing from input shapes.")
+  desire_shape = input_shapes[desire_key]
+
+  npy_arrays = {'tfm': np.zeros((3, 3), dtype=np.float32), 'big_tfm': np.zeros((3, 3), dtype=np.float32)}
+
+  shapes, sizes = get_policy_npy_shapes(input_shapes, is_supercombo=is_supercombo)
+  packed_npy_inputs = np.zeros(sum(sizes), dtype=np.float32)
+  split_views = np.split(packed_npy_inputs, np.cumsum(sizes[:-1]))
+  for (k, s), v in zip(shapes.items(), split_views, strict=True):
+    npy_arrays[k] = v.reshape(s)
+
+  queues = {
+    'img_q': Tensor(np.zeros(img_buf_shape, dtype=np.uint8), device=device).contiguous().realize(),
+    'big_img_q': Tensor(np.zeros(img_buf_shape, dtype=np.uint8), device=device).contiguous().realize(),
+    'desire_q': Tensor(np.zeros((frame_skip * desire_shape[1], desire_shape[0], desire_shape[2]),
+                                dtype=np.float32), device=device).contiguous().realize(),
+    'packed_npy_inputs': Tensor(packed_npy_inputs, device='NPY').realize(),
+  }
+
+  if (features_buffer := input_shapes.get('features_buffer')) is not None:
+    feat_dim = math.prod(features_buffer[2:])
+    # Supercombo feeds prev_feat explicitly; split models append the current frame's
+    # feature inside the JIT, so they need one extra slot instead of a full stride.
+    feat_q_len = frame_skip * features_buffer[1] if is_supercombo else frame_skip * (features_buffer[1] - 1) + 1
+    queues['feat_q'] = Tensor(np.zeros((feat_q_len, features_buffer[0], feat_dim),
+                                       dtype=np.float32), device=device).contiguous().realize()
+
+  queues.update({k: Tensor(npy_arrays[k], device='NPY').realize() for k in WARP_INPUTS})
+  return queues, npy_arrays
+
+
+def make_split_input_queues(vision_input_shapes, policy_input_shapes, frame_skip, device=None):
+  return generate_queues_and_npy({**vision_input_shapes, **policy_input_shapes}, frame_skip, device, is_supercombo=False)
+
+
+def make_supercombo_input_queues(input_shapes, frame_skip, device=None):
+  return generate_queues_and_npy(input_shapes, frame_skip, device, is_supercombo=True)
 
 
 def make_input_queues(input_shapes, frame_skip, device, frame_copy_size):
@@ -132,7 +223,7 @@ def make_input_queues(input_shapes, frame_skip, device, frame_copy_size):
   n_frames = img[1] // 6
   img_buf_shape = (frame_skip * (n_frames - 1) + 1, 6, img[2], img[3])
 
-  policy_shapes, _ = get_policy_npy_shapes(input_shapes)
+  policy_shapes, _ = get_policy_npy_shapes(input_shapes, is_supercombo=True)
   shapes = {'tfm': (3, 3), 'big_tfm': (3, 3)} | policy_shapes
   sizes = [math.prod(s) for s in shapes.values()]
   packed_npy_size = sum(sizes) * np.dtype(np.float32).itemsize
@@ -185,7 +276,7 @@ def make_warp(nv12, model_w, model_h):
 def make_run_policy(model_runner, model_metadata, frame_skip):
   sample_desire_fn = partial(sample_desire, frame_skip=frame_skip)
   sample_skip_fn = partial(sample_skip, frame_skip=frame_skip)
-  npy_shapes, npy_sizes = get_policy_npy_shapes(model_metadata['input_shapes'])
+  npy_shapes, npy_sizes = get_policy_npy_shapes(model_metadata['input_shapes'], is_supercombo=True)
   model_input_dtypes = {name: spec.dtype for name, spec in model_runner.graph_inputs.items()}
 
   def run_policy(warped, img_q, big_img_q, feat_q, desire_q, packed_npy_inputs):
@@ -214,7 +305,7 @@ def make_run_policy(model_runner, model_metadata, frame_skip):
 
 
 def make_run_model(warp, run_policy, model_metadata, frame_copy_size):
-  _, policy_sizes = get_policy_npy_shapes(model_metadata['input_shapes'])
+  _, policy_sizes = get_policy_npy_shapes(model_metadata['input_shapes'], is_supercombo=True)
   packed_npy_size = (18 + sum(policy_sizes)) * np.dtype(np.float32).itemsize
 
   def run_model(img_q, big_img_q, feat_q, desire_q, packed_npy_inputs):

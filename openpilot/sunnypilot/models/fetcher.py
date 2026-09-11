@@ -95,7 +95,10 @@ class ModelParser:
 
   @staticmethod
   def parse_models(json_data: dict) -> list[custom.ModelManagerSP.ModelBundle]:
-    found_bundles = [ModelParser._parse_bundle(bundle) for bundle in json_data.get("bundles", [])]
+    # Big (1B/chestnut) models are not supported by this build's modeld, and
+    # is_big is dropped by _parse_bundle, so filter on the raw JSON here.
+    bundles = [b for b in json_data.get("bundles", []) if not b.get("is_big", False)]
+    found_bundles = [ModelParser._parse_bundle(bundle) for bundle in bundles]
     return [bundle for bundle in found_bundles if is_bundle_version_compatible(bundle.to_dict())]
 
 

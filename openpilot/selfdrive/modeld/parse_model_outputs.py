@@ -17,6 +17,25 @@ def softmax(x, axis=-1):
   x /= np.sum(x, axis=axis, keepdims=True)
   return x
 
+def _infer_mhp(slice_size: int, prod_out_shape: int, max_in_n: int = 16, max_out_n: int = 6) -> tuple[int, int]:
+  """Infer (in_N, out_N) for an MDN output from its raw size.
+
+  Each hypothesis contributes 2*prod (mu + std) values, plus out_n weights.
+  Split models ship multi-hypothesis heads (e.g. plan with 5 hypotheses) whose
+  layout isn't known ahead of time; returns (1, 0) for a plain single-hypothesis
+  output, which reproduces the non-MHP path exactly.
+  """
+  for out_n in range(max_out_n + 1):
+    per = 2 * prod_out_shape + out_n
+    if per <= 0:
+      continue
+    if slice_size % per == 0:
+      in_n = slice_size // per
+      if 1 <= in_n <= max_in_n:
+        return in_n, out_n
+  return 1, 0
+
+
 class Parser:
   def __init__(self, ignore_missing=False):
     self.ignore_missing = ignore_missing
@@ -41,10 +60,12 @@ class Parser:
     raw = outs[name]
     outs[name] = sigmoid(raw)
 
-  def parse_mdn(self, name, outs, in_N=0, out_N=1, out_shape=()):
+  def parse_mdn(self, name, outs, in_N=0, out_N=1, out_shape=(), infer_mhp=False):
     if self.check_missing(outs, name):
       return
     raw = outs[name]
+    if infer_mhp:
+      in_N, out_N = _infer_mhp(raw.shape[1], int(np.prod(out_shape)))
     raw = raw.reshape((raw.shape[0], max(in_N, 1), -1))
 
     n_values = (raw.shape[2] - out_N)//2
@@ -110,8 +131,12 @@ class Parser:
     return outs
 
   def parse_policy_outputs(self, outs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
-    self.parse_mdn('plan', outs, in_N=0, out_N=0, out_shape=(ModelConstants.IDX_N, ModelConstants.PLAN_WIDTH))
+    # Split models vary in hypothesis count per head, so infer it from the slice size.
+    self.parse_mdn('plan', outs, in_N=0, out_N=0, out_shape=(ModelConstants.IDX_N, ModelConstants.PLAN_WIDTH), infer_mhp=True)
     self.parse_categorical_crossentropy('desire_state', outs, out_shape=(ModelConstants.DESIRE_PRED_WIDTH,))
+    if 'desired_curvature' in outs:
+      self.parse_mdn('desired_curvature', outs, in_N=0, out_N=0,
+                     out_shape=(ModelConstants.DESIRED_CURV_WIDTH,), infer_mhp=True)
     return outs
 
   def parse_outputs(self, outs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
