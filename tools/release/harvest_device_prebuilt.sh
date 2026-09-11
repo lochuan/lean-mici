@@ -45,6 +45,24 @@ for f in $files; do
     echo "FATAL: $f missing on device; device build.py 没跑过？" >&2
     exit 1
   fi
+  # Provenance gate. A release overlay installs prebuilt binaries onto the
+  # device, so "it is on the device" does NOT mean "the device built it". If a
+  # cross-built ELF was shipped, the device keeps it (the `prebuilt` marker makes
+  # build.py skip rebuilding) and harvesting would pull that same bad binary back
+  # into the next release -- a self-perpetuating loop.
+  #
+  # A cross-built artifact has $HOME/.comma paths compiled in (see PC_PATH_MARKER
+  # in release_lib.py). This shipped a PC-built pandad that read
+  # /home/comma/.comma/params instead of /data/params, so the OBD multiplexing
+  # handshake never completed and the car sat at "sunnypilot unavailable".
+  if ssh -o BatchMode=yes "$DEVICE" "strings /data/openpilot/$f 2>/dev/null | grep -q '/\.comma'"; then
+    echo "FATAL: $f on device is CROSS-BUILT (has \$HOME/.comma paths), not device-built." >&2
+    echo "       Harvesting it would ship a broken binary. On the device run:" >&2
+    echo "         rm -f /data/openpilot/prebuilt" >&2
+    echo "         cd /data/openpilot && SKIP_TINYGRAD_COMPILE=1 scons -j4" >&2
+    echo "       then re-run this script." >&2
+    exit 1
+  fi
   mkdir -p "$DEST/$(dirname "$f")"
   scp -q -o BatchMode=yes "$DEVICE:/data/openpilot/$f" "$DEST/$f"
 done

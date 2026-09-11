@@ -6,7 +6,7 @@
 # 容器构建源码与 panda 固件；native ELF 运行时产物一律不来自容器，
 # 只从 release/prebuilt/arm64 里经过校验后overlay：
 #   - 容器持久层：工具链 + uv venv 只装一次（首次 init），之后复用
-#   - 每次构建：git 干净同步 + 清构建产物 + scons -j$(nproc)
+#   - 每次构建：git 干净同步 + 清构建产物 + scons（只编可交叉的目标）
 #   - SKIP_TINYGRAD_COMPILE=1（模型 pkl 必须在设备上编，见下）
 #   - 构建产物推 lean-release 分支（设备自己 checkout lean-release 跑）
 #
@@ -19,6 +19,12 @@
 # 并由 release_lib.py 校验（ELF 查架构，pkl 查 sha256）后 overlay。
 #
 # 可以交叉编译的：纯 Python、capnp 生成物、panda 固件（裸 .bin，不依赖 ABI）。
+#
+# 容器不再跑全量 scons。原因：SConstruct 靠构建机的 /AGNOS 判断 arch，容器里
+# 没有 → __COMMA_HARDWARE__ 不定义 → hw.h 编译期选 Hardware::PC() 分支 →
+# 把 $HOME/.comma/params 编进二进制。这种 ELF 架构合法，is_arm64_elf() 查不出，
+# 曾导致 pandad 读错 params 目录、OBD 握手死锁、实车 "unavailable"。
+# 现在 release_lib.py 的 PC 路径守卫会拒绝任何含 /.comma 的 native 产物。
 #
 # 防陈旧机制：release_lib.py 的 NATIVE_INPUT_PATHS 把上述产物的全部构建输入
 # （含 driving_supercombo.onnx、compile_modeld.py、tinygrad_repo）纳入 native_hash。
@@ -132,8 +138,24 @@ rm -f .sconsign.dblite 2>/dev/null || true
 echo "[clean] build artifacts removed"
 '
 
-# --- 4. scons 构建（SKIP_TINYGRAD_COMPILE 跳过 tinygrad ONNX bug）---
-echo "[-] scons build T=$SECONDS"
+# --- 4. scons 构建（只做可交叉编译的产物；native ELF 一律来自设备）---
+#
+# 为什么不再跑全量 `scons -j$(nproc)`：
+# SConstruct 用构建机上的 /AGNOS 来决定 arch（COMMA_HARDWARE），容器里没有
+# /AGNOS，于是 __COMMA_HARDWARE__ 不定义，common/hardware/hw.h 在编译期选中
+# Hardware::PC() 分支，把 "$HOME/.comma/params" 编进二进制（设备上应是
+# /data/params）。这种产物依然是合法的 ARM64 ELF，is_arm64_elf() 查不出来。
+#
+# 2026-09-11 实车故障就是这么来的：容器编的 pandad 读
+# /home/comma/.comma/params/d/，而 card 写 /data/params/d/，OBD multiplexing
+# 握手永远完不成 → sendcan=0，VIN/FW 一条没发 → CarParams 永不发布 →
+# selfdrived/controlsd/plannerd/radard 全卡在 waiting for CarParams →
+# 屏幕停在 "sunnypilot unavailable, waiting to start"。
+#
+# 所以容器只构建不依赖 ABI 的东西：capnp 代码生成（纯 Python 导入需要）。
+# 全部 native ELF/.so 与模型 pkl 由设备构建，经 harvest_device_prebuilt.sh
+# 取回、release_lib.py 校验（含 PC 路径守卫）后 overlay。
+echo "[-] scons build (cross-safe targets only) T=$SECONDS"
 $SSH '
 set -e
 export PATH="$HOME/.local/bin:$PATH"
@@ -141,8 +163,9 @@ cd "$HOME/opilot"
 source "$HOME/venv/bin/activate"
 export PYTHONPATH="$HOME/opilot"
 export SKIP_TINYGRAD_COMPILE=1
-time scons -j$(nproc)
-echo "[build] scons OK"
+# capnp 代码生成：纯代码生成，无 ABI 耦合，设备端 Python 导入依赖它。
+time scons -j$(nproc) openpilot/cereal/
+echo "[build] scons (cereal/capnp) OK"
 '
 
 # --- 5. panda build（debug，匹配 AGNOS 当前 panda）---

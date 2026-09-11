@@ -116,6 +116,32 @@ def compute_native_hash(repo_root: Path, commit: str) -> str:
   return hashed.strip()
 
 
+# Marker proving an artifact was built with __COMMA_HARDWARE__ undefined.
+#
+# common/hardware/hw.h selects paths at COMPILE time. With __COMMA_HARDWARE__ the
+# Hardware::PC() branch is dead and paths are "/data/params" / "/data/media".
+# Without it the binary bakes in Path::comma_home() == "$HOME/.comma".
+# SConstruct defines that flag only when the BUILD MACHINE has /AGNOS, so a
+# container build silently produces PC paths while still being a valid ARM64 ELF.
+#
+# This is how a container-built pandad reached a car: it read
+# /home/comma/.comma/params/d/ while card wrote /data/params/d/, so the OBD
+# multiplexing handshake never completed, no CarParams was ever published, and
+# the UI sat at "sunnypilot unavailable, waiting to start".
+#
+# is_arm64_elf() cannot catch this (a container ARM64 build passes), so every
+# native artifact is additionally screened for this marker.
+PC_PATH_MARKER = b"/.comma"
+
+
+def has_pc_paths(path: Path) -> bool:
+  """Return True when a native artifact has PC (non-device) paths compiled in."""
+  try:
+    return PC_PATH_MARKER in path.read_bytes()
+  except OSError:
+    return False
+
+
 def is_arm64_elf(path: Path) -> bool:
   """Return True when ``path`` is a 64-bit little-endian ARM ELF."""
   try:
@@ -185,6 +211,12 @@ def validate_artifact(path: Path, expected_sha256: str | None = None, require_el
     return False, f"missing artifact: {path}"
   if require_elf and not is_arm64_elf(path):
     return False, f"not an ARM64 ELF: {path}"
+  if require_elf and has_pc_paths(path):
+    return False, (
+      f"PC-built artifact (contains {PC_PATH_MARKER.decode()} path): {path}; "
+      "it was cross-built without __COMMA_HARDWARE__ and would read "
+      "$HOME/.comma/params instead of /data/params. Rebuild it on the device."
+    )
   if expected_sha256 is not None:
     actual = sha256_file(path)
     if actual != expected_sha256:

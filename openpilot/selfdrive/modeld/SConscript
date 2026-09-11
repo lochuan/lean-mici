@@ -69,8 +69,13 @@ if not os.getenv('SKIP_TINYGRAD_COMPILE'):
   file_prefix, cmd_flags = ('', tg_flags)
   driving_onnx_deps = get_existing_chunks(File(f"models/{file_prefix}driving_supercombo.onnx").abspath)
   camera_res_args = ' '.join(f'{cw}x{ch}' for cw, ch in camera_configs)
-  # CPU 7 is isolated with isolcpus on AGNOS, so explicitly pin the compiler to it.
-  taskset = 'taskset -c 7 ' if arch == 'comma_arm64' else ''
+  # Upstream pins this to CPU 7, which AGNOS isolates via isolcpus=6,7 on the
+  # comma 3X. mici keeps CPUs 4-7 powered down unless the device is on 12V, and
+  # `taskset -c 7` then fails outright ("Invalid argument"), taking the whole pkl
+  # build down with it. CPU 4 comes back online on 12V and is outside the
+  # isolcpus set, so the compile shares it with the rest of the system: slightly
+  # less parallelism, but it actually runs. Build the pkl on 12V power.
+  taskset = 'taskset -c 4 ' if arch == 'comma_arm64' else ''
   cmd = (f'{cmd_flags} {mac_brew_string} {taskset}python3 {modeld_dir}/compile_modeld.py '
          f'--model-size {model_w}x{model_h} '
          f'--camera-resolutions {camera_res_args} '

@@ -238,6 +238,40 @@ class TestManifestAndArtifactValidation(unittest.TestCase):
       self.assertFalse(ok)
       self.assertIn("ARM64", reason)
 
+  def test_validate_artifact_rejects_cross_built_arm64_elf(self):
+    """A container-built ARM64 ELF must be rejected.
+
+    SConstruct defines __COMMA_HARDWARE__ only when the BUILD MACHINE has
+    /AGNOS. Cross-building without it makes common/hardware/hw.h bake in
+    Path::comma_home() ("$HOME/.comma/params") instead of "/data/params".
+    Such a binary is a perfectly valid ARM64 ELF, so is_arm64_elf() passes it --
+    that is exactly how a PC-built pandad shipped and deadlocked the OBD
+    multiplexing handshake on a real car.
+    """
+    with tempfile.TemporaryDirectory() as td:
+      p = Path(td) / "pandad"
+      p.write_bytes(elf_bytes(183) + b"\x00/home/comma/.comma/params\x00")
+      self.assertTrue(is_arm64_elf(p), "precondition: arch check alone passes")
+      ok, reason = validate_artifact(p)
+      self.assertFalse(ok)
+      self.assertIn("PC-built", reason)
+
+  def test_validate_artifact_accepts_device_built_arm64_elf(self):
+    """A device-built ELF has no $HOME/.comma paths and must pass."""
+    with tempfile.TemporaryDirectory() as td:
+      p = Path(td) / "pandad"
+      p.write_bytes(elf_bytes(183) + b"\x00/data/params\x00")
+      ok, reason = validate_artifact(p)
+      self.assertTrue(ok, reason)
+
+  def test_pc_path_marker_not_applied_to_data_artifacts(self):
+    """The PC-path screen is ELF-only: the pkl may legitimately contain paths."""
+    with tempfile.TemporaryDirectory() as td:
+      p = Path(td) / "driving_tinygrad.pkl.chunk01of02"
+      p.write_bytes(b"pickled kernels /.comma whatever")
+      ok, reason = validate_artifact(p, require_elf=False)
+      self.assertTrue(ok, reason)
+
 
 class TestDataArtifacts(unittest.TestCase):
   """The driving model pkl ships as a non-ELF prebuilt: checksum-verified only.
