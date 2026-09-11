@@ -183,6 +183,8 @@ test ! -e /tmp/opilot-release/openpilot/system/loggerd/loggerd || { echo \"FATAL
 # 回收产物 overlay：设备原生构建的 camerad/loggerd（camerad 容器构建不出；
 # loggerd 容器版 ABI 不兼容已在上面排除）。native 源码树哈希未变 → 随 release 发
 # prebuilt 标记，设备开机跳过 build.py（省 ~9s）；哈希不匹配 → 回退设备端首启原生重建。
+# 不发 prebuilt 时写标记文件，脚本结尾（mac 端）会再醒目提醒 harvest 流程。
+rm -f /tmp/opilot-no-prebuilt
 PREBUILT_DIR=release/prebuilt/arm64
 if [ -f /tmp/opilot-release/\$PREBUILT_DIR/MANIFEST ]; then
   want=\$(grep '^native_hash=' /tmp/opilot-release/\$PREBUILT_DIR/MANIFEST | cut -d= -f2)
@@ -194,6 +196,7 @@ if [ -f /tmp/opilot-release/\$PREBUILT_DIR/MANIFEST ]; then
     touch /tmp/opilot-release/prebuilt
     echo \"[release] prebuilt shipped (native sources unchanged)\"
   else
+    touch /tmp/opilot-no-prebuilt
     echo \"[release] WARN: native sources changed since harvest, no prebuilt (device rebuilds on first boot)\"
   fi
 fi
@@ -219,3 +222,23 @@ git worktree remove --force /tmp/opilot-release 2>/dev/null || true
 "
 
 echo "=== done T=$SECONDS ==="
+
+# --- 7. 结尾汇总：native 源码变了而没发 prebuilt 时，醒目提醒 harvest 流程 ---
+if $SSH 'test -f /tmp/opilot-no-prebuilt' 2>/dev/null; then
+  cat <<'BANNER'
+
+********************************************************************************
+*  ⚠️  本次 release 未包含 prebuilt（native 源码自上次回收后有改动）
+*
+*  后果：设备更新后首次开机，build.py 会原生重建 camerad/loggerd（慢一次）。
+*  恢复快速启动，设备首启完成后执行：
+*
+*    1. ./tools/release/harvest_device_prebuilt.sh
+*    2. git add release/prebuilt && git commit -m "release: re-harvest prebuilts"
+*       && git push fork lean-master
+*    3. ./tools/release/build_lean_release_on_orb.sh     # 重建，恢复 prebuilt
+*
+*  （不改 native 代码的日常构建不受影响）
+********************************************************************************
+BANNER
+fi
