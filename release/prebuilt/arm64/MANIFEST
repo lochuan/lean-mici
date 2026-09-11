@@ -1,5 +1,5 @@
-source_commit=437cd7cf87b1ae5dcb422b6a2200808628c9ff56
-device_release=240dd80512be47017f6050632e809018d0e22cac
+source_commit=6bf3872706f4e35b44e252f17449e2d46e34af42
+device_release=17b3899719a2be366c0f9ab53753e54918cb88d1
 native_hash=704f661eb8fa8075a44ad385d11943ee40e6bee8
-harvested_at=2026-09-11T12:08:54Z
-files=openpilot/system/camerad/camerad openpilot/system/loggerd/loggerd
+harvested_at=2026-09-11T12:57:46Z
+files=openpilot/system/camerad/camerad openpilot/system/loggerd/loggerd openpilot/common/libparams_c.so
