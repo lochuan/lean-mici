@@ -97,5 +97,38 @@ class TestReleaseLibArtifactSet(unittest.TestCase):
     self.assertEqual(set(release_lib.ARTIFACT_PATHS), expected)
 
 
+class TestRelocatableRpaths(unittest.TestCase):
+  """Harvested ELFs must not depend on absolute build-machine paths.
+
+  locationd shipped with RUNPATH baked to the build dir
+  (/home/kevin/opilot/.../models/generated), so on the device it could not find
+  liblive.so and exited 127. Library search paths that must resolve inside the
+  install tree have to be expressed as $ORIGIN-relative.
+  """
+
+  SCONSCRIPTS = (
+    "openpilot/sunnypilot/selfdrive/locationd/SConscript",
+    "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/SConscript",
+  )
+
+  def test_sconscripts_use_origin_relative_rpath(self):
+    repo = Path(__file__).resolve().parents[2]
+    checked = 0
+    for rel in self.SCONSCRIPTS:
+      path = repo / rel
+      if not path.exists():
+        continue
+      checked += 1
+      for i, line in enumerate(path.read_text().splitlines(), 1):
+        if "RPATH" not in line or line.lstrip().startswith("#"):
+          continue
+        # An RPATH built from Dir(...).abspath bakes in the build machine's layout.
+        self.assertNotIn(
+          ".abspath", line,
+          f"{rel}:{i} builds an absolute RPATH; use $ORIGIN instead: {line.strip()}",
+        )
+    self.assertTrue(checked, "no SConscripts found to check")
+
+
 if __name__ == "__main__":
   unittest.main()
