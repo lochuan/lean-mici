@@ -172,14 +172,13 @@ git worktree add --detach /tmp/opilot-release $BUILD_BRANCH
 # 产物 tracked 进 release 分支：设备 OTA 的 git clean -xdff 会删未跟踪/被忽略文件（updated.py fetch_update）。
 # 注意：不推 prebuilt——camerad 等 comma_arm64 专属可执行文件容器构建不出（无 /AGNOS、无 QCOM 相机栈），
 # 必须靠设备端 build.py 首启构建（/data/scons_cache 有缓存，很快）。
-# loggerd 同理排除：容器版链接容器 ffmpeg（libav*.so.61），AGNOS 上无对应库（实测 exit 127 起不来），
-# 交由设备端 build.py 原生链接重建。
-(cd \$HOME/opilot && { find . \( -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0; python3 tools/release/elf_find.py; } | grep -zv -F -e './openpilot/system/loggerd/loggerd' -e './openpilot/system/loggerd/encoderd' | tar --null -T - -cf -) | tar -x -C /tmp/opilot-release
-# 产物兜底校验：缺失说明叠加失败，拒绝推裸源码 release
-test -f /tmp/opilot-release/openpilot/common/libparams_c.so || { echo \"FATAL: build artifact overlay failed\"; exit 1; }
-# 回归守卫：被裁剪/ABI 不兼容的二进制不得混入 release
+# loggerd 和 libparams_c.so 同理排除：前者链接容器 ffmpeg（libav*.so.61），后者未定义
+# __COMMA_HARDWARE__ 而错误地读 PC 参数目录。两者由设备端原生构建并通过 prebuilt 回收。
+(cd \$HOME/opilot && { find . \( -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0; python3 tools/release/elf_find.py; } | grep -zv -F -e './openpilot/system/loggerd/loggerd' -e './openpilot/system/loggerd/encoderd' -e './openpilot/common/libparams_c.so' | tar --null -T - -cf -) | tar -x -C /tmp/opilot-release
+# 回归守卫：被裁剪/ABI 不兼容的容器二进制不得混入 release。
 test ! -e /tmp/opilot-release/openpilot/system/loggerd/encoderd || { echo \"FATAL: stale encoderd leaked into release\"; exit 1; }
 test ! -e /tmp/opilot-release/openpilot/system/loggerd/loggerd || { echo \"FATAL: container loggerd leaked into release\"; exit 1; }
+test ! -e /tmp/opilot-release/openpilot/common/libparams_c.so || { echo \"FATAL: container libparams leaked into release\"; exit 1; }
 # 回收产物 overlay：设备原生构建的 camerad/loggerd（camerad 容器构建不出；
 # loggerd 容器版 ABI 不兼容已在上面排除）。native 源码树哈希未变 → 随 release 发
 # prebuilt 标记，设备开机跳过 build.py（省 ~9s）；哈希不匹配 → 回退设备端首启原生重建。
@@ -190,10 +189,11 @@ if [ -f /tmp/opilot-release/\$PREBUILT_DIR/MANIFEST ]; then
   want=\$(grep '^native_hash=' /tmp/opilot-release/\$PREBUILT_DIR/MANIFEST | cut -d= -f2)
   have=\$(\$HOME/opilot/tools/release/prebuilt_native_hash.sh HEAD)
   if [ \"\$want\" = \"\$have\" ]; then
-    for f in openpilot/system/camerad/camerad openpilot/system/loggerd/loggerd; do
+    for f in openpilot/system/camerad/camerad openpilot/system/loggerd/loggerd openpilot/common/libparams_c.so; do
       cp /tmp/opilot-release/\$PREBUILT_DIR/\$f /tmp/opilot-release/\$f
     done
     touch /tmp/opilot-release/prebuilt
+    test -f /tmp/opilot-release/openpilot/common/libparams_c.so || { echo \"FATAL: device libparams missing from prebuilt\"; exit 1; }
     echo \"[release] prebuilt shipped (native sources unchanged)\"
   else
     touch /tmp/opilot-no-prebuilt
