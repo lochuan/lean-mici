@@ -3,9 +3,10 @@
 # build_lean_release_on_orb.sh — OrbStack 容器构建 lean release（mac 上跑）
 #
 # 镜像官方 tools/release/build_release.sh 流程，用 OrbStack Ubuntu 24.04 ARM64
-# 容器构建（和 AGNOS 同 distro/GLIBC，产物直接可上设备）：
+# 容器构建源码与 panda 固件；native ELF 运行时产物一律不来自容器，
+# 只从 release/prebuilt/arm64 里经过校验后overlay：
 #   - 容器持久层：工具链 + uv venv 只装一次（首次 init），之后复用
-#   - 每次构建：git 干净同步 + 清构建产物（.o/.so/__pycache__）+ scons -j$(nproc)
+#   - 每次构建：git 干净同步 + 清构建产物 + scons -j$(nproc)
 #   - SKIP_TINYGRAD_COMPILE=1（tinygrad ONNX 解析 bug，模型用 CI 预构建）
 #   - 构建产物推 lean-release 分支（设备自己 checkout lean-release 跑）
 #
@@ -143,17 +144,21 @@ echo "[build] panda OK"
 #     否则设备端 submodule update --init 拿到的是 fork 里旧的/缺失的 .so/.bin ---
 echo "[-] submodule artifact guard T=$SECONDS"
 $SSH '
-cd $HOME/opilot
+set -e
+cd "$HOME/opilot"
 status=0
 for sm in msgq_repo opendbc_repo panda rednose_repo tinygrad_repo; do
   dirty=$(git -C "$sm" status --porcelain | grep -E "\.so$|\.bin$|\.bin\.signed$|\.elf$" || true)
   if [ -n "$dirty" ]; then
-    echo "[warn] submodule $sm 构建产物未提交进 fork 仓库（设备端拿不到）："
-    echo "$dirty"
+    echo "[FATAL] submodule $sm 构建产物未提交进 fork 仓库（设备端拿不到）：" >&2
+    echo "$dirty" >&2
     status=1
   fi
 done
-echo "[guard] submodule artifact check done (status=$status)"
+if [ "$status" -ne 0 ]; then
+  exit "$status"
+fi
+echo "[guard] submodule artifact check OK"
 '
 
 # --- 6. push lean-release 分支（容器 worktree 出 release commit）---
@@ -162,80 +167,73 @@ $SSH "
 set -e
 set -o pipefail
 cd \$HOME/opilot
+
 # worktree 隔离 release commit（不污染 dev 树）
 if git worktree remove --force /tmp/opilot-release 2>/dev/null; then :; fi
 git worktree prune
 git update-ref -d refs/heads/$BUILD_BRANCH 2>/dev/null || true
 git update-ref refs/heads/$BUILD_BRANCH HEAD
 git worktree add --detach /tmp/opilot-release $BUILD_BRANCH
-# 叠加构建产物：全部 ELF（含无后缀 daemon、版本化 .so.X）+ panda 固件 .bin/.bin.signed（裸二进制非 ELF）。
-# 产物 tracked 进 release 分支：设备 OTA 的 git clean -xdff 会删未跟踪/被忽略文件（updated.py fetch_update）。
-# 注意：不推 prebuilt——camerad 等 comma_arm64 专属可执行文件容器构建不出（无 /AGNOS、无 QCOM 相机栈），
-# 必须靠设备端 build.py 首启构建（/data/scons_cache 有缓存，很快）。
-# loggerd 和 libparams_c.so 同理排除：前者链接容器 ffmpeg（libav*.so.61），后者未定义
-# __COMMA_HARDWARE__ 而错误地读 PC 参数目录。两者由设备端原生构建并通过 prebuilt 回收。
-(cd \$HOME/opilot && { find . \( -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0; python3 tools/release/elf_find.py; } | grep -zv -F -e './openpilot/system/loggerd/loggerd' -e './openpilot/system/loggerd/encoderd' -e './openpilot/common/libparams_c.so' | tar --null -T - -cf -) | tar -x -C /tmp/opilot-release
-# 回归守卫：被裁剪/ABI 不兼容的容器二进制不得混入 release。
-test ! -e /tmp/opilot-release/openpilot/system/loggerd/encoderd || { echo \"FATAL: stale encoderd leaked into release\"; exit 1; }
-test ! -e /tmp/opilot-release/openpilot/system/loggerd/loggerd || { echo \"FATAL: container loggerd leaked into release\"; exit 1; }
-test ! -e /tmp/opilot-release/openpilot/common/libparams_c.so || { echo \"FATAL: container libparams leaked into release\"; exit 1; }
-# 回收产物 overlay：设备原生构建的 camerad/loggerd（camerad 容器构建不出；
-# loggerd 容器版 ABI 不兼容已在上面排除）。native 源码树哈希未变 → 随 release 发
-# prebuilt 标记，设备开机跳过 build.py（省 ~9s）；哈希不匹配 → 回退设备端首启原生重建。
-# 不发 prebuilt 时写标记文件，脚本结尾（mac 端）会再醒目提醒 harvest 流程。
+
+# 只 overlay panda 固件（裸二进制，非 ELF，不依赖容器 ABI）。
+# native ELF 运行时产物一律来自 release/prebuilt/arm64，由 release_lib.py 校验。
+(cd \$HOME/opilot && find . \( -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0 | tar --null -T - -cf -) | tar -x -C /tmp/opilot-release
+
 rm -f /tmp/opilot-no-prebuilt
-PREBUILT_DIR=release/prebuilt/arm64
-if [ -f /tmp/opilot-release/\$PREBUILT_DIR/MANIFEST ]; then
-  want=\$(grep '^native_hash=' /tmp/opilot-release/\$PREBUILT_DIR/MANIFEST | cut -d= -f2)
-  have=\$(\$HOME/opilot/tools/release/prebuilt_native_hash.sh HEAD)
-  if [ \"\$want\" = \"\$have\" ]; then
-    for f in openpilot/system/camerad/camerad openpilot/system/loggerd/loggerd openpilot/common/libparams_c.so; do
-      cp /tmp/opilot-release/\$PREBUILT_DIR/\$f /tmp/opilot-release/\$f
-    done
-    touch /tmp/opilot-release/prebuilt
-    test -f /tmp/opilot-release/openpilot/common/libparams_c.so || { echo \"FATAL: device libparams missing from prebuilt\"; exit 1; }
-    echo \"[release] prebuilt shipped (native sources unchanged)\"
-  else
-    touch /tmp/opilot-no-prebuilt
-    echo \"[release] WARN: native sources changed since harvest, no prebuilt (device rebuilds on first boot)\"
-  fi
+if python3 \$HOME/opilot/tools/release/release_lib.py overlay /tmp/opilot-release; then
+  echo \"[release] prebuilt shipped\"
+else
+  echo \"[release] WARN: prebuilt validation failed, shipping source-only release\" >&2
+  touch /tmp/opilot-no-prebuilt
+  rm -rf /tmp/opilot-release/release/prebuilt
 fi
-# release 分支不带回收暂存目录（只带就位后的二进制）
-rm -rf /tmp/opilot-release/release/prebuilt
+
 cd /tmp/opilot-release
-# release commit
 VERSION=\$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' openpilot/sunnypilot/common/version.h | head -1)
 git -c core.compression=0 -c gc.auto=0 add -f .
-git -c core.compression=0 -c gc.auto=0 commit -m \"openpilot v\$VERSION lean release\" || true
+if git diff --cached --quiet; then
+  echo \"[release] no changes to commit\"
+else
+  git -c core.compression=0 -c gc.auto=0 commit -m \"openpilot v\$VERSION lean release\"
+fi
+
 # push 到 fork 的 lean-release 分支（origin = lochuan/lean-mici）
 # 100MB 大 commit，GitHub 可能限流断连，重试 3 次
-# 注意：release commit 在 worktree 的 detached HEAD 上，推 HEAD 而不是 build-mici
+pushed=0
 for i in 1 2 3; do
   if git push -f origin HEAD:$RELEASE_BRANCH 2>&1; then
-    echo \"[release] pushed $RELEASE_BRANCH (attempt $i)\"
+    echo \"[release] pushed $RELEASE_BRANCH (attempt \$i)\"
+    pushed=1
     break
   fi
-  echo \"[release] push attempt $i failed, retrying...\"
+  echo \"[release] push attempt \$i failed, retrying...\" >&2
   sleep 5
 done
+if [ \"\$pushed\" -ne 1 ]; then
+  echo \"FATAL: failed to push $RELEASE_BRANCH after 3 attempts\" >&2
+  git worktree remove --force /tmp/opilot-release 2>/dev/null || true
+  exit 1
+fi
 git worktree remove --force /tmp/opilot-release 2>/dev/null || true
 "
 
 echo "=== done T=$SECONDS ==="
 
-# --- 7. 结尾汇总：native 源码变了而没发 prebuilt 时，醒目提醒 harvest 流程 ---
+# --- 7. 结尾汇总：prebuilt 校验失败时，醒目提醒 harvest 流程 ---
 if $SSH 'test -f /tmp/opilot-no-prebuilt' 2>/dev/null; then
   cat <<'BANNER'
 
 ********************************************************************************
-*  ⚠️  本次 release 未包含 prebuilt（native 源码自上次回收后有改动）
+*  ⚠️  本次 release 未包含 prebuilt（native 产物校验失败或源码已变化）
 *
-*  后果：设备更新后首次开机，build.py 会原生重建 camerad/loggerd（慢一次）。
+*  后果：设备更新后首次开机，build.py 会原生重建全部 native 产物（慢一次）。
 *  恢复快速启动，设备首启完成后执行：
 *
 *    1. ./tools/release/harvest_device_prebuilt.sh
-*    2. git add release/prebuilt && git commit -m "release: re-harvest prebuilts"
-*       && git push fork lean-master
+*    2. git add release/prebuilt
+*       git add -f release/prebuilt/arm64/openpilot/common/libparams_c.so
+*       git commit -m "release: refresh device prebuilts"
+*       git push fork lean-master
 *    3. ./tools/release/build_lean_release_on_orb.sh     # 重建，恢复 prebuilt
 *
 *  （不改 native 代码的日常构建不受影响）
