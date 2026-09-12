@@ -66,8 +66,8 @@ for key in ("ondevice_hash", "alt"):
   entry.pop(key, None)
 if not entry.get("has_ab"):
   raise SystemExit("system must be an A/B partition")
-if not entry.get("sparse"):
-  raise SystemExit("system must use a sparse payload for local flashing")
+if entry.get("sparse"):
+  raise SystemExit("system must use a raw, non-sparse payload for local flashing")
 entry["url"] = f"http://127.0.0.1:{port}/{Path(system_image).name}"
 
 Path(destination).write_text(json.dumps([entry], indent=2) + "\n", encoding="utf-8")
