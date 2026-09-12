@@ -7,6 +7,7 @@
 import { computed } from "vue";
 import {
   Activity,
+  Bluetooth,
   Boxes,
   Car,
   Code2,
@@ -34,6 +35,7 @@ const ICONS: Record<string, unknown> = {
   visuals: Eye,
   toggles: SlidersHorizontal,
   device: Cog,
+  bluetooth: Bluetooth,
   software: Package,
   developer: Code2,
   models: Boxes,

@@ -10,6 +10,8 @@
 SessionStore / LoginThrottle 是**进程内内存状态**。多 worker 下同一 token 只在签发它
 的那个进程有效，登录会随机失效，防爆破计数也会被稀释成 worker 份数倍。
 """
+
+import asyncio
 import json
 import os
 import threading
@@ -22,13 +24,14 @@ from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.hardware.hw import Paths
+from openpilot.sunnypilot.system.bluetooth import BluetoothClient
+from openpilot.system.lanlinkd import bluetooth_api
 from openpilot.system.lanlinkd import logs as logs_mod
 from openpilot.system.lanlinkd import models_api
 from openpilot.system.lanlinkd import params_api
 from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd import vehicle_api
-from openpilot.system.lanlinkd.auth import (
-  MIN_PASSWORD_LEN, LoginThrottle, SessionStore, hash_password, verify_password)
+from openpilot.system.lanlinkd.auth import MIN_PASSWORD_LEN, LoginThrottle, SessionStore, hash_password, verify_password
 from openpilot.system.lanlinkd.radard import RadarCache
 from openpilot.system.lanlinkd.statusd import StatusCache
 
@@ -139,19 +142,19 @@ class LanlinkApp:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     code, value = params_api.read_param(self.params, key)
-    return (json_response({"value": value}) if code == 200 else _json_error(code, "denied"))
+    return json_response({"value": value}) if code == 200 else _json_error(code, "denied")
 
   async def params_put(self, request: Request, key: str) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     code, message = params_api.write_param(self.params, key, str(self._body(request).get("value", "")))
-    return (empty(status=204) if code == 204 else _json_error(code, message))
+    return empty(status=204) if code == 204 else _json_error(code, message)
 
   async def params_delete(self, request: Request, key: str) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     code, _ = params_api.delete_param(self.params, key)
-    return (empty(status=204) if code == 204 else _json_error(code, "denied"))
+    return empty(status=204) if code == 204 else _json_error(code, "denied")
 
   # ---- models ----
   async def models_get(self, request: Request) -> HTTPResponse:
@@ -163,32 +166,32 @@ class LanlinkApp:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     code, msg = models_api.select(self.params, str(self._body(request).get("ref", "")))
-    return (empty(status=204) if code == 204 else _json_error(code, msg))
+    return empty(status=204) if code == 204 else _json_error(code, msg)
 
   async def models_cancel(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     code, msg = models_api.cancel(self.params)
-    return (empty(status=204) if code == 204 else _json_error(code, msg))
+    return empty(status=204) if code == 204 else _json_error(code, msg)
 
   async def models_refresh(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     code, msg = models_api.refresh(self.params)
-    return (empty(status=204) if code == 204 else _json_error(code, msg))
+    return empty(status=204) if code == 204 else _json_error(code, msg)
 
   async def models_clear_cache(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     code, msg = models_api.clear_cache(self.params)
-    return (empty(status=204) if code == 204 else _json_error(code, msg))
+    return empty(status=204) if code == 204 else _json_error(code, msg)
 
   async def models_fav(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
     body = self._body(request)
     code, msg = models_api.set_fav(self.params, str(body.get("ref", "")), bool(body.get("on")))
-    return (empty(status=204) if code == 204 else _json_error(code, msg))
+    return empty(status=204) if code == 204 else _json_error(code, msg)
 
   # ---- vehicle（指纹 / 平台选择）----
   async def vehicle_get(self, request: Request) -> HTTPResponse:
@@ -201,7 +204,30 @@ class LanlinkApp:
       return _json_error(401, "unauthorized")
     name = str(self._body(request).get("name", ""))
     code, msg = vehicle_api.select_platform(self.params, name)
-    return (empty(status=204) if code == 204 else _json_error(code, msg))
+    return empty(status=204) if code == 204 else _json_error(code, msg)
+
+  # ---- bluetooth ----
+  # BluetoothClient 是阻塞 socket IO（status 10s、set_power 引导最长 90s），
+  # 必须丢进线程池：single_process 下阻塞事件循环会让整个 Web UI 冻住。
+  async def bluetooth_get(self, request: Request) -> HTTPResponse:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    code, body = await asyncio.to_thread(
+      bluetooth_api.status_payload, BluetoothClient(timeout=bluetooth_api.BLUETOOTH_TIMEOUT), self.params
+    )
+    return json_response(body, status=code)
+
+  async def bluetooth_operation(self, request: Request, operation: str) -> HTTPResponse:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    code, body = await asyncio.to_thread(
+      bluetooth_api.run_operation,
+      BluetoothClient(timeout=bluetooth_api.BLUETOOTH_TIMEOUT),
+      self.params,
+      operation,
+      self._body(request),
+    )
+    return json_response(body, status=code)
 
   # ---- status / capabilities / settings / logs ----
   async def status(self, request: Request) -> HTTPResponse:
@@ -281,6 +307,8 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/models/fav", "models_fav"),
   ("GET", "/api/vehicle", "vehicle_get"),
   ("POST", "/api/vehicle/select", "vehicle_select"),
+  ("GET", "/api/bluetooth", "bluetooth_get"),
+  ("POST", "/api/bluetooth/<operation:str>", "bluetooth_operation"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/radar", "radar_get"),
   ("GET", "/api/capabilities", "capabilities"),

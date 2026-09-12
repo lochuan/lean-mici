@@ -4,6 +4,7 @@ import { computed, ref, watch } from "vue";
 import SettingSection from "./SettingSection.vue";
 import SubPanelDrawer from "./SubPanelDrawer.vue";
 import SettingRow from "./SettingRow.vue";
+import BluetoothPanel from "./BluetoothPanel.vue";
 import ModelsManager from "./ModelsManager.vue";
 import VehiclePanel from "./VehiclePanel.vue";
 import StatusPanel from "./StatusPanel.vue";
@@ -60,6 +61,8 @@ watch(
     <VehiclePanel v-else-if="panel.id === 'vehicle'" />
     <!-- 状态页：遥测 + 雷达点阵，整个面板都是自定义组件 -->
     <StatusPanel v-else-if="panel.id === 'status'" />
+    <!-- 蓝牙页：配对 / 连接 / 音频输出，走 daemon RPC 的自定义面板 -->
+    <BluetoothPanel v-else-if="panel.id === 'bluetooth'" />
 
     <SettingSection
       v-for="(section, i) in panel.sections"

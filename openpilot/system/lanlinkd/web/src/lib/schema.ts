@@ -223,3 +223,42 @@ export interface ModelsState {
   /** 已下载模型占用空间（MB），用于 Clear Cache 按钮旁提示 */
   cache_size_mb?: number;
 }
+
+/** /api/bluetooth：BluetoothStatus 的序列化形（见 bluetooth_api.status_payload）。
+ *  字段与 sunnypilot/system/bluetooth/protocol.py 的 dataclass 一一对应。 */
+export interface BluetoothDevice {
+  address: string;
+  name: string;
+  paired: boolean;
+  trusted: boolean;
+  connected: boolean;
+  blocked: boolean;
+  rssi: number | null;
+  uuids: string[];
+  audio: boolean;
+  controller: boolean;
+}
+
+/** daemon 的 bluez agent 配对请求（confirmation/authorization 只需确认，
+ *  pin/passkey 需要输入数值；display_only 只展示不响应） */
+export interface BluetoothPrompt {
+  id: string;
+  kind: "confirmation" | "authorization" | "pin" | "passkey" | (string & {});
+  name?: string;
+  value?: string;
+  display_only?: boolean;
+  address?: string;
+}
+
+export interface BluetoothStatus {
+  available: boolean;
+  enabled: boolean;
+  powered: boolean;
+  discovering: boolean;
+  offroad: boolean;
+  selected_audio: string;
+  pairing_address: string;
+  devices: BluetoothDevice[];
+  prompt: BluetoothPrompt | null;
+  error: string;
+}

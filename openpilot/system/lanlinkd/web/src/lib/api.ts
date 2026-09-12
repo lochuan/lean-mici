@@ -7,7 +7,7 @@
  *  - blocked param 返回 403 而非静默跳过（与上游不同，见 FRONTEND_SPEC.md §1）
  */
 import type {
-  Capabilities, ModelsState, ParamValues, RadarSnapshot, SettingsSchema, StatusSnapshot,
+  BluetoothStatus, Capabilities, ModelsState, ParamValues, RadarSnapshot, SettingsSchema, StatusSnapshot,
   VehicleState,
 } from "./schema";
 
@@ -102,6 +102,15 @@ export const api = {
   vehicle: () => request<VehicleState>("/api/vehicle"),
   // 空 name = 清除手动指定，回到自动识别
   selectVehicle: (name: string) => post<null>("/api/vehicle/select", { name }),
+
+  // ---- bluetooth ----
+  // 503 时 body 是 params 推导的降级快照，request 会抛 ApiError（message 即 error 字段）
+  bluetooth: () => request<BluetoothStatus>("/api/bluetooth"),
+  // 操作名与后端 OPERATIONS 对应：power/scan/stop_scan/pair/connect/disconnect/
+  // forget/select_audio/test_audio/pairing_response
+  bluetoothOp: (operation: string, body?: Record<string, unknown>) =>
+    post<{ message?: string; audio_test_delay_ms?: number }>(
+      `/api/bluetooth/${encodeURIComponent(operation)}`, body),
 
   // ---- logs ----
   logs: () => request<unknown>("/api/logs"),

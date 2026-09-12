@@ -117,7 +117,7 @@ class TestPublicSurface:
   @pytest.mark.parametrize("path", [
     "/api/params", "/api/params/_all", "/api/params/TestToggle", "/api/models",
     "/api/status", "/api/capabilities", "/api/settings_ui", "/api/logs", "/api/password",
-    "/api/vehicle", "/api/radar",
+    "/api/vehicle", "/api/radar", "/api/bluetooth",
   ])
   def test_every_other_endpoint_requires_token(self, app, path):
     _, r = app.test_client.get(path)
@@ -126,7 +126,8 @@ class TestPublicSurface:
 
   def test_write_endpoints_require_token(self, app):
     for method, path in [("put", "/api/params/TestToggle"), ("post", "/api/models/select"),
-                         ("post", "/api/models/cancel"), ("post", "/api/vehicle/select")]:
+                         ("post", "/api/models/cancel"), ("post", "/api/vehicle/select"),
+                         ("post", "/api/bluetooth/scan")]:
       _, r = getattr(app.test_client, method)(path, json={"value": "1"})
       assert r.status == 401, f"{method} {path} leaked without a token"
     # DELETE 单独发：sanic_testing 的 delete() 不接受 json=

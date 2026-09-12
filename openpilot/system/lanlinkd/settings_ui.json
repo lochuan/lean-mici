@@ -1637,10 +1637,18 @@
    ]
   },
   {
+   "id": "bluetooth",
+   "label": "蓝牙",
+   "icon": "bluetooth",
+   "order": 7,
+   "description": "设备配对、连接与音频输出",
+   "sections": []
+  },
+  {
    "id": "status",
    "label": "状态",
    "icon": "status",
-   "order": 7,
+   "order": 8,
    "description": "设备遥测与 ACC 雷达点阵实时视图",
    "sections": []
   },
@@ -1648,7 +1656,7 @@
    "id": "software",
    "label": "软件",
    "icon": "software",
-   "order": 8,
+   "order": 9,
    "sections": [
     {
      "id": "updates",
@@ -1677,7 +1685,7 @@
    "id": "vehicle",
     "label": "车辆",
     "icon": "vehicle",
-    "order": 9,
+    "order": 10,
    "sections": [
     {
      "title": "车辆",
@@ -1689,7 +1697,7 @@
    "id": "developer",
     "label": "开发者",
     "icon": "developer",
-    "order": 10,
+    "order": 11,
    "sections": [
     {
      "id": "connectivity",
@@ -1848,7 +1856,7 @@
    "id": "models",
     "label": "模型",
     "icon": "models",
-    "order": 11,
+    "order": 12,
    "sections": [
     {
      "id": "model_behavior",
