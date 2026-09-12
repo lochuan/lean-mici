@@ -11,6 +11,12 @@ from openpilot.common.hardware.hw import Paths
 def driverview(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started or params.get_bool("IsDriverViewEnabled")
 
+def soundd_run(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return driverview(started, params, CP) or params.get_bool("BluetoothAudioTestActive")
+
+def bluetooth_enabled(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return params.get_bool("BluetoothEnabled")
+
 def iscar(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started and not CP.notCar
 
@@ -67,7 +73,8 @@ procs = [
 
   PythonProcess("sensord", "openpilot.system.sensord.sensord", only_onroad, enabled=not PC),
   PythonProcess("ui", "openpilot.selfdrive.ui.ui", always_run),
-  PythonProcess("soundd", "openpilot.selfdrive.ui.soundd", driverview),
+  PythonProcess("soundd", "openpilot.selfdrive.ui.soundd", soundd_run),
+  PythonProcess("bluetooth_managerd", "openpilot.sunnypilot.system.bluetooth.daemon", bluetooth_enabled, enabled=COMMA_HARDWARE),
   PythonProcess("locationd", "openpilot.selfdrive.locationd.locationd", only_onroad),
   NativeProcess("_pandad", "openpilot/selfdrive/pandad", ["./pandad"], always_run, enabled=False),
   PythonProcess("calibrationd", "openpilot.selfdrive.locationd.calibrationd", only_onroad),

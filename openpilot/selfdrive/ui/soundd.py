@@ -7,14 +7,17 @@ import wave
 from openpilot.cereal import log, messaging, custom
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.utils import retry
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.system import micd
 from openpilot.common.hardware import HARDWARE
+from openpilot.common.hardware.hw import Paths
 
 from openpilot.sunnypilot.selfdrive.ui.quiet_mode import QuietMode
+from openpilot.sunnypilot.system.bluetooth.audio import BluetoothAudioSink
 
 SAMPLE_RATE = 48000
 SAMPLE_BUFFER = 4096 # (approx 100ms)
@@ -88,6 +91,14 @@ class Soundd(QuietMode):
 
     self.spl_filter_weighted = FirstOrderFilter(0, 2.5, FILTER_DT, initialized=False)
 
+    self.bluetooth_audio = None
+    self.bluetooth_supported = HARDWARE.get_device_type() in ("tici", "tizi", "mici")
+    self.bluetooth_params = Params() if self.bluetooth_supported else None
+    self.bluetooth_enabled = False
+    self.bluetooth_last_check = 0.0
+
+    self.params_memory = Params(Paths.shm_path() + "/params")
+
   def load_sounds(self):
     self.loaded_sounds: dict[int, np.ndarray] = {}
 
@@ -133,7 +144,24 @@ class Soundd(QuietMode):
   def callback(self, data_out: np.ndarray, frames: int, time, status) -> None:
     if status:
       cloudlog.warning(f"soundd stream over/underflow: {status}")
-    data_out[:frames, 0] = self.get_sound_data(frames)
+    samples = self.get_sound_data(frames)
+    bluetooth_healthy = self.bluetooth_audio.submit(samples) if self.bluetooth_audio is not None else False
+    data_out[:frames, 0] = 0.0 if bluetooth_healthy else samples
+
+  def update_bluetooth_audio(self) -> None:
+    if not self.bluetooth_supported or time.monotonic() - self.bluetooth_last_check < 1.0:
+      return
+    self.bluetooth_last_check = time.monotonic()
+    enabled = self.bluetooth_params.get_bool("BluetoothEnabled")
+    if enabled == self.bluetooth_enabled:
+      return
+    self.bluetooth_enabled = enabled
+    if enabled:
+      self.bluetooth_audio = BluetoothAudioSink(params=self.bluetooth_params)
+    elif self.bluetooth_audio is not None:
+      sink = self.bluetooth_audio
+      self.bluetooth_audio = None
+      sink.close()
 
   def update_alert(self, new_alert):
     current_alert_played_once = self.current_alert == AudibleAlert.none or self.current_sound_frame >= len(self.loaded_sounds[self.current_alert])
@@ -154,7 +182,13 @@ class Soundd(QuietMode):
       self.current_sound_frame = 0
 
   def get_audible_alert(self, sm):
-    if sm.updated['selfdriveState']:
+    if self.params_memory.get("TestAlert"):
+      test_alert = self.params_memory.get("TestAlert")
+      if isinstance(test_alert, bytes):
+        test_alert = test_alert.decode("utf-8", "ignore")
+      self.update_alert(getattr(AudibleAlert, str(test_alert), AudibleAlert.none))
+      self.params_memory.remove("TestAlert")
+    elif sm.updated['selfdriveState']:
       new_alert = sm['selfdriveState'].alertSound.raw
       self.update_alert(new_alert)
     elif check_selfdrive_timeout_alert(sm):
@@ -190,6 +224,7 @@ class Soundd(QuietMode):
         sm.update(0)
 
         self.load_param()
+        self.update_bluetooth_audio()
 
         # freeze volume during alerts to avoid mic feedback increasing volume
         if sm.updated['soundPressure']:
