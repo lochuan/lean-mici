@@ -2,7 +2,7 @@
 #
 # build_lean_release_on_orb.sh — OrbStack 容器构建 lean release（mac 上跑）
 #
-# 镜像官方 tools/release/build_release.sh 流程，用 OrbStack Ubuntu 24.04 ARM64
+# 用 OrbStack Ubuntu 24.04 ARM64 容器出 lean release（替代上游 Jenkins 流程）
 # 容器构建源码与 panda 固件；native ELF 运行时产物一律不来自容器，
 # 只从 release/prebuilt/arm64 里经过校验后overlay：
 #   - 容器持久层：工具链 + uv venv 只装一次（首次 init），之后复用
