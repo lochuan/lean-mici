@@ -8,11 +8,13 @@ import traceback
 
 from openpilot.cereal import log
 import openpilot.cereal.messaging as messaging
+from openpilot.common.basedir import BASEDIR
 from openpilot.common.utils import atomic_write
 from openpilot.common.params import Params, ParamKeyFlag
 from openpilot.common.text_window import TextWindow
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.system.manager.helpers import unblock_stdout, save_bootlog
+from openpilot.system.manager.quick_boot import native_artifacts_unfit_for_quick_boot
 from openpilot.system.manager.process import ensure_running
 from openpilot.system.manager.process_config import managed_processes
 from openpilot.common.swaglog import cloudlog, add_file_handler
@@ -41,9 +43,13 @@ def manager_init() -> None:
 
   # quick boot
   if params.get_bool("QuickBootToggle") and not PC:
-    prebuilt_path = "/data/openpilot/prebuilt"
+    prebuilt_path = os.path.join(BASEDIR, "prebuilt")
     if not os.path.exists(prebuilt_path):
-      open(prebuilt_path, 'x').close()
+      missing = native_artifacts_unfit_for_quick_boot(BASEDIR)
+      if missing:
+        cloudlog.error({"event": "quick boot declined", "reason": missing})
+      else:
+        open(prebuilt_path, 'x').close()
 
   if not PC:
     run_migration(params)
