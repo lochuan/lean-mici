@@ -34,6 +34,7 @@ const ICONS: Record<string, unknown> = {
   developer: Code2,
   models: Boxes,
   vehicle: Car,
+  status: Activity,
 };
 
 const iconFor = (p: Panel) => ICONS[p.icon ?? ""] ?? Settings2;

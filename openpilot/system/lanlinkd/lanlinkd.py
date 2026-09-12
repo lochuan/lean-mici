@@ -29,6 +29,7 @@ from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd.auth import (
   MIN_PASSWORD_LEN, LoginThrottle, SessionStore, hash_password, verify_password)
+from openpilot.system.lanlinkd.radard import RadarCache
 from openpilot.system.lanlinkd.statusd import StatusCache
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -52,9 +53,11 @@ class LanlinkApp:
     self.throttle = LoginThrottle()
     self.version_info = {k: params_api.to_str(self.params.get(k)) or "" for k in VERSION_PARAMS}
     self.cache = StatusCache(self.version_info, device_type="pc" if PC else HARDWARE.get_device_type(), params=self.params)
+    self.radar = RadarCache()
     self.exit_event = threading.Event()
     self._settings_ui: dict | None = None
     threading.Thread(target=self.cache.run, args=(self.exit_event,), name="lanlink_status", daemon=True).start()
+    threading.Thread(target=self.radar.run, args=(self.exit_event,), name="lanlink_radar", daemon=True).start()
 
   # ---- helpers ----
   def _authorized(self, request: Request) -> bool:
@@ -208,6 +211,11 @@ class LanlinkApp:
     snap["paramsVersion"] = params_api.to_str(self.params.get(params_api.VERSION_KEY))
     return json_response(snap)
 
+  async def radar_get(self, request: Request) -> HTTPResponse:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    return json_response(self.radar.snapshot())
+
   async def capabilities(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
       return _json_error(401, "unauthorized")
@@ -274,6 +282,7 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("GET", "/api/vehicle", "vehicle_get"),
   ("POST", "/api/vehicle/select", "vehicle_select"),
   ("GET", "/api/status", "status"),
+  ("GET", "/api/radar", "radar_get"),
   ("GET", "/api/capabilities", "capabilities"),
   ("GET", "/api/settings_ui", "settings_ui"),
   ("GET", "/api/logs", "logs_list"),

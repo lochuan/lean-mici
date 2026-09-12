@@ -7,7 +7,8 @@
  *  - blocked param 返回 403 而非静默跳过（与上游不同，见 FRONTEND_SPEC.md §1）
  */
 import type {
-  Capabilities, ModelsState, ParamValues, SettingsSchema, StatusSnapshot, VehicleState,
+  Capabilities, ModelsState, ParamValues, RadarSnapshot, SettingsSchema, StatusSnapshot,
+  VehicleState,
 } from "./schema";
 
 const TOKEN_KEY = "lanlink_token";
@@ -79,6 +80,7 @@ export const api = {
   capabilities: () => request<Capabilities>("/api/capabilities"),
   allParams: () => request<ParamValues>("/api/params/_all"),
   status: () => request<StatusSnapshot>("/api/status"),
+  radar: () => request<RadarSnapshot>("/api/radar"),
 
   // ---- 单 key 写 ----
   putParam: (key: string, value: string) =>

@@ -6,6 +6,7 @@ import SubPanelDrawer from "./SubPanelDrawer.vue";
 import SettingRow from "./SettingRow.vue";
 import ModelsManager from "./ModelsManager.vue";
 import VehiclePanel from "./VehiclePanel.vue";
+import StatusPanel from "./StatusPanel.vue";
 import Badge from "./ui/Badge.vue";
 import { itemState } from "@/lib/itemState";
 import { store } from "@/lib/store";
@@ -57,6 +58,8 @@ watch(
     <!-- 模型页：设置项之前先放模型管理（与 sunnylink 的版面顺序一致） -->
     <ModelsManager v-if="panel.id === 'models'" />
     <VehiclePanel v-else-if="panel.id === 'vehicle'" />
+    <!-- 状态页：遥测 + 雷达点阵，整个面板都是自定义组件 -->
+    <StatusPanel v-else-if="panel.id === 'status'" />
 
     <SettingSection
       v-for="(section, i) in panel.sections"

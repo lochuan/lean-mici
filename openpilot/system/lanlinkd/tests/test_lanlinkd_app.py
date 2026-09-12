@@ -77,6 +77,9 @@ def app(monkeypatch):
   monkeypatch.setattr(mod.StatusCache, "snapshot", lambda self: {"stale": True})
   monkeypatch.setattr(mod.StatusCache, "capabilities", lambda self: {"brand": "toyota"})
   monkeypatch.setattr(mod.StatusCache, "download", lambda self: None)
+  # RadarCache 同理：真实 run 会起 SubMaster
+  monkeypatch.setattr(mod.RadarCache, "run", lambda self, ev: None)
+  monkeypatch.setattr(mod.RadarCache, "snapshot", lambda self: {"stale": True})
   # Sanic 要求 app name 唯一，否则跨测试复用同一实例
   a = mod.create_app(name=f"lanlinkd_test_{os.urandom(4).hex()}")
   a.ctx.fake_params = params
@@ -114,7 +117,7 @@ class TestPublicSurface:
   @pytest.mark.parametrize("path", [
     "/api/params", "/api/params/_all", "/api/params/TestToggle", "/api/models",
     "/api/status", "/api/capabilities", "/api/settings_ui", "/api/logs", "/api/password",
-    "/api/vehicle",
+    "/api/vehicle", "/api/radar",
   ])
   def test_every_other_endpoint_requires_token(self, app, path):
     _, r = app.test_client.get(path)
@@ -228,6 +231,32 @@ class TestParamsRoutes:
     t = _token(app)
     _, r = app.test_client.delete("/api/params/NoSuchKey", headers=_auth(t))
     assert r.status == 404
+
+
+class TestRadarRoute:
+  def test_radar_returns_cached_snapshot(self, app):
+    t = _token(app)
+    fake = {
+      "stale": False,
+      "logMonoTime": 1234567890,
+      "points": [
+        {"trackId": 0, "dRel": 26.89, "yRel": 0.04, "vRel": 1.80},
+        {"trackId": 1, "dRel": 7.20, "yRel": 0.08, "vRel": 1.75},
+      ],
+      "errors": {"canError": False, "radarUnavailableTemporary": False},
+    }
+    app.ctx.state.radar.snapshot = lambda: fake
+    _, r = app.test_client.get("/api/radar", headers=_auth(t))
+    assert r.status == 200
+    assert r.json == fake
+
+  def test_radar_stale_shape(self, app):
+    # 无数据时（熄火/无雷达平台）必须返回 {"stale": true}，而不是 500 或空体
+    t = _token(app)
+    app.ctx.state.radar.snapshot = lambda: {"stale": True}
+    _, r = app.test_client.get("/api/radar", headers=_auth(t))
+    assert r.status == 200
+    assert r.json == {"stale": True}
 
 
 class TestStaticRoutes:
