@@ -58,11 +58,11 @@ npm run build               # 类型检查 + 构建到 ../static/
 
 ```bash
 git add openpilot/system/lanlinkd/web          # 先暂存源码（指纹按 git 索引算）
-tools/build_lanlink_web.py --build             # 构建 + 写 static/.build-hash
+tools/lanlink/build_lanlink_web.py --build             # 构建 + 写 static/.build-hash
 git add openpilot/system/lanlinkd/static
 ```
 
-`tools/build_lanlink_web.py --check` 会比对 `static/.build-hash` 与源码指纹，
+`tools/lanlink/build_lanlink_web.py --check` 会比对 `static/.build-hash` 与源码指纹，
 不一致即报错；`tools/release/test_release_files.py` 在测试里跑这个检查。
 
 这道防护是必要的：忘记构建不会有任何报错，release 照常打包，

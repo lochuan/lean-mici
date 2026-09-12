@@ -74,7 +74,7 @@ class TestFrontendBuildIsCurrent(unittest.TestCase):
 
   def test_dist_matches_committed_sources(self):
     r = subprocess.run(
-      ["python3", str(REPO_ROOT / "tools/build_lanlink_web.py"), "--check"],
+      ["python3", str(REPO_ROOT / "tools/lanlink/build_lanlink_web.py"), "--check"],
       cwd=REPO_ROOT, capture_output=True, text=True,
     )
     self.assertEqual(r.returncode, 0, f"前端产物与源码不一致：\n{r.stdout}\n{r.stderr}")
@@ -88,7 +88,7 @@ class TestFrontendBuildIsCurrent(unittest.TestCase):
 
     Vite 文件名带内容 hash，而 outDir 是 emptyOutDir:false，旧产物会堆积。
     一旦被 git add，就会**永久**随每个 release 发到设备，还带 immutable
-    长缓存。tools/build_lanlink_web.py 会在构建后清理。
+    长缓存。tools/lanlink/build_lanlink_web.py 会在构建后清理。
     """
     static = REPO_ROOT / "openpilot/system/lanlinkd/static"
     index = (static / "index.html").read_text()
@@ -101,7 +101,7 @@ class TestFrontendBuildIsCurrent(unittest.TestCase):
     }
     self.assertEqual(
       tracked_assets - referenced, set(),
-      "存在已失效但仍被 git 跟踪的产物；运行 tools/build_lanlink_web.py --build",
+      "存在已失效但仍被 git 跟踪的产物；运行 tools/lanlink/build_lanlink_web.py --build",
     )
 
 

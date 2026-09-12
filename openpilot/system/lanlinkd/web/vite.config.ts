@@ -8,7 +8,7 @@ import tailwindcss from "@tailwindcss/vite";
 // 产物直接写进 ../static，由 lanlinkd 的 /static 与 /assets 路由提供，
 // 并随 git 提交进仓库——设备上没有 Node，release 只发 `git ls-files` 的
 // 已 tracked 文件（见 tools/release/release_files.py）。
-// 陈旧防护见 tools/build_lanlink_web.py：源码 hash 不匹配即报错。
+// 陈旧防护见 tools/lanlink/build_lanlink_web.py：源码 hash 不匹配即报错。
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
   resolve: {

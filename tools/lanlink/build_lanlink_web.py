@@ -15,9 +15,9 @@ release 只发 tracked 文件，所以**只有已提交的源码**才算数。�
 的文件不会改变指纹——这正是我们要的，否则本地脏工作区会一直告警。
 
 用法：
-  tools/build_lanlink_web.py --check    # 校验（CI / 提交前）
-  tools/build_lanlink_web.py --write    # 构建后写入指纹
-  tools/build_lanlink_web.py --build    # npm ci（按需）+ npm run build + 写指纹
+  tools/lanlink/build_lanlink_web.py --check    # 校验（CI / 提交前）
+  tools/lanlink/build_lanlink_web.py --write    # 构建后写入指纹
+  tools/lanlink/build_lanlink_web.py --build    # npm ci（按需）+ npm run build + 写指纹
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = REPO_ROOT / "openpilot/system/lanlinkd/web"
 STATIC_DIR = REPO_ROOT / "openpilot/system/lanlinkd/static"
 HASH_FILE = STATIC_DIR / ".build-hash"
@@ -105,7 +105,7 @@ def write_hash(value: str) -> None:
 def check() -> int:
   if not (STATIC_DIR / "index.html").exists():
     print("错误：static/index.html 不存在，前端还没构建过。", file=sys.stderr)
-    print("  运行：tools/build_lanlink_web.py --build", file=sys.stderr)
+    print("  运行：tools/lanlink/build_lanlink_web.py --build", file=sys.stderr)
     return 1
 
   recorded = read_recorded_hash()
@@ -113,7 +113,7 @@ def check() -> int:
 
   if recorded is None:
     print("错误：static/.build-hash 缺失，无法判断产物是否为最新。", file=sys.stderr)
-    print("  运行：tools/build_lanlink_web.py --build", file=sys.stderr)
+    print("  运行：tools/lanlink/build_lanlink_web.py --build", file=sys.stderr)
     return 1
 
   if recorded != expected:
@@ -121,7 +121,7 @@ def check() -> int:
     print(f"  产物记录: {recorded}", file=sys.stderr)
     print(f"  源码实际: {expected}", file=sys.stderr)
     print("  设备上没有 Node，发版只会带上 static/，所以旧产物会被静默发出去。", file=sys.stderr)
-    print("  运行：tools/build_lanlink_web.py --build && git add openpilot/system/lanlinkd/static", file=sys.stderr)
+    print("  运行：tools/lanlink/build_lanlink_web.py --build && git add openpilot/system/lanlinkd/static", file=sys.stderr)
     return 1
 
   print(f"LANLink 前端产物是最新的 ({recorded[:12]})")

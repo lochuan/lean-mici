@@ -6,7 +6,7 @@ Python/原生代码，所以没必要走 release + reset 那一整套流程—�
 static/ 推上去、重启 lanlinkd 就行，几秒钟的事。
 
 做了三件容易出错的事：
-  1. 同步前**校验产物是否最新**（tools/build_lanlink_web.py --check），
+  1. 同步前**校验产物是否最新**（tools/lanlink/build_lanlink_web.py --check），
      否则会把旧界面推上去且毫无提示。
   2. 清理设备上**已失效的 hash 文件**。Vite 的文件名带内容 hash，每次构建
      换名字，只做 scp 会让旧 JS/CSS 一直堆在 assets/ 里（实测堆了 3 份）。
@@ -15,10 +15,10 @@ static/ 推上去、重启 lanlinkd 就行，几秒钟的事。
      scp 到设备后会被当成静态资源。
 
 用法：
-  tools/deploy_lanlink_web.py                     # 构建 + 部署 + 重启
-  tools/deploy_lanlink_web.py --no-build          # 只部署当前产物
-  tools/deploy_lanlink_web.py --host comma@1.2.3.4
-  tools/deploy_lanlink_web.py --set-password PW   # 顺便设置访问密码
+  tools/lanlink/deploy_lanlink_web.py                     # 构建 + 部署 + 重启
+  tools/lanlink/deploy_lanlink_web.py --no-build          # 只部署当前产物
+  tools/lanlink/deploy_lanlink_web.py --host comma@1.2.3.4
+  tools/lanlink/deploy_lanlink_web.py --set-password PW   # 顺便设置访问密码
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR = REPO_ROOT / "openpilot/system/lanlinkd/static"
 DEFAULT_HOST = "comma@10.223.134.33"
 REMOTE_ROOT = "/data/openpilot"
@@ -63,19 +63,19 @@ def referenced_assets() -> set[str]:
 
 def build() -> None:
   print("==> 构建前端")
-  run(["python3", str(REPO_ROOT / "tools/build_lanlink_web.py"), "--build"])
+  run(["python3", str(REPO_ROOT / "tools/lanlink/build_lanlink_web.py"), "--build"])
 
 
 def check_fresh() -> None:
   print("==> 校验产物与源码一致")
   r = subprocess.run(
-    ["python3", str(REPO_ROOT / "tools/build_lanlink_web.py"), "--check"],
+    ["python3", str(REPO_ROOT / "tools/lanlink/build_lanlink_web.py"), "--check"],
     text=True, capture_output=True,
   )
   sys.stdout.write(r.stdout)
   if r.returncode != 0:
     sys.stderr.write(r.stderr)
-    raise SystemExit("产物已过期，请先运行 tools/deploy_lanlink_web.py（不加 --no-build）")
+    raise SystemExit("产物已过期，请先运行 tools/lanlink/deploy_lanlink_web.py（不加 --no-build）")
 
 
 def make_tarball(dest: Path) -> None:
