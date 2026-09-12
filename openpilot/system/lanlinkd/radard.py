@@ -49,7 +49,7 @@ class RadarCache:
       try:
         snap = {
           "stale": False,
-          "logMonoTime": int(rd.logMonoTime),
+          "logMonoTime": int(sm.logMonoTime['radarTracks']),
           "points": [_point(p) for p in rd.points],
           "errors": {
             "canError": bool(rd.errors.canError),
