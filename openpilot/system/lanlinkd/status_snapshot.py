@@ -39,11 +39,17 @@ def build_snapshot(services: dict, version_info: dict, capabilities: dict) -> di
   return {
     "stale": not services,
     "device": {
+      "started": bool(_get(ds, "started", False)),
       "cpuTempC": _list(_get(ds, "cpuTempC", [])),
       "gpuTempC": _list(_get(ds, "gpuTempC", [])),
       "memoryTempC": _get(ds, "memoryTempC", 0.0),
+      "maxTempC": _get(ds, "maxTempC", 0.0),
       "memoryUsagePercent": _get(ds, "memoryUsagePercent", 0),
+      "cpuUsagePercent": _list(_get(ds, "cpuUsagePercent", [])),
+      "gpuUsagePercent": _get(ds, "gpuUsagePercent", 0),
       "freeSpacePercent": _get(ds, "freeSpacePercent", 0.0),
+      "powerDrawW": _get(ds, "powerDrawW", 0.0),
+      "fanSpeedPercentDesired": _get(ds, "fanSpeedPercentDesired", 0),
       "usbOnline": bool(_get(ds, "usbOnline", False)),
       "networkType": _enum(_get(ds, "networkType", 0)),
       "networkStrength": _enum(_get(ds, "networkStrength", 0)),

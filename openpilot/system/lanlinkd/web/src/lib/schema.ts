@@ -114,17 +114,51 @@ export type ParamValues = Record<string, string>;
 
 /** /api/status 快照（只声明前端实际用到的字段）。
  *
- * 后端还会返回 device / car / gps 三组遥测（CPU 温度、车速、GPS 等），
- * 这里故意不建模：LANLink 是设置工具，不做仪表盘，那些数据在车机屏幕上
- * 已经有了。真要加回来时照 status_snapshot.build_snapshot() 补即可。
+ * device / car / gps 三组遥测里，car 和 gps 仍然故意不建模：那些数据在
+ * 车机屏幕上已经有了。device 建模给「状态」页用（CPU/GPU 负载与温度），
+ * 字段照 status_snapshot.build_snapshot() 的 device 节。
  *
- * 但轮询本身不能停——paramsVersion 是察觉车机端改了设置的唯一途径。
+ * 轮询本身不能停——paramsVersion 是察觉车机端改了设置的唯一途径。
  */
+export interface DeviceStatus {
+  /** manager 判定的 onroad 状态（hardwared 的 started 位），与点火无关 */
+  started?: boolean;
+  /** cereal NetworkType 枚举（0 none / 1 wifi / … / 6 ethernet） */
+  networkType?: number;
+  cpuTempC?: number[];
+  gpuTempC?: number[];
+  memoryTempC?: number;
+  maxTempC?: number;
+  memoryUsagePercent?: number;
+  cpuUsagePercent?: number[];
+  gpuUsagePercent?: number;
+  freeSpacePercent?: number;
+  powerDrawW?: number;
+  fanSpeedPercentDesired?: number;
+  thermalStatus?: number; // 0 ok / 2 overheated / 3 critical
+}
+
 export interface StatusSnapshot {
   stale?: boolean;
   paramsVersion?: string | null;
   system?: { version?: string; branch?: string; commit?: string; ignition?: boolean };
+  device?: DeviceStatus;
   capabilities?: Capabilities;
+}
+
+/** /api/radar：radarTracks 最新一帧的快照 */
+export interface RadarPoint {
+  trackId: number;
+  dRel: number; // m，ego 车头前方为正
+  yRel: number; // m，左正右负（ego 车辆坐标系）
+  vRel: number; // m/s，正 = 远离
+}
+
+export interface RadarSnapshot {
+  stale?: boolean;
+  logMonoTime?: number;
+  points?: RadarPoint[];
+  errors?: { canError?: boolean; radarUnavailableTemporary?: boolean };
 }
 
 export interface ModelBundle {
