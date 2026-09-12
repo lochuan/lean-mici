@@ -12,7 +12,7 @@ import { itemState } from "@/lib/itemState";
 import { store } from "@/lib/store";
 import type { Panel, SubPanel } from "@/lib/schema";
 
-const props = defineProps<{ panel: Panel; highlight?: string }>();
+const props = defineProps<{ panel: Panel }>();
 
 const openId = ref<string | null>(null);
 

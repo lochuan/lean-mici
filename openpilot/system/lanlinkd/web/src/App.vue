@@ -11,7 +11,6 @@ import TopBar from "./components/TopBar.vue";
 import PanelView from "./components/PanelView.vue";
 import HomeView from "./components/HomeView.vue";
 import LoginView from "./components/LoginView.vue";
-import SearchPalette from "./components/SearchPalette.vue";
 import Toasts from "./components/Toasts.vue";
 import { getToken, setToken, setUnauthorizedHandler } from "./lib/api";
 import { loadAll, panelById, pollStatus, refreshParams, store, toast } from "./lib/store";
@@ -19,8 +18,8 @@ import { loadAll, panelById, pollStatus, refreshParams, store, toast } from "./l
 const authed = ref(Boolean(getToken()));
 const booting = ref(false);
 const current = ref("");
-const searchOpen = ref(false);
-const highlight = ref("");
+/** <md 的侧边栏 drawer 开关；>=md 常驻，状态无效 */
+const sidebarOpen = ref(false);
 let timer: ReturnType<typeof setInterval> | undefined;
 
 const panel = computed(() => panelById(current.value));
@@ -28,6 +27,8 @@ const panel = computed(() => panelById(current.value));
 function readHash(): void {
   // 空 hash 落在首页，与 sunnylink 的 /dashboard 一致
   current.value = (location.hash || "").replace(/^#\/?/, "");
+  // 任何 hash 变化（点导航、浏览器后退）都收起手机 drawer
+  sidebarOpen.value = false;
 }
 
 function navigate(id: string): void {
@@ -65,16 +66,7 @@ async function manualRefresh(): Promise<void> {
 }
 
 function onKeydown(e: KeyboardEvent): void {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-    e.preventDefault();
-    searchOpen.value = !searchOpen.value;
-  }
-}
-
-function pickSearch(panelId: string, key: string): void {
-  searchOpen.value = false;
-  highlight.value = key;
-  navigate(panelId);
+  if (e.key === "Escape") sidebarOpen.value = false;
 }
 
 onMounted(() => {
@@ -105,7 +97,22 @@ async function onAuthed(): Promise<void> {
   <LoginView v-if="!authed" @authed="onAuthed" />
 
   <div v-else class="flex h-dvh overflow-hidden bg-sl-bg">
-    <Sidebar :current="current" @navigate="navigate">
+    <!-- 手机端 drawer 遮罩；md+ 侧边栏常驻，遮罩不渲染 -->
+    <Transition
+      enter-active-class="transition-opacity duration-200"
+      leave-active-class="transition-opacity duration-200"
+      enter-from-class="opacity-0"
+      leave-to-class="opacity-0"
+    >
+      <div
+        v-if="sidebarOpen"
+        class="fixed inset-0 z-30 bg-black/50 md:hidden"
+        aria-hidden="true"
+        @click="sidebarOpen = false"
+      />
+    </Transition>
+
+    <Sidebar :current="current" :open="sidebarOpen" @navigate="navigate">
       <template #footer>
         <div class="flex items-center gap-1 border-t border-sl-border p-3">
           <button
@@ -129,7 +136,7 @@ async function onAuthed(): Promise<void> {
     </Sidebar>
 
     <main class="flex min-w-0 flex-1 flex-col">
-      <TopBar @search="searchOpen = true" />
+      <TopBar @menu="sidebarOpen = true" />
 
       <div class="flex-1 overflow-y-auto">
         <div v-if="booting" class="grid h-full place-items-center">
@@ -147,12 +154,11 @@ async function onAuthed(): Promise<void> {
           </button>
         </div>
 
-        <PanelView v-else-if="panel" :panel="panel" :highlight="highlight" />
+        <PanelView v-else-if="panel" :panel="panel" />
         <HomeView v-else @navigate="navigate" />
       </div>
     </main>
   </div>
 
-  <SearchPalette :open="searchOpen" @close="searchOpen = false" @pick="pickSearch" />
   <Toasts />
 </template>

@@ -1,5 +1,9 @@
 <script setup lang="ts">
-/** 侧边栏。复刻 sunnylink 的结构（实测 bg #181818），图标用 lucide 对应上游语义。 */
+/** 侧边栏。复刻 sunnylink 的结构（实测 bg #181818），图标用 lucide 对应上游语义。
+ *
+ * 响应式：>=md 常驻（与旧版一致）；<md 变 overlay drawer（手机上
+ * 248px 常驻栏会把内容挤没），由父组件经 open 控制滑入滑出。
+ */
 import { computed } from "vue";
 import {
   Activity,
@@ -19,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { panels } from "@/lib/store";
 import type { Panel } from "@/lib/schema";
 
-const props = defineProps<{ current: string }>();
+const props = defineProps<{ current: string; open?: boolean }>();
 const emit = defineEmits<{ navigate: [string] }>();
 
 /** schema 的 icon 名 → lucide 组件 */
@@ -43,7 +47,13 @@ const items = computed(() => panels.value);
 
 <template>
   <aside
-    class="flex w-[248px] shrink-0 flex-col border-r border-sl-border bg-sl-surface"
+    :class="
+      cn(
+        'fixed inset-y-0 left-0 z-40 flex w-[248px] shrink-0 flex-col border-r border-sl-border bg-sl-surface transition-transform duration-200',
+        '-translate-x-full md:static md:translate-x-0',
+        props.open && 'translate-x-0',
+      )
+    "
   >
     <div class="sl-hairline flex h-16 shrink-0 items-center gap-2.5 px-5">
       <div class="grid size-7 place-items-center rounded-md bg-sl-accent/15 ring-1 ring-inset ring-sl-accent/30">

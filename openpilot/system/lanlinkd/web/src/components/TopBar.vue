@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /** 顶栏。
  *
- * 状态胶囊复刻 sunnylink /dashboard 右上角的 "Device status" 按钮
- * （实测 2026-09-12）：状态词保持英文原词（Connecting... / Offroad /
+ * 左侧：<md 显示汉堡按钮（侧边栏 drawer 入口）；>=md 留白。
+ * 右侧：状态胶囊，复刻 sunnylink /dashboard 右上角的 "Device status"
+ * 按钮（实测 2026-09-12）：状态词保持英文原词（Connecting... / Offroad /
  * Onroad / Always Offroad），点击展开设备详情弹层——里面有 Always
  * Offroad Mode 开关，对应 params.OffroadMode（upstream hardwared.py
  * 读它阻断 onroad；车机设置页的「强制离线模式」是同一个参数）。
@@ -11,13 +12,13 @@
  * 弹层里带一份便于随时查看。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Search } from "lucide-vue-next";
+import { Menu } from "lucide-vue-next";
 import Switch from "./ui/Switch.vue";
 import { store, writeParam, isPending } from "@/lib/store";
 import { devicePill, networkLabel } from "@/lib/deviceState";
 import { cn } from "@/lib/utils";
 
-const emit = defineEmits<{ search: [] }>();
+const emit = defineEmits<{ menu: [] }>();
 
 const open = ref(false);
 const rootEl = ref<HTMLElement | null>(null);
@@ -65,7 +66,7 @@ const rows = computed(() => [
   { label: "COMMIT", value: s.value?.system?.commit?.slice(0, 12) },
 ]);
 
-// ---- 弹层关闭：点外部 / Escape（SearchPalette 同款约定）----
+// ---- 弹层关闭：点外部 / Escape（与 App 的 drawer Escape 约定一致）----
 function onDocMousedown(e: MouseEvent): void {
   if (open.value && rootEl.value && !rootEl.value.contains(e.target as Node)) {
     open.value = false;
@@ -85,20 +86,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="sl-hairline relative flex h-16 shrink-0 items-center gap-4 bg-sl-bg/80 px-6 backdrop-blur">
-    <!-- 搜索：sunnylink 把它放在顶栏中部 -->
+  <div class="sl-hairline relative flex h-16 shrink-0 items-center gap-4 bg-sl-bg/80 px-4 backdrop-blur md:px-6">
+    <!-- 汉堡按钮：仅手机端（侧边栏 drawer 入口），桌面端侧边栏常驻 -->
     <button
       type="button"
-      class="flex h-9 min-w-0 max-w-[448px] flex-1 items-center gap-2 rounded-lg bg-sl-surface-2 px-3 text-left ring-1 ring-inset ring-sl-border transition-colors hover:ring-sl-border-strong"
-      aria-label="搜索设置（⌘K）"
-      @click="emit('search')"
+      class="grid size-9 shrink-0 place-items-center rounded-lg text-sl-text-2 ring-1 ring-inset ring-sl-border transition-colors hover:bg-sl-surface-2 hover:text-sl-text-1 md:hidden"
+      aria-label="打开导航菜单"
+      @click="emit('menu')"
     >
-      <Search class="size-3.5 shrink-0 text-sl-text-3" />
-      <span class="flex-1 truncate text-[13px] text-sl-text-3">搜索设置…</span>
-      <kbd class="shrink-0 rounded border border-sl-border bg-sl-surface-3 px-1.5 py-0.5 text-[10px] text-sl-text-3">
-        ⌘K
-      </kbd>
+      <Menu class="size-4" />
     </button>
+
+    <div class="min-w-0 flex-1" />
 
     <!-- 状态胶囊 = 按钮（复刻 sunnylink 的 "Device status: X"） -->
     <div ref="rootEl" class="relative shrink-0">
