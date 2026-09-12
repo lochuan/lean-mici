@@ -68,8 +68,8 @@
   {
     "name": "system",
     "url": "http://10.0.0.5:8091/system-19.7.1-raw.img.xz",
-    "hash": "7bc632bf298c1b8342a5ea16c75f4a9dcd799387ba4353a149500da29123a2f9",
-    "hash_raw": "9aa2998a7b097bc459e4bde161edef0c637731c599f6b3e6c4881d19300e7862",
+    "hash": "e996e43c8c45fc03d0860b4d156f0b7211f1672222375079beb3f9ad2dc9ee13",
+    "hash_raw": "9afa3f4c5ee6b1660193cd666a5ea95e646186619ceef13d38f27a93c8d2da13",
     "size": 4718592000,
     "sparse": false,
     "full_check": false,
