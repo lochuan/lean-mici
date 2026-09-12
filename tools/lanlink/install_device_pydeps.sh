@@ -15,7 +15,7 @@
 # minimal and never install something the venv already provides -- that is why
 # setuptools is pruned below (sanic wants >=70.1.0; the venv has 83.0.0).
 #
-# Usage: ./tools/install_device_pydeps.sh [user@host]
+# Usage: ./tools/lanlink/install_device_pydeps.sh [user@host]
 set -euo pipefail
 
 HOST="${1:-comma@10.223.134.33}"

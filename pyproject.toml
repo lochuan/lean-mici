@@ -49,7 +49,7 @@ dependencies = [
   "comma-deps-raylib",
 
   # lanlinkd web service. Declared here for CI/PC; on device it is installed
-  # into /data/pydeps by tools/install_device_pydeps.sh, because the AGNOS venv
+  # into /data/pydeps by tools/lanlink/install_device_pydeps.sh, because the AGNOS venv
   # is read-only and dropping a dep there (as 19.6 did with aiohttp) silently
   # kills the daemon on device while CI stays green.
   "sanic",

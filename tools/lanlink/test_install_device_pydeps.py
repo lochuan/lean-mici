@@ -12,8 +12,8 @@ import stat
 import unittest
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
-SCRIPT = REPO / "tools/install_device_pydeps.sh"
+REPO = Path(__file__).resolve().parents[2]
+SCRIPT = REPO / "tools/lanlink/install_device_pydeps.sh"
 LAUNCH = REPO / "launch_chffrplus.sh"
 PYDEPS = "/data/pydeps"
 

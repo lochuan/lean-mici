@@ -3,7 +3,7 @@
 
 为什么是 Sanic 而不是 aiohttp：aiohttp 曾由 AGNOS venv 提供，19.6 起被移除，
 于是 lanlinkd 在设备上直接 ModuleNotFoundError（CI 仍绿，因为 CI 的 venv 有）。
-现在 Web 框架由 tools/install_device_pydeps.sh 钉版安装进 /data/pydeps，
+现在 Web 框架由 tools/lanlink/install_device_pydeps.sh 钉版安装进 /data/pydeps，
 不再依赖 AGNOS 碰巧带了什么。
 
 为什么 single_process=True（见 main()）：Sanic 默认起多 worker 进程，而
