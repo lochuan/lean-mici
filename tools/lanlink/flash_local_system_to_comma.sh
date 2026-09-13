@@ -19,7 +19,7 @@
 set -euo pipefail
 
 HOST="${1:-${SSH_HOST:-comma@192.168.3.110}}"
-SYSTEM_IMAGE="${2:-$HOME/Documents/Projects/agnos-builder/output/system-19.7.2-bt.img.xz}"
+SYSTEM_IMAGE="${2:-$HOME/Documents/Projects/agnos-builder/output/system-19.7.3-bt.img.xz}"
 EXPECTED_VERSION="${EXPECTED_VERSION:-19.7.2}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
