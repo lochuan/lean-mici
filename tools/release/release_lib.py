@@ -288,6 +288,40 @@ def find_data_artifacts(root: Path) -> list[str]:
   return sorted(found)
 
 
+# A git-lfs pointer file is ASCII and short; real binary media never is.
+LFS_POINTER_MAGIC = b"version https://git-lfs.github.com/spec/v1"
+LFS_POINTER_MAX_SIZE = 200
+MEDIA_SUFFIXES = (
+  ".png", ".jpg", ".jpeg", ".svg", ".ttf", ".otf", ".wav", ".mp3", ".mp4",
+  ".so", ".bin",
+)
+
+
+def find_lfs_pointers(tree: Path) -> list[str]:
+  """Return relative paths in ``tree`` that are git-lfs pointers pretending
+  to be binary media.
+
+  Fresh clones on devices without a matching .gitattributes rule check out
+  these files as 130-byte pointer stubs; the first consumer that opens them
+  fails (ZeroDivisionError in the UI texture loader for the horizontal scroll
+  indicator was the first casualty). The release tree must never ship them.
+  """
+  pointers: list[str] = []
+  for path in sorted(tree.rglob("*")):
+    if not path.is_file() or path.is_symlink():
+      continue
+    if path.suffix.lower() not in MEDIA_SUFFIXES:
+      continue
+    try:
+      if path.stat().st_size <= LFS_POINTER_MAX_SIZE:
+        with open(path, "rb") as f:
+          if f.read(len(LFS_POINTER_MAGIC)) == LFS_POINTER_MAGIC:
+            pointers.append(str(path.relative_to(tree)))
+    except OSError:
+      continue
+  return pointers
+
+
 def _repo_root() -> Path:
   result = _run(["git", "rev-parse", "--show-toplevel"])
   return Path(result.stdout.strip())
@@ -303,6 +337,11 @@ def main() -> int:
   sub.add_parser("artifact-paths", help="print native artifact paths")
   sub.add_parser("data-artifact-globs", help="print non-ELF data artifact globs")
   sub.add_parser("validate-artifacts", help="validate staged prebuilt artifacts")
+  sweep_parser = sub.add_parser(
+    "sweep-lfs-pointers",
+    help="fail if binary media in a tree checkout are lfs pointer stubs",
+  )
+  sweep_parser.add_argument("tree")
 
   manifest_parser = sub.add_parser(
     "write-manifest",
@@ -376,6 +415,19 @@ def main() -> int:
       print(reason, file=sys.stderr)
       return 1
     print("prebuilt shipped")
+    return 0
+
+  if args.command == "sweep-lfs-pointers":
+    pointers = find_lfs_pointers(Path(args.tree))
+    if pointers:
+      for rel in pointers[:20]:
+        print(f"LFS pointer stub shipped as media: {rel}", file=sys.stderr)
+      print(
+        f"{len(pointers)} pointer stub(s): run `git lfs fetch && git lfs checkout` in the "
+        "clone, and ensure .gitattributes rules cover these suffixes.",
+        file=sys.stderr,
+      )
+      return 1
     return 0
 
   raise AssertionError(f"unhandled command: {args.command}")

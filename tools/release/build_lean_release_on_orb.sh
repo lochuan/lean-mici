@@ -215,6 +215,17 @@ git update-ref -d refs/heads/$BUILD_BRANCH 2>/dev/null || true
 git update-ref refs/heads/$BUILD_BRANCH HEAD
 git worktree add --detach /tmp/opilot-release $BUILD_BRANCH
 
+# LFS guard：worktree 里的媒体必须 smudge 后的真实文件，指针假文件一律拦截
+#（设备 fresh clone 时 lfs 未命中会得到 130 字节 stub，UI 第一次加载纹理即崩）
+git lfs fetch --all 2>/dev/null || git lfs checkout /tmp/opilot-release # pre-populate LFS store
+git lfs checkout /tmp/opilot-release
+if python3 \$HOME/opilot/tools/release/release_lib.py sweep-lfs-pointers /tmp/opilot-release; then
+  echo "[release] LFS media sweep OK"
+else
+  echo "[release] FATAL: LFS pointer stubs in release tree; fix .gitattributes / git lfs fetch" >&2
+  exit 1
+fi
+
 # 只 overlay panda 固件（裸二进制，非 ELF，不依赖容器 ABI）。
 # native ELF 运行时产物一律来自 release/prebuilt/arm64，由 release_lib.py 校验。
 (cd \$HOME/opilot && find . \( -name \"*.bin\" -o -name \"*.bin.signed\" \) -not -path \"./.git/*\" -print0 | tar --null -T - -cf -) | tar -x -C /tmp/opilot-release
