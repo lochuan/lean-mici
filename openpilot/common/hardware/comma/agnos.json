@@ -68,7 +68,7 @@
   {
     "name": "system",
     "url": "http://10.0.0.5:8091/19.7.1/system-19.7.1-bt.img.xz",
-    "hash": "54d54c2df1e7375353ceb9a6cb4db162948b6206c59705ee52e3acc987ee23af",
+    "hash": "df3ba90b24f738554ee80912e63494e2558a780258f1c71a93ca8d8670c702bb",
     "hash_raw": "df3ba90b24f738554ee80912e63494e2558a780258f1c71a93ca8d8670c702bb",
     "size": 4718592000,
     "sparse": false,
