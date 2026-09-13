@@ -77,6 +77,16 @@ function launch {
     fi
   fi
 
+  # submodule integrity (manual clones without --recurse-submodules brick launch
+  # at manager.py with an opaque import error)
+  for sm_dir in opendbc_repo/opendbc msgq_repo/msgq rednose_repo/rednose tinygrad_repo/tinygrad panda; do
+    if [ ! -d "$DIR/$sm_dir" ]; then
+      echo "FATAL: submodule missing: $sm_dir (remote install must clone with --recurse-submodules or run git submodule update --init --recursive)"
+      sleep infinity
+      exit 1
+    fi
+  done
+
   # handle pythonpath
   ln -sfn $(pwd) /data/pythonpath
   export PYTHONPATH="$PWD"
