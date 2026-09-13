@@ -3,8 +3,8 @@
 
 为什么是 Sanic 而不是 aiohttp：aiohttp 曾由 AGNOS venv 提供，19.6 起被移除，
 于是 lanlinkd 在设备上直接 ModuleNotFoundError（CI 仍绿，因为 CI 的 venv 有）。
-现在 Web 框架由 tools/lanlink/install_device_pydeps.sh 钉版安装进 /data/pydeps，
-不再依赖 AGNOS 碰巧带了什么。
+Sanic 由 pyproject.toml 声明，随 AGNOS venv 一起安装（19.7.2 起），不再需要
+/data/pydeps 旁路。
 
 为什么 single_process=True（见 main()）：Sanic 默认起多 worker 进程，而
 SessionStore / LoginThrottle 是**进程内内存状态**。多 worker 下同一 token 只在签发它

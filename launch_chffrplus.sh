@@ -77,9 +77,9 @@ function launch {
     fi
   fi
 
-  # handle pythonpath
+  # handle pythonpath (all deps incl. sanic come from AGNOS venv since 19.7.2)
   ln -sfn $(pwd) /data/pythonpath
-  export PYTHONPATH="$PWD:/data/pydeps"
+  export PYTHONPATH="$PWD"
 
   # submodule package symlinks for PYTHONPATH imports on device.
   # on PC these come from editable installs via pyproject.toml / uv.

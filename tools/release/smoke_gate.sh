@@ -25,7 +25,7 @@ echo "[-] running onroad smoke test (${DURATION}s); this stops any running openp
 set +e
 ssh -o BatchMode=yes "$DEVICE" \
   "cd /data/openpilot && sudo systemctl stop comma 2>/dev/null; \
-   PYTHONPATH=/data/openpilot:/data/openpilot/openpilot:/data/pydeps \
+   PYTHONPATH=/data/openpilot:/data/openpilot/openpilot \
    /usr/local/venv/bin/python $REMOTE_PATH $DURATION" 2>&1 | tee /tmp/smoke_gate.log
 rc=${PIPESTATUS[0]}
 set -e

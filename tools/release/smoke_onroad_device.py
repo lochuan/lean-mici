@@ -66,7 +66,7 @@ def main():
 
   env = dict(os.environ)
   # mimic launch_chffrplus.sh for the manager children
-  env['PYTHONPATH'] = '/data/openpilot:/data/openpilot/openpilot:/data/pydeps'
+  env['PYTHONPATH'] = '/data/openpilot:/data/openpilot/openpilot'
   mgr = subprocess.Popen([sys.executable, 'manager.py'],
                          cwd='/data/openpilot/openpilot/system/manager', env=env)
 

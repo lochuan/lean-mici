@@ -37,9 +37,9 @@ DEFAULT_HOST = "comma@10.223.134.33"
 REMOTE_ROOT = "/data/openpilot"
 REMOTE_STATIC = f"{REMOTE_ROOT}/openpilot/system/lanlinkd/static"
 
-# 设备上的 python 与额外依赖（sanic 等装在 /data/pydeps，见 tools/install_device_pydeps.sh）
+# 设备上的 python 与依赖（sanic 等随 AGNOS venv，19.7.2 起不再需要 /data/pydeps）
 REMOTE_PY = "/usr/local/venv/bin/python"
-REMOTE_PYPATH = f"{REMOTE_ROOT}:/data/pydeps"
+REMOTE_PYPATH = f"{REMOTE_ROOT}"
 
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
