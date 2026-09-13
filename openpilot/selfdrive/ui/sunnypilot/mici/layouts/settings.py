@@ -22,9 +22,7 @@ BIG_ICON_SIZE = 110
 class SettingsLayoutSP(OP.SettingsLayout):
   def __init__(self):
     OP.SettingsLayout.__init__(self)
-
     device_panel = DeviceLayoutMici()
-    self._scroller._items[2].set_click_callback(lambda: gui_app.push_widget(device_panel))
 
     self.icon_offroad_enable = gui_app.texture("../../sunnypilot/selfdrive/assets/icons_mici/always_offroad.png", BIG_ICON_SIZE,
                                                BIG_ICON_SIZE)
