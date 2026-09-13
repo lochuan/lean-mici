@@ -28,6 +28,8 @@ dependencies = [
   # vendored native dependencies
   "comma-deps-capnproto",
   "comma-deps-acados",
+  "comma-deps-eigen",   # rednose EKF headers (<eigen3/Eigen/Dense>); SConstruct imports the module
+  "comma-deps-ncurses", # SConstruct imports the module at top level (only replay links it)
   "comma-deps-ffmpeg",
   "comma-deps-zstd",
   "comma-deps-zeromq",
