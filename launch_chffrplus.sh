@@ -77,9 +77,18 @@ function launch {
     fi
   fi
 
-  # handle pythonpath (all deps incl. sanic come from AGNOS venv since 19.7.2)
+  # handle pythonpath
   ln -sfn $(pwd) /data/pythonpath
   export PYTHONPATH="$PWD"
+
+  # persistent sanic for lanlinkd (stock AGNOS ships without it)
+  if [ -f /AGNOS ] && [ ! -d /data/pydeps/sanic ]; then
+    mkdir -p /data/pydeps
+    /usr/local/venv/bin/pip3 install --target /data/pydeps "sanic==25.12.1" || true
+  fi
+  if [ -d /data/pydeps ]; then
+    export PYTHONPATH="$PWD:/data/pydeps"
+  fi
 
   # submodule package symlinks for PYTHONPATH imports on device.
   # on PC these come from editable installs via pyproject.toml / uv.
