@@ -217,8 +217,9 @@ git worktree add --detach /tmp/opilot-release $BUILD_BRANCH
 
 # LFS guard：worktree 里的媒体必须 smudge 后的真实文件，指针假文件一律拦截
 #（设备 fresh clone 时 lfs 未命中会得到 130 字节 stub，UI 第一次加载纹理即崩）
-git lfs fetch --all 2>/dev/null || git lfs checkout /tmp/opilot-release # pre-populate LFS store
-git lfs checkout /tmp/opilot-release
+# 只拉 worktree 当前 checkout 引用的对象（拉全量 --all 会白拿上游历史里 11G+ 每一版 LFS blob）
+git lfs checkout /tmp/opilot-release 2>/dev/null || true
+( cd /tmp/opilot-release && git lfs pull origin HEAD )
 if python3 \$HOME/opilot/tools/release/release_lib.py sweep-lfs-pointers /tmp/opilot-release; then
   echo "[release] LFS media sweep OK"
 else
