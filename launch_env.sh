@@ -16,7 +16,7 @@ export VECLIB_MAXIMUM_THREADS=1
 export QCOM_PRIORITY=12
 
 if [ -z "$AGNOS_VERSION" ]; then
-  export AGNOS_VERSION="19.7.2"
+  export AGNOS_VERSION="19.7.3"
 fi
 
 if [ -z "$AGNOS_ACCEPTED_VERSIONS" ]; then
