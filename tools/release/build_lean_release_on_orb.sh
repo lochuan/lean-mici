@@ -221,9 +221,9 @@ git worktree add --detach /tmp/opilot-release $BUILD_BRANCH
 git lfs checkout /tmp/opilot-release 2>/dev/null || true
 ( cd /tmp/opilot-release && git lfs pull origin HEAD )
 if python3 \$HOME/opilot/tools/release/release_lib.py sweep-lfs-pointers /tmp/opilot-release; then
-  echo "[release] LFS media sweep OK"
+  echo \"[release] LFS media sweep OK\"
 else
-  echo "[release] FATAL: LFS pointer stubs in release tree; fix .gitattributes / git lfs fetch" >&2
+  echo \"[release] FATAL: LFS pointer stubs in release tree; fix .gitattributes / git lfs fetch\" >&2
   exit 1
 fi
 

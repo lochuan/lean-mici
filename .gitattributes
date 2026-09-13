@@ -4,18 +4,7 @@
 # git add --renormalize .
 *.onnx filter=lfs diff=lfs merge=lfs -text
 
-*.gif filter=lfs diff=lfs merge=lfs -text
-*.ttf filter=lfs diff=lfs merge=lfs -text
-*.otf filter=lfs diff=lfs merge=lfs -text
-*.wav filter=lfs diff=lfs merge=lfs -text
 
-# PNG/SVG blobs are stored in LFS (see `git lfs ls-files`); without a rule a
-# fresh clone checks pointer stubs out as media, bricking the first texture
-# load in the UI.
-*.png filter=lfs diff=lfs merge=lfs -text
-*.svg filter=lfs diff=lfs merge=lfs -text
-*.jpg filter=lfs diff=lfs merge=lfs -text
-*.jpeg filter=lfs diff=lfs merge=lfs -text
 
 openpilot/selfdrive/car/tests/test_models_segs.txt filter=lfs diff=lfs merge=lfs -text
 openpilot/common/hardware/comma/updater filter=lfs diff=lfs merge=lfs -text
