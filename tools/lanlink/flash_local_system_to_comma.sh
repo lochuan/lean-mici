@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 烧写本地构建的 sunnypilot system 镜像（19.7 + 蓝牙 overlay）到设备的 inactive slot。
+# 烧写本地构建的 sunnypilot system 镜像（19.7.2 + 蓝牙 overlay）到设备的 inactive slot。
 #
-# 只动 system 分区：kernel/boot/xbl 全部沿用 comma CDN 的 19.7 产物，
+# 只动 system 分区：kernel/boot/xbl 全部沿用我们 OTA mirror 的 19.7.2 产物，
 # 与设备现行 slot 一致，不需要 boot.img。流程仿 StarPilot 的
 # tools/agnos/flash_local_agnos_pair_to_comma.sh，但裁掉 boot：
 #   1. 本机校验 manifest（单 system 条目、A/B、sparse raw payload）
@@ -19,8 +19,8 @@
 set -euo pipefail
 
 HOST="${1:-${SSH_HOST:-comma@192.168.3.110}}"
-SYSTEM_IMAGE="${2:-$HOME/Documents/Projects/agnos-builder/output/system-19.7-bt.img.xz}"
-EXPECTED_VERSION="${EXPECTED_VERSION:-19.7}"
+SYSTEM_IMAGE="${2:-$HOME/Documents/Projects/agnos-builder/output/system-19.7.2-bt.img.xz}"
+EXPECTED_VERSION="${EXPECTED_VERSION:-19.7.2}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
