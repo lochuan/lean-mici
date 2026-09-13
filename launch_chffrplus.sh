@@ -17,8 +17,17 @@ function agnos_init {
   sudo chgrp gpu /dev/adsprpc-smd /dev/ion /dev/kgsl-3d0
   sudo chmod 660 /dev/adsprpc-smd /dev/ion /dev/kgsl-3d0
 
-  # Check if AGNOS update is required
-  if [ $(< /VERSION) != "$AGNOS_VERSION" ]; then
+  # Check if AGNOS update is required (whitelist: current version accepted as-is)
+  AGNOS_CURRENT_VERSION="$(< /VERSION)"
+  AGNOS_UPDATE_REQUIRED=1
+  for accepted_version in $AGNOS_ACCEPTED_VERSIONS; do
+    if [ "$AGNOS_CURRENT_VERSION" = "$accepted_version" ]; then
+      AGNOS_UPDATE_REQUIRED=0
+      break
+    fi
+  done
+
+  if [ "$AGNOS_UPDATE_REQUIRED" = "1" ]; then
     AGNOS_PY="$DIR/openpilot/common/hardware/comma/agnos.py"
     MANIFEST="$DIR/openpilot/system/hardware/comma/agnos.json"
     if $AGNOS_PY --verify $MANIFEST; then
