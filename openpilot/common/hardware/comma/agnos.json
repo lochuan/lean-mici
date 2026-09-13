@@ -55,21 +55,10 @@
     "ondevice_hash": "2a67971602012c1b43544964709da13c322786b456a8e78568b117e8b1540ce3"
   },
   {
-    "name": "boot",
-    "url": "http://10.0.0.5:8091/19.7.2/boot-6ecf6f98.img.xz",
-    "hash": "6ecf6f987cd11968104abcccabbe268485d329cdb73012dfd3c381a6b8deb27d",
-    "hash_raw": "6ecf6f987cd11968104abcccabbe268485d329cdb73012dfd3c381a6b8deb27d",
-    "size": 46897152,
-    "sparse": false,
-    "full_check": true,
-    "has_ab": true,
-    "ondevice_hash": "d12e1e5b9455b62a1464558716493b33e470d7a7e88da1c4105a3b21d0961808"
-  },
-  {
     "name": "system",
     "url": "http://10.0.0.5:8091/19.7.2/system-19.7.2-bt.img.xz",
-    "hash": "c1da7209a4c94187575f1bd1c53ab3efdb1963d9ae27d8d776bb5667872a9c08",
-    "hash_raw": "c1da7209a4c94187575f1bd1c53ab3efdb1963d9ae27d8d776bb5667872a9c08",
+    "hash": "5b7080e26e7f4ea553ff44e25cadf09d15cea4ebe40e735aa51457893a2d913c",
+    "hash_raw": "5b7080e26e7f4ea553ff44e25cadf09d15cea4ebe40e735aa51457893a2d913c",
     "size": 4718592000,
     "sparse": false,
     "full_check": false,
