@@ -66,7 +66,11 @@ def main():
 
   env = dict(os.environ)
   # mimic launch_chffrplus.sh for the manager children
-  env['PYTHONPATH'] = '/data/openpilot:/data/openpilot/openpilot'
+  # /data/pydeps 提供 sanic（lanlinkd 依赖），launch 脚本同样注入；缺了它
+  # LanLinkEnabled 开启时 lanlinkd 会在 smoke 里 import 崩溃
+  pydeps = '/data/pydeps' if os.path.isdir('/data/pydeps') else ''
+  env['PYTHONPATH'] = ':'.join(
+    p for p in ['/data/openpilot', '/data/openpilot/openpilot', pydeps] if p)
   mgr = subprocess.Popen([sys.executable, 'manager.py'],
                          cwd='/data/openpilot/openpilot/system/manager', env=env)
 

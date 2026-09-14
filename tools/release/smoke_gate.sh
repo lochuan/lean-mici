@@ -22,10 +22,13 @@ echo "[-] copying smoke harness to device"
 scp -q -o BatchMode=yes "$DIR/smoke_onroad_device.py" "$DEVICE:$REMOTE_PATH"
 
 echo "[-] running onroad smoke test (${DURATION}s); this stops any running openpilot"
+# PYTHONPATH 必须含 /data/pydeps：sanic（lanlinkd 依赖）由 launch_chffrplus.sh
+# 装 /data/pydeps 并注入 PYTHONPATH，smoke 环境要与真实启动环境一致，否则
+# lanlinkd 在 smoke 里 import 崩溃（LanLinkEnabled 开启时）。
 set +e
 ssh -o BatchMode=yes "$DEVICE" \
   "cd /data/openpilot && sudo systemctl stop comma 2>/dev/null; \
-   PYTHONPATH=/data/openpilot:/data/openpilot/openpilot \
+   PYTHONPATH=/data/openpilot:/data/openpilot/openpilot:/data/pydeps \
    /usr/local/venv/bin/python $REMOTE_PATH $DURATION" 2>&1 | tee /tmp/smoke_gate.log
 rc=${PIPESTATUS[0]}
 set -e
