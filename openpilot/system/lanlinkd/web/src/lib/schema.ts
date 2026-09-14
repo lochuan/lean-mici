@@ -262,3 +262,28 @@ export interface BluetoothStatus {
   prompt: BluetoothPrompt | null;
   error: string;
 }
+
+/** /api/wifi：一个可连接网络（lanlinkd wl_worker 的序列化形） */
+export interface WifiNetwork {
+  ssid: string;
+  rssi: number | null;
+  security: string;
+  saved: boolean;
+}
+
+/** 当前连接 profile 的 ipv4 概览（wifi_manager.get_ipv4_settings 形） */
+export interface WifiIpv4 {
+  method: string;
+  addresses: string[];
+  gateway: string;
+  dns: string[];
+}
+
+export interface WifiStatus {
+  available: boolean;
+  connecting: string | null;
+  connected: string | null;
+  ipv4: WifiIpv4;
+  networks: WifiNetwork[];
+  error: string;
+}

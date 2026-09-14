@@ -31,6 +31,7 @@ from openpilot.system.lanlinkd import models_api
 from openpilot.system.lanlinkd import params_api
 from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd import vehicle_api
+from openpilot.system.lanlinkd import wifi_api
 from openpilot.system.lanlinkd.auth import MIN_PASSWORD_LEN, LoginThrottle, SessionStore, hash_password, verify_password
 from openpilot.system.lanlinkd.radard import RadarCache
 from openpilot.system.lanlinkd.statusd import StatusCache
@@ -59,6 +60,8 @@ class LanlinkApp:
     self.radar = RadarCache()
     self.exit_event = threading.Event()
     self._settings_ui: dict | None = None
+    self._wifi_manager = None
+    self._wifi_lock = threading.Lock()
     threading.Thread(target=self.cache.run, args=(self.exit_event,), name="lanlink_status", daemon=True).start()
     threading.Thread(target=self.radar.run, args=(self.exit_event,), name="lanlink_radar", daemon=True).start()
 
@@ -229,6 +232,91 @@ class LanlinkApp:
     )
     return json_response(body, status=code)
 
+  # ---- wifi ----
+  # WifiManager(nm DBus) 是阻塞 IO，与 bluetooth 同理走线程池。
+  # 单例懒加载：DBUS 不可用时退化为 fallback 快照（页面可渲染）。
+  def _get_wifi(self):
+    with self._wifi_lock:
+      if self._wifi_manager is None:
+        from openpilot.system.ui.lib.wifi_manager import WifiManager
+        self._wifi_manager = WifiManager(manage_tethering=False)
+      return self._wifi_manager
+
+  async def wifi_get(self, request: Request) -> HTTPResponse:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    def worker():
+      try:
+        mgr = self._get_wifi()
+        networks = [
+          {
+            "ssid": n.name,
+            "rssi": getattr(n, "rssi", None) or getattr(n, "strength", None),
+            "security": str(getattr(n, "security_type", "")),
+            "saved": getattr(mgr, "is_connection_saved", lambda s: False)(n.name),
+          }
+          for n in mgr.networks
+        ]
+        connected = mgr.connected_ssid
+        ipv4 = mgr.get_ipv4_settings(connected) if connected else {"method": "auto", "addresses": [], "gateway": "", "dns": []}
+        return {
+          "available": True,
+          "connecting": mgr.connecting_to_ssid,
+          "connected": connected,
+          "ipv4": {
+            "method": str(ipv4.get("method", "auto")),
+            "addresses": ipv4.get("addresses", []),
+            "gateway": ipv4.get("gateway", ""),
+            "dns": ipv4.get("dns", []),
+          },
+          "networks": networks,
+          "error": "",
+        }
+      except Exception as exc:
+        return wifi_api.fallback_snapshot(exc)
+    body = await asyncio.to_thread(worker)
+    return json_response(body)
+
+  async def wifi_operation(self, request: Request, operation: str) -> HTTPResponse:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    if operation not in wifi_api.OPERATIONS:
+      return _json_error(404, "Unknown WiFi operation.")
+    if operation in wifi_api.OFFROAD_ONLY and not self.params.get_bool("IsOffroad"):
+      return _json_error(409, "WiFi settings can only be changed offroad.")
+    req_body = self._body(request)
+
+    def worker():
+      mgr = self._get_wifi()
+      if operation == "connect":
+        code, msg, payload = wifi_api.validate_connect_body(req_body)
+        if code:
+          return code, {"error": msg}
+        # 先落静态 IP 再连接：NM AddAndActivateConnection2 是 volatile profile，
+        # 连接成功落盘后这些字段随 profile 一起持久化。
+        mgr.connect_to_network(payload["ssid"], payload["password"], hidden=payload["hidden"])
+        result = {}
+      else:
+        ssid = str(req_body.get("ssid", "")).strip()
+        if not ssid:
+          return 400, {"error": "SSID is required."}
+        if operation == "forget":
+          mgr.forget_connection(ssid, block=True)
+          return 200, {}
+        try:
+          cfg = wifi_api.validate_static_config(req_body)
+        except wifi_api.WifiValidationError as exc:
+          return 400, {"error": str(exc)}
+        result = mgr.set_static_ip(
+          ssid, cfg["ip"], cfg["prefix"], cfg["gateway"], cfg["dns"], block=True
+        ) or {}
+        return 200 if not result.get("error") else 502, result or {}
+
+      return 200, result
+
+    code, body = await asyncio.to_thread(worker)
+    return json_response(body, status=code)
+
   # ---- status / capabilities / settings / logs ----
   async def status(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
@@ -309,6 +397,8 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/vehicle/select", "vehicle_select"),
   ("GET", "/api/bluetooth", "bluetooth_get"),
   ("POST", "/api/bluetooth/<operation:str>", "bluetooth_operation"),
+  ("GET", "/api/wifi", "wifi_get"),
+  ("POST", "/api/wifi/<operation:str>", "wifi_operation"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/radar", "radar_get"),
   ("GET", "/api/capabilities", "capabilities"),

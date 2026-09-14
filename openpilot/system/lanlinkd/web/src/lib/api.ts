@@ -8,7 +8,7 @@
  */
 import type {
   BluetoothStatus, Capabilities, ModelsState, ParamValues, RadarSnapshot, SettingsSchema, StatusSnapshot,
-  VehicleState,
+  VehicleState, WifiStatus,
 } from "./schema";
 
 const TOKEN_KEY = "lanlink_token";
@@ -111,6 +111,11 @@ export const api = {
   bluetoothOp: (operation: string, body?: Record<string, unknown>) =>
     post<{ message?: string; audio_test_delay_ms?: number }>(
       `/api/bluetooth/${encodeURIComponent(operation)}`, body),
+
+  // ---- wifi ----
+  wifi: () => request<WifiStatus>("/api/wifi"),
+  wifiOp: (operation: string, body: Record<string, unknown>) =>
+    post<Record<string, unknown>>(`/api/wifi/${encodeURIComponent(operation)}`, body),
 
   // ---- logs ----
   logs: () => request<unknown>("/api/logs"),

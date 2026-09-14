@@ -1638,10 +1638,10 @@
   },
   {
    "id": "bluetooth",
-   "label": "蓝牙",
-   "icon": "bluetooth",
+   "label": "连接",
+   "icon": "wifi",
    "order": 7,
-   "description": "设备配对、连接与音频输出",
+   "description": "WiFi 与蓝牙：扫描、配对、IP 配置",
    "sections": []
   },
   {

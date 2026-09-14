@@ -1,4 +1,6 @@
 import atexit
+import socket
+import struct
 import threading
 import time
 import uuid
@@ -155,10 +157,11 @@ class WifiState:
 
 
 class WifiManager:
-  def __init__(self):
+  def __init__(self, manage_tethering: bool = True):
     self._networks: list[Network] = []  # an unsorted list of available Networks. a Network can be comprised of multiple APs
     self._active = True  # used to not run when not in settings
     self._exit = False
+    self._manage_tethering = manage_tethering
 
     # DBus connections
     try:
@@ -215,12 +218,13 @@ class WifiManager:
       self._state_thread.start()
 
       self._init_connections()
-      if Params is not None and self._tethering_ssid not in self._connections:
+      if self._manage_tethering and Params is not None and self._tethering_ssid not in self._connections:
         self._add_tethering_connection()
 
       self._init_wifi_state()
 
-      self._tethering_password = self._get_tethering_password()
+      if self._manage_tethering:
+        self._tethering_password = self._get_tethering_password()
       cloudlog.debug("WifiManager initialized")
 
     threading.Thread(target=worker, daemon=True).start()
@@ -745,6 +749,120 @@ class WifiManager:
   def is_tethering_active(self) -> bool:
     # Check ssid, not connected_ssid, to also catch connecting state
     return self._wifi_state.ssid == self._tethering_ssid
+
+  # ---- static IP (per-SSID NetworkManager profile) ----
+
+  @staticmethod
+  def _dbus_val(value) -> Any:
+    """Unwrap a jeepney ('s', value) style tuple from GetSettings output."""
+    if isinstance(value, tuple) and len(value) == 2:
+      return value[1]
+    return value
+
+  def get_ipv4_settings(self, ssid: str) -> dict:
+    """Read the ipv4 section of a saved connection's profile.
+
+    Always returns a dict with at least 'method'; manual profiles also carry
+    'addresses' / 'gateway' / 'dns' as plain python values (unwrapped).
+    """
+    def worker():
+      conn_path = self._connections.get(ssid, None)
+      if conn_path is None:
+        return {"error": f"unknown connection: {ssid}"}
+      settings = self._get_connection_settings(conn_path)
+      if not settings:
+        return {"error": "failed to read connection settings"}
+      ipv4 = settings.get('ipv4', {})
+      out: dict[str, Any] = {"method": str(self._dbus_val(ipv4.get('method', ('s', 'auto'))))}
+      if 'address-data' in ipv4:
+        out["addresses"] = [
+          f"{self._dbus_val(a.get('address'))}/{self._dbus_val(a.get('prefix'))}"
+          for a in self._dbus_val(ipv4['address-data']) if isinstance(a, dict) and 'address' in a
+        ]
+      if 'gateway' in ipv4:
+        out["gateway"] = str(self._dbus_val(ipv4['gateway']))
+      if 'dns-data' in ipv4:
+        out["dns"] = [str(d) for d in self._dbus_val(ipv4['dns-data'])]
+      elif 'dns' in ipv4:
+        out["dns"] = [socket.inet_ntoa(struct.pack('!I', int(n))) for n in self._dbus_val(ipv4['dns'])]
+      return out
+    return worker()
+
+  def set_static_ip(self, ssid: str, ip: str, prefix: int, gateway: str, dns: list[str], block: bool = True):
+    """Switch a saved connection to ipv4 manual with the given static config.
+
+    Fails (no-op) when dns is empty: with method=manual there is no DHCP to
+    fall back on, so an empty resolver list would silently break the network.
+    """
+    def worker():
+      conn_path = self._connections.get(ssid, None)
+      if conn_path is None:
+        cloudlog.warning(f"No connection found for {ssid}, cannot set static IP")
+        return {"error": "unknown connection"}
+
+      new_ipv4 = {
+        'method': ('s', 'manual'),
+        'address-data': ('aa{sv}', [[('address', ('s', ip)), ('prefix', ('u', int(prefix)))]]),
+        'gateway': ('s', gateway),
+        'dns-data': ('as', [str(d) for d in dns]),
+        'ignore-auto-dns': ('b', True),
+        'dns-priority': ('i', 600),
+      }
+
+      settings = self._get_connection_settings(conn_path)
+      if not settings:
+        cloudlog.warning(f"Failed to get settings for {ssid}")
+        return {"error": "failed to read connection settings"}
+      settings['ipv4'] = new_ipv4
+
+      conn_addr = DBusAddress(conn_path, bus_name=NM, interface=NM_CONNECTION_IFACE)
+      reply = self._router_main.send_and_get_reply(new_method_call(conn_addr, 'Update', 'a{sa{sv}}', (settings,)))
+      if reply.header.message_type == MessageType.error:
+        cloudlog.warning(f"Failed to update static IP for {ssid}: {reply}")
+        return {"error": f"failed to update connection: {reply}"}
+
+      # Re-activate so the new profile takes effect immediately (only when live)
+      conn_path_active, _ = self._get_active_wifi_connection()
+      if conn_path_active == conn_path:
+        self.activate_connection(ssid, block=True)
+      return {}
+
+    result = {"error": None}
+    if block:
+      result = worker() or {}
+    else:
+      threading.Thread(target=worker, daemon=True).start()
+    return result
+
+  def clear_static_ip(self, ssid: str, block: bool = True):
+    """Restore ipv4 dhcp on a saved connection and re-activate if live."""
+    def worker():
+      conn_path = self._connections.get(ssid, None)
+      if conn_path is None:
+        return {"error": "unknown connection"}
+      settings = self._get_connection_settings(conn_path)
+      if not settings:
+        return {"error": "failed to read connection settings"}
+      settings['ipv4'] = {
+        'method': ('s', 'auto'),
+        'dns-priority': ('i', 600),
+      }
+      conn_addr = DBusAddress(conn_path, bus_name=NM, interface=NM_CONNECTION_IFACE)
+      reply = self._router_main.send_and_get_reply(new_method_call(conn_addr, 'Update', 'a{sa{sv}}', (settings,)))
+      if reply.header.message_type == MessageType.error:
+        cloudlog.warning(f"Failed to clear static IP for {ssid}: {reply}")
+        return {"error": f"failed to update connection: {reply}"}
+      conn_path_active, _ = self._get_active_wifi_connection()
+      if conn_path_active == conn_path:
+        self.activate_connection(ssid, block=True)
+      return {}
+
+    result = {"error": None}
+    if block:
+      result = worker() or {}
+    else:
+      threading.Thread(target=worker, daemon=True).start()
+    return result
 
   def is_connection_saved(self, ssid: str) -> bool:
     return ssid in self._connections
