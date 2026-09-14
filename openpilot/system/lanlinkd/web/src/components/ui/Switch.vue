@@ -1,6 +1,8 @@
 <script setup lang="ts">
-/** 开关。尺寸取自 sunnylink 实测：44×26，圆头 22。
- *  用 reka-ui 的 Switch 拿到可访问性与键盘交互（空格/回车）。 */
+/** 开关（shadcn-vue Switch 形态）。
+ *  reka-ui SwitchRoot/Thumb 提供可访问性与键盘交互；类名对齐 shadcn-vue
+ *  官方规范（data-state 驱动 + 语义 token），尺寸沿用 44×26。
+ */
 import { SwitchRoot, SwitchThumb } from "reka-ui";
 import { cn } from "@/lib/utils";
 
@@ -22,11 +24,10 @@ const emit = defineEmits<{ "update:modelValue": [boolean] }>();
     :aria-label="props.ariaLabel"
     :class="
       cn(
-        'relative inline-flex h-[26px] w-[44px] shrink-0 cursor-pointer items-center rounded-full',
-        'border border-transparent transition-colors duration-200 ease-out',
-        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sl-accent',
-        props.modelValue ? 'bg-sl-accent' : 'bg-sl-surface-3',
-        (props.disabled || props.pending) && 'cursor-not-allowed opacity-40',
+        'peer inline-flex h-[26px] w-[44px] shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-sm transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'data-[state=checked]:bg-primary data-[state=unchecked]:bg-input',
+        (props.disabled || props.pending) && 'cursor-not-allowed opacity-50',
       )
     "
     @update:model-value="emit('update:modelValue', $event)"
@@ -34,9 +35,9 @@ const emit = defineEmits<{ "update:modelValue": [boolean] }>();
     <SwitchThumb
       :class="
         cn(
-          'pointer-events-none block h-[22px] w-[22px] rounded-full bg-white shadow-sm',
+          'pointer-events-none block size-[22px] rounded-full bg-background shadow-lg ring-0',
           'transition-transform duration-200 ease-out will-change-transform',
-          props.modelValue ? 'translate-x-[20px]' : 'translate-x-[2px]',
+          props.modelValue ? 'translate-x-[18px]' : 'translate-x-0',
           props.pending && 'animate-pulse',
         )
       "
