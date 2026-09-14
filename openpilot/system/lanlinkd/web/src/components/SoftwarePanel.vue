@@ -6,7 +6,7 @@
  * /api/software 参数快照，updaterState 会从 downloading/finalizing 走过，
  * 所以按"非 idle 即进行中"判断按钮可用性。
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { Loader2, RefreshCw, Rocket } from "lucide-vue-next";
 import { api } from "@/lib/api";
 import type { SoftwareStatus } from "@/lib/schema";
@@ -20,13 +20,6 @@ const pollError = ref("");
 const busy = ref("");
 
 let timer: ReturnType<typeof setInterval> | undefined;
-
-/** 远程跟踪引用 vs 本地 HEAD：一致双绿，落后本地标红，未知（远程引用缺失）中性色 */
-const syncState = computed<"sync" | "behind" | "unknown">(() => {
-  const s = status.value;
-  if (!s?.remoteCommit || !s?.commit) return "unknown";
-  return s.remoteCommit === s.commit ? "sync" : "behind";
-});
 
 async function poll(): Promise<void> {
   try {
@@ -104,19 +97,9 @@ onUnmounted(() => {
           </div>
           <div class="min-w-0 flex-1">
             <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">检查更新</h2>
-            <!-- 远程 = origin/<target branch>（上次检查时的远程 tip）；本地 = 当前 HEAD。
-                 一致双绿；不一致本地红（落后于远程，点检查获取）；远程未知时中性色。 -->
-            <div class="mt-1 space-y-0.5 font-mono text-[12px] leading-5">
-              <p class="break-all" :class="syncState === 'sync' ? 'text-sl-accent' : 'text-sl-text-2'">
-                远程 {{ status.remoteCommit || "-" }}
-              </p>
-              <p
-                class="break-all"
-                :class="syncState === 'sync' ? 'text-sl-accent' : syncState === 'behind' ? 'text-sl-danger' : 'text-sl-text-2'"
-              >
-                本地 {{ status.commit || "-" }}
-              </p>
-            </div>
+            <p class="mt-0.5 text-[13px] text-sl-text-2">
+              {{ status.fetchAvailable ? "有新版本可下载" : "已是最新版本" }}
+            </p>
           </div>
           <Button variant="accent" :disabled="!status.offroad || !!busy" class="min-w-20 justify-center"
                   @click="action('check')">

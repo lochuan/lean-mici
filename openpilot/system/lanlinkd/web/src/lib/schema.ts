@@ -301,7 +301,6 @@ export interface SoftwareStatus {
   version: string;
   branch: string;
   commit: string;
-  remoteCommit: string;
   current: SoftwareDescription | null;
   updaterState: string;
   updateAvailable: boolean;
