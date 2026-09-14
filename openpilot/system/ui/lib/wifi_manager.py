@@ -669,9 +669,22 @@ class WifiManager:
 
       # Volatile connection auto-deletes on disconnect (wrong password, user switches networks)
       # Persisted to disk on ACTIVATED via Save()
+      # 等待 wifi 设备就绪（lanlinkd 等非 UI 调用方会在实例刚创建时就发起连接，
+      # _wifi_device 的初始化 worker 可能还没跑完；有界等待 15s 而不是直接放弃）
+      if self._wifi_device is None:
+        deadline = time.monotonic() + 15
+        while self._wifi_device is None and not self._exit and time.monotonic() < deadline:
+          time.sleep(0.5)
+          self._get_adapter(NM_DEVICE_TYPE_WIFI) and None
+        if self._wifi_device is None:
+          # 最后兜底：借用 _wait_for_wifi_device 的一次检索
+          device_path = self._get_adapter(NM_DEVICE_TYPE_WIFI)
+          self._wifi_device = device_path
+
       if self._wifi_device is None:
         cloudlog.warning("No WiFi device found")
-        # TODO: expose a failed connection state in the UI
+        # 断开“连接中”残留，payload 自愈读取后 UI 会回到未连接态
+        self._set_connecting(None)
         self._init_wifi_state()
         return
 

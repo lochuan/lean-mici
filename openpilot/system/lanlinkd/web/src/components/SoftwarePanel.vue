@@ -90,7 +90,10 @@ onUnmounted(() => {
       <section class="sl-card px-5 py-4">
         <div class="flex items-center gap-3">
           <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
-            <RefreshCw class="size-5 text-sl-text-2" />
+            <RefreshCw
+              class="size-5 text-sl-text-2"
+              :class="{ 'animate-spin': busy === 'check' || status.updaterState !== 'idle' }"
+            />
           </div>
           <div class="min-w-0 flex-1">
             <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">检查更新</h2>
