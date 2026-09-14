@@ -248,6 +248,9 @@ class LanlinkApp:
     def worker():
       try:
         mgr = self._get_wifi()
+        # 自愈：lanlinkd 单例的 monitor 订阅可能错过最终状态（连接后就停了），
+        # 每次轮询都从 NM 现读一次真实 wifi state，防止 payload 卡在"连接中"
+        mgr._init_wifi_state(block=True)
         networks = [
           {
             "ssid": n.ssid,
