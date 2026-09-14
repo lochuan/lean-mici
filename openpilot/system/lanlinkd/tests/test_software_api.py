@@ -39,7 +39,8 @@ def _full_params(**overrides):
 
 
 class TestStatus:
-  def test_full_payload(self):
+  def test_full_payload(self, monkeypatch):
+    monkeypatch.setattr(software_api, "_remote_commit", lambda p: "669b1769b4ba80c1a7843ff35a7bbf9e5c06f569")
     st = software_api.status(_full_params())
     assert st["version"] == "2026.003.000"
     assert st["branch"] == "lean-release"
@@ -48,12 +49,35 @@ class TestStatus:
     assert st["updateAvailable"] is True
     assert st["newVersion"] and st["newVersion"]["version"] == "2026.004.000"
     assert st["availableBranches"] == ["lean-release", "devel"]
+    assert st["remoteCommit"] == "669b1769b4ba80c1a7843ff35a7bbf9e5c06f569"
 
-  def test_empty_params(self):
+  def test_remote_commit_git_failure_is_empty(self, monkeypatch):
+    # git 不可用/引用不存在时必须回落为空串（前端显示 "-"），不能抛异常
+    class FakeProc:
+      returncode = 128
+      stdout = ""
+    monkeypatch.setattr(software_api.subprocess, "run", lambda *a, **k: FakeProc())
+    assert software_api._remote_commit(_full_params()) == ""
+
+  def test_remote_commit_uses_target_branch(self, monkeypatch):
+    captured = {}
+    def fake_run(cmd, **k):
+      captured["cmd"] = cmd
+      class FakeProc:
+        returncode = 0
+        stdout = "cafe123\n"
+      return FakeProc()
+    monkeypatch.setattr(software_api.subprocess, "run", fake_run)
+    assert software_api._remote_commit(_full_params(UpdaterTargetBranch="devel")) == "cafe123"
+    assert "origin/devel" in captured["cmd"]
+
+  def test_empty_params(self, monkeypatch):
+    monkeypatch.setattr(software_api, "_remote_commit", lambda p: "")
     st = software_api.status(StubParams({"UpdateAvailable": 0, "UpdaterCurrentDescription": "malformed"}))
     assert st["version"] == ""
     assert st["current"] is None
     assert st["updateAvailable"] is False
+    assert st["remoteCommit"] == ""
 
   def test_failed_count_str(self):
     st = software_api.status(_full_params(UpdateFailedCount="3"))

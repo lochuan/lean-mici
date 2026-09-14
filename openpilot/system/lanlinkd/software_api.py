@@ -12,6 +12,8 @@
 import re
 import subprocess
 
+from openpilot.common.basedir import BASEDIR
+
 UPDATED_PROC = "openpilot.system.updated.updated"
 SIGNAL_CHECK = "-SIGUSR1"   # mici CheckUpdateButton.CHECK_FOR_UPDATE
 SIGNAL_INSTALL = "-SIGHUP"  # DOWNLOAD_UPDATE -> 触发 fetch/download
@@ -33,6 +35,25 @@ def _pwd(params, key: str):
   return to_str(params.get(key)) or ""
 
 
+def _remote_commit(params) -> str:
+  """origin/<target branch> 的本地跟踪引用 hash（updater 每次 check/fetch 后刷新）。
+
+  纯本地 rev-parse，不发网络请求：它表示"上次检查时远程在哪"，与本地 HEAD
+  对比即知是否落后。git 缺失/引用不存在/超时时返回空串，前端显示 "-"。
+  """
+  branch = _pwd(params, "UpdaterTargetBranch") or "lean-release"
+  try:
+    proc = subprocess.run(
+      ["git", "-C", BASEDIR, "rev-parse", f"origin/{branch}"],
+      check=False, capture_output=True, text=True, timeout=5,
+    )
+    if proc.returncode == 0:
+      return proc.stdout.strip()
+  except Exception:
+    pass
+  return ""
+
+
 def status(params) -> dict:
   cur_desc = _pwd(params, "UpdaterCurrentDescription")
   new_desc = _pwd(params, "UpdaterNewDescription")
@@ -44,6 +65,7 @@ def status(params) -> dict:
     "version": _pwd(params, "Version"),
     "branch": _pwd(params, "GitBranch"),
     "commit": _pwd(params, "GitCommit"),
+    "remoteCommit": _remote_commit(params),
     "current": _split_description(cur_desc) if cur_desc else None,
     "updaterState": _pwd(params, "UpdaterState") or "idle",
     "updateAvailable": params.get_bool("UpdateAvailable"),
