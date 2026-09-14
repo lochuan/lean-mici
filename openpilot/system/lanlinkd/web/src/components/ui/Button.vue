@@ -36,6 +36,8 @@ const SIZES = {
       cn(
         'inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap',
         'transition-colors duration-150 active:scale-[0.98]',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+        '[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
         'disabled:pointer-events-none disabled:opacity-40',
         VARIANTS[props.variant],
         SIZES[props.size],

@@ -29,7 +29,7 @@ const TONE = {
           :class="
             cn(
               'pointer-events-auto flex max-w-[420px] items-start gap-2.5 rounded-lg border border-sl-border',
-              'bg-sl-surface-2 px-4 py-3 text-[13px] text-sl-text-1 shadow-xl shadow-black/50 ring-1 ring-inset',
+              'bg-sl-surface px-4 py-3 text-sm text-sl-text-1 shadow-lg shadow-black/50 ring-1 ring-inset',
               TONE[t.kind],
             )
           "
