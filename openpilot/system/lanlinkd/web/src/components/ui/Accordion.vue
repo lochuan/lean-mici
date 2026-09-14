@@ -50,9 +50,7 @@ defineProps<{
           />
         </AccordionTrigger>
       </AccordionHeader>
-      <AccordionContent
-        class="overflow-hidden border-t border-sl-border/70 data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
-      >
+      <AccordionContent class="overflow-hidden border-t border-sl-border/70">
         <div class="px-4 py-2">
           <slot :item="it" />
         </div>

@@ -6,7 +6,7 @@
  * lib/bluetooth.ts；按钮可用性与 the_galaxy 的 BluetoothPanel.js 对齐。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { Bluetooth } from "lucide-vue-next";
+import { Bluetooth, Loader2 } from "lucide-vue-next";
 import { api } from "@/lib/api";
 import type { BluetoothDevice, BluetoothStatus } from "@/lib/schema";
 import {

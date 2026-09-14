@@ -2,6 +2,7 @@
 /** 面板页：标题 + 各分区 + 车型专属设置。 */
 import { computed } from "vue";
 import SettingSection from "./SettingSection.vue";
+import SettingRow from "./SettingRow.vue";
 import BluetoothPanel from "./BluetoothPanel.vue";
 import WifiPanel from "./WifiPanel.vue";
 import SoftwarePanel from "./SoftwarePanel.vue";

@@ -66,7 +66,7 @@ function subRows(id: string) {
         v-if="accordions.length"
         :items="accordions"
       >
-        <template #item="it">
+        <template #default="it">
           <div class="divide-y divide-sl-border/70 py-1">
             <SettingRow v-for="i in subRows(it.item.id)" :key="i.key" :item="i" />
           </div>
