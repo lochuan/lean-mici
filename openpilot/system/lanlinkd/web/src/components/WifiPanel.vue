@@ -14,6 +14,7 @@ import type { WifiIpv4, WifiStatus } from "@/lib/schema";
 import { toast } from "@/lib/store";
 import Badge from "./ui/Badge.vue";
 import Button from "./ui/Button.vue";
+import Switch from "./ui/Switch.vue";
 
 const status = ref<WifiStatus | null>(null);
 const loading = ref(true);
@@ -158,7 +159,21 @@ onUnmounted(() => {
   if (timer) clearInterval(timer);
 });
 
-const networks = computed(() => status.value?.networks ?? []);
+const networks = computed(() => (status.value?.enabled ? (status.value?.networks ?? []) : []));
+
+async function togglePower(): Promise<void> {
+  if (busy.value || !status.value?.available || !status.value.offroad) return;
+  busy.value = "power";
+  try {
+    await api.wifiOp("power", { enabled: !status.value.enabled });
+    await poll();
+  } catch (e) {
+    toast(e instanceof Error ? e.message : "WiFi 开关失败", "error");
+  } finally {
+    busy.value = "";
+  }
+}
+const writesBlocked = computed(() => !!busy.value || !status.value?.offroad || (status.value?.enabled === false));
 </script>
 
 <template>
@@ -168,20 +183,47 @@ const networks = computed(() => status.value?.networks ?? []);
     </div>
 
     <template v-else-if="status">
-      <!-- 当前连接 -->
+      <!-- 电源 -->
       <section class="sl-card px-5 py-4">
         <div class="flex items-center gap-3">
           <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
-            <component :is="status.connected ? Wifi : WifiOff" class="size-5 text-sl-text-2" />
+            <component :is="status.enabled ? Wifi : WifiOff" class="size-5 text-sl-text-2" />
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2">
               <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">WiFi</h2>
               <Badge v-if="!status.available" kind="muted">不可用</Badge>
-              <Badge v-if="status.connecting" kind="warn">连接中…</Badge>
+              <Badge v-if="!status.offroad" kind="warn">行车中</Badge>
             </div>
             <p class="mt-0.5 text-[13px] text-sl-text-2">
-              {{ status.connected ?? "未连接" }}
+              {{ status.enabled ? (status.connected ?? "已开启") : "已关闭" }}
+            </p>
+          </div>
+          <Switch
+            :model-value="status.enabled"
+            :disabled="!status.available || !status.offroad || !!busy"
+            :pending="busy === 'power'"
+            aria-label="WiFi 电源"
+            @update:model-value="togglePower"
+          />
+        </div>
+        <p v-if="!status.offroad" class="mt-3 rounded-lg bg-sl-surface-2 px-3 py-2 text-[13px] text-sl-text-3">
+          连接、忘记与静态 IP 仅限停车（offroad）时操作。
+        </p>
+      </section>
+
+      <template v-if="status.enabled">
+      <!-- 当前连接 -->
+      <section v-if="status.connected || status.connecting" class="sl-card px-5 py-4">
+        <div class="flex items-center gap-3">
+          <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
+            <Wifi v-if="status.connected" class="size-5 text-sl-text-2" />
+            <Loader2 v-else class="size-5 animate-spin text-sl-text-3" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">当前连接</h2>
+            <p class="mt-0.5 truncate text-[13px] text-sl-text-2">
+              {{ status.connecting && !status.connected ? `${status.connecting}（连接中…）` : status.connected }}
             </p>
           </div>
         </div>
@@ -206,7 +248,7 @@ const networks = computed(() => status.value?.networks ?? []);
         <p class="mt-1 text-[13px] text-sl-text-2">
           当前方式：{{ status.ipv4.method === "manual" ? "静态" : "DHCP 自动获取" }}
         </p>
-        <Button class="mt-3 w-full justify-center" :disabled="!!busy" @click="openStaticEditor(status.ipv4, status.connected)">
+        <Button class="mt-3 w-full justify-center" :disabled="writesBlocked" @click="openStaticEditor(status.ipv4, status.connected)">
           编辑 IP / 网关 / DNS
         </Button>
       </section>
@@ -241,13 +283,13 @@ const networks = computed(() => status.value?.networks ?? []);
               <Button
                 v-if="n.saved && n.ssid !== status.connected"
                 variant="ghost"
-                :disabled="!!busy"
+                :disabled="writesBlocked"
                 class="px-2"
                 @click="doForget(n.ssid)"
               >
                 忘记
               </Button>
-              <Button :disabled="!!busy" class="min-w-20 justify-center" @click="openConnect(n.ssid, n.saved)">
+              <Button :disabled="writesBlocked" class="min-w-20 justify-center" @click="openConnect(n.ssid, n.saved)">
                 连接
               </Button>
             </div>
@@ -304,6 +346,7 @@ const networks = computed(() => status.value?.networks ?? []);
           <Button class="flex-1 justify-center" variant="surface" @click="editTarget = null">取消</Button>
         </div>
       </div>
+      </template>
     </template>
   </div>
 </template>

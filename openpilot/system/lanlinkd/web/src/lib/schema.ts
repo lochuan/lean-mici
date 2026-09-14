@@ -281,6 +281,8 @@ export interface WifiIpv4 {
 
 export interface WifiStatus {
   available: boolean;
+  enabled: boolean;
+  offroad: boolean;
   connecting: string | null;
   connected: string | null;
   ipv4: WifiIpv4;

@@ -16,9 +16,9 @@ import re
 WIFI_TIMEOUT = 15.0
 
 # url 操作名；操作语义见 WifiManager 对应方法
-OPERATIONS = frozenset({"connect", "static", "forget"})
+OPERATIONS = frozenset({"power", "connect", "static", "forget"})
 
-OFFROAD_ONLY = frozenset({"connect", "static", "forget"})
+OFFROAD_ONLY = frozenset({"power", "connect", "static", "forget"})
 
 MAX_DNS_SERVERS = 3
 
@@ -134,6 +134,8 @@ def fallback_snapshot(error: Exception | str) -> dict:
   """NetworkManager 不可达时的降级快照：页面仍可渲染。"""
   return {
     "available": False,
+    "enabled": True,
+    "offroad": True,
     "connecting": None,
     "connected": None,
     "ipv4": {"method": "unknown", "addresses": [], "gateway": "", "dns": []},

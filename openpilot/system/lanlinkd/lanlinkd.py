@@ -248,19 +248,24 @@ class LanlinkApp:
     def worker():
       try:
         mgr = self._get_wifi()
+        enabled = mgr.wireless_enabled()
+        if enabled is None:
+          return wifi_api.fallback_snapshot("NetworkManager unavailable")
         networks = [
           {
-            "ssid": n.name,
-            "rssi": getattr(n, "rssi", None) or getattr(n, "strength", None),
-            "security": str(getattr(n, "security_type", "")),
-            "saved": getattr(mgr, "is_connection_saved", lambda s: False)(n.name),
+            "ssid": n.ssid,
+            "rssi": n.strength,
+            "security": n.security_type.name if n.security_type is not None else "UNSUPPORTED",
+            "saved": getattr(mgr, "is_connection_saved", lambda s: False)(n.ssid),
           }
-          for n in mgr.networks
+          for n in mgr.networks if not n.is_tethering
         ]
         connected = mgr.connected_ssid
         ipv4 = mgr.get_ipv4_settings(connected) if connected else {"method": "auto", "addresses": [], "gateway": "", "dns": []}
         return {
           "available": True,
+          "enabled": bool(enabled),
+          "offroad": self.params.get_bool("IsOffroad"),
           "connecting": mgr.connecting_to_ssid,
           "connected": connected,
           "ipv4": {
@@ -288,6 +293,9 @@ class LanlinkApp:
 
     def worker():
       mgr = self._get_wifi()
+      if operation == "power":
+        result = mgr.set_wireless_enabled(bool(req_body.get("enabled", True)), block=True) or {}
+        return 200 if not result.get("error") else 502, result
       if operation == "connect":
         code, msg, payload = wifi_api.validate_connect_body(req_body)
         if code:

@@ -867,6 +867,38 @@ class WifiManager:
   def is_connection_saved(self, ssid: str) -> bool:
     return ssid in self._connections
 
+  # ---- radio power (NM WirelessEnabled) ----
+
+  def wireless_enabled(self) -> bool | None:
+    """None = NM 不可达；设备没有 WiFi 时调用方按 unavailable 处理。"""
+    if self._router_main is None:
+      return None
+    try:
+      reply = self._router_main.send_and_get_reply(
+        Properties(DBusAddress(NM_PATH, bus_name=NM, interface=NM_PROPERTIES_IFACE)).get('WirelessEnabled'))
+      if reply.header.message_type == MessageType.error:
+        return None
+      return bool(reply.body[0][1])
+    except Exception:
+      cloudlog.exception("Failed to read WirelessEnabled")
+      return None
+
+  def set_wireless_enabled(self, enabled: bool, block: bool = False):
+    def worker():
+      addr = DBusAddress(NM_PATH, bus_name=NM, interface=NM_PROPERTIES_IFACE)
+      reply = self._router_main.send_and_get_reply(Properties(addr).set('WirelessEnabled', 'b', bool(enabled)))
+      if reply.header.message_type == MessageType.error:
+        cloudlog.warning(f"Failed to set WirelessEnabled={enabled}: {reply}")
+        return {"error": f"failed to set wifi radio: {reply}"}
+      return {}
+
+    result = {"error": None}
+    if block:
+      result = worker() or {}
+    else:
+      threading.Thread(target=worker, daemon=True).start()
+    return result
+
   def set_tethering_password(self, password: str):
     def worker():
       conn_path = self._connections.get(self._tethering_ssid, None)
