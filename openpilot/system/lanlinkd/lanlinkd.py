@@ -248,9 +248,6 @@ class LanlinkApp:
     def worker():
       try:
         mgr = self._get_wifi()
-        enabled = mgr.wireless_enabled()
-        if enabled is None:
-          return wifi_api.fallback_snapshot("NetworkManager unavailable")
         networks = [
           {
             "ssid": n.ssid,
@@ -264,7 +261,6 @@ class LanlinkApp:
         ipv4 = mgr.get_ipv4_settings(connected) if connected else {"method": "auto", "addresses": [], "gateway": "", "dns": []}
         return {
           "available": True,
-          "enabled": bool(enabled),
           "offroad": self.params.get_bool("IsOffroad"),
           "connecting": mgr.connecting_to_ssid,
           "connected": connected,
@@ -293,9 +289,6 @@ class LanlinkApp:
 
     def worker():
       mgr = self._get_wifi()
-      if operation == "power":
-        result = mgr.set_wireless_enabled(bool(req_body.get("enabled", True)), block=True) or {}
-        return 200 if not result.get("error") else 502, result
       if operation == "connect":
         code, msg, payload = wifi_api.validate_connect_body(req_body)
         if code:

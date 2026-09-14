@@ -6,7 +6,7 @@
  * lib/bluetooth.ts；按钮可用性与 the_galaxy 的 BluetoothPanel.js 对齐。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { Bluetooth, BluetoothOff, Loader2 } from "lucide-vue-next";
+import { Bluetooth } from "lucide-vue-next";
 import { api } from "@/lib/api";
 import type { BluetoothDevice, BluetoothStatus } from "@/lib/schema";
 import {
@@ -16,7 +16,6 @@ import {
 import { toast } from "@/lib/store";
 import Badge from "./ui/Badge.vue";
 import Button from "./ui/Button.vue";
-import Switch from "./ui/Switch.vue";
 
 const status = ref<BluetoothStatus | null>(null);
 const loading = ref(true);
@@ -82,12 +81,6 @@ watch(testPhase, (p) => {
   if (p.phase === "complete") testDeadline.value = 0;
 });
 
-function togglePower(): void {
-  const s = status.value;
-  if (!s) return;
-  void request("power", { enabled: !s.enabled });
-}
-
 function toggleScan(): void {
   const s = status.value;
   if (!s) return;
@@ -128,12 +121,12 @@ function respondPairing(accepted: boolean): void {
     </div>
 
     <template v-else-if="status">
-      <!-- 电源 -->
+      <!-- 开关已从 lanlink 移除（切电源会把承载本页的服务一起踢掉线）。
+           开关位放搜索设备：停车才能扫，行车中显示禁用。 -->
       <section class="sl-card px-5 py-4">
         <div class="flex items-center gap-3">
           <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
-            <Bluetooth v-if="status.enabled" class="size-5 text-sl-text-2" />
-            <BluetoothOff v-else class="size-5 text-sl-text-3" />
+            <Bluetooth class="size-5 text-sl-text-2" />
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2">
@@ -141,15 +134,20 @@ function respondPairing(accepted: boolean): void {
               <Badge v-if="!status.available" kind="muted">不可用</Badge>
               <Badge v-if="!status.offroad" kind="warn">行车中</Badge>
             </div>
-            <p class="mt-0.5 text-[13px] text-sl-text-2">{{ status.enabled ? "已开启" : "已关闭" }}</p>
+            <p class="mt-0.5 text-[13px] text-sl-text-2">
+              {{ status.enabled ? (status.discovering ? "正在搜索附近设备…" : "就绪") : "蓝牙已关闭（请在车机端开启）" }}
+            </p>
           </div>
-          <Switch
-            :model-value="status.enabled"
-            :disabled="!status.available || !status.offroad || !!busy"
-            :pending="busy === 'power'"
-            aria-label="蓝牙电源"
-            @update:model-value="togglePower"
-          />
+          <Button
+            v-if="status.enabled && status.available"
+            variant="accent"
+            :disabled="!status.offroad || !!busy"
+            class="min-w-28 justify-center"
+            @click="toggleScan"
+          >
+            <Loader2 v-if="busy === 'scan' || busy === 'stop_scan'" class="mr-2 size-4 animate-spin" />
+            {{ status.discovering ? "停止搜索" : "搜索设备" }}
+          </Button>
         </div>
         <p v-if="!status.offroad" class="mt-3 rounded-lg bg-sl-surface-2 px-3 py-2 text-[13px] text-sl-text-3">
           搜索、配对与遗忘设备仅限停车（offroad）时操作；行车中仍可断开设备或切换音频输出。

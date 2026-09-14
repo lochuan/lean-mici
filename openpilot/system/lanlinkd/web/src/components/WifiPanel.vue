@@ -8,13 +8,11 @@
  * 没有 DHCP 兜底，空 DNS 会静默断网）。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Loader2, Wifi, WifiOff } from "lucide-vue-next";
+import { Loader2, Wifi } from "lucide-vue-next";
 import { api } from "@/lib/api";
 import type { WifiIpv4, WifiStatus } from "@/lib/schema";
 import { toast } from "@/lib/store";
-import Badge from "./ui/Badge.vue";
 import Button from "./ui/Button.vue";
-import Switch from "./ui/Switch.vue";
 
 const status = ref<WifiStatus | null>(null);
 const loading = ref(true);
@@ -159,21 +157,9 @@ onUnmounted(() => {
   if (timer) clearInterval(timer);
 });
 
-const networks = computed(() => (status.value?.enabled ? (status.value?.networks ?? []) : []));
+const networks = computed(() => status.value?.networks ?? []);
 
-async function togglePower(): Promise<void> {
-  if (busy.value || !status.value?.available || !status.value.offroad) return;
-  busy.value = "power";
-  try {
-    await api.wifiOp("power", { enabled: !status.value.enabled });
-    await poll();
-  } catch (e) {
-    toast(e instanceof Error ? e.message : "WiFi 开关失败", "error");
-  } finally {
-    busy.value = "";
-  }
-}
-const writesBlocked = computed(() => !!busy.value || !status.value?.offroad || (status.value?.enabled === false));
+const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
 </script>
 
 <template>
@@ -183,36 +169,6 @@ const writesBlocked = computed(() => !!busy.value || !status.value?.offroad || (
     </div>
 
     <template v-else-if="status">
-      <!-- 电源 -->
-      <section class="sl-card px-5 py-4">
-        <div class="flex items-center gap-3">
-          <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
-            <component :is="status.enabled ? Wifi : WifiOff" class="size-5 text-sl-text-2" />
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">WiFi</h2>
-              <Badge v-if="!status.available" kind="muted">不可用</Badge>
-              <Badge v-if="!status.offroad" kind="warn">行车中</Badge>
-            </div>
-            <p class="mt-0.5 text-[13px] text-sl-text-2">
-              {{ status.enabled ? (status.connected ?? "已开启") : "已关闭" }}
-            </p>
-          </div>
-          <Switch
-            :model-value="status.enabled"
-            :disabled="!status.available || !status.offroad || !!busy"
-            :pending="busy === 'power'"
-            aria-label="WiFi 电源"
-            @update:model-value="togglePower"
-          />
-        </div>
-        <p v-if="!status.offroad" class="mt-3 rounded-lg bg-sl-surface-2 px-3 py-2 text-[13px] text-sl-text-3">
-          连接、忘记与静态 IP 仅限停车（offroad）时操作。
-        </p>
-      </section>
-
-      <template v-if="status.enabled">
       <!-- 当前连接 -->
       <section v-if="status.connected || status.connecting" class="sl-card px-5 py-4">
         <div class="flex items-center gap-3">
@@ -346,7 +302,6 @@ const writesBlocked = computed(() => !!busy.value || !status.value?.offroad || (
           <Button class="flex-1 justify-center" variant="surface" @click="editTarget = null">取消</Button>
         </div>
       </div>
-      </template>
     </template>
   </div>
 </template>
