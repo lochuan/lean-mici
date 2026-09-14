@@ -1,7 +1,7 @@
 <script setup lang="ts">
-/** 设置分区：标题 + 若干行 + 抽屉入口。 */
+/** 设置分区：标题 + 若干行 + 子设置原地手风琴。 */
 import { computed } from "vue";
-import { ChevronRight, Lock } from "lucide-vue-next";
+import Accordion, { type AccordionEntry } from "./ui/Accordion.vue";
 import SettingRow from "./SettingRow.vue";
 import Badge from "./ui/Badge.vue";
 import { evalRules } from "@/lib/rules";
@@ -10,7 +10,6 @@ import { store } from "@/lib/store";
 import type { Section } from "@/lib/schema";
 
 const props = defineProps<{ section: Section }>();
-const emit = defineEmits<{ open: [string] }>();
 
 const ctx = computed(() => ({ params: store.params, caps: store.caps }));
 
@@ -21,12 +20,23 @@ const rows = computed(() =>
   (props.section.items ?? []).filter((i) => itemState(i, ctx.value).visible),
 );
 
-const drawers = computed(() =>
-  (props.section.sub_panels ?? []).map((sp) => ({
-    ...sp,
-    gate: subPanelOpenable(sp.trigger_condition, ctx.value),
-  })),
+const accordions = computed<AccordionEntry[]>(() =>
+  (props.section.sub_panels ?? []).map((sp) => {
+    const gate = subPanelOpenable(sp.trigger_condition, ctx.value);
+    return {
+      id: sp.id,
+      label: sp.label,
+      count: sp.items.length,
+      disabled: !gate.ok,
+      disabledReason: gate.reason,
+    };
+  }),
 );
+
+function subRows(id: string) {
+  const sp = (props.section.sub_panels ?? []).find((s) => s.id === id);
+  return (sp?.items ?? []).filter((i) => itemState(i, ctx.value).visible);
+}
 </script>
 
 <template>
@@ -51,25 +61,17 @@ const drawers = computed(() =>
         <SettingRow v-for="item in rows" :key="item.key" :item="item" />
       </div>
 
-      <!-- 抽屉入口：前置开关未开时置灰并说明，而不是消失 -->
-      <div v-if="drawers.length" class="mt-2 flex flex-col gap-1.5">
-        <button
-          v-for="d in drawers"
-          :key="d.id"
-          type="button"
-          :disabled="!d.gate.ok"
-          :title="d.gate.reason"
-          class="group flex h-12 w-full items-center justify-between rounded-lg bg-sl-surface-2 px-4 text-left ring-1 ring-inset ring-sl-border transition-colors hover:bg-sl-surface-3 disabled:pointer-events-none disabled:opacity-40"
-          @click="emit('open', d.id)"
-        >
-          <span class="flex items-center gap-2 text-sm text-sl-text-1">
-            <Lock v-if="!d.gate.ok" class="size-3.5 text-sl-text-3" />
-            {{ d.label }}
-            <span class="text-xs text-sl-text-3">{{ d.items.length }} 项</span>
-          </span>
-          <ChevronRight class="size-4 text-sl-text-3 transition-transform group-hover:translate-x-0.5" />
-        </button>
-      </div>
+      <!-- 子设置原地展开：前置开关未开时置灰 + Lock + title 说明，而不是消失 -->
+      <Accordion
+        v-if="accordions.length"
+        :items="accordions"
+      >
+        <template #item="it">
+          <div class="divide-y divide-sl-border/70 py-1">
+            <SettingRow v-for="i in subRows(it.item.id)" :key="i.key" :item="i" />
+          </div>
+        </template>
+      </Accordion>
     </div>
   </section>
 </template>

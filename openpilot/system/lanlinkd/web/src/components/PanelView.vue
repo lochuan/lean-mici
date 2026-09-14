@@ -1,9 +1,7 @@
 <script setup lang="ts">
 /** 面板页：标题 + 各分区 + 车型专属设置。 */
-import { computed, ref, watch } from "vue";
+import { computed } from "vue";
 import SettingSection from "./SettingSection.vue";
-import SubPanelDrawer from "./SubPanelDrawer.vue";
-import SettingRow from "./SettingRow.vue";
 import BluetoothPanel from "./BluetoothPanel.vue";
 import WifiPanel from "./WifiPanel.vue";
 import SoftwarePanel from "./SoftwarePanel.vue";
@@ -13,20 +11,12 @@ import StatusPanel from "./StatusPanel.vue";
 import Badge from "./ui/Badge.vue";
 import { itemState } from "@/lib/itemState";
 import { store } from "@/lib/store";
-import type { Panel, SubPanel } from "@/lib/schema";
+import type { Panel } from "@/lib/schema";
 
 const props = defineProps<{ panel: Panel }>();
 
-const openId = ref<string | null>(null);
-
 const ctx = computed(() => ({ params: store.params, caps: store.caps }));
 
-const allSubPanels = computed<SubPanel[]>(() =>
-  props.panel.sections.flatMap((s) => s.sub_panels ?? []),
-);
-const openPanel = computed(() => allSubPanels.value.find((s) => s.id === openId.value) ?? null);
-
-/** 仅当前车型品牌的专属设置 */
 const brandSettings = computed(() => {
   const brand = String(store.caps.brand ?? "");
   const group = store.schema?.vehicle_settings?.[brand];
@@ -37,13 +27,6 @@ const brandSettings = computed(() => {
 
 // 只在「车辆」相关面板底部显示品牌设置，避免每页重复
 const showBrand = computed(() => brandSettings.value && props.panel.id === "toggles");
-
-watch(
-  () => props.panel.id,
-  () => {
-    openId.value = null;
-  },
-);
 </script>
 
 <template>
@@ -75,7 +58,6 @@ watch(
       v-for="(section, i) in panel.sections"
       :key="section.id ?? `s${i}`"
       :section="section"
-      @open="openId = $event"
     />
 
     <!-- 车型专属：按 capabilities.brand 选取 -->
@@ -87,7 +69,5 @@ watch(
         <SettingRow v-for="item in brandSettings.items" :key="item.key" :item="item" />
       </div>
     </section>
-
-    <SubPanelDrawer :panel="openPanel" @close="openId = null" />
   </div>
 </template>
