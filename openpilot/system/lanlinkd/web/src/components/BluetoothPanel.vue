@@ -206,18 +206,6 @@ function respondPairing(accepted: boolean): void {
         </div>
       </section>
 
-      <!-- 搜索 -->
-      <div class="flex items-center gap-2">
-        <Button
-          variant="accent"
-          :disabled="!status.offroad || !status.enabled || !!busy"
-          @click="toggleScan"
-        >
-          <Loader2 v-if="status.discovering" class="size-3.5 animate-spin" />
-          {{ status.discovering ? "搜索中…" : "搜索设备" }}
-        </Button>
-      </div>
-
       <!-- 我的设备 -->
       <section class="sl-card px-5 py-4">
         <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">我的设备</h2>
