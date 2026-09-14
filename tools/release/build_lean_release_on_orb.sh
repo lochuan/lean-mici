@@ -46,6 +46,26 @@ set -x
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 SOURCE_DIR="$(git -C "$DIR" rev-parse --show-toplevel)"
+
+# ===== native 输入变更预警（提前喊话，避免只看到 tail 里的 source-only 信息）=====
+release_lib="$SOURCE_DIR/tools/release/release_lib.py"
+manifest="$SOURCE_DIR/release/prebuilt/arm64/MANIFEST"
+if [ -f "$manifest" ]; then
+  manifest_hash=$(sed -n 's/^native_hash=//p' "$manifest" 2>/dev/null | head -1)
+  current_hash=$(python3 "$release_lib" hash HEAD 2>/dev/null || true)
+  if [ -n "$manifest_hash" ] && [ "$manifest_hash" != "$current_hash" ]; then
+    echo "====================================================================" >&2
+    echo "⚠️  NATIVE INPUTS CHANGED（自上次 prebuilt 收割后）" >&2
+    echo "⚠️  本轮 release 将 SOURCE-ONLY：设备首启 scons 全量编译" >&2
+    echo "⚠️  30–60 分钟黑屏/风扇狂转，切勿断电" >&2
+    echo "⚠️  康复：设备编译完成 → \`./tools/release/harvest_device_prebuilt.sh\` → 重建 release" >&2
+    echo "--------------------------------------------------------------------" >&2
+    sleep 3
+  fi
+else
+  echo "[native] release/prebuilt/arm64/MANIFEST 不存在：prebuilt 尚未收割，本轮将 SOURCE-ONLY" >&2
+fi
+
 ORB_MACHINE="${ORB_MACHINE:-opilotbuild}"
 SOURCE_BRANCH="${SOURCE_BRANCH:-lean-master}"
 RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
@@ -232,6 +252,8 @@ rm -f /tmp/opilot-no-prebuilt
 if python3 \$HOME/opilot/tools/release/release_lib.py overlay /tmp/opilot-release; then
   echo \"[release] prebuilt shipped\"
 else
+  echo \"[release] ⚠️⚠️⚠️ SOURCE-ONLY RELEASE: 设备首启将 scons 全量编译 30–60 分钟（黑屏/风扇狂转，切勿断电）\" >&2
+  echo \"[release] ⚠️ 康复路径：设备编译完成后跑 \`./tools/release/harvest_device_prebuilt.sh\` 收割，再重建 release 恢复秒级启动\" >&2
   echo \"[release] WARN: prebuilt validation failed, shipping source-only release\" >&2
   touch /tmp/opilot-no-prebuilt
   rm -rf /tmp/opilot-release/release/prebuilt
