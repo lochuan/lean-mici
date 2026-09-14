@@ -214,18 +214,11 @@ const switching = computed(() => !!busy.value || (!!status.value?.connecting && 
         </dl>
       </section>
 
-      <!-- 静态 IP 编辑：切换期间同样蒙版常驻，不跟着消失 -->
+      <!-- 当前连接的网络刻意不在列表里重复出现 forget 入口，误触会断网 -->
       <section
-        v-if="(status.connected || switching) && status.ipv4"
-        class="sl-card relative px-5 py-4"
+        v-if="status.connected && status.ipv4.addresses.length > 0"
+        class="sl-card px-5 py-4"
       >
-        <div
-          v-if="switching"
-          class="absolute inset-0 z-10 grid place-items-center rounded-xl bg-sl-bg/70"
-          aria-hidden="true"
-        >
-          <Loader2 class="size-6 animate-spin text-sl-text-3" />
-        </div>
         <h2 class="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">
           <Loader2 v-if="busy" class="size-4 animate-spin text-sl-text-3" />
           配置 IP / 网关 / DNS（{{ status.connected }}）
