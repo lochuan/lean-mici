@@ -205,6 +205,12 @@ class WifiManager:
     self._disconnected: list[Callable[[], None]] = []
 
     self._scan_lock = threading.Lock()
+    # 同步有界等待 wifi 设备（10s）——lanlinkd 等调用方在实例创建后立即 connect，
+    # 必须保证 _wifi_device 已就绪，否则连接会静默失败（今晚的"一直连接中"根因）
+    self._wait_for_wifi_device(timeout=10)
+    if self._wifi_device is None:
+      cloudlog.warning("wifi device not found within 10s; marking manager exited")
+      self._exit = True
     self._scan_thread = threading.Thread(target=self._network_scanner, daemon=True)
     self._state_thread = threading.Thread(target=self._monitor_state, daemon=True)
     self._initialize()
@@ -212,8 +218,6 @@ class WifiManager:
 
   def _initialize(self):
     def worker():
-      self._wait_for_wifi_device()
-
       # TODO: wait for state thread to start before adding tethering connection, tiny race currently
       self._scan_thread.start()
       self._state_thread.start()
@@ -515,11 +519,14 @@ class WifiManager:
           self._last_network_scan = time.monotonic()
       time.sleep(1 / 2.)
 
-  def _wait_for_wifi_device(self):
+  def _wait_for_wifi_device(self, timeout: float | None = None):
+    deadline = None if timeout is None else time.monotonic() + timeout
     while not self._exit:
       device_path = self._get_adapter(NM_DEVICE_TYPE_WIFI)
       if device_path is not None:
         self._wifi_device = device_path
+        break
+      if deadline is not None and time.monotonic() >= deadline:
         break
       time.sleep(1)
 
