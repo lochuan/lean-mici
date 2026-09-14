@@ -275,7 +275,7 @@ class LanlinkApp:
             "dns": ipv4.get("dns", []),
           },
           "networks": networks,
-          "error": "",
+          "error": mgr.last_error or "",
         }
       except Exception as exc:
         return wifi_api.fallback_snapshot(exc)

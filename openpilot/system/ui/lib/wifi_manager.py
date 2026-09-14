@@ -185,6 +185,7 @@ class WifiManager:
     self._ipv4_address: str = ""
     self._current_network_metered: MeteredType = MeteredType.UNKNOWN
     self._tethering_password: str = ""
+    self._last_error: str | None = None
     self._ipv4_forward = False
 
     self._last_network_scan: float = 0.0
@@ -294,6 +295,10 @@ class WifiManager:
   @property
   def current_network_metered(self) -> MeteredType:
     return self._current_network_metered
+
+  @property
+  def last_error(self) -> str | None:
+    return self._last_error
 
   @property
   def connecting_to_ssid(self) -> str | None:
@@ -458,6 +463,7 @@ class WifiManager:
       # Stale NEED_AUTH from a prior connection during network switching arrives with
       # prev_state=DISCONNECTED and must be ignored to avoid a false wrong-password callback.
       if self._wifi_state.ssid:
+        self._last_error = f"连接 {self._wifi_state.ssid} 失败：密码错误？"
         self._enqueue_callbacks(self._need_auth, self._wifi_state.ssid)
         self._set_connecting(None)
 
@@ -466,6 +472,7 @@ class WifiManager:
       pass
 
     elif new_state == NMDeviceState.ACTIVATED:
+      self._last_error = None
       # Note that IP address from Ip4Config may not be propagated immediately and could take until the next scan results
       epoch = self._user_epoch
       wifi_state = replace(self._wifi_state, status=ConnectStatus.CONNECTED)
