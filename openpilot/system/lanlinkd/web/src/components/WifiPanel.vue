@@ -245,8 +245,12 @@ const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
               >
                 忘记
               </Button>
-              <Button :disabled="writesBlocked" class="min-w-20 justify-center" @click="openConnect(n.ssid, n.saved)">
-                连接
+              <Button
+                :disabled="writesBlocked || n.ssid === status.connected"
+                class="min-w-20 justify-center"
+                @click="openConnect(n.ssid, n.saved)"
+              >
+                {{ n.ssid === status.connected ? "已连接" : "连接" }}
               </Button>
             </div>
           </div>
