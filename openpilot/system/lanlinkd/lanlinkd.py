@@ -308,6 +308,9 @@ class LanlinkApp:
         if operation == "forget":
           mgr.forget_connection(ssid, block=True)
           return 200, {}
+        if operation == "activate":
+          mgr.activate_connection(ssid, block=True)
+          return 200, {}
         try:
           cfg = wifi_api.validate_static_config(req_body)
         except wifi_api.WifiValidationError as exc:

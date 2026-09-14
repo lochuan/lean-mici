@@ -187,7 +187,11 @@ const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
         v-if="status.connected && status.ipv4.addresses.length > 0"
         class="sl-card px-5 py-4"
       >
-        <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">高级设置（{{ status.connected }}）</h2>
+        <h2 class="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">
+          <Loader2 v-if="busy" class="size-4 animate-spin text-sl-text-3" />
+          配置 IP / 网关 / DNS（{{ status.connected }}）
+        </h2>
+        <p class="mt-1 text-[12px] text-sl-text-2" v-if="busy">连接中，请稍候…</p>
         <p class="mt-1 text-[13px] text-sl-text-2">
           当前方式：{{ status.ipv4.method === "manual" ? "静态" : "DHCP 自动获取" }}
         </p>
