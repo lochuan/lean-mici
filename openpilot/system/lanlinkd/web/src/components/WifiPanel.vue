@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import type { WifiIpv4, WifiStatus } from "@/lib/schema";
 import { toast } from "@/lib/store";
 import Button from "./ui/Button.vue";
+import Dialog from "./ui/Dialog.vue";
 
 const status = ref<WifiStatus | null>(null);
 const loading = ref(true);
@@ -162,14 +163,17 @@ const networks = computed(() => status.value?.networks ?? []);
 
 const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
 
-/** 卡片文案：已连 ssid > 连接中 ssid > 切换中（busy 但后端状态未跟上） */
+/** 卡片文案：已连 ssid > 连接中 ssid > 切换中（busy 但后端状态未跟上）> 未连接 */
 const cardText = computed(() => {
   const s = status.value;
   if (s?.connected) return s.connected;
   if (s?.connecting) return `${s.connecting}（连接中…）`;
   if (busy.value) return "正在切换网络…";
-  return "";
+  return "未连接";
 });
+
+/** 网络切换全程：提交后 busy 起步，直到后端状态落到新连接（或失败复位） */
+const switching = computed(() => !!busy.value || (!!status.value?.connecting && status.value?.connecting !== status.value?.connected));
 </script>
 
 <template>
@@ -179,18 +183,23 @@ const cardText = computed(() => {
     </div>
 
     <template v-else-if="status">
-      <!-- 当前连接：切换网络的整个过程卡片常驻（转等待圈），不要闪没 -->
-      <section v-if="status.connected || status.connecting || !!busy" class="sl-card px-5 py-4">
+      <!-- 当前连接：卡片常驻，切换全程蒙版+转圈（不消失、不闪） -->
+      <section class="sl-card relative px-5 py-4">
+        <div
+          v-if="switching"
+          class="absolute inset-0 z-10 grid place-items-center rounded-xl bg-sl-bg/70"
+          aria-live="polite"
+        >
+          <Loader2 class="size-6 animate-spin text-sl-text-2" />
+        </div>
         <div class="flex items-center gap-3">
           <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
-            <Loader2 v-if="!status.connected || busy" class="size-5 animate-spin text-sl-text-3" />
+            <Loader2 v-if="!status.connected || switching" class="size-5 animate-spin text-sl-text-3" />
             <Wifi v-else class="size-5 text-sl-text-2" />
           </div>
           <div class="min-w-0 flex-1">
             <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">当前连接</h2>
-            <p class="mt-0.5 truncate text-[13px] text-sl-text-2">
-              {{ cardText }}
-            </p>
+            <p class="mt-0.5 truncate text-[13px] text-sl-text-2">{{ cardText }}</p>
           </div>
         </div>
         <dl v-if="status.connected" class="mt-3 grid grid-cols-[56px_1fr] gap-x-3 gap-y-1 text-[13px]">
@@ -205,11 +214,18 @@ const cardText = computed(() => {
         </dl>
       </section>
 
-      <!-- 当前连接的网络刻意不在列表里重复出现 forget 入口，误触会断网 -->
+      <!-- 静态 IP 编辑：切换期间同样蒙版常驻，不跟着消失 -->
       <section
-        v-if="status.connected && status.ipv4.addresses.length > 0"
-        class="sl-card px-5 py-4"
+        v-if="(status.connected || switching) && status.ipv4"
+        class="sl-card relative px-5 py-4"
       >
+        <div
+          v-if="switching"
+          class="absolute inset-0 z-10 grid place-items-center rounded-xl bg-sl-bg/70"
+          aria-hidden="true"
+        >
+          <Loader2 class="size-6 animate-spin text-sl-text-3" />
+        </div>
         <h2 class="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">
           <Loader2 v-if="busy" class="size-4 animate-spin text-sl-text-3" />
           配置 IP / 网关 / DNS（{{ status.connected }}）
@@ -286,9 +302,8 @@ const cardText = computed(() => {
         </div>
       </section>
 
-      <!-- 连接弹层：永远 DHCP -->
-      <div v-if="connectTarget" class="sl-card px-5 py-4" role="dialog" aria-modal="true">
-        <h2 class="text-[15px] font-semibold">连接到 {{ connectTarget.ssid }}</h2>
+      <!-- 连接弹层（模态）：永远 DHCP。Portal 渲染，轮询重渲染不影响 -->
+      <Dialog :open="!!connectTarget" :title="`连接到 ${connectTarget?.ssid ?? ''}`" @update:open="(v: boolean) => { if (!v) connectTarget = null; }">
         <input
           v-model="connectPassword"
           type="password"
@@ -301,7 +316,7 @@ const cardText = computed(() => {
           </Button>
           <Button class="flex-1 justify-center" variant="ghost" @click="connectTarget = null">取消</Button>
         </div>
-      </div>
+      </Dialog>
     </template>
   </div>
 </template>

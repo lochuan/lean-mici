@@ -260,12 +260,13 @@ class WifiManager:
       if self._user_epoch != epoch:
         return
 
-      # 用户刚发起的 CONNECTING（新激活在 NM 侧尚未展开，设备还挂在旧连接上）：
-      # 保留之，否则 2s 轮询的"自愈"会用旧连接的 CONNECTED 反杀用户动作，
-      # UI 的"连接中"卡片闪没
+      # 用户刚发起的 CONNECTING（新激活在 NM 侧尚未展开）：设备可能还挂在旧连接
+      # （ACTIVATED 但 ssid 不同）或正在切换（DEACTIVATING/DISCONNECTED）。这些
+      # 中间态都保留用户的 CONNECTING，别让轮询"自愈"反杀——否则 UI 的"连接中"
+      # 卡片闪没。真正的失败/复位路径走 _set_connecting(None)（推进 epoch，不进这里）
       if (self._wifi_state.status == ConnectStatus.CONNECTING
-          and status == ConnectStatus.CONNECTED
-          and self._wifi_state.ssid != ssid):
+          and (status == ConnectStatus.DISCONNECTED
+               or (status == ConnectStatus.CONNECTED and self._wifi_state.ssid != ssid))):
         return
 
       self._wifi_state = WifiState(ssid=ssid, status=status)
