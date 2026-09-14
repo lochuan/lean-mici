@@ -31,7 +31,9 @@ class SettingsLayoutSP(OP.SettingsLayout):
     self.icon_offroad_slider = gui_app.texture("icons_mici/settings/device/lkas.png", BIG_ICON_SIZE, BIG_ICON_SIZE)
 
     lanlink_panel = LanLinkLayoutMici()
-    lanlink_btn = SettingsBigButton(tr("lanlink"), "", gui_app.texture("icons_mici/settings/network/wifi_strength_full.png", 76, 56))
+    # 链环图标（原 comma connect 时代的 link.png）：lanlink 是"链"接设备的入口，
+    # 且与隔壁 wifi 强度图标区分开
+    lanlink_btn = SettingsBigButton(tr("lanlink"), "", gui_app.texture("icons/link.png", 76, 56))
     lanlink_btn.set_click_callback(lambda: gui_app.push_widget(lanlink_panel))
 
     models_panel = ModelsLayoutMici()
