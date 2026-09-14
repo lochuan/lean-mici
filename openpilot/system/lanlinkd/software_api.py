@@ -64,7 +64,7 @@ def signal(params, action: str) -> tuple[int, dict | str]:
   install: 置 DoReboot → updated 自己 swap 后重启
   两个动作都只允许 offroad（与 mici 的按钮 disable 规则一致）。
   """
-  if action not in ("check", "install"):
+  if action not in ("check", "download", "install"):
     return 404, "Unknown software action."
   if not params.get_bool("IsOffroad"):
     return 409, "Software updates can only be installed offroad."

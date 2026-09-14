@@ -85,6 +85,11 @@ class TestSignal:
     # 用 stub 的 put_bool 语义写回了一个真值
     assert software_api._DO_REBOOT_KEY in p.values and p.values[software_api._DO_REBOOT_KEY] is True
 
+  def test_download_maps_sighup(self):
+    code, _ = software_api.signal(_full_params(), "download")
+    # updated 进程不存在时给 503（不 500），说明动作已被映射
+    assert code == 503
+
   def test_unknown_action(self):
     code, _ = software_api.signal(_full_params(), "reboot")
     assert code == 404

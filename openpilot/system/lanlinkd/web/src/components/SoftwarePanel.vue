@@ -32,7 +32,7 @@ async function poll(): Promise<void> {
   }
 }
 
-async function action(kind: "check" | "install"): Promise<void> {
+async function action(kind: "check" | "download" | "install"): Promise<void> {
   if (busy.value) return;
   busy.value = kind;
   try {
@@ -112,8 +112,32 @@ onUnmounted(() => {
         </p>
       </section>
 
-      <!-- 安装（常驻：无可装更新时按钮禁用并说明） -->
-      <section class="sl-card px-5 py-4">
+      <!-- 下载：检查发现新版本 (fetchAvailable) 后出现 -->
+      <section
+        v-if="!status.updateAvailable && status.fetchAvailable"
+        class="sl-card px-5 py-4"
+      >
+        <div class="flex items-center gap-3">
+          <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
+            <RefreshCw class="size-5 text-sl-text-2" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">下载更新</h2>
+            <p class="mt-0.5 text-[13px] text-sl-text-2">
+              {{ status.newVersion ? `${status.newVersion.version}（${status.newVersion.branch}）` : "准备联网拉取新版本" }}
+            </p>
+          </div>
+          <Button variant="accent" :disabled="!status.offroad || !!busy"
+                  class="min-w-20 justify-center"
+                  @click="action('download')">
+            <Loader2 v-if="busy === 'download' || status.updaterState !== 'idle'" class="mr-2 size-4 animate-spin" />
+            DOWNLOAD
+          </Button>
+        </div>
+      </section>
+
+      <!-- 安装 (仅在确认已下载到 finalized 后出现) -->
+      <section v-if="status.updateAvailable" class="sl-card px-5 py-4">
         <div class="flex items-center gap-3">
           <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
             <Rocket class="size-5 text-sl-text-2" />
@@ -121,12 +145,10 @@ onUnmounted(() => {
           <div class="min-w-0 flex-1">
             <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">安装更新</h2>
             <p class="mt-0.5 text-[13px] text-sl-text-2">
-              {{ status.updateAvailable
-                ? (status.newVersion ? `${status.newVersion.version}（${status.newVersion.branch}）` : "新版本")
-                : "暂无可安装的更新（先检查更新）" }}
+              {{ status.newVersion ? `${status.newVersion.version}（${status.newVersion.branch}）` : "新版本" }}
             </p>
           </div>
-          <Button variant="accent" :disabled="!status.offroad || !!busy || !status.updateAvailable"
+          <Button variant="accent" :disabled="!status.offroad || !!busy || status.updaterState !== 'idle'"
                   class="min-w-20 justify-center"
                   @click="action('install')">
             <Loader2 v-if="busy === 'install'" class="mr-2 size-4 animate-spin" />安装
