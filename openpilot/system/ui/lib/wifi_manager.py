@@ -803,7 +803,7 @@ class WifiManager:
       active_path, props = self._get_active_wifi_connection()
       if active_path != conn_path or not props:
         return None
-      ip4_path = self._dbus_val(props.get('IPv4Config'))
+      ip4_path = self._dbus_val(props.get('Ip4Config'))
       if not ip4_path or ip4_path == '/':
         return None
       ip4 = DBusAddress(ip4_path, bus_name=NM, interface=NM_IP4_CONFIG_IFACE)
