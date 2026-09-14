@@ -19,21 +19,16 @@ const loading = ref(true);
 const pollError = ref("");
 const busy = ref("");
 
-/** 连接弹层：目标网络 + 密码 + 可展开的静态 IP 字段 */
+/** 连接弹层：目标网络 + 密码（永远 DHCP） */
 const connectTarget = ref<{ ssid: string; saved: boolean } | null>(null);
 const connectPassword = ref("");
-const staticOn = ref(false);
-const staticIp = ref("");
-const staticPrefix = ref("24");
-const staticGateway = ref("");
-const staticDns = ref("");
 
-/** 静态 IP 编辑弹层（对已保存网络） */
-const editTarget = ref<string | null>(null);
-const editIp = ref("");
-const editPrefix = ref("24");
-const editGateway = ref("");
-const editDns = ref("");
+/** 当前连接的静态 IP 编辑（高级设置） */
+const showAdvanced = ref(false);
+const advIp = ref("");
+const advPrefix = ref("24");
+const advGateway = ref("");
+const advDns = ref("");
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -52,11 +47,6 @@ async function poll(): Promise<void> {
 function openConnect(ssid: string, saved: boolean): void {
   connectTarget.value = { ssid, saved };
   connectPassword.value = "";
-  staticOn.value = false;
-  staticIp.value = "";
-  staticPrefix.value = "24";
-  staticGateway.value = "";
-  staticDns.value = "";
 }
 
 function parseFields(ip: string, prefix: string, gateway: string, dns: string):
@@ -91,16 +81,13 @@ function parseFields(ip: string, prefix: string, gateway: string, dns: string):
 async function doConnect(): Promise<void> {
   const t = connectTarget.value;
   if (!t || busy.value) return;
+  // 连接永远 DHCP（method=auto）；静态 IP 只对"当前连接"在高级设置里改
   const body: Record<string, unknown> = { ssid: t.ssid, password: connectPassword.value };
-  if (staticOn.value) {
-    const cfg = parseFields(staticIp.value, staticPrefix.value, staticGateway.value, staticDns.value);
-    if (cfg === null) return;
-    body.static = cfg;
-  }
   busy.value = "connect";
   try {
     await api.wifiOp("connect", body);
     connectTarget.value = null;
+    showAdvanced.value = false;
     await poll();
   } catch (e) {
     toast(e instanceof Error ? e.message : "连接失败", "error");
@@ -110,14 +97,13 @@ async function doConnect(): Promise<void> {
 }
 
 async function doStatic(): Promise<void> {
-  const ssid = status.value?.connected ?? status.value?.connecting;
+  const ssid = status.value?.connected;
   if (!ssid || busy.value) return;
-  const cfg = editTarget.value === null ? null : parseFields(editIp.value, editPrefix.value, editGateway.value, editDns.value);
+  const cfg = parseFields(advIp.value, advPrefix.value, advGateway.value, advDns.value);
   if (cfg === null) return;
   busy.value = "static";
   try {
     await api.wifiOp("static", { ssid, ...cfg });
-    editTarget.value = null;
     await poll();
   } catch (e) {
     toast(e instanceof Error ? e.message : "保存失败", "error");
@@ -139,14 +125,15 @@ async function doForget(ssid: string): Promise<void> {
   }
 }
 
-function openStaticEditor(ipv4: WifiIpv4 | undefined, ssid: string): void {
-  if (!ipv4) return;
-  staticOn.value = true;
-  editIp.value = ipv4.addresses[0]?.split("/")[0] ?? "";
-  editPrefix.value = ipv4.addresses[0]?.split("/")[1] ?? "24";
-  editGateway.value = ipv4.gateway ?? "";
-  editDns.value = ipv4.dns.join(", ");
-  editTarget.value = ssid;
+function openAdvanced(): void {
+  showAdvanced.value = !showAdvanced.value;
+  const ipv4 = status.value?.ipv4 as WifiIpv4 | undefined;
+  if (showAdvanced.value && status.value?.connected && ipv4) {
+    advIp.value = ipv4.addresses[0]?.split("/")[0] ?? "";
+    advPrefix.value = ipv4.addresses[0]?.split("/")[1] ?? "24";
+    advGateway.value = ipv4.gateway ?? "";
+    advDns.value = ipv4.dns.join(", ");
+  }
 }
 
 onMounted(() => {
@@ -200,13 +187,27 @@ const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
         v-if="status.connected && status.ipv4.addresses.length > 0"
         class="sl-card px-5 py-4"
       >
-        <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">静态 IP（{{ status.connected }}）</h2>
+        <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">高级设置（{{ status.connected }}）</h2>
         <p class="mt-1 text-[13px] text-sl-text-2">
           当前方式：{{ status.ipv4.method === "manual" ? "静态" : "DHCP 自动获取" }}
         </p>
-        <Button class="mt-3 w-full justify-center" :disabled="writesBlocked" @click="openStaticEditor(status.ipv4, status.connected)">
-          编辑 IP / 网关 / DNS
+        <Button class="mt-3 w-full justify-center" :disabled="writesBlocked" @click="openAdvanced">
+          {{ showAdvanced ? "收起" : "配置 IP / 网关 / DNS" }}
         </Button>
+        <div v-if="showAdvanced" class="mt-3 space-y-2">
+          <input v-model="advIp" type="text" placeholder="IP e.g. 192.168.1.50"
+                 class="w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
+          <input v-model="advPrefix" type="number" min="1" max="32" placeholder="前缀 e.g. 24"
+                 class="w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
+          <input v-model="advGateway" type="text" placeholder="网关 e.g. 192.168.1.1"
+                 class="w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
+          <input v-model="advDns" type="text" placeholder="DNS，逗号分隔 e.g. 1.1.1.1,8.8.8.8"
+                 class="w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
+          <p class="text-[12px] text-sl-text-2">DNS 必填；保存后立即对该 SSID 生效并持久化</p>
+          <Button class="w-full justify-center" variant="accent" :disabled="writesBlocked" @click="doStatic">
+            <Loader2 v-if="busy === 'static'" class="mr-2 size-4 animate-spin" />保存并生效
+          </Button>
+        </div>
       </section>
 
       <p
@@ -246,6 +247,7 @@ const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
                 忘记
               </Button>
               <Button
+                variant="accent"
                 :disabled="writesBlocked || n.ssid === status.connected"
                 class="min-w-20 justify-center"
                 @click="openConnect(n.ssid, n.saved)"
@@ -257,7 +259,7 @@ const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
         </div>
       </section>
 
-      <!-- 连接弹层：密码 + 可选静态 IP -->
+      <!-- 连接弹层：永远 DHCP -->
       <div v-if="connectTarget" class="sl-card px-5 py-4" role="dialog" aria-modal="true">
         <h2 class="text-[15px] font-semibold">连接到 {{ connectTarget.ssid }}</h2>
         <input
@@ -266,44 +268,11 @@ const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
           placeholder="密码（开放网络可留空）"
           class="mt-3 w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]"
         >
-        <button class="mt-2 text-[13px] text-sl-accent underline underline-offset-4" @click="staticOn = !staticOn">
-          {{ staticOn ? "使用 DHCP 自动获取" : "配置静态 IP…" }}
-        </button>
-        <div v-if="staticOn" class="mt-2 space-y-2">
-          <input v-model="staticIp" type="text" placeholder="IP e.g. 192.168.1.50"
-                 class="w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
-          <input v-model="staticPrefix" type="number" min="1" max="32" placeholder="前缀 e.g. 24"
-                 class="w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
-          <input v-model="staticGateway" type="text" placeholder="网关 e.g. 192.168.1.1"
-                 class="w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
-          <input v-model="staticDns" type="text" placeholder="DNS，逗号分隔 e.g. 1.1.1.1,8.8.8.8"
-                 class="w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
-        </div>
         <div class="mt-4 flex gap-2">
           <Button class="flex-1 justify-center" :disabled="!!busy" @click="doConnect">
             <Loader2 v-if="busy === 'connect'" class="mr-2 size-4 animate-spin" />连接
           </Button>
           <Button class="flex-1 justify-center" variant="ghost" @click="connectTarget = null">取消</Button>
-        </div>
-      </div>
-
-      <!-- 静态 IP 编辑弹层 -->
-      <div v-if="editTarget" class="sl-card px-5 py-4" role="dialog" aria-modal="true">
-        <h2 class="text-[15px] font-semibold">静态 IP · {{ editTarget }}</h2>
-        <input v-model="editIp" type="text" placeholder="IP e.g. 192.168.1.50"
-               class="mt-3 w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
-        <input v-model="editPrefix" type="number" min="1" max="32" placeholder="前缀 e.g. 24"
-               class="mt-2 w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
-        <input v-model="editGateway" type="text" placeholder="网关 e.g. 192.168.1.1"
-               class="mt-2 w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
-        <input v-model="editDns" type="text" placeholder="DNS，逗号分隔 e.g. 1.1.1.1,8.8.8.8"
-               class="mt-2 w-full rounded-lg border border-sl-border bg-transparent px-3 py-2 text-[15px]">
-        <p class="mt-2 text-[12px] text-sl-text-2">DNS 必填；保存后立即对该 SSID 生效并持久化</p>
-        <div class="mt-4 flex gap-2">
-          <Button class="flex-1 justify-center" :disabled="!!busy" @click="doStatic">
-            <Loader2 v-if="busy === 'static'" class="mr-2 size-4 animate-spin" />保存并生效
-          </Button>
-          <Button class="flex-1 justify-center" variant="surface" @click="editTarget = null">取消</Button>
         </div>
       </div>
     </template>

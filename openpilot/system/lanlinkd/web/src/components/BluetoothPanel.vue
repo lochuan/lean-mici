@@ -142,11 +142,11 @@ function respondPairing(accepted: boolean): void {
             v-if="status.enabled && status.available"
             variant="accent"
             :disabled="!status.offroad || !!busy"
-            class="min-w-28 justify-center"
+            class="min-w-20 justify-center"
             @click="toggleScan"
           >
             <Loader2 v-if="busy === 'scan' || busy === 'stop_scan'" class="mr-2 size-4 animate-spin" />
-            {{ status.discovering ? "停止搜索" : "搜索设备" }}
+            {{ status.discovering ? "STOP" : "SCAN" }}
           </Button>
         </div>
         <p v-if="!status.offroad" class="mt-3 rounded-lg bg-sl-surface-2 px-3 py-2 text-[13px] text-sl-text-3">
