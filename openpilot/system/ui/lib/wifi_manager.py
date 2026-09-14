@@ -260,6 +260,14 @@ class WifiManager:
       if self._user_epoch != epoch:
         return
 
+      # 用户刚发起的 CONNECTING（新激活在 NM 侧尚未展开，设备还挂在旧连接上）：
+      # 保留之，否则 2s 轮询的"自愈"会用旧连接的 CONNECTED 反杀用户动作，
+      # UI 的"连接中"卡片闪没
+      if (self._wifi_state.status == ConnectStatus.CONNECTING
+          and status == ConnectStatus.CONNECTED
+          and self._wifi_state.ssid != ssid):
+        return
+
       self._wifi_state = WifiState(ssid=ssid, status=status)
 
     if block:
@@ -697,7 +705,8 @@ class WifiManager:
 
       if self._wifi_device is None:
         cloudlog.warning("No WiFi device found")
-        # 断开“连接中”残留，payload 自愈读取后 UI 会回到未连接态
+        # 显式清掉用户 CONNECTING 再读真实状态（_set_connecting 会推进 epoch，
+        # 使紧接着的 _init_wifi_state 不被"保留 CONNECTING"守卫挡住）
         self._set_connecting(None)
         self._init_wifi_state()
         return
@@ -707,7 +716,10 @@ class WifiManager:
 
       if reply.header.message_type == MessageType.error:
         cloudlog.warning(f"Failed to add and activate connection for {ssid}: {reply}")
-        # TODO: expose a failed connection state in the UI
+        # 失败要可见也要复位：只 _init_wifi_state 会被"保留 CONNECTING"守卫挡住，
+        # 造成假连接中态卡死
+        self._set_connecting(None)
+        self._last_error = f"连接 {ssid} 失败"
         self._init_wifi_state()
 
     threading.Thread(target=worker, daemon=True).start()

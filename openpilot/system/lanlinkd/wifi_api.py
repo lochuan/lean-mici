@@ -16,9 +16,10 @@ import re
 WIFI_TIMEOUT = 15.0
 
 # url 操作名；操作语义见 WifiManager 对应方法
-OPERATIONS = frozenset({"connect", "static", "forget"})
+# activate = 已保存 profile 直接激活（无需重输密码，与 connect 的 forget+重建不同）
+OPERATIONS = frozenset({"connect", "activate", "static", "forget"})
 
-OFFROAD_ONLY = frozenset({"connect", "static", "forget"})
+OFFROAD_ONLY = frozenset({"connect", "activate", "static", "forget"})
 
 MAX_DNS_SERVERS = 3
 

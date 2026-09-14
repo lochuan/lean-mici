@@ -49,6 +49,20 @@ function openConnect(ssid: string, saved: boolean): void {
   connectPassword.value = "";
 }
 
+/** 已保存网络：直接激活 NM profile，不需要重输密码 */
+async function doActivate(ssid: string): Promise<void> {
+  if (busy.value) return;
+  busy.value = "activate";
+  try {
+    await api.wifiOp("activate", { ssid });
+    await poll();
+  } catch (e) {
+    toast(e instanceof Error ? e.message : "连接失败", "error");
+  } finally {
+    busy.value = "";
+  }
+}
+
 function parseFields(ip: string, prefix: string, gateway: string, dns: string):
   { ip: string; prefix: number; gateway: string; dns: string[] } | null {
   const dnsList = dns.split(",").map((d) => d.trim()).filter(Boolean);
@@ -147,6 +161,15 @@ onUnmounted(() => {
 const networks = computed(() => status.value?.networks ?? []);
 
 const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
+
+/** 卡片文案：已连 ssid > 连接中 ssid > 切换中（busy 但后端状态未跟上） */
+const cardText = computed(() => {
+  const s = status.value;
+  if (s?.connected) return s.connected;
+  if (s?.connecting) return `${s.connecting}（连接中…）`;
+  if (busy.value) return "正在切换网络…";
+  return "";
+});
 </script>
 
 <template>
@@ -156,17 +179,17 @@ const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
     </div>
 
     <template v-else-if="status">
-      <!-- 当前连接 -->
-      <section v-if="status.connected || status.connecting" class="sl-card px-5 py-4">
+      <!-- 当前连接：切换网络的整个过程卡片常驻（转等待圈），不要闪没 -->
+      <section v-if="status.connected || status.connecting || !!busy" class="sl-card px-5 py-4">
         <div class="flex items-center gap-3">
           <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
-            <Wifi v-if="status.connected" class="size-5 text-sl-text-2" />
-            <Loader2 v-else class="size-5 animate-spin text-sl-text-3" />
+            <Loader2 v-if="!status.connected || busy" class="size-5 animate-spin text-sl-text-3" />
+            <Wifi v-else class="size-5 text-sl-text-2" />
           </div>
           <div class="min-w-0 flex-1">
             <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">当前连接</h2>
             <p class="mt-0.5 truncate text-[13px] text-sl-text-2">
-              {{ status.connecting && !status.connected ? `${status.connecting}（连接中…）` : status.connected }}
+              {{ cardText }}
             </p>
           </div>
         </div>
@@ -254,7 +277,7 @@ const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
                 variant="accent"
                 :disabled="writesBlocked || n.ssid === status.connected"
                 class="min-w-20 justify-center"
-                @click="openConnect(n.ssid, n.saved)"
+                @click="n.saved ? doActivate(n.ssid) : openConnect(n.ssid, n.saved)"
               >
                 {{ n.ssid === status.connected ? "已连接" : "连接" }}
               </Button>
