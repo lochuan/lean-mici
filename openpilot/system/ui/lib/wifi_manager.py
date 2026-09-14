@@ -760,10 +760,11 @@ class WifiManager:
     return value
 
   def get_ipv4_settings(self, ssid: str) -> dict:
-    """Read the ipv4 section of a saved connection's profile.
+    """Read the ipv4 config of a connection (profile + live active IP4Config).
 
-    Always returns a dict with at least 'method'; manual profiles also carry
-    'addresses' / 'gateway' / 'dns' as plain python values (unwrapped).
+    Profile carries static/manual addresses only; for DHCP the live values
+    (addresses/gateway/dns) come from the active connection's IP4Config.
+    Always returns a dict with at least 'method'.
     """
     def worker():
       conn_path = self._connections.get(ssid, None)
@@ -785,8 +786,49 @@ class WifiManager:
         out["dns"] = [str(d) for d in self._dbus_val(ipv4['dns-data'])]
       elif 'dns' in ipv4:
         out["dns"] = [socket.inet_ntoa(struct.pack('!I', int(n))) for n in self._dbus_val(ipv4['dns'])]
+
+      # DHCP 模式从活动的 IP4Config 拿实时地址/网关/DNS
+      if out["method"] != "manual" and not out.get("addresses"):
+        active = self._get_active_ip4_config(conn_path)
+        if active:
+          out.update({k: v for k, v in active.items() if v})
       return out
     return worker()
+
+  def _get_active_ip4_config(self, conn_path: str) -> dict | None:
+    """Live IP (IPv4Config) of a connection; None if not currently active."""
+    if self._router_main is None:
+      return None
+    try:
+      active_path, props = self._get_active_wifi_connection()
+      if active_path != conn_path or not props:
+        return None
+      ip4_path = self._dbus_val(props.get('IPv4Config'))
+      if not ip4_path or ip4_path == '/':
+        return None
+      ip4 = DBusAddress(ip4_path, bus_name=NM, interface=NM_IP4_CONFIG_IFACE)
+      reply = self._router_main.send_and_get_reply(Properties(ip4).get_all())
+      if reply.header.message_type == MessageType.error:
+        return None
+      raw = dict(reply.body[0])
+      out: dict[str, Any] = {}
+      data = self._dbus_val(raw.get('AddressData'))
+      if isinstance(data, (list, tuple)):
+        out["addresses"] = [
+          f"{self._dbus_val(a['address'])}/{self._dbus_val(a['prefix'])}"
+          for a in data if isinstance(a, dict) and 'address' in a
+        ]
+      if raw.get('Gateway'):
+        out["gateway"] = str(self._dbus_val(raw['Gateway']))
+      dns = self._dbus_val(raw.get('Dns') or raw.get('DNS'))
+      if isinstance(dns, (list, tuple)) and dns:
+        out["dns"] = [socket.inet_ntoa(struct.pack('!I', int(n))) for n in dns]
+      elif raw.get('Domain'):
+        pass
+      return out if out else None
+    except Exception:
+      cloudlog.exception("failed to read active IPv4Config")
+      return None
 
   def set_static_ip(self, ssid: str, ip: str, prefix: int, gateway: str, dns: list[str], block: bool = True):
     """Switch a saved connection to ipv4 manual with the given static config.
