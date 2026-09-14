@@ -53,7 +53,7 @@ async function poll(): Promise<void> {
     snap.value = await api.radar();
     failures.value = 0;
   } catch {
-    // 401 由全局 handler 处理；这里只把点阵判为不可用，保留最后一帧
+    // 失败只把点阵判为不可用，保留最后一帧
     failures.value += 1;
   }
 }

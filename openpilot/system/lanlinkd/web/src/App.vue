@@ -1,21 +1,18 @@
 <script setup lang="ts">
-/** 根组件：认证 → 加载 → 面板。
+/** 根组件：加载 → 面板。局域网无认证，直接进主界面。
  *
  * 路由用 hash（#/steering），沿用旧版前端的做法：设备上是静态文件服务，
  * 没有 history fallback，用 path 路由刷新会 404。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Loader2, LogOut, RefreshCw } from "lucide-vue-next";
+import { Loader2, RefreshCw } from "lucide-vue-next";
 import Sidebar from "./components/Sidebar.vue";
 import TopBar from "./components/TopBar.vue";
 import PanelView from "./components/PanelView.vue";
 import HomeView from "./components/HomeView.vue";
-import LoginView from "./components/LoginView.vue";
 import Toasts from "./components/Toasts.vue";
-import { getToken, setToken, setUnauthorizedHandler } from "./lib/api";
 import { loadAll, panelById, pollStatus, refreshParams, store, toast } from "./lib/store";
 
-const authed = ref(Boolean(getToken()));
 const booting = ref(false);
 const current = ref("");
 /** <md 的侧边栏 drawer 开关；>=md 常驻，状态无效 */
@@ -50,12 +47,6 @@ async function boot(): Promise<void> {
   }
 }
 
-function logout(): void {
-  setToken("");
-  authed.value = false;
-  if (timer) clearInterval(timer);
-}
-
 async function manualRefresh(): Promise<void> {
   try {
     await refreshParams();
@@ -70,15 +61,9 @@ function onKeydown(e: KeyboardEvent): void {
 }
 
 onMounted(() => {
-  // token 失效（含设备端改密后的全端下线）→ 回登录页
-  setUnauthorizedHandler(() => {
-    authed.value = false;
-    if (timer) clearInterval(timer);
-    toast("登录已失效，请重新登录", "warn");
-  });
   window.addEventListener("hashchange", readHash);
   window.addEventListener("keydown", onKeydown);
-  if (authed.value) void boot();
+  void boot();
 });
 
 onUnmounted(() => {
@@ -86,17 +71,10 @@ onUnmounted(() => {
   window.removeEventListener("hashchange", readHash);
   window.removeEventListener("keydown", onKeydown);
 });
-
-async function onAuthed(): Promise<void> {
-  authed.value = true;
-  await boot();
-}
 </script>
 
 <template>
-  <LoginView v-if="!authed" @authed="onAuthed" />
-
-  <div v-else class="flex h-dvh overflow-hidden bg-sl-bg">
+  <div class="flex h-dvh overflow-hidden bg-sl-bg">
     <!-- 手机端 drawer 遮罩；md+ 侧边栏常驻，遮罩不渲染 -->
     <Transition
       enter-active-class="transition-opacity duration-200"
@@ -122,14 +100,6 @@ async function onAuthed(): Promise<void> {
           >
             <RefreshCw class="size-3.5" />
             刷新
-          </button>
-          <button
-            type="button"
-            class="grid size-9 place-items-center rounded-lg text-sl-text-3 transition-colors hover:bg-sl-surface-2 hover:text-sl-danger"
-            title="退出登录"
-            @click="logout"
-          >
-            <LogOut class="size-4" />
           </button>
         </div>
       </template>

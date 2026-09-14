@@ -2,8 +2,8 @@
 
 ``openpilot.common.params`` dlopens ``libparams_c`` at import time, which only
 exists on comma hardware (and on machines that can run a full scons build).
-That made ``lanlinkd.py`` — the HTTP surface, including every authorization
-check — the one module nobody could test on a dev machine.
+That made ``lanlinkd.py`` — the HTTP surface, including every route — the one
+module nobody could test on a dev machine.
 
 The daemon only ever uses ``Params`` through the duck-typed interface the pure
 modules already assume (``get``/``put``/``all_keys``/``get_type``/...), so we

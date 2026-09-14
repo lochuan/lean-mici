@@ -25,7 +25,6 @@ BLOCKED_PARAMS = {
   "DoShutdown",
   "DoUninstall",
   "LanLinkEnabled",        # 防本 API 自锁（设备端或 SSH 改）
-  "LanLinkPasswordHash",   # 本服务密码哈希
   "LanLinkParamsVersion",  # 本服务写计数
   "SecOCKey",              # 车辆安全密钥
   "SshEnabled",            # SSH 开关

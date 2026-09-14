@@ -110,7 +110,6 @@ export async function pollStatus(): Promise<void> {
     }
   } catch (e) {
     state.connected = false;
-    if (e instanceof ApiError && e.status === 401) throw e;
   }
 }
 

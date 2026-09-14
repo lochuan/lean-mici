@@ -34,7 +34,7 @@ async function poll(): Promise<void> {
     status.value = await api.bluetooth();
     pollError.value = "";
   } catch (e) {
-    // 401 走全局 handler；其余失败保留上一帧，配对流程不因一次超时被打断
+    // 失败保留上一帧，配对流程不因一次超时被打断
     pollError.value = e instanceof Error ? e.message : String(e);
   } finally {
     loading.value = false;

@@ -18,7 +18,7 @@ async function poll(): Promise<void> {
     const s = await api.status();
     dev.value = s.device ?? null;
   } catch {
-    // 401 走全局 handler；其余失败保留上一帧，指标显示为旧值总比闪烁好
+    // 失败保留上一帧，指标显示为旧值总比闪烁好
   }
 }
 

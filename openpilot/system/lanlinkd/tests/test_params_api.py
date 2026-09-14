@@ -168,7 +168,7 @@ class TestList:
 
 
 def test_blocked_params_contains_critical_keys():
-  assert {"LanLinkPasswordHash", "LanLinkParamsVersion", "GithubSshKeys",
+  assert {"LanLinkParamsVersion", "GithubSshKeys",
           "SshEnabled", "ParamsVersion", "OnroadCycleRequested",
           "DoReboot", "DoShutdown", "DoUninstall",
           "AccessToken", "SecOCKey", "AssistNowToken",

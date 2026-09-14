@@ -18,7 +18,6 @@ static/ 推上去、重启 lanlinkd 就行，几秒钟的事。
   tools/lanlink/deploy_lanlink_web.py                     # 构建 + 部署 + 重启
   tools/lanlink/deploy_lanlink_web.py --no-build          # 只部署当前产物
   tools/lanlink/deploy_lanlink_web.py --host comma@1.2.3.4
-  tools/lanlink/deploy_lanlink_web.py --set-password PW   # 顺便设置访问密码
 """
 from __future__ import annotations
 
@@ -127,31 +126,6 @@ find static -type f | sort | sed 's/^/      /'
   ssh(host, script)
 
 
-def set_password(host: str, password: str) -> None:
-  """直接写 LanLinkPasswordHash。
-
-  走 auth.hash_password 而不是 HTTP /api/setup：后者在已设密码时返回 409，
-  而这里的语义是"设成这个"（含改密）。哈希在**设备上**计算，密码不会出现在
-  scp 的文件里，只作为参数传给设备上的 python。
-  """
-  print("==> 设置访问密码")
-  remote = (
-    "from openpilot.common.params import Params;"
-    "from openpilot.system.lanlinkd.auth import hash_password, MIN_PASSWORD_LEN;"
-    "import sys;"
-    "pw = sys.argv[1];"
-    "assert len(pw) >= MIN_PASSWORD_LEN, f'密码至少 {MIN_PASSWORD_LEN} 位';"
-    "Params().put('LanLinkPasswordHash', hash_password(pw), block=True);"
-    "print('    密码已更新（旧 token 会在 lanlinkd 重启后失效）')"
-  )
-  script = (
-    f"cd {shlex.quote(REMOTE_ROOT)} && "
-    f"PYTHONPATH={shlex.quote(REMOTE_PYPATH)} {shlex.quote(REMOTE_PY)} "
-    f"-c {shlex.quote(remote)} {shlex.quote(password)}"
-  )
-  ssh(host, script)
-
-
 def restart(host: str) -> None:
   """重启 lanlinkd。
 
@@ -207,7 +181,6 @@ def main() -> int:
   ap.add_argument("--host", default=DEFAULT_HOST, help=f"设备 ssh 地址（默认 {DEFAULT_HOST}）")
   ap.add_argument("--no-build", action="store_true", help="跳过构建，只部署现有产物")
   ap.add_argument("--no-restart", action="store_true", help="部署后不重启 lanlinkd")
-  ap.add_argument("--set-password", metavar="PW", help="同时设置 LANLink 访问密码")
   args = ap.parse_args()
 
   if args.no_build:
@@ -216,9 +189,6 @@ def main() -> int:
     build()
 
   deploy(args.host)
-
-  if args.set_password:
-    set_password(args.host, args.set_password)
 
   if not args.no_restart:
     restart(args.host)
