@@ -288,3 +288,27 @@ export interface WifiStatus {
   networks: WifiNetwork[];
   error: string;
 }
+
+/** /api/software：updater 状态参数的序列化形（见 software_api.status） */
+export interface SoftwareDescription {
+  version: string;
+  branch: string;
+  commit: string;
+  date: string;
+}
+
+export interface SoftwareStatus {
+  version: string;
+  branch: string;
+  commit: string;
+  current: SoftwareDescription | null;
+  updaterState: string;
+  updateAvailable: boolean;
+  fetchAvailable: boolean;
+  failedCount: number;
+  failed: boolean;
+  newVersion: SoftwareDescription | null;
+  targetBranch: string;
+  availableBranches: string[];
+  offroad: boolean;
+}

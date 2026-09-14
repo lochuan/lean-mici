@@ -6,6 +6,7 @@ import SubPanelDrawer from "./SubPanelDrawer.vue";
 import SettingRow from "./SettingRow.vue";
 import BluetoothPanel from "./BluetoothPanel.vue";
 import WifiPanel from "./WifiPanel.vue";
+import SoftwarePanel from "./SoftwarePanel.vue";
 import ModelsManager from "./ModelsManager.vue";
 import VehiclePanel from "./VehiclePanel.vue";
 import StatusPanel from "./StatusPanel.vue";
@@ -67,6 +68,8 @@ watch(
       <WifiPanel />
       <BluetoothPanel />
     </template>
+    <!-- 软件页：版本 / 检查更新 / 安装，参数驱动的自定义面板 -->
+    <SoftwarePanel v-else-if="panel.id === 'software'" />
 
     <SettingSection
       v-for="(section, i) in panel.sections"

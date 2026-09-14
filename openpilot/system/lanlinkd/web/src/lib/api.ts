@@ -7,7 +7,7 @@
  *  - blocked param 返回 403 而非静默跳过（与上游不同，见 FRONTEND_SPEC.md §1）
  */
 import type {
-  BluetoothStatus, Capabilities, ModelsState, ParamValues, RadarSnapshot, SettingsSchema, StatusSnapshot,
+  BluetoothStatus, Capabilities, ModelsState, ParamValues, RadarSnapshot, SettingsSchema, SoftwareStatus, StatusSnapshot,
   VehicleState, WifiStatus,
 } from "./schema";
 
@@ -116,6 +116,11 @@ export const api = {
   wifi: () => request<WifiStatus>("/api/wifi"),
   wifiOp: (operation: string, body: Record<string, unknown>) =>
     post<Record<string, unknown>>(`/api/wifi/${encodeURIComponent(operation)}`, body),
+
+  // ---- software (updater) ----
+  software: () => request<SoftwareStatus>("/api/software"),
+  softwareOp: (action: string) =>
+    post<null>(`/api/software/${encodeURIComponent(action)}`),
 
   // ---- logs ----
   logs: () => request<unknown>("/api/logs"),

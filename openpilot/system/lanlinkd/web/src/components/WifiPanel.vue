@@ -239,7 +239,7 @@ const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
             <div class="flex shrink-0 items-center gap-2">
               <Button
                 v-if="n.saved && n.ssid !== status.connected"
-                variant="ghost"
+                variant="danger"
                 :disabled="writesBlocked"
                 class="px-2"
                 @click="doForget(n.ssid)"

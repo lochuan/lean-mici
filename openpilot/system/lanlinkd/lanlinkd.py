@@ -32,6 +32,7 @@ from openpilot.system.lanlinkd import params_api
 from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd import wifi_api
+from openpilot.system.lanlinkd import software_api
 from openpilot.system.lanlinkd.auth import MIN_PASSWORD_LEN, LoginThrottle, SessionStore, hash_password, verify_password
 from openpilot.system.lanlinkd.radard import RadarCache
 from openpilot.system.lanlinkd.statusd import StatusCache
@@ -321,6 +322,22 @@ class LanlinkApp:
     code, body = await asyncio.to_thread(worker)
     return json_response(body, status=code)
 
+  # ---- software (updater) ----
+  async def software_get(self, request: Request) -> HTTPResponse:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    return json_response(software_api.status(self.params))
+
+  async def software_action(self, request: Request, action: str) -> HTTPResponse:
+    if not self._authorized(request):
+      return _json_error(401, "unauthorized")
+    code, payload = software_api.signal(self.params, action)
+    if code == 200:
+      return empty(status=204)
+    if isinstance(payload, str):
+      return _json_error(code, payload)
+    return json_response(payload, status=code)
+
   # ---- status / capabilities / settings / logs ----
   async def status(self, request: Request) -> HTTPResponse:
     if not self._authorized(request):
@@ -403,7 +420,8 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/bluetooth/<operation:str>", "bluetooth_operation"),
   ("GET", "/api/wifi", "wifi_get"),
   ("POST", "/api/wifi/<operation:str>", "wifi_operation"),
-  ("GET", "/api/status", "status"),
+  ("GET", "/api/software", "software_get"),
+  ("POST", "/api/software/<action:str>", "software_action"),  ("GET", "/api/status", "status"),
   ("GET", "/api/radar", "radar_get"),
   ("GET", "/api/capabilities", "capabilities"),
   ("GET", "/api/settings_ui", "settings_ui"),
