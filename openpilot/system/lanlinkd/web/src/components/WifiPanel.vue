@@ -7,7 +7,7 @@
  * 静态 IP 语义：按 SSID 存 NM profile，method=manual；DNS 必填（manual
  * 没有 DHCP 兜底，空 DNS 会静默断网）。
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { Loader2, Wifi } from "lucide-vue-next";
 import { api } from "@/lib/api";
 import type { WifiIpv4, WifiStatus } from "@/lib/schema";
@@ -53,6 +53,7 @@ function openConnect(ssid: string, saved: boolean): void {
 /** 已保存网络：直接激活 NM profile，不需要重输密码 */
 async function doActivate(ssid: string): Promise<void> {
   if (busy.value) return;
+  freezeIpCard();
   busy.value = "activate";
   try {
     await api.wifiOp("activate", { ssid });
@@ -96,6 +97,7 @@ function parseFields(ip: string, prefix: string, gateway: string, dns: string):
 async function doConnect(): Promise<void> {
   const t = connectTarget.value;
   if (!t || busy.value) return;
+  freezeIpCard();
   // 连接永远 DHCP（method=auto）；静态 IP 只对"当前连接"在高级设置里改
   const body: Record<string, unknown> = { ssid: t.ssid, password: connectPassword.value };
   busy.value = "connect";
@@ -163,6 +165,33 @@ const networks = computed(() => status.value?.networks ?? []);
 
 const writesBlocked = computed(() => !!busy.value || !status.value?.offroad);
 
+/** IP 卡片冻结：点击连接的瞬间把内容定格，切换全程零变化，完成后才刷新一次 */
+const frozenIp = ref<{ connected: string | null; ipv4: WifiIpv4 } | null>(null);
+
+function freezeIpCard(): void {
+  const s = status.value;
+  if (s && !frozenIp.value) {
+    frozenIp.value = { connected: s.connected, ipv4: s.ipv4 };
+  }
+}
+
+/** 网络切换全程：提交后 busy 起步，直到后端状态落到新连接（或失败复位） */
+const switching = computed(() => !!busy.value || (!!status.value?.connecting && status.value?.connecting !== status.value?.connected));
+
+// 切换结束（成功或失败复位）→ 解冻，卡片一次性刷新到新状态
+watch(switching, (v) => {
+  if (!v) frozenIp.value = null;
+});
+
+/** 静态 IP 卡片的渲染数据：切换中用冻结值，其余用实时值 */
+const ipCard = computed(() => {
+  if (switching.value && frozenIp.value) return frozenIp.value;
+  return {
+    connected: status.value?.connected ?? null,
+    ipv4: status.value?.ipv4 ?? { method: "unknown", addresses: [], gateway: "", dns: [] },
+  };
+});
+
 /** 卡片文案：已连 ssid > 连接中 ssid > 切换中（busy 但后端状态未跟上）> 未连接 */
 const cardText = computed(() => {
   const s = status.value;
@@ -171,9 +200,6 @@ const cardText = computed(() => {
   if (busy.value) return "正在切换网络…";
   return "未连接";
 });
-
-/** 网络切换全程：提交后 busy 起步，直到后端状态落到新连接（或失败复位） */
-const switching = computed(() => !!busy.value || (!!status.value?.connecting && status.value?.connecting !== status.value?.connected));
 </script>
 
 <template>
@@ -214,20 +240,15 @@ const switching = computed(() => !!busy.value || (!!status.value?.connecting && 
         </dl>
       </section>
 
-      <!-- 当前连接的网络刻意不在列表里重复出现 forget 入口，误触会断网 -->
-      <section
-        v-if="status.connected && status.ipv4.addresses.length > 0"
-        class="sl-card px-5 py-4"
-      >
-        <h2 class="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">
-          <Loader2 v-if="busy" class="size-4 animate-spin text-sl-text-3" />
-          配置 IP / 网关 / DNS（{{ status.connected }}）
+      <!-- 静态 IP 编辑：连接全程整卡冻结（标题/内容零变化），切换完成后一次性刷新 -->
+      <section class="sl-card px-5 py-4">
+        <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">
+          配置 IP / 网关 / DNS{{ ipCard.connected ? `（${ipCard.connected}）` : "" }}
         </h2>
-        <p class="mt-1 text-[12px] text-sl-text-2" v-if="busy">连接中，请稍候…</p>
         <p class="mt-1 text-[13px] text-sl-text-2">
-          当前方式：{{ status.ipv4.method === "manual" ? "静态" : "DHCP 自动获取" }}
+          当前方式：{{ ipCard.ipv4.method === "manual" ? "静态" : "DHCP 自动获取" }}
         </p>
-        <Button class="mt-3 w-full justify-center" :disabled="writesBlocked" @click="openAdvanced">
+        <Button class="mt-3 w-full justify-center" @click="openAdvanced">
           {{ showAdvanced ? "收起" : "配置 IP / 网关 / DNS" }}
         </Button>
         <div v-if="showAdvanced" class="mt-3 space-y-2">
