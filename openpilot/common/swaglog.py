@@ -1,9 +1,8 @@
 import logging
 import os
 import time
-import warnings
-from pathlib import Path
 from logging.handlers import BaseRotatingHandler
+from pathlib import Path
 
 import zmq
 
@@ -81,6 +80,12 @@ class UnixDomainSocketHandler(logging.Handler):
       self.sock.close()
     if self.zctx is not None:
       self.zctx.term()
+    # 重置状态：close 后必须能通过 emit 里的 pid/closed 检查重新 connect，
+    # 否则 closed socket 会以 ENOTSOCK 永久毒死所有后续日志调用（曾打死
+    # lanlinkd 的 wifi connect worker：首连必挂、已保存网络才幸免）
+    self.sock = None
+    self.zctx = None
+    self.pid = None
 
   def connect(self):
     self.zctx = zmq.Context()
@@ -90,19 +95,25 @@ class UnixDomainSocketHandler(logging.Handler):
     self.pid = os.getpid()
 
   def emit(self, record):
-    if os.getpid() != self.pid:
-      # TODO suppresses warning about forking proc with zmq socket, fix root cause
-      warnings.filterwarnings("ignore", category=ResourceWarning, message="unclosed.*<zmq.*>")
-      self.connect()
-
-    msg = self.format(record).rstrip('\n')
-    # print("SEND".format(repr(msg)))
     try:
-      s = chr(record.levelno)+msg
-      self.sock.send(s.encode('utf8'), zmq.NOBLOCK)
-    except zmq.error.Again:
-      # drop :/
-      pass
+      # fork 检测 + 坏 socket 自愈：close()/term() 之后 sock.closed 置真，
+      # 必须 reconnect，否则 send 抛 ENOTSOCK 直接打死调用方
+      if os.getpid() != self.pid or self.sock is None or self.sock.closed:
+        self.connect()
+
+      msg = self.format(record).rstrip('\n')
+      try:
+        s = chr(record.levelno)+msg
+        self.sock.send(s.encode('utf8'), zmq.NOBLOCK)
+      except zmq.error.Again:
+        # drop :/
+        pass
+    except Exception:
+      # 日志永远不能打断业务调用：宁可丢这条，也重建 socket 保住后续日志
+      try:
+        self.connect()
+      except Exception:
+        pass
 
 
 class ForwardingHandler(logging.Handler):
