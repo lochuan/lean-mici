@@ -104,7 +104,7 @@ onUnmounted(() => {
           <Button variant="accent" :disabled="!status.offroad || !!busy" class="min-w-20 justify-center"
                   @click="action('check')">
             <Loader2 v-if="busy === 'check' || status.updaterState !== 'idle'" class="mr-2 size-4 animate-spin" />
-            CHECK
+            检查
           </Button>
         </div>
         <p v-if="!status.offroad" class="mt-3 rounded-lg bg-sl-surface-2 px-3 py-2 text-[13px] text-sl-text-3">
@@ -112,8 +112,8 @@ onUnmounted(() => {
         </p>
       </section>
 
-      <!-- 安装 -->
-      <section v-if="status.updateAvailable" class="sl-card px-5 py-4">
+      <!-- 安装（常驻：无可装更新时按钮禁用并说明） -->
+      <section class="sl-card px-5 py-4">
         <div class="flex items-center gap-3">
           <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
             <Rocket class="size-5 text-sl-text-2" />
@@ -121,13 +121,15 @@ onUnmounted(() => {
           <div class="min-w-0 flex-1">
             <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">安装更新</h2>
             <p class="mt-0.5 text-[13px] text-sl-text-2">
-              {{ status.newVersion ? `${status.newVersion.version}（${status.newVersion.branch}）` : "新版本" }}
+              {{ status.updateAvailable
+                ? (status.newVersion ? `${status.newVersion.version}（${status.newVersion.branch}）` : "新版本")
+                : "暂无可安装的更新（先检查更新）" }}
             </p>
           </div>
-          <Button variant="accent" :disabled="!status.offroad || !!busy || status.updaterState !== 'idle'"
+          <Button variant="accent" :disabled="!status.offroad || !!busy || !status.updateAvailable"
                   class="min-w-20 justify-center"
                   @click="action('install')">
-            <Loader2 v-if="busy === 'install'" class="mr-2 size-4 animate-spin" />INSTALL
+            <Loader2 v-if="busy === 'install'" class="mr-2 size-4 animate-spin" />安装
           </Button>
         </div>
         <p class="mt-3 rounded-lg bg-sl-surface-2 px-3 py-2 text-[13px] text-sl-text-3">
