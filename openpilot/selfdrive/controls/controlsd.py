@@ -31,6 +31,10 @@ LaneChangeDirection = log.LaneChangeDirection
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 
 
+def fuse_curvature(model: float, avoid: float, valid: bool, enabled: bool) -> float:
+  return avoid if (valid and enabled) else model
+
+
 class Controls(ControlsExt):
   def __init__(self) -> None:
     self.params = Params()
@@ -139,10 +143,13 @@ class Controls(ControlsExt):
 
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage
-    if self.sm.valid['lateralManeuverPlan']:
-      new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature if CC.latActive else self.curvature
+    if CC.latActive:
+      new_desired_curvature = fuse_curvature(model_v2.action.desiredCurvature,
+                                             self.sm['lateralManeuverPlan'].desiredCurvature,
+                                             self.sm.valid['lateralManeuverPlan'],
+                                             self.params.get_bool("AvoidanceEnabled"))
     else:
-      new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
+      new_desired_curvature = self.curvature
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 
