@@ -549,6 +549,18 @@
        ]
       }
      ]
+    },
+    {
+     "id": "lateral_avoidance",
+     "title": "横向避让",
+     "items": [
+      {
+       "key": "AvoidanceEnabled",
+       "widget": "toggle",
+       "title": "启用横向避让",
+       "details": "雷达+视觉融合的轻微横向避让：对相邻车道贴近的车辆和辅路上的摩托车/自行车/行人轻微偏移让行，BSM 有车侧自动减小幅度。约 1 秒内生效，失效时自动回退车道居中。"
+      }
+     ]
     }
    ]
   },

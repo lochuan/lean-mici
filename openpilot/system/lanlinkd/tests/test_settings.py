@@ -1,3 +1,7 @@
+import json
+import os
+import re
+
 from openpilot.system.lanlinkd.settings import mark_missing_keys
 
 SETTINGS = {
@@ -55,3 +59,39 @@ def test_marks_missing_keys_inside_sub_items():
   sub_items = out["panels"][0]["sections"][0]["items"][2]["sub_items"]
   assert "_missing" not in sub_items[0]
   assert sub_items[1]["_missing"] is True
+
+
+def _param_keys_from_header() -> set[str]:
+  header = os.path.join(os.path.dirname(__file__), "../../../common/params_keys.h")
+  with open(header) as f:
+    return set(re.findall(r'\{"(\w+)",', f.read()))
+
+
+def _items(node: dict):
+  for item in node.get("items", []):
+    yield item
+    yield from item.get("sub_items", [])
+  for sub in node.get("sub_panels", []):
+    yield from _items(sub)
+
+
+def test_real_settings_ui_keys_exist_in_params():
+  """真实 settings_ui.json 的每个 key 都必须在 params_keys.h 注册。
+
+  漏注册的后果不是显示问题：lanlink 会把它渲染成可用控件（stale libparams
+  下 mark_missing_keys 也查不出），用户去调、写入时才 404。
+  """
+  ui_path = os.path.join(os.path.dirname(__file__), "..", "settings_ui.json")
+  with open(ui_path) as f:
+    real = json.load(f)
+  existing = _param_keys_from_header()
+  marked = mark_missing_keys(real, lambda key: key in existing)
+
+  ghosts = []
+  for panel in marked["panels"]:
+    for section in panel.get("sections", []):
+      ghosts += [item["key"] for item in _items(section) if item.get("_missing")]
+  for brand in marked.get("vehicle_settings", {}).values():
+    ghosts += [item["key"] for item in _items(brand) if item.get("_missing")]
+
+  assert ghosts == []
