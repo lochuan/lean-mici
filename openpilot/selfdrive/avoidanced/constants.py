@@ -30,3 +30,17 @@ DT_5HZ = 0.2
 LOWPASS_TAU_S = 0.5
 ENTER_HOLD_S = 0.5
 EXIT_HOLD_S = 1.0
+
+# YOLO classes treated as vulnerable road users (higher avoidance weight)
+VRU_CLASSES = frozenset({"person", "bicycle", "motorcycle"})
+
+# Camera -> car-frame projection (spec §4). Initial mount values; the P0
+# calibration (shadow harness, spec §4) refines them.
+CAMERA_HEIGHT = 1.2    # m, wide camera above the ground (windshield mount)
+CAMERA_PITCH = 0.0     # rad, camera pitch, positive = tilted down
+CAMERA_YAW = 0.0       # rad, camera yaw, positive = looking left
+# The windshield camera sits behind the front bumper — the radar's dRel origin
+# (radar_interface.py fills dRel "from front of car"). A camera-frame ground
+# point is therefore FARTHER than the radar-frame distance, so this offset is
+# subtracted when aligning projected dRel to radar dRel.
+CAMERA_TO_FRONT = 1.5  # m, windshield camera behind the front bumper

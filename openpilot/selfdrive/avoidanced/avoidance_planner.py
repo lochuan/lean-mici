@@ -21,10 +21,8 @@ from typing import Protocol
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.avoidanced.constants import (D_GATE, D_MAX, DT_5HZ, EDGE_CLEAR_MIN, ENTER_HOLD_S, EXIT_HOLD_S,
                                                       K_GAIN, L_LOOKAHEAD, LOWPASS_TAU_S, MAX_OFFSET_BSM,
-                                                      MAX_OFFSET_FREE, VEHICLE_WEIGHT, V_EGO_MAX, V_EGO_MIN, VRU_WEIGHT,
-                                                      Y_GATE)
-
-VRU_CLASSES = frozenset({"person", "bicycle", "motorcycle"})
+                                                      MAX_OFFSET_FREE, VEHICLE_WEIGHT, V_EGO_MAX, V_EGO_MIN, VRU_CLASSES,
+                                                      VRU_WEIGHT, Y_GATE)
 
 
 class RadarPoint(Protocol):
@@ -152,7 +150,7 @@ class AvoidancePlanner:
     self._last_target_t: float | None = None
 
   def update(self, model_curvature: float, targets: Iterable[Target], v_ego: float,
-             bsm_left: bool = False, bsm_right: bool = False, clearance: float = float("inf"),
+             bsm_left: bool = False, bsm_right: bool = False, road_edges: Iterable = (),
              enabled: bool = True, lat_active: bool = True, steering_pressed: bool = False,
              max_offset: float = MAX_OFFSET_FREE, now: float | None = None) -> tuple[float, bool]:
     """Return ``(desired_curvature, valid)`` for one 5Hz frame.
@@ -164,6 +162,9 @@ class AvoidancePlanner:
     targets = tuple(targets)
 
     direction = _avoid_direction(targets, max_offset)
+    # Direction-aware road-edge gate: only the edge on the side the bias would
+    # move toward can block the manoeuvre (spec §3 roadEdge clearance).
+    clearance = edge_clearance(road_edges, side=direction)
     bsm_same = (direction > 0 and bsm_left) or (direction < 0 and bsm_right)
     bsm_opposite = (direction > 0 and bsm_right) or (direction < 0 and bsm_left)
     y_des = plan(targets, max_offset=max_offset, bsm_opposite=bsm_opposite, bsm_same=bsm_same)

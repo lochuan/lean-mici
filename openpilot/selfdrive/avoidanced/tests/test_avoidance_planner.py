@@ -94,12 +94,19 @@ def test_fuse_targets_uses_vru_weight_for_detections():
   assert targets[0].side == 1
 
 
-def test_edge_clearance_min_over_lookahead():
-  class _Edge:
-    x = [0.0, 10.0, 30.0]
-    y = [1.8, 1.6, 1.4]
+class _Edge:
+  def __init__(self, *ys, x=10.0):
+    self.x = [x] * len(ys)
+    self.y = list(ys)
 
-  assert edge_clearance([_Edge()]) == pytest.approx(1.4)
+
+def test_edge_clearance_min_over_lookahead():
+  assert edge_clearance([_Edge(1.8, 1.6, 1.4)]) == pytest.approx(1.4)
+
+
+def test_edge_clearance_side_filter():
+  assert edge_clearance([_Edge(1.8, -0.4)], side=1) == pytest.approx(1.8)   # left only
+  assert edge_clearance([_Edge(1.8, -0.4)], side=-1) == pytest.approx(0.4)  # right only
 
 
 # --- AvoidancePlanner gating / temporal behaviour ----------------------------
@@ -153,9 +160,29 @@ def test_planner_high_speed_invalid():
 def test_planner_edge_clearance_gate():
   p = _planner()
   _step(p, 0.0, [_right_target()])
+  # right target -> avoid left; a close LEFT edge (the avoidance side) blocks the plan
   _, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
-                      clearance=C.EDGE_CLEAR_MIN - 0.1, now=C.ENTER_HOLD_S + 0.01)
+                      road_edges=[_Edge(0.5)], now=C.ENTER_HOLD_S + 0.01)
   assert not valid
+
+
+def test_planner_clearance_is_direction_aware():
+  # A close edge on the NON-avoidance side must not block the manoeuvre.
+  p = _planner()
+  _step(p, 0.0, [_right_target()])            # avoid left -> only left edges gate
+  curv, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
+                         road_edges=[_Edge(-0.5)], now=C.ENTER_HOLD_S + 0.01)
+  assert valid
+  assert curv > 0.01
+
+  # mirrored: left target -> avoid right -> only right edges gate; the bias now
+  # pushes curvature below the model value (negative y_des).
+  q = _planner()
+  q.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0, road_edges=[_Edge(0.5)], now=0.0)
+  curv, valid = q.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0,
+                         road_edges=[_Edge(0.5)], now=C.ENTER_HOLD_S + 0.01)
+  assert valid
+  assert curv < 0.01
 
 
 def test_planner_takeover_invalid():

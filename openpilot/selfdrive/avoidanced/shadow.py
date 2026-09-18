@@ -8,10 +8,10 @@ lines up with the projection and does not move the car before P1.
 What it records (per 5Hz frame, plus a summary):
 
 * **association rate** — fraction of in-gate radar targets that a vision object
-  corroborates. Until the camera -> YOLO -> projection/association chain lands
-  (Task 5 I3, unowned), the vision side is ``modelV2.leadsV3`` at t=0 used as a
-  stand-in; :func:`associate` is generic and will take projected YOLO boxes once
-  that task exists. Target: ``ASSOC_RATE_MIN`` (> 0.80).
+  corroborates. The daemon path (Task 7) feeds projected YOLO boxes into
+  :func:`associate`; the shadow replay still uses ``modelV2.leadsV3`` at t=0 as
+  the vision side because route logs carry no YOLO boxes. Target:
+  ``ASSOC_RATE_MIN`` (> 0.80).
 * **calibration alignment** — max lateral residual ``|radar.yRel - vision.y|``
   over associated pairs. Target: ``CALIB_MAX_RESIDUAL_M`` (< 0.30 m, spec §4).
 * **false triggers** — valid frames with a non-zero bias whose target had no
@@ -37,7 +37,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, edge_clearance, fuse_targets
+from openpilot.selfdrive.avoidanced.association import nearest_pairs
+from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, fuse_targets
 
 # Acceptance thresholds (spec §3/§4 and the Task 6 brief).
 ASSOC_RATE_MIN = 0.80
@@ -74,7 +75,7 @@ class ShadowFrame:
   vision_objects: Sequence[VisionObject] = ()
   bsm_left: bool = False
   bsm_right: bool = False
-  clearance: float = float("inf")
+  road_edges: Sequence = ()
 
 
 @dataclass
@@ -96,20 +97,11 @@ def associate(radar_points: Iterable[RadarTarget], vision_objects: Iterable[Visi
               max_dx: float = ASSOC_MAX_DX, max_dy: float = ASSOC_MAX_DY) -> list[tuple[RadarTarget, VisionObject, float, float]]:
   """Nearest-neighbour radar<->vision association within the dx/dy gates.
 
-  Returns ``(radar, vision, dx, dy)`` tuples, one per matched radar target.
+  Thin wrapper over the shared core in :mod:`association` (the daemon path uses
+  the same matcher with tighter gates). Returns ``(radar, vision, dx, dy)``
+  tuples, one per matched radar target.
   """
-  vision = tuple(vision_objects)
-  pairs: list[tuple[RadarTarget, VisionObject, float, float]] = []
-  for radar in radar_points:
-    best: tuple[float, VisionObject, float, float] | None = None
-    for obj in vision:
-      dx, dy = abs(radar.dRel - obj.x), abs(radar.yRel - obj.y)
-      if dx <= max_dx and dy <= max_dy:
-        dist = dx * dx + dy * dy
-        if best is None or dist < best[0]:
-          best = (dist, obj, dx, dy)
-    if best is not None:
-      pairs.append((radar, best[1], best[2], best[3]))
+  pairs, _ = nearest_pairs(radar_points, vision_objects, max_dx, max_dy)
   return pairs
 
 
@@ -133,7 +125,7 @@ class ShadowEvaluator:
       v_ego=frame.v_ego,
       bsm_left=frame.bsm_left,
       bsm_right=frame.bsm_right,
-      clearance=frame.clearance,
+      road_edges=frame.road_edges,
       max_offset=self.max_offset,
       now=frame.t,
     )
@@ -282,7 +274,7 @@ def iter_frames(messages: Iterable, sample_period: float = 0.2, limit: int | Non
       vision_objects=_vision_from_model(model),
       bsm_left=bool(getattr(car, "leftBlindspot", False)),
       bsm_right=bool(getattr(car, "rightBlindspot", False)),
-      clearance=edge_clearance(getattr(model, "roadEdges", []) or []),
+      road_edges=getattr(model, "roadEdges", []) or [],
     )
     emitted += 1
     if limit is not None and emitted >= limit:

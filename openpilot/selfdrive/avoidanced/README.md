@@ -11,9 +11,22 @@ curvature, which is also what an invalid frame carries.
 |---|---|
 | 5Hz process, every-frame publish + `valid` flag | `avoidanced.py` |
 | planner: gates, BSM, low-pass, hysteresis | `avoidance_planner.py` |
-| tunables (offset caps, gates, weights, speed) | `constants.py` |
+| camera feed: visionipc -> NV12 -> RGB -> bottom ROI 640x384 | `camera_stream.py` |
+| box bottom-centre -> car-frame ground point + ROI inverse mapping | `projection.py` |
+| radar<->vision nearest-neighbour association (shared with shadow) | `association.py` |
+| tunables (offset caps, gates, weights, speed, camera mount) | `constants.py` |
 | offline shadow harness | `shadow.py` |
 | YOLO detector shell + build recipe | `yolo_detector.py`, `models/README.md` |
+
+## Fusion chain (per 5Hz tick)
+
+`camera_stream.frame()` -> `YoloDetector.infer()` -> `project_detections()`
+(ROI px inverse-mapped to full-frame px, then ground-plane projection; `dRel`
+aligned to the radar's front-bumper origin via `CAMERA_TO_FRONT`) ->
+`associate()` (matched detections are absorbed by their radar point, unmatched
+ones — typically VRUs the radar missed — stay independent) ->
+`fuse_targets(radar.points, fused)` -> planner. Without camerad or without the
+YOLO pkl the daemon logs the reason once and degrades to radar-only.
 
 ## P0 shadow (record only, never publish)
 
@@ -45,15 +58,15 @@ radar/vision/associated counts, lateral residual, latency, jerk. Use
 `shadow.csv` to eyeball false triggers: a false trigger is a `valid` frame with
 a non-zero bias whose target no vision object corroborated (a radar ghost).
 
-### Known gap: the vision side is a stand-in
+### Known gap: the shadow vision side is a stand-in
 
-Camera → YOLO → projection → association is **not implemented** (Task 5 I3, no
-owning task). Until it lands, the shadow harness uses `modelV2.leadsV3` at t=0
-as the vision-side object, so the association rate and calibration residual
-measure radar↔model-lead agreement, not radar↔YOLO-box agreement.
-`shadow.associate()` is generic and will take projected YOLO boxes once the
-projection step exists; the detector's own latency is measured separately per
-`models/README.md` §4.
+The daemon runs the real camera -> YOLO -> projection -> association chain, but
+the shadow replay still uses `modelV2.leadsV3` at t=0 as the vision-side object
+because route logs carry no YOLO boxes — so the shadow association rate and
+calibration residual measure radar↔model-lead agreement, not radar↔YOLO-box
+agreement. `shadow.associate()` shares the matcher core with the daemon path
+(`association.py`) and accepts projected YOLO boxes as-is; the detector's own
+latency is measured separately per `models/README.md` §4.
 
 ## P1 small open
 
