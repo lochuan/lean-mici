@@ -25,8 +25,10 @@ output `(1, 4 + 80, N)` (YOLOv8 has no objectness head).
 ## 2. Compile to tinygrad pkl
 
 Run on the comma 3X, **on 12V** (mici powers down CPU 4-7 otherwise, and the
-compile needs CPU 4). The script sets `DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1`
-and drives `tinygrad_repo/examples/openpilot/compile3.py`:
+compile needs CPU 4). The script sets
+`DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1`
+(aligned with `modeld/SConscript`) plus `PICKLE_OOB=1`, and drives
+`tinygrad_repo/examples/openpilot/compile3.py`:
 
 ```bash
 openpilot/selfdrive/avoidanced/models/compile_yolo.sh
@@ -34,6 +36,11 @@ openpilot/selfdrive/avoidanced/models/compile_yolo.sh
 ```
 
 Local CPU smoke test (no QCOM backend): `DEV=CPU openpilot/selfdrive/avoidanced/models/compile_yolo.sh`.
+
+`PICKLE_OOB=1` makes `compile3.py` write the out-of-band pickle format that
+`TinygradRunner` reads back with modeld's `load_oob()` (same format as the
+`compile_modeld.py` + `dump_oob` modeld pkls). Without it the pkl is a plain
+pickle and `load_oob` fails.
 
 `modeld/SConscript` is intentionally not modified: the ONNX is not in the repo,
 so a build-graph entry would fail clean builds. The standalone script is the

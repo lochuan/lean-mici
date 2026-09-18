@@ -31,8 +31,10 @@ fi
 # QCOM is the deployment target; allow DEV=CPU for a local smoke test.
 export DEV="${DEV:-QCOM}"
 if [[ "$DEV" == "QCOM" ]]; then
-  export FLOAT16=1 IMAGE=1 NOLOCALS=1 JIT_BATCH_SIZE=0
+  export FLOAT16=1 IMAGE=1 NOLOCALS=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1
 fi
+# OOB pickle format so the pkl loads with modeld's load_oob() (see yolo_detector.py).
+export PICKLE_OOB=1
 export PYTHONPATH="${PYTHONPATH:-}:$ROOT/tinygrad_repo"
 
 echo "compiling $ONNX -> $OUT (DEV=$DEV)"

@@ -79,10 +79,12 @@ def _nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float) -> list[in
 def postprocess(raw: np.ndarray, conf_threshold: float = DEFAULT_CONF_THRESHOLD,
                 iou_threshold: float = DEFAULT_IOU_THRESHOLD,
                 class_names: dict[int, str] = CLASS_NAMES) -> list[dict]:
-  """Decode YOLOv8 detect head output (1, 4 + num_classes, num_anchors)."""
-  pred = raw[0]
-  if pred.shape[0] > pred.shape[1]:
-    pred = pred.T
+  """Decode YOLOv8 detect head output (1, 4 + num_classes, num_anchors).
+
+  YOLOv8 always emits channel-major (4 box + num_classes rows, one column per
+  anchor), so transpose unconditionally to (num_anchors, 4 + num_classes).
+  """
+  pred = raw[0].T
   if pred.size == 0:
     return []
 

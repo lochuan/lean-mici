@@ -16,11 +16,15 @@ PKL_PATH = MODELS_DIR / "yolo_tinygrad.pkl"
 
 # YOLOv8 detect head emits (1, 4 + num_coco_classes, num_anchors); COCO has 80 classes.
 NUM_CLASSES = 80
+# Production anchor count for a 640x384 input: (80*48) + (40*24) + (20*12) = 5040.
+PRODUCTION_ANCHORS = 5040
 
 
-def _raw_output(entries: list[tuple[int, float, float, float, float, float]]) -> np.ndarray:
-  """Build a canned YOLOv8 raw output. entries: (cls_id, conf, cx, cy, w, h)."""
-  raw = np.zeros((1, 4 + NUM_CLASSES, len(entries)), dtype=np.float32)
+def _raw_output(entries: list[tuple[int, float, float, float, float, float]],
+                num_anchors: int = PRODUCTION_ANCHORS) -> np.ndarray:
+  """Build a canned YOLOv8 raw output at production shape. entries: (cls_id, conf, cx, cy, w, h)."""
+  assert len(entries) <= num_anchors
+  raw = np.zeros((1, 4 + NUM_CLASSES, num_anchors), dtype=np.float32)
   for i, (cls_id, conf, cx, cy, w, h) in enumerate(entries):
     raw[0, 0, i] = cx
     raw[0, 1, i] = cy
@@ -99,6 +103,24 @@ def test_postprocess_box_schema_and_xyxy():
   assert det["y2"] == pytest.approx(110.0)
   assert det["cls"] == "car"
   assert det["conf"] == pytest.approx(0.9)
+
+
+def test_postprocess_production_anchor_count_channel_major():
+  """YOLOv8 is channel-major: a detection at the last of 5040 anchors must decode."""
+  raw = np.zeros((1, 4 + NUM_CLASSES, PRODUCTION_ANCHORS), dtype=np.float32)
+  idx = PRODUCTION_ANCHORS - 1
+  raw[0, 0, idx] = 320.0
+  raw[0, 1, idx] = 200.0
+  raw[0, 2, idx] = 60.0
+  raw[0, 3, idx] = 80.0
+  raw[0, 4 + 0, idx] = 0.9
+  dets = postprocess(raw, conf_threshold=0.4)
+  assert len(dets) == 1
+  assert dets[0]["cls"] == "person"
+  assert dets[0]["x1"] == pytest.approx(290.0)
+  assert dets[0]["y1"] == pytest.approx(160.0)
+  assert dets[0]["x2"] == pytest.approx(350.0)
+  assert dets[0]["y2"] == pytest.approx(240.0)
 
 
 def test_postprocess_maps_required_classes():
