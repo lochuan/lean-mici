@@ -289,7 +289,7 @@ def _make_daemon(enabled=True):
   from openpilot.selfdrive.avoidanced.avoidanced import AvoidanceDaemon
   model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[])
   car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
-  radar = _NS(points=[_RadarPoint(8.0, -1.0)])
+  radar = _NS(points=[_RadarPoint(8.0, -1.0)], errors=_NS(canError=False, radarUnavailableTemporary=False))
   pm = _FakePubMaster()
   daemon = AvoidanceDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=enabled))
   return daemon, pm

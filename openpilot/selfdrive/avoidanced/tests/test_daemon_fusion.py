@@ -85,7 +85,8 @@ def _daemon(*, camera=None, detector=None, camera_factory=None, radar_points=(),
             model_valid=True):
   model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[])
   car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
-  radar = _NS(points=[_NS(dRel=d, yRel=y, vRel=0.0) for d, y in radar_points])
+  radar = _NS(points=[_NS(dRel=d, yRel=y, vRel=0.0) for d, y in radar_points],
+              errors=_NS(canError=False, radarUnavailableTemporary=False))
   kwargs = {}
   if camera is not None:
     kwargs["camera"] = camera

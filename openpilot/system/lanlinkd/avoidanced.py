@@ -1,11 +1,13 @@
 # system/lanlinkd/avoidanced.py
 """avoidanceDebug 快照线程：缓存最新一帧避让监测数据，线程安全。
 
-与 radard.py 的 RadarCache 同款模式：独立线程跑 SubMaster，锁下缓存
-最新快照。avoidanceDebug 是 5Hz 在线观测流（不落盘），给 lanlink 鸟瞰图
-和标定工具看——每帧构建 targets 列表 dict，序列化在收帧时一次完成。
+独立线程跑 SubMaster，锁下缓存最新快照。avoidanceDebug 是 5Hz 在线观测
+流（不落盘），给 lanlink 鸟瞰图和标定工具看——每帧构建 targets 列表
+dict，序列化在收帧时一次完成。快照含雷达 CAN 错误标志（canError /
+radarUnavailable，来自 radarTracks.errors，随 debug 透传），所以前端
+不再需要独立的 /api/radar 端点。
 
-staleness 用本地接收时刻（time.monotonic）判断，与 radard.py 一致：
+staleness 用本地接收时刻（time.monotonic）判断：
 avoidanceDebug 是 5Hz，STALE_AFTER_MS 取 1s（5 帧没新数据即视为停更）。
 """
 import threading
@@ -66,6 +68,8 @@ class AvoidanceCache:
           "nVision": int(dbg.nVision),
           "nAssociated": int(dbg.nAssociated),
           "edgeClearance": float(dbg.edgeClearance),
+          "canError": bool(dbg.canError),
+          "radarUnavailable": bool(dbg.radarUnavailable),
           "targets": [_target(t) for t in dbg.targets],
         }
       except Exception:

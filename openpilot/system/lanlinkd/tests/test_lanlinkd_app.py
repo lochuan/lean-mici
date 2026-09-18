@@ -74,10 +74,7 @@ def app(monkeypatch):
   monkeypatch.setattr(mod.StatusCache, "snapshot", lambda self: {"stale": True})
   monkeypatch.setattr(mod.StatusCache, "capabilities", lambda self: {"brand": "toyota"})
   monkeypatch.setattr(mod.StatusCache, "download", lambda self: None)
-  # RadarCache 同理：真实 run 会起 SubMaster
-  monkeypatch.setattr(mod.RadarCache, "run", lambda self, ev: None)
-  monkeypatch.setattr(mod.RadarCache, "snapshot", lambda self: {"stale": True})
-  # AvoidanceCache 同理
+  # AvoidanceCache 同理：真实 run 会起 SubMaster
   monkeypatch.setattr(mod.AvoidanceCache, "run", lambda self, ev: None)
   monkeypatch.setattr(mod.AvoidanceCache, "snapshot", lambda self: {"stale": True})
   # Sanic 要求 app name 唯一，否则跨测试复用同一实例
@@ -92,7 +89,7 @@ class TestOpenSurface:
   @pytest.mark.parametrize("path", [
     "/api/params", "/api/params/_all", "/api/params/TestToggle", "/api/models",
     "/api/status", "/api/capabilities", "/api/settings_ui", "/api/logs",
-    "/api/vehicle", "/api/radar", "/api/avoidance", "/api/bluetooth",
+    "/api/vehicle", "/api/avoidance", "/api/bluetooth",
   ])
   def test_read_endpoints_need_no_token(self, app, path):
     _, r = app.test_client.get(path)
@@ -146,30 +143,6 @@ class TestParamsRoutes:
   def test_deleting_unknown_param_is_404_not_500(self, app):
     _, r = app.test_client.delete("/api/params/NoSuchKey")
     assert r.status == 404
-
-
-class TestRadarRoute:
-  def test_radar_returns_cached_snapshot(self, app):
-    fake = {
-      "stale": False,
-      "logMonoTime": 1234567890,
-      "points": [
-        {"trackId": 0, "dRel": 26.89, "yRel": 0.04, "vRel": 1.80},
-        {"trackId": 1, "dRel": 7.20, "yRel": 0.08, "vRel": 1.75},
-      ],
-      "errors": {"canError": False, "radarUnavailableTemporary": False},
-    }
-    app.ctx.state.radar.snapshot = lambda: fake
-    _, r = app.test_client.get("/api/radar")
-    assert r.status == 200
-    assert r.json == fake
-
-  def test_radar_stale_shape(self, app):
-    # 无数据时（熄火/无雷达平台）必须返回 {"stale": true}，而不是 500 或空体
-    app.ctx.state.radar.snapshot = lambda: {"stale": True}
-    _, r = app.test_client.get("/api/radar")
-    assert r.status == 200
-    assert r.json == {"stale": True}
 
 
 class TestAvoidanceRoute:

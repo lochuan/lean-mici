@@ -23,6 +23,8 @@ def _publish_debug(pm: messaging.PubMaster) -> None:
   dbg.nVision = 1
   dbg.nAssociated = 1
   dbg.edgeClearance = 999.0
+  dbg.canError = False
+  dbg.radarUnavailable = True
   tgts = dbg.init('targets', 2)
   tgts[0].dRel, tgts[0].yRel, tgts[0].vRel = 20.0, -1.0, 1.5
   tgts[0].matched, tgts[0].inGate, tgts[0].pairId = True, True, 1
@@ -70,6 +72,8 @@ def test_cache_captures_published_debug(publisher):
   assert snap["bsmRight"] is True
   assert snap["vEgo"] == pytest.approx(25.0)
   assert snap["edgeClearance"] == pytest.approx(999.0)
+  assert snap["canError"] is False
+  assert snap["radarUnavailable"] is True
   assert (snap["nRadar"], snap["nVision"], snap["nAssociated"]) == (1, 1, 1)
   assert len(snap["targets"]) == 2
   radar_t, vision_t = snap["targets"]

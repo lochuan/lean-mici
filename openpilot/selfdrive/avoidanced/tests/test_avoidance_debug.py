@@ -100,3 +100,14 @@ def test_debug_bsm_flags_from_car_state():
   daemon.update(0.0)
   dbg = _debug_msgs(pm)[-1].avoidanceDebug
   assert dbg.bsmLeft is False and dbg.bsmRight is True
+
+
+def test_debug_carries_radar_error_flags():
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI]),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0, cls="person")]),
+                       radar_points=[])
+  daemon.sm._data["radarTracks"].errors.canError = True
+  daemon.sm._data["radarTracks"].errors.radarUnavailableTemporary = True
+  daemon.update(0.0)
+  dbg = _debug_msgs(pm)[-1].avoidanceDebug
+  assert dbg.canError is True and dbg.radarUnavailable is True

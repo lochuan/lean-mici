@@ -1250,6 +1250,8 @@ struct AvoidanceDebug {
   nAssociated @11 :UInt16;
   edgeClearance @12 :Float32;  # 避让侧路沿余量 m；inf 时发 999.0
   targets @13 :List(AvoidanceTarget);
+  canError @14 :Bool;         # radarTracks.errors.canError
+  radarUnavailable @15 :Bool; # radarTracks.errors.radarUnavailableTemporary
 }
 
 struct LongitudinalPlan @0xe00b5b3eba12876c {

@@ -1,17 +1,18 @@
 <script setup lang="ts">
-/** 避让监测鸟瞰图：双源轮询（/api/radar 250ms 雷达点 + /api/avoidance 500ms
- *  视觉目标），planner 叠加（yDes 箭头 + 幽影车道）。
+/** 避让监测鸟瞰图：单源轮询 /api/avoidance（500ms），雷达点与视觉目标
+ *  都来自 avoidanceDebug targets（vision=false 是雷达点，vision=true 是
+ *  YOLO 投影目标），planner 叠加（yDes 箭头 + 幽影车道）。
  *
  * 方向语义（review 裁定）：yDes > 0 = 向左偏（与 yRel 左正同号），
  * 箭头按 yDes 符号画；direction = 障碍物侧（+1 = 障碍在右），只做侧别
  * 标识，不画箭头。
  *
- * 降级链：/api/avoidance stale（avoidanced 未开/未跑）→ 只画雷达点，
- * 等同旧雷达图；/api/radar 也 stale → "等待数据"占位。
+ * 降级链：avoidance 快照 stale（avoidanced 未跑/未开）→ "等待数据"占位；
+ * CAN 错误 / 雷达暂不可用徽章来自快照透传的 radarTracks.errors。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "@/lib/api";
-import type { AvoidanceSnapshot, RadarSnapshot } from "@/lib/schema";
+import type { AvoidanceSnapshot } from "@/lib/schema";
 import {
   CLS_FILL,
   CLS_LABEL,
@@ -32,7 +33,6 @@ import {
 } from "@/lib/radar";
 import Badge from "./ui/Badge.vue";
 
-const RADAR_POLL_MS = 250;
 const AVOID_POLL_MS = 500;
 // 连续失败这么多次才判无数据——单次网络抖动不该闪徽章
 const FAIL_LIMIT = 3;
@@ -57,23 +57,11 @@ const LEGEND: Array<{ cls: TargetCls; bg: string }> = [
   { cls: "car", bg: "bg-sl-info" },
 ];
 
-// ---- 双源轮询 ----
+// ---- 单源轮询 ----
 
-const radar = ref<RadarSnapshot | null>(null);
 const av = ref<AvoidanceSnapshot | null>(null);
-const radarFails = ref(0);
 const avFails = ref(0);
-let radarTimer: ReturnType<typeof setInterval> | undefined;
 let avTimer: ReturnType<typeof setInterval> | undefined;
-
-async function pollRadar(): Promise<void> {
-  try {
-    radar.value = await api.radar();
-    radarFails.value = 0;
-  } catch {
-    radarFails.value += 1; // 失败保留最后一帧
-  }
-}
 
 async function pollAvoidance(): Promise<void> {
   try {
@@ -85,29 +73,28 @@ async function pollAvoidance(): Promise<void> {
 }
 
 onMounted(() => {
-  void pollRadar();
   void pollAvoidance();
-  radarTimer = setInterval(() => void pollRadar(), RADAR_POLL_MS);
   avTimer = setInterval(() => void pollAvoidance(), AVOID_POLL_MS);
 });
 onUnmounted(() => {
-  if (radarTimer) clearInterval(radarTimer);
   if (avTimer) clearInterval(avTimer);
 });
 
-const radarStale = computed(
-  () => !radar.value || Boolean(radar.value.stale) || radarFails.value >= FAIL_LIMIT,
-);
 const avStale = computed(
   () => !av.value || Boolean(av.value.stale) || avFails.value >= FAIL_LIMIT,
 );
 
-const canError = computed(() => Boolean(radar.value?.errors?.canError));
+const canError = computed(() => !avStale.value && Boolean(av.value?.canError));
+const radarUnavailable = computed(
+  () => !avStale.value && Boolean(av.value?.radarUnavailable),
+);
 
-// ---- 雷达点：灰白小圆（avoidance stale 时也能单独撑起整张图）----
+// ---- 雷达点：灰白小圆（targets 里 vision=false 的条目）----
 
 const radarPoints = computed(() =>
-  radarStale.value ? [] : (radar.value?.points ?? []),
+  avStale.value
+    ? []
+    : (av.value?.targets ?? []).filter((t) => !t.vision),
 );
 
 // ---- 视觉目标：类别色方块（targets 里 vision=true 的条目）----
@@ -200,10 +187,10 @@ const gridX = (y: number) => lateralX(y, VB);
       <h2 class="text-[13px] font-semibold uppercase tracking-wider text-sl-text-3">
         避让监测
       </h2>
-      <Badge v-if="radarStale" kind="warn">无数据</Badge>
-      <Badge v-else-if="avStale" kind="warn">无避让数据</Badge>
+      <Badge v-if="avStale" kind="warn">无数据</Badge>
       <Badge v-else-if="planner" :kind="status.badge">{{ status.label }}</Badge>
       <Badge v-if="canError" kind="danger">CAN 错误</Badge>
+      <Badge v-if="radarUnavailable" kind="warn">雷达暂不可用</Badge>
       <Badge v-if="!avStale && sideLabel !== '—'" kind="muted">{{ sideLabel }}</Badge>
 
       <!-- 图例：雷达点灰白 + 视觉目标类别色 -->
@@ -279,18 +266,18 @@ const gridX = (y: number) => lateralX(y, VB);
         class="stroke-sl-accent" stroke-width="1" stroke-dasharray="2 3"
       />
 
-      <!-- 雷达点：灰白小圆 -->
-      <g v-if="!radarStale">
+      <!-- 雷达点：灰白小圆（来自 avoidance targets vision=false） -->
+      <g v-if="!avStale">
         <circle
           v-for="(p, i) in radarPoints"
-          :key="p.trackId === -1 ? `i${i}` : p.trackId"
+          :key="`r${p.pairId || `i${i}`}`"
           :cx="projectPoint(p, VB).x"
           :cy="projectPoint(p, VB).y"
           r="4"
           class="fill-sl-text-3 stroke-sl-bg"
           stroke-width="1.5"
         >
-          <title>#{{ p.trackId }}  dRel {{ p.dRel.toFixed(1) }}m  yRel {{ p.yRel.toFixed(2) }}m  vRel {{ p.vRel.toFixed(2) }}m/s</title>
+          <title>雷达点  dRel {{ p.dRel.toFixed(1) }}m  yRel {{ p.yRel.toFixed(2) }}m  vRel {{ p.vRel.toFixed(2) }}m/s</title>
         </circle>
       </g>
 
@@ -330,16 +317,16 @@ const gridX = (y: number) => lateralX(y, VB);
         </text>
       </g>
 
-      <!-- 无数据占位：连雷达都 stale -->
+      <!-- 无数据占位：avoidanced 未运行或未收到 avoidanceDebug -->
       <text
-        v-if="radarStale"
+        v-if="avStale"
         :x="VB.width / 2"
         :y="VB.height / 2"
         text-anchor="middle"
         class="fill-sl-text-3"
         font-size="13"
       >
-        等待数据…（点火且 openpilot 运行后会有 radarTracks / avoidanceDebug）
+        等待数据…（点火且 avoidanced 运行后会发布 avoidanceDebug）
       </text>
     </svg>
 

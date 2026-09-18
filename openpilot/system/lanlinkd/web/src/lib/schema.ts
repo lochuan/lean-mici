@@ -146,25 +146,7 @@ export interface StatusSnapshot {
   capabilities?: Capabilities;
 }
 
-/** /api/radar：radarTracks 最新一帧的快照 */
-export interface RadarPoint {
-  trackId: number;
-  dRel: number; // m，ego 车头前方为正
-  yRel: number; // m，左正右负（ego 车辆坐标系）
-  vRel: number; // m/s，正 = 远离
-}
-
-export interface RadarSnapshot {
-  stale?: boolean;
-  logMonoTime?: number;
-  points?: RadarPoint[];
-  errors?: { canError?: boolean; radarUnavailableTemporary?: boolean };
-}
-
-/** /api/avoidance：avoidanceDebug 最新一帧的快照（avoidanced.py AvoidanceCache）。
- *  字段逐一对上 _target()/快照 dict；direction = 障碍物侧（-1 左/0 无/1 右），
- *  yDes 左正（与 yRel 同号）。targets 含视觉目标（vision=true）与雷达点
- *  （vision=false），配对双方共享 pairId（0=未配对）。 */
+/** 避让监测目标（avoidanceDebug targets 条目；雷达点与视觉目标共用） */
 export interface AvoidanceTarget {
   dRel: number; // m，车头原点
   yRel: number; // m，左正
@@ -194,6 +176,8 @@ export interface AvoidanceSnapshot {
   nVision?: number;
   nAssociated?: number;
   edgeClearance?: number; // 避让侧路沿余量 m；inf 时后端发 999.0
+  canError?: boolean; // radarTracks.errors.canError（随 debug 透传）
+  radarUnavailable?: boolean; // radarTracks.errors.radarUnavailableTemporary
   targets?: AvoidanceTarget[];
 }
 

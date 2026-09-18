@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { RadarPoint } from "../src/lib/schema";
 import {
   clamp,
   lateralX,
   projectPoint,
   rangeTicks,
   rangeY,
-  trackBucket,
   type RadarViewBox,
 } from "../src/lib/radar";
 
@@ -20,12 +18,7 @@ const VB: RadarViewBox = {
   padX: 28,
 };
 
-const pt = (dRel: number, yRel: number, vRel = 0): RadarPoint => ({
-  trackId: 0,
-  dRel,
-  yRel,
-  vRel,
-});
+const pt = (dRel: number, yRel: number) => ({ dRel, yRel });
 
 describe("projectPoint", () => {
   it("puts dRel=0 at the bottom and rangeM at the top", () => {
@@ -66,18 +59,6 @@ describe("lateralX / rangeY", () => {
     for (const dRel of [0, 30, 75, 150]) {
       expect(rangeY(dRel, VB)).toBeCloseTo(projectPoint(pt(dRel, 0), VB).y);
     }
-  });
-});
-
-describe("trackBucket", () => {
-  it("buckets with a ±0.5 m/s dead band", () => {
-    expect(trackBucket(-20)).toBe("approach"); // 对向车：vRel ≈ -2×vEgo
-    expect(trackBucket(-0.6)).toBe("approach");
-    expect(trackBucket(-0.4)).toBe("static");
-    expect(trackBucket(0)).toBe("static");
-    expect(trackBucket(0.4)).toBe("static");
-    expect(trackBucket(0.6)).toBe("recede");
-    expect(trackBucket(5)).toBe("recede");
   });
 });
 
