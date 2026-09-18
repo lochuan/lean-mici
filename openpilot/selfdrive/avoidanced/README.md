@@ -131,6 +131,11 @@ subscribes to `avoidanceDebug`). Run it **on the device** while driving:
 python -m openpilot.selfdrive.avoidanced.calibrate [--duration 120] [--min-pairs 30] [--max-pairs 500]
 ```
 
+**lanlink 一键版（推荐）**：避让监测图状态条右侧的"开始标定/停止标定"按钮
+走同一套拟合（`POST /api/calibration/start|stop`，`GET /api/calibration/status`），
+无固定时长，开/停由你控制；停止后页面直接显示 p95 残差、Δfront/Δpitch/Δyaw、
+警告和**可复制的 constants.py 建议块**。配对 <30 时结果标记"仅供参考"。
+
 Workflow:
 
 1. Turn `AvoidanceEnabled` on so the avoidanced process runs at all — the
