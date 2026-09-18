@@ -22,7 +22,7 @@ from openpilot.system.camerad.snapshot import extract_image
 CAMERAD_NAME = "camerad"
 CONNECT_RETRY_S = 1.0
 
-# comma 3X (mici, os04c10) wide road camera intrinsics; scaled to the actual
+# comma 4 (mici, os04c10) wide road camera intrinsics; scaled to the actual
 # buffer resolution so a resolution change keeps the projection consistent.
 _WIDE_CAM = DEVICE_CAMERAS[("mici", "os04c10")].wide_road
 

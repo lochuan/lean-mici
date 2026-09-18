@@ -82,7 +82,7 @@ offline planner metrics (bias, jerk, latency) on route logs.
 
 ## Device acceptance checklist (P0)
 
-Everything below runs on the comma 3X with `AvoidanceEnabled` **off** — nothing
+Everything below runs on the comma 4 (mici) with `AvoidanceEnabled` **off** — nothing
 publishes until P1.
 
 1. **Compile the YOLO pkl on-device, on 12V.** Mici powers CPU 4-7 down unless

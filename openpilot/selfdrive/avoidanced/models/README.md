@@ -8,24 +8,31 @@ supercombo, so avoidanced ships its own pkl.
 **Weights and ONNX are not stored in the repo.** Only the code and build recipe
 live here. `*.onnx` and `*.pkl` in this directory are gitignored.
 
-## 1. Export the ONNX (one-off, on a dev machine)
+## 1. Export the ONNX (one-off, on the comma 4 / mici)
 
-Not required on the device, and not installed by avoidanced. Use upstream
-ultralytics in a throwaway environment:
+Per the lean-mici build split (see KB 发版流程), the pkl is device-only (QCOM
+tinygrad JIT); the ONNX itself is a plain file with no ABI coupling, so the
+export location is flexible — but the default flow does everything on-device:
 
 ```bash
-pip install ultralytics
-yolo export model=yolov8n.pt format=onnx imgsz=384,640 half=True opset=12
+# on the comma 4 (mici)
+python3 -m venv /tmp/yolo-export && /tmp/yolo-export/bin/pip install ultralytics
+/tmp/yolo-export/bin/yolo export model=yolov8n.pt format=onnx imgsz=384,640 half=True opset=12
 mv yolov8n.onnx openpilot/selfdrive/avoidanced/models/yolov8n-det-640x384-fp16.onnx
+rm -rf /tmp/yolo-export
 ```
+
+Fallback: the ONNX is architecture-neutral, so exporting it on any machine
+(including the arm64 OrbStack container) and scp'ing it to the device works
+too. What must NOT happen off-device is the pkl compile below.
 
 The ONNX input must be `(1, 3, 384, 640)` float16/float32 and the detect head
 output `(1, 4 + 80, N)` (YOLOv8 has no objectness head).
 
 ## 2. Compile to tinygrad pkl
 
-Run on the comma 3X, **on 12V** (mici powers down CPU 4-7 otherwise, and the
-compile needs CPU 4). The script sets
+Run on the comma 4 (mici), **on 12V** (mici powers down CPU 4-7 otherwise, and
+the compile needs CPU 4). The script sets
 `DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1`
 (aligned with `modeld/SConscript`) plus `PICKLE_OOB=1`, and drives
 `tinygrad_repo/examples/openpilot/compile3.py`:
@@ -67,8 +74,9 @@ detections = det.infer(roi_384x640_rgb_uint8)  # 5Hz throttled
 
 ## 4. Latency budget
 
-Target **< 120ms/frame** on comma 3X (5Hz = 200ms budget), leaving headroom for
-the modeld process on CPU 7. Measure after building the pkl:
+Target **< 120ms/frame** on the comma 4 (mici) (5Hz = 200ms budget), leaving
+headroom for the modeld process on the isolated cores. Measure after building
+the pkl:
 
 ```bash
 DEV=QCOM .venv/bin/python - <<'PY'
@@ -84,6 +92,6 @@ print(f"min {min(ts):.1f} ms  median {sorted(ts)[len(ts)//2]:.1f} ms")
 PY
 ```
 
-Measured on 3X: **pending** (no weights/device in the authoring environment).
+Measured on device: **pending** (no weights/device in the authoring environment).
 The unit tests run the real pre/post pipeline with an injected runner and skip
 the pkl test when the pkl is absent.

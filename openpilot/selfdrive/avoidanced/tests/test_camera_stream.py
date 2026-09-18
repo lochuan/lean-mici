@@ -54,7 +54,7 @@ def test_roi_from_rgb_bottom_crop():
 # --- intrinsics ------------------------------------------------------------------
 
 def test_scaled_intrinsics_match_native_resolution():
-  # comma 3X wide road cam: 425.25 px focal at native 1344x760.
+  # comma 4 (mici) wide road cam: 425.25 px focal at native 1344x760.
   fx, fy, cx, cy = cs.scaled_intrinsics(1344, 760)
   assert fx == pytest.approx(425.25)
   assert fy == pytest.approx(425.25)

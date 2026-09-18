@@ -8,8 +8,9 @@
 #   input  = models/yolov8n-det-640x384-fp16.onnx
 #   output = models/yolo_tinygrad.pkl
 #
-# On a comma 3X this MUST run on 12V: mici keeps CPU 4-7 powered down otherwise
-# and the tinygrad compile needs CPU 4 (see modeld/SConscript for the same note).
+# On a comma 4 (mici) this MUST run on 12V: mici keeps CPU 4-7 powered down
+# otherwise and the tinygrad compile needs CPU 4 (see modeld/SConscript for the
+# same note).
 # For a local CPU sanity check (no QCOM):  DEV=CPU ./compile_yolo.sh
 #
 # Weights are not stored in the repo; export the ONNX first (see README.md).
