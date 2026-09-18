@@ -3,8 +3,9 @@
 The planner consumes already-fused targets (radar points, optionally upgraded by
 YOLO VRU detections) plus vehicle state and produces a curvature bias that is
 added on top of the model curvature. It never commands a path of its own: the
-consumer (``avoidanced``) republishes ``model + bias`` and stops publishing when
-the plan is invalid, so control falls back to the raw model curvature.
+consumer (``avoidanced``) republishes ``model + bias`` every frame and clears the
+envelope ``valid`` flag when the plan is invalid, so control falls back to the
+raw model curvature.
 
 Sign convention: ``yRel`` is left-positive (car frame), so a target on the left
 produces a negative ``y_des`` (avoid right) and vice-versa.

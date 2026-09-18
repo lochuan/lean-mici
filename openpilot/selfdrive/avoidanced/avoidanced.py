@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """avoidanced: 5Hz radar-fused lateral avoidance bias on top of model curvature.
 
-Publishes ``lateralManeuverPlan`` only while the plan is valid. When the plan is
-invalid (no target, gated, takeover) or the feature is disabled the message is
-not sent, goes stale, and controlsd falls back to the model curvature.
+Publishes ``lateralManeuverPlan`` **every frame** with the message envelope
+``valid`` flag set from the planner. An invalid frame (no target, gated,
+takeover, disabled) still carries the raw model curvature, so controlsd falls
+back cleanly; nothing depends on the message going stale.
 """
 
 import os
