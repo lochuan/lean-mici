@@ -8,10 +8,11 @@ lines up with the projection and does not move the car before P1.
 What it records (per 5Hz frame, plus a summary):
 
 * **association rate** — fraction of in-gate radar targets that a vision object
-  corroborates. The daemon path (Task 7) feeds projected YOLO boxes into
-  :func:`associate`; the shadow replay still uses ``modelV2.leadsV3`` at t=0 as
-  the vision side because route logs carry no YOLO boxes. Target:
-  ``ASSOC_RATE_MIN`` (> 0.80).
+  corroborates. Two vision sides: the default route replay proxies with
+  ``modelV2.leadsV3`` at t=0 (route logs carry no camera frames or YOLO boxes);
+  with a detector injected (``ShadowEvaluator(detector=...)``) each frame runs
+  the real daemon chain — YOLO boxes -> ground-plane projection -> association
+  — on synthetic camera data (tests only). Target: ``ASSOC_RATE_MIN`` (> 0.80).
 * **calibration alignment** — max lateral residual ``|radar.yRel - vision.y|``
   over associated pairs. Target: ``CALIB_MAX_RESIDUAL_M`` (< 0.30 m, spec §4).
 * **false triggers** — valid frames with a non-zero bias whose target had no
@@ -20,6 +21,10 @@ What it records (per 5Hz frame, plus a summary):
   the device).
 * **jerk** — ``v_ego**2 * d(curvature)/dt``, the same quantity ``clip_curvature``
   bounds with ``MAX_LATERAL_JERK``.
+
+The real P0 run is the avoidanced daemon on the device (real camera + YOLO pkl)
+with metrics collected over lanlink/CSV; this replay tool grades offline planner
+metrics on route logs.
 
 Usage::
 
@@ -35,10 +40,16 @@ import time
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from openpilot.selfdrive.avoidanced import constants as C
+from openpilot.selfdrive.avoidanced.association import associate as associate_daemon
 from openpilot.selfdrive.avoidanced.association import nearest_pairs
-from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, fuse_targets
+from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets
+from openpilot.selfdrive.avoidanced.projection import RoiMeta, project_detections
+
+if TYPE_CHECKING:
+  import numpy as np
 
 # Acceptance thresholds (spec §3/§4 and the Task 6 brief).
 ASSOC_RATE_MIN = 0.80
@@ -76,6 +87,11 @@ class ShadowFrame:
   bsm_left: bool = False
   bsm_right: bool = False
   road_edges: Sequence = ()
+  # Camera side for the fused path. Synthetic frames only: route logs carry no
+  # camera frames, so iter_frames never fills these.
+  roi_frame: np.ndarray | None = None
+  roi_meta: RoiMeta | None = None
+  intrinsics: tuple[float, float, float, float] | None = None
 
 
 @dataclass
@@ -106,17 +122,49 @@ def associate(radar_points: Iterable[RadarTarget], vision_objects: Iterable[Visi
 
 
 class ShadowEvaluator:
-  """Runs the real planner over frames and records metrics; never publishes."""
+  """Runs the real planner over frames and records metrics; never publishes.
+
+  ``detector=None`` keeps the ``modelV2.leadsV3`` proxy vision side (route
+  replay). With a detector injected, frames carrying camera data
+  (``roi_frame``/``roi_meta``/``intrinsics``) run the real fused path instead:
+  detector -> ground-plane projection -> daemon association -> planner.
+  """
 
   def __init__(self, planner: AvoidancePlanner | None = None, max_offset: float = C.MAX_OFFSET_FREE,
-               clock=time.perf_counter):
+               clock=time.perf_counter, detector=None):
     self.planner = planner if planner is not None else AvoidancePlanner()
     self.max_offset = max_offset
     self._clock = clock
+    self.detector = detector
     self.records: list[ShadowRecord] = []
 
+  def _project(self, frame: ShadowFrame) -> list[dict] | None:
+    """Detector -> car-frame projections; ``None`` keeps the leadsV3 proxy path."""
+    if self.detector is None:
+      return None
+    if frame.roi_frame is None or frame.roi_meta is None or frame.intrinsics is None:
+      raise ValueError("detector injected but the frame carries no camera data (roi_frame/roi_meta/intrinsics)")
+    detections = self.detector.infer(frame.roi_frame, now=frame.t)
+    fx, fy, cx, cy = frame.intrinsics
+    return project_detections(detections, fx=fx, fy=fy, cx=cx, cy=cy,
+                              height=C.CAMERA_HEIGHT, pitch=C.CAMERA_PITCH, yaw=C.CAMERA_YAW,
+                              camera_to_front=C.CAMERA_TO_FRONT, roi_meta=frame.roi_meta)
+
   def step(self, frame: ShadowFrame) -> ShadowRecord:
-    targets = fuse_targets(frame.radar_points)
+    projected = self._project(frame)
+    if projected is not None:
+      # Fused path (daemon parity): association decides which detections the
+      # radar points absorb; the rest stay independent planner targets.
+      _, fused = associate_daemon(frame.radar_points, projected)
+      targets = fuse_targets(frame.radar_points, fused)
+      vision_objects = [VisionObject(x=float(d["dRel"]), y=float(d["yRel"])) for d in projected]
+      # Metrics radar side stays radar-only (in-gate), so a vision-only target
+      # cannot pair with itself and inflate the association rate.
+      metric_radar = [p for p in frame.radar_points if _in_gate(float(p.dRel), float(p.yRel))]
+    else:
+      targets = fuse_targets(frame.radar_points)
+      vision_objects = frame.vision_objects
+      metric_radar = targets
 
     t0 = self._clock()
     curvature, valid = self.planner.update(
@@ -131,7 +179,7 @@ class ShadowEvaluator:
     )
     latency_ms = (self._clock() - t0) * 1e3
 
-    pairs = associate(targets, frame.vision_objects)
+    pairs = associate(metric_radar, vision_objects)
     residual = max((abs(radar.yRel - obj.y) for radar, obj, _, _ in pairs), default=None)
 
     jerk = None
@@ -149,8 +197,8 @@ class ShadowEvaluator:
       curvature=curvature,
       valid=valid,
       y_des=y_des,
-      n_radar=len(targets),
-      n_vision=len(frame.vision_objects),
+      n_radar=len(metric_radar),
+      n_vision=len(vision_objects),
       n_associated=len(pairs),
       lat_residual=residual,
       latency_ms=latency_ms,
@@ -243,7 +291,8 @@ def iter_frames(messages: Iterable, sample_period: float = 0.2, limit: int | Non
   """Turn a message stream into 5Hz shadow frames (latest model/car/radar state).
 
   ``messages`` items need ``.which()`` and ``.logMonoTime`` (cereal readers and
-  the test doubles both satisfy this).
+  the test doubles both satisfy this). Route logs carry no camera frames, so
+  these frames always take the leadsV3 proxy vision side.
   """
   model = car = radar = None
   last_emit: float | None = None
@@ -282,8 +331,9 @@ def iter_frames(messages: Iterable, sample_period: float = 0.2, limit: int | Non
 
 
 def evaluate_records(frames: Iterable[ShadowFrame], planner: AvoidancePlanner | None = None,
-                     max_offset: float = C.MAX_OFFSET_FREE, clock=time.perf_counter) -> tuple[list[ShadowRecord], dict]:
-  evaluator = ShadowEvaluator(planner=planner, max_offset=max_offset, clock=clock)
+                     max_offset: float = C.MAX_OFFSET_FREE, clock=time.perf_counter,
+                     detector=None) -> tuple[list[ShadowRecord], dict]:
+  evaluator = ShadowEvaluator(planner=planner, max_offset=max_offset, clock=clock, detector=detector)
   records = evaluator.run(frames)
   return records, summarize(records)
 
@@ -307,7 +357,12 @@ def write_report(records: Sequence[ShadowRecord], summary: dict, out_dir: str | 
 
 def evaluate_log(route: str, out_dir: str | Path | None = None, max_offset: float = C.MAX_OFFSET_FREE,
                  sample_period: float = 0.2, limit: int | None = None) -> dict:
-  """Replay a route log in shadow mode and (optionally) write the report."""
+  """Replay a route log in shadow mode and (optionally) write the report.
+
+  Route logs carry no camera frames, so this always runs the leadsV3 proxy
+  vision side; the fused path needs the on-device daemon (or a detector
+  injected over synthetic frames in tests).
+  """
   from openpilot.tools.lib.logreader import LogReader
 
   frames = iter_frames(LogReader(route), sample_period=sample_period, limit=limit)
