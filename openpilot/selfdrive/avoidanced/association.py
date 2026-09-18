@@ -59,16 +59,21 @@ def nearest_pairs(radar_points: Iterable, vision_objects: Iterable,
 
 
 def associate(radar_points: Iterable, detections: Iterable,
-              max_dx: float = ASSOC_MAX_DX, max_dy: float = ASSOC_MAX_DY) -> tuple[int, list[dict]]:
-  """Daemon-facing association: ``(n_associated, fused detections for fuse_targets)``.
+              max_dx: float = ASSOC_MAX_DX, max_dy: float = ASSOC_MAX_DY) -> tuple[int, list[dict], list[tuple]]:
+  """Daemon-facing association: ``(n_associated, fused, pairs)``.
 
-  Matched detections are absorbed by their radar point (the radar range is the
-  more reliable longitudinal position); only unmatched detections — objects the
-  radar missed — are returned as independent targets. Note the matched radar
-  points keep the vehicle weight; upgrading them with the detection's class is
-  a P0 refinement once the calibration is trusted.
+  ``fused`` holds the fused detections for ``fuse_targets``: matched detections
+  are absorbed by their radar point (the radar range is the more reliable
+  longitudinal position); only unmatched detections — objects the radar missed —
+  are returned as independent targets. ``pairs`` holds one
+  ``(radar, vision, pair_id)`` tuple per match, ``pair_id`` counting up from 1
+  in match order (both sides of a pair share it; 0 means unpaired).
+
+  Note the matched radar points keep the vehicle weight; upgrading them with the
+  detection's class is a P0 refinement once the calibration is trusted.
   """
   detections = list(detections)
-  pairs, matched = nearest_pairs(radar_points, detections, max_dx, max_dy)
+  matches, matched = nearest_pairs(radar_points, detections, max_dx, max_dy)
   fused = [det for idx, det in enumerate(detections) if idx not in matched]
-  return len(pairs), fused
+  pairs = [(radar, obj, pid) for pid, (radar, obj, _, _) in enumerate(matches, start=1)]
+  return len(matches), fused, pairs

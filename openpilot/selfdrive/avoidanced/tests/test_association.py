@@ -13,18 +13,25 @@ def _det(d_rel, y_rel, cls="person", conf=0.9):
 def test_associate_matches_nearest_within_gates():
   radar = [RadarTarget(10.0, -1.0)]
   dets = [_det(10.4, -1.2), _det(30.0, 0.0, cls="car")]
-  n, fused = associate(radar, dets)
+  n, fused, pairs = associate(radar, dets)
   assert n == 1
   # The matched detection is absorbed by the radar point -> not re-added.
   assert fused == [dets[1]]
+  # pair_id counts up from 1; both sides share it.
+  assert len(pairs) == 1
+  radar_p, vision_p, pair_id = pairs[0]
+  assert radar_p is radar[0]
+  assert vision_p is dets[0]
+  assert pair_id == 1
 
 
 def test_associate_unmatched_detection_stays_independent():
   radar = [RadarTarget(30.0, 0.0)]
   dets = [_det(10.0, -1.0, cls="bicycle")]
-  n, fused = associate(radar, dets)
+  n, fused, pairs = associate(radar, dets)
   assert n == 0
   assert fused == dets
+  assert pairs == []
 
 
 def test_associate_gates_are_dx2_dy1():
@@ -32,23 +39,34 @@ def test_associate_gates_are_dx2_dy1():
   assert ASSOC_MAX_DY == 1.0
   radar = [RadarTarget(10.0, -1.0)]
   just_out = _det(10.0, -1.0 - ASSOC_MAX_DY - 0.01)
-  n, fused = associate(radar, [just_out])
+  n, fused, pairs = associate(radar, [just_out])
   assert n == 0
   assert fused == [just_out]
+  assert pairs == []
 
 
 def test_associate_nearest_wins():
   radar = [RadarTarget(10.0, 0.0)]
   dets = [_det(11.0, 0.0, cls="car", conf=0.5), _det(10.2, 0.1, conf=0.9)]
-  n, fused = associate(radar, dets)
+  n, fused, pairs = associate(radar, dets)
   assert n == 1
   assert fused == [dets[0]]
+  assert pairs[0][1] is dets[1]
 
 
 def test_associate_empty_inputs():
-  assert associate([], []) == (0, [])
-  assert associate([], [_det(1.0, 0.0)]) == (0, [_det(1.0, 0.0)])
-  assert associate([RadarTarget(1.0, 0.0)], []) == (0, [])
+  assert associate([], []) == (0, [], [])
+  assert associate([], [_det(1.0, 0.0)]) == (0, [_det(1.0, 0.0)], [])
+  assert associate([RadarTarget(1.0, 0.0)], []) == (0, [], [])
+
+
+def test_associate_pair_ids_count_up_from_one():
+  radar = [RadarTarget(10.0, 0.0), RadarTarget(25.0, -1.5)]
+  dets = [_det(10.5, 0.1, cls="car"), _det(26.0, -1.4)]
+  n, fused, pairs = associate(radar, dets)
+  assert n == 2
+  assert [p[2] for p in pairs] == [1, 2]
+  assert fused == []  # both detections absorbed
 
 
 def test_nearest_pairs_returns_gates_residuals():
@@ -71,5 +89,5 @@ def test_shadow_associate_reuses_core_with_its_own_gates():
   assert shadow.ASSOC_MAX_DY == 1.5
   pairs = shadow_associate([RadarTarget(10.0, -1.0)], [VisionObject(12.5, -2.0)])
   assert len(pairs) == 1  # within the shadow gates...
-  n, _ = associate([RadarTarget(10.0, -1.0)], [_det(12.5, -2.0)])
+  n, _, _ = associate([RadarTarget(10.0, -1.0)], [_det(12.5, -2.0)])
   assert n == 0          # ...but outside the daemon gates

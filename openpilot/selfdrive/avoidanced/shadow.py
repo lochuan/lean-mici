@@ -155,7 +155,7 @@ class ShadowEvaluator:
     if projected is not None:
       # Fused path (daemon parity): association decides which detections the
       # radar points absorb; the rest stay independent planner targets.
-      _, fused = associate_daemon(frame.radar_points, projected)
+      _, fused, _ = associate_daemon(frame.radar_points, projected)
       targets = fuse_targets(frame.radar_points, fused)
       vision_objects = [VisionObject(x=float(d["dRel"]), y=float(d["yRel"])) for d in projected]
       # Metrics radar side stays radar-only (in-gate), so a vision-only target

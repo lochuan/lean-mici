@@ -242,5 +242,5 @@ def test_daemon_gates_valid_on_modelv2_validity():
                        model_valid=False)
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
-  assert len(pm.sent) == 2                    # every-frame publish invariant holds
+  assert len(pm.sent) == 4                    # every-frame publish invariant holds (debug+plan)
   assert pm.sent[-1][1].valid is False        # controlsd falls back to its own modelV2

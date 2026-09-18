@@ -300,9 +300,9 @@ def test_daemon_sends_valid_flag_every_frame():
   daemon.update(0.0)                    # enter hysteresis not yet satisfied -> invalid
   daemon.update(C.ENTER_HOLD_S + 0.01)  # active -> valid
 
-  assert len(pm.sent) == 2
-  service0, msg0 = pm.sent[0]
-  service1, msg1 = pm.sent[1]
+  assert len(pm.sent) == 4  # avoidanceDebug (2) + lateralManeuverPlan (2), one debug per frame
+  service0, msg0 = pm.sent[1]
+  service1, msg1 = pm.sent[3]
   assert service0 == service1 == "lateralManeuverPlan"
   assert msg0.valid is False
   assert msg0.lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
@@ -315,7 +315,7 @@ def test_daemon_invalid_frame_carries_model_curvature():
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
 
-  assert len(pm.sent) == 2
-  for _, msg in pm.sent:
+  assert len(pm.sent) == 4  # avoidanceDebug (2) + lateralManeuverPlan (2)
+  for _, msg in pm.sent[1::2]:
     assert msg.valid is False
     assert msg.lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)

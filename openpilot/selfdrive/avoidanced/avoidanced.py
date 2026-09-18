@@ -33,7 +33,7 @@ from openpilot.common.realtime import Priority, Ratekeeper, config_realtime_proc
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.avoidanced import constants as C
 from openpilot.selfdrive.avoidanced.association import associate
-from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, fuse_targets
+from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets
 from openpilot.selfdrive.avoidanced.camera_stream import CameraStream
 from openpilot.selfdrive.avoidanced.projection import project_detections
 from openpilot.selfdrive.avoidanced.yolo_detector import YoloDetector
@@ -47,7 +47,7 @@ class AvoidanceDaemon:
                camera_factory=CameraStream):
     self.params = params if params is not None else Params()
     self.sm = sm if sm is not None else messaging.SubMaster(['modelV2', 'carState', 'radarTracks'])
-    self.pm = pm if pm is not None else messaging.PubMaster(['lateralManeuverPlan'])
+    self.pm = pm if pm is not None else messaging.PubMaster(['lateralManeuverPlan', 'avoidanceDebug'])
     self.planner = planner if planner is not None else AvoidancePlanner()
     self.camera = camera                  # lazy: created via camera_factory on first use
     self.camera_factory = camera_factory
@@ -114,7 +114,7 @@ class AvoidanceDaemon:
     radar = self.sm['radarTracks']
 
     detections = self._detect(now)
-    n_associated, fused = associate(radar.points, detections)
+    n_associated, fused, pairs = associate(radar.points, detections)
     targets = fuse_targets(radar.points, fused)
     curvature, valid = self.planner.update(
       model_curvature=model_v2.action.desiredCurvature,
@@ -136,10 +136,86 @@ class AvoidanceDaemon:
     # suspect, so the plan is never published as valid. We keep sending (instead
     # of skipping the frame) to preserve the every-frame freshness invariant in
     # controlsd; the invalid envelope makes controlsd ignore the curvature.
+    # Debug snapshot first so the plan message remains the frame's last publish
+    # (the every-frame freshness invariant tests read pm.sent[-1]).
+    self._publish_debug(radar.points, detections, n_associated, pairs, car_state, valid=bool(valid))
+
+    # Publish every frame. ``valid`` is the message envelope flag controlsd reads
+    # via ``sm.valid['lateralManeuverPlan']``; an invalid plan still carries the
+    # model curvature so a fresh-but-invalid frame falls back cleanly.
+    # Defensive gate: if this frame's modelV2 failed validation its curvature is
+    # suspect, so the plan is never published as valid. We keep sending (instead
+    # of skipping the frame) to preserve the every-frame freshness invariant in
+    # controlsd; the invalid envelope makes controlsd ignore the curvature.
     msg = messaging.new_message('lateralManeuverPlan')
     msg.lateralManeuverPlan.desiredCurvature = float(curvature)
     msg.valid = bool(valid) and bool(self.sm.valid['modelV2'])
     self.pm.send('lateralManeuverPlan', msg)
+
+  def _publish_debug(self, radar_points, detections, n_associated, pairs, car_state,
+                     valid: bool) -> None:
+    """Build and publish the fused avoidanceDebug snapshot for this frame.
+
+    Sent every frame regardless of planner validity: the message envelope
+    ``valid`` flag is always true (this is a live observation, not a plan), and
+    the planner's own validity lives in the struct's ``valid`` field. Consumers
+    are lanlink's bird's-eye view and the P0 calibration tool — never controlsd.
+    """
+    radar_points = list(radar_points)
+    # Association pairs reference this frame's radar/detection objects, so match
+    # them back by identity to stamp the shared pairId on both sides.
+    radar_pair_ids = {id(p[0]): p[2] for p in pairs}
+    vision_pair_ids = {id(p[1]): p[2] for p in pairs}
+    targets: list[tuple] = []
+    for point in radar_points:
+      in_gate = _in_gate(float(point.dRel), float(point.yRel))
+      targets.append((in_gate, {
+        "dRel": float(point.dRel), "yRel": float(point.yRel), "vRel": float(point.vRel),
+        "cls": "", "conf": 0.0, "weight": C.VEHICLE_WEIGHT,
+        "matched": id(point) in radar_pair_ids, "inGate": in_gate, "vision": False,
+        "pairId": radar_pair_ids.get(id(point), 0),
+      }))
+    for det in detections:
+      in_gate = _in_gate(float(det["dRel"]), float(det["yRel"]))
+      weight = C.VRU_WEIGHT if det.get("cls") in C.VRU_CLASSES else C.VEHICLE_WEIGHT
+      targets.append((in_gate, {
+        "dRel": float(det["dRel"]), "yRel": float(det["yRel"]), "vRel": 0.0,
+        "cls": det.get("cls", ""), "conf": float(det.get("conf", 1.0)),
+        "weight": weight,
+        "matched": id(det) in vision_pair_ids, "inGate": in_gate, "vision": True,
+        "pairId": vision_pair_ids.get(id(det), 0),
+      }))
+
+    msg = messaging.new_message('avoidanceDebug')
+    dbg = msg.avoidanceDebug
+    last = self.planner.last_state
+    dbg.valid = bool(valid)
+    dbg.active = bool(last.get("active", False))
+    dbg.direction = int(last.get("direction", 0))
+    dbg.yDes = float(last.get("yDes", 0.0))
+    dbg.bias = float(last.get("bias", 0.0))
+    dbg.maxOffset = float(last.get("maxOffset", self.max_offset))
+    dbg.bsmLeft = bool(car_state.leftBlindspot)
+    dbg.bsmRight = bool(car_state.rightBlindspot)
+    dbg.vEgo = float(car_state.vEgo)
+    dbg.nRadar = len(radar_points)
+    dbg.nVision = len(detections)
+    dbg.nAssociated = int(n_associated)
+    dbg.edgeClearance = min(float(last.get("edgeClearance", float("inf"))), 999.0)
+    tgts = dbg.init('targets', len(targets))
+    for i, (in_gate, t) in enumerate(targets):
+      tgts[i].dRel = t["dRel"]
+      tgts[i].yRel = t["yRel"]
+      tgts[i].vRel = t["vRel"]
+      tgts[i].cls = t["cls"]
+      tgts[i].conf = t["conf"]
+      tgts[i].weight = t["weight"]
+      tgts[i].matched = t["matched"]
+      tgts[i].inGate = in_gate
+      tgts[i].vision = t["vision"]
+      tgts[i].pairId = t["pairId"]
+    msg.valid = True
+    self.pm.send('avoidanceDebug', msg)
 
 
 def main() -> None:

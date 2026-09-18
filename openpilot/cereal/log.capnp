@@ -1222,6 +1222,36 @@ struct LateralManeuverPlan {
   desiredCurvature @0 :Float32;  # 1/m
 }
 
+struct AvoidanceTarget {
+  dRel @0 :Float32;      # 车头原点
+  yRel @1 :Float32;      # 左正右负，与雷达一致
+  vRel @2 :Float32;      # 雷达点才有，视觉目标 0
+  cls @3 :Text;          # person/bicycle/motorcycle/car；雷达点 ""
+  conf @4 :Float32;      # YOLO conf；雷达点 0
+  weight @5 :Float32;    # planner 权重（VRU 1.0 / car 0.6）
+  matched @6 :Bool;      # 雷达↔视觉关联上
+  inGate @7 :Bool;       # planner 门内（dRel≤40, |yRel|≤2.5）
+  vision @8 :Bool;       # true=YOLO 投影目标；false=雷达点
+  pairId @9 :UInt16;     # 0=未配对；配对双方共享同 id（递增分配）
+}
+
+struct AvoidanceDebug {
+  valid @0 :Bool;        # planner 本帧 valid
+  active @1 :Bool;       # 迟滞后避让激活中
+  direction @2 :Int8;    # -1 左 / 0 无 / 1 右
+  yDes @3 :Float32;      # 期望横向偏移 m
+  bias @4 :Float32;      # 曲率偏置 1/m
+  maxOffset @5 :Float32; # BSM 门控后的本帧生效上限 m
+  bsmLeft @6 :Bool;
+  bsmRight @7 :Bool;
+  vEgo @8 :Float32;
+  nRadar @9 :UInt16;
+  nVision @10 :UInt16;
+  nAssociated @11 :UInt16;
+  edgeClearance @12 :Float32;  # 避让侧路沿余量 m；inf 时发 999.0
+  targets @13 :List(AvoidanceTarget);
+}
+
 struct LongitudinalPlan @0xe00b5b3eba12876c {
   modelMonoTime @9 :UInt64;
   hasLead @7 :Bool;
@@ -2608,6 +2638,7 @@ struct Event {
     bookmarkButton @148 :UserBookmark;
 
     lateralManeuverPlan @150 :LateralManeuverPlan;
+    avoidanceDebug @153 :AvoidanceDebug;
 
     # *********** debug ***********
     testJoystick @52 :Joystick;
