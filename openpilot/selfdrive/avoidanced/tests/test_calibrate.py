@@ -1,4 +1,11 @@
-"""Tests for the online calibration collector (pure fit + extraction + CLI semantics)."""
+"""Tests for the online calibration collector (pure fit + extraction + CLI semantics).
+
+Pair injection round-trips the REAL ``project_box_to_vehicle``: pixels are
+generated with the true constants (current + deltas) via the inverse mapping,
+then projected back with the current constants. The residuals therefore carry
+the true sensor geometry (including the projection's yaw/pitch sign
+conventions) — the tests never share a hand-derived error model with the fit.
+"""
 
 import math
 from types import SimpleNamespace
@@ -9,44 +16,111 @@ import pytest
 from openpilot.selfdrive.avoidanced import constants as C
 from openpilot.selfdrive.avoidanced.calibrate import (CalibPair, MIN_FIT_PAIRS, RESIDUAL_PASS_M, extract_pairs,
                                                       fit_calibrated_offsets, format_constants_block, main)
+from openpilot.selfdrive.avoidanced.projection import project_box_to_vehicle
+
+# Synthetic wide-camera intrinsics (full frame 1344x760, focal 425.25), same as
+# the shadow/daemon fusion tests.
+FX = FY = 425.25
+CX, CY = 672.0, 380.0
 
 
-def _synth_pairs(n=200, d_front=0.0, d_pitch=0.0, d_yaw=0.0, lateral_bias=0.0,
-                 noise=0.0, seed=0):
-  """Radar positions are the truth; vision = truth + injected constant errors."""
+def _pixel_at(d_rel, y_rel, ctf, pitch, yaw, height=C.CAMERA_HEIGHT):
+  """Inverse of project_box_to_vehicle: bumper-frame ground point -> full-frame pixel."""
+  x = d_rel + ctf
+  cos_y, sin_y = math.cos(yaw), math.sin(yaw)
+  xg = x * cos_y + y_rel * sin_y
+  yg = -x * sin_y + y_rel * cos_y
+  cos_p, sin_p = math.cos(pitch), math.sin(pitch)
+  y_n = (height * cos_p - xg * sin_p) / (xg * cos_p + height * sin_p)
+  x_n = -(yg / xg) * (cos_p - y_n * sin_p)
+  return CX + FX * x_n, CY + FY * y_n
+
+
+def _synth_pairs(d_front=0.0, d_pitch=0.0, d_yaw=0.0, lateral_bias=0.0,
+                 noise=0.0, n=200, seed=0, current=None, true=None):
+  """Pairs whose vision side comes from the real projection round-trip.
+
+  ``current`` is the (ctf, pitch, yaw) triple the projection runs with; the
+  pixels are generated with the TRUE mount — by default ``current + deltas``,
+  or the explicit ``true`` triple (pass it to keep the mount fixed across
+  fit/apply iterations).
+  """
+  current = current if current is not None else (C.CAMERA_TO_FRONT, C.CAMERA_PITCH, C.CAMERA_YAW)
+  true = true if true is not None else (current[0] + d_front, current[1] + d_pitch, current[2] + d_yaw)
   rng = np.random.default_rng(seed)
   pairs = []
-  for d, y in zip(rng.uniform(5.0, 45.0, n), rng.uniform(-2.0, 2.0, n), strict=False):
-    e_d = d_front + d_pitch * d ** 2 / C.CAMERA_HEIGHT + rng.normal(0.0, noise)
-    e_y = d_yaw * d + lateral_bias + rng.normal(0.0, noise)
+  for d, y in zip(rng.uniform(5.0, 45.0, n), rng.uniform(-2.0, 2.0, n), strict=True):
+    u, v = _pixel_at(float(d), float(y), *true)
+    vis = project_box_to_vehicle(u=u, v=v, fx=FX, fy=FY, cx=CX, cy=CY, height=C.CAMERA_HEIGHT,
+                                 pitch=current[1], yaw=current[2], camera_to_front=current[0])
     pairs.append(CalibPair(d_radar=float(d), y_radar=float(y),
-                           d_vision=float(d + e_d), y_vision=float(y + e_y), v_ego=20.0))
+                           d_vision=vis["dRel"] + rng.normal(0.0, noise),
+                           y_vision=vis["yRel"] + lateral_bias + rng.normal(0.0, noise),
+                           v_ego=20.0))
   return pairs
 
 
 # --- fit ----------------------------------------------------------------------
 
-def test_fit_recovers_injected_constants_exact():
-  pairs = _synth_pairs(d_front=0.3, d_pitch=math.radians(0.5), d_yaw=math.radians(0.3))
+# Real-projection residuals are only approximately linear in the constants
+# (the pitch term gains a constant Δpitch·h piece and grows faster than d²/h at
+# range), so recovery tolerances are statistical, not exact; the round-trip
+# convergence test below pins the end-to-end behaviour.
+
+def test_fit_recovers_injected_constants():
+  pairs = _synth_pairs(d_front=0.3, d_pitch=math.radians(0.1), d_yaw=math.radians(0.3))
   result = fit_calibrated_offsets(pairs)
-  assert result["d_front_m"] == pytest.approx(0.3, abs=1e-6)
-  assert result["d_pitch_rad"] == pytest.approx(math.radians(0.5), abs=1e-9)
-  assert result["d_yaw_rad"] == pytest.approx(math.radians(0.3), abs=1e-9)
-  assert result["residual_p95_after_m"] == pytest.approx(0.0, abs=1e-6)
+  assert result["d_front_m"] == pytest.approx(0.3, abs=0.06)
+  assert result["d_pitch_rad"] == pytest.approx(math.radians(0.1), rel=0.25)
+  assert result["d_yaw_rad"] == pytest.approx(math.radians(0.3), rel=0.10)
+  assert result["residual_p95_after_m"] < RESIDUAL_PASS_M
   assert result["pass"] is True
   assert result["warnings"] == []
 
 
 def test_fit_recovers_injected_constants_with_noise():
-  pairs = _synth_pairs(n=400, d_front=0.3, d_pitch=math.radians(0.5), d_yaw=math.radians(0.3),
+  pairs = _synth_pairs(n=400, d_front=0.3, d_pitch=math.radians(0.1), d_yaw=math.radians(0.3),
                        noise=0.03, seed=42)
   result = fit_calibrated_offsets(pairs)
-  assert result["d_front_m"] == pytest.approx(0.3, abs=0.05)
-  assert result["d_pitch_rad"] == pytest.approx(math.radians(0.5), abs=0.002)
-  assert result["d_yaw_rad"] == pytest.approx(math.radians(0.3), abs=0.002)
+  assert result["d_front_m"] == pytest.approx(0.3, abs=0.06)
+  assert result["d_pitch_rad"] == pytest.approx(math.radians(0.1), rel=0.25)
+  assert result["d_yaw_rad"] == pytest.approx(math.radians(0.3), rel=0.10)
+
+
+def test_fit_yaw_suggestion_sign_matches_projection():
+  # Reviewer's numeric case: a camera truly yawed LEFT by +0.05 rad relative to
+  # the compiled constant produces e_y slope = -0.04998 (= -sin 0.05, verified
+  # against project_box_to_vehicle); the suggestion must be the NEGATED slope,
+  # and applying it must shrink the lateral residual, not double it.
+  pairs = _synth_pairs(d_yaw=0.05, n=300, seed=7)
+  result = fit_calibrated_offsets(pairs)
+  assert result["d_yaw_rad"] > 0.0
+  assert result["d_yaw_rad"] == pytest.approx(math.sin(0.05), abs=0.002)
+  e_y_before = np.mean(np.abs([p.y_vision - p.y_radar for p in pairs]))
+  e_y_after = np.mean(np.abs([p.y_vision + result["d_yaw_rad"] * p.d_radar - p.y_radar for p in pairs]))
+  assert e_y_after < e_y_before / 10.0
+
+
+def test_roundtrip_convergence_two_iterations():
+  # Applying the suggestions and re-fitting must monotonically shrink the raw
+  # residual across two iterations (linearized fit of a mildly nonlinear
+  # geometry: round 1 removes the bulk, round 2 the cross-terms). The true
+  # mount stays FIXED while the compiled constants converge onto it.
+  base = (C.CAMERA_TO_FRONT, C.CAMERA_PITCH, C.CAMERA_YAW)
+  true = (base[0] + 0.3, base[1] + math.radians(0.1), base[2] + math.radians(0.3))
+  current = list(base)
+  p95s = []
+  for _ in range(3):
+    pairs = _synth_pairs(n=300, seed=7, current=tuple(current), true=true)
+    result = fit_calibrated_offsets(pairs)
+    p95s.append(result["residual_p95_before_m"])
+    current = [current[0] + result["d_front_m"], current[1] + result["d_pitch_rad"], current[2] + result["d_yaw_rad"]]
+  assert p95s[0] > p95s[1] > p95s[2]
+  assert p95s[2] < 0.1
 
 
 def test_fit_zero_residual_gives_zero_suggestions_and_passes():
+  # Zero deltas: the projection round-trip is the identity, so vision == radar.
   result = fit_calibrated_offsets(_synth_pairs())
   assert result["d_front_m"] == pytest.approx(0.0, abs=1e-9)
   assert result["d_pitch_rad"] == pytest.approx(0.0, abs=1e-12)
@@ -67,22 +141,22 @@ def test_fit_reports_lateral_bias_as_warning_without_absorbing_it():
   result = fit_calibrated_offsets(pairs)
   assert result["lateral_bias_m"] == pytest.approx(0.15, abs=0.01)
   assert any("lateral mount" in w for w in result["warnings"])
-  assert result["d_yaw_rad"] == pytest.approx(math.radians(0.3), abs=1e-9)
+  assert result["d_yaw_rad"] == pytest.approx(math.sin(math.radians(0.3)), rel=0.10)
 
 
 def test_fit_reports_p95_improvement():
-  pairs = _synth_pairs(d_front=0.5, d_pitch=math.radians(1.0), d_yaw=math.radians(0.5))
+  pairs = _synth_pairs(d_front=0.5, d_pitch=math.radians(0.1), d_yaw=math.radians(0.5))
   result = fit_calibrated_offsets(pairs)
-  assert result["residual_p95_before_m"] > 0.5
-  assert result["residual_p95_after_m"] < 0.05
+  assert result["residual_p95_before_m"] > 1.0
+  assert result["residual_p95_after_m"] < RESIDUAL_PASS_M
 
 
 def test_format_constants_block_applies_increments():
-  pairs = _synth_pairs(d_front=0.3, d_pitch=math.radians(0.5), d_yaw=math.radians(0.3))
-  block = format_constants_block(fit_calibrated_offsets(pairs))
-  assert f"CAMERA_TO_FRONT = {C.CAMERA_TO_FRONT + 0.3:.4f}" in block
-  assert f"CAMERA_PITCH = {C.CAMERA_PITCH + math.radians(0.5):.6f}" in block
-  assert f"CAMERA_YAW = {C.CAMERA_YAW + math.radians(0.3):.6f}" in block
+  result = fit_calibrated_offsets(_synth_pairs(d_front=0.3, d_pitch=math.radians(0.1), d_yaw=math.radians(0.3)))
+  block = format_constants_block(result)
+  assert f"CAMERA_TO_FRONT = {C.CAMERA_TO_FRONT + result['d_front_m']:.4f}" in block
+  assert f"CAMERA_PITCH = {C.CAMERA_PITCH + result['d_pitch_rad']:.6f}" in block
+  assert f"CAMERA_YAW = {C.CAMERA_YAW + result['d_yaw_rad']:.6f}" in block
 
 
 # --- pair extraction ------------------------------------------------------------

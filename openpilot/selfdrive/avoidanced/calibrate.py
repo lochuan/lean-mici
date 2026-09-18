@@ -10,10 +10,12 @@ errors this tool fits:
 * forward residual ``e_d = d_vis - d_radar`` regressed on ``[1, d_r^2/h]`` ->
   ``CAMERA_TO_FRONT`` increment (constant shift) and ``CAMERA_PITCH`` increment
   (error growing with distance squared over camera height);
-* lateral residual ``e_y = y_vis - y_radar`` regressed on ``[1, d_r]`` ->
-  ``CAMERA_YAW`` increment (slope). The intercept is a constant component the
-  slope cannot absorb; it is reported as a lateral mount-offset WARNING but is
-  never auto-assigned to a constant (it needs a physical re-measure, not a
+* lateral residual ``e_y = y_vis - y_radar`` regressed on ``[1, d_r]`` -> the
+  slope is ``-Δyaw`` (the projection UNDOES the camera yaw: a camera truly
+  yawed left by Δyaw relative to the compiled constant maps forward distance
+  to ``e_y = -Δyaw·d``), so ``CAMERA_YAW += -slope``. The intercept is a
+  constant component reported as a lateral mount-offset WARNING but never
+  auto-assigned to a constant (it needs a physical re-measure, not a
   regression).
 
 Iteration semantics: the vision coordinates already include the constants
@@ -102,8 +104,9 @@ def fit_calibrated_offsets(pairs: Sequence[CalibPair], height: float = C.CAMERA_
 
   * ``e_d = d_vis - d_radar`` on ``[1, d_r^2/height]`` -> ``d_front_m`` (constant
     forward shift) and ``d_pitch_rad`` (distance-growing pitch error);
-  * ``e_y = y_vis - y_radar`` on ``[1, d_r]`` -> ``d_yaw_rad`` (slope); the
-    intercept is ``lateral_bias_m`` (warning only, never folded into a constant).
+  * ``e_y = y_vis - y_radar`` on ``[1, d_r]`` -> ``d_yaw_rad`` is the NEGATED
+    slope (slope = ``-Δyaw``, see module docstring); the intercept is
+    ``lateral_bias_m`` (warning only, never folded into a constant).
 
   Raises ``ValueError`` with fewer than ``MIN_FIT_PAIRS`` pairs.
   """
@@ -123,13 +126,17 @@ def fit_calibrated_offsets(pairs: Sequence[CalibPair], height: float = C.CAMERA_
   resid_d = e_d - basis_d @ coeffs_d
   if np.linalg.matrix_rank(basis_d) < 2:
     warnings.append("distance range too narrow to separate CAMERA_TO_FRONT from CAMERA_PITCH; collect pairs across a wider distance spread")
-  # Lateral residuals: yaw term growing as d. The intercept column separates a
-  # constant mount offset from the distance-proportional yaw error; only the
-  # slope is suggested as a constant, the intercept is warning-only.
+  # Lateral residuals: yaw term growing as d. The projection UNDOES the camera
+  # yaw (vehicle = R(yaw)·camera), so a camera truly yawed left by Δyaw relative
+  # to the compiled constant produces e_y = -Δyaw·d: the regression slope is the
+  # NEGATIVE of the increment to apply. The intercept column separates a
+  # constant mount offset from the yaw term; only the negated slope is suggested
+  # as a constant, the intercept is warning-only.
   basis_y = np.column_stack([np.ones_like(d_r), d_r])
   coeffs_y, *_ = np.linalg.lstsq(basis_y, e_y, rcond=None)
-  lateral_bias, d_yaw = float(coeffs_y[0]), float(coeffs_y[1])
-  resid_y = e_y - d_yaw * d_r  # only the suggested correction is applied
+  lateral_bias = float(coeffs_y[0])
+  d_yaw = -float(coeffs_y[1])  # slope = -Δyaw (see comment above)
+  resid_y = e_y + d_yaw * d_r  # applying Δyaw raises y_vision by ~d·Δyaw, cancelling the residual
   lateral_warning = abs(lateral_bias) >= LATERAL_BIAS_WARN_M
   if lateral_warning:
     warnings.append(f"constant lateral residual {lateral_bias:+.3f} m suggests a lateral mount offset; re-measure physically, do not patch it into a constant")
