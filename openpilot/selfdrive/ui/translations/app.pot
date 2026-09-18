@@ -617,10 +617,6 @@ msgid "Longitudinal Maneuver Mode"
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
-msgid "Lateral Maneuver Mode"
-msgstr ""
-
-#: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "sunnypilot Longitudinal Control (Alpha)"
 msgstr ""
 
@@ -867,5 +863,13 @@ msgstr ""
 
 #: openpilot/selfdrive/ui/onroad/driver_camera_dialog.py
 msgid "camera starting"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering.py
+msgid "Gentle lateral nudge away from nearby vehicles and vulnerable road users."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering.py
+msgid "Lateral Avoidance"
 msgstr ""
 

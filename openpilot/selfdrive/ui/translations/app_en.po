@@ -342,6 +342,10 @@ msgstr "Forget Wi-Fi Network \"{}\"?"
 msgid "GOOD"
 msgstr "GOOD"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering.py
+msgid "Gentle lateral nudge away from nearby vehicles and vulnerable road users."
+msgstr "Gentle lateral nudge away from nearby vehicles and vulnerable road users."
+
 #: openpilot/selfdrive/ui/widgets/pairing_dialog.py
 msgid "Go to https://connect.comma.ai on your phone"
 msgstr "Go to https://connect.comma.ai on your phone"
@@ -386,9 +390,9 @@ msgstr "LOADING"
 msgid "LTE"
 msgstr "LTE"
 
-#: openpilot/selfdrive/ui/layouts/settings/developer.py
-msgid "Lateral Maneuver Mode"
-msgstr ""
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering.py
+msgid "Lateral Avoidance"
+msgstr "Lateral Avoidance"
 
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "Longitudinal Maneuver Mode"
