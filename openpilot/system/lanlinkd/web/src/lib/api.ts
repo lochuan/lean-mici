@@ -6,8 +6,8 @@
  *  - blocked param 返回 403 而非静默跳过（与上游不同，见 FRONTEND_SPEC.md §1）
  */
 import type {
-  BluetoothStatus, Capabilities, ModelsState, ParamValues, RadarSnapshot, SettingsSchema, SoftwareStatus, StatusSnapshot,
-  VehicleState, WifiStatus,
+  AvoidanceSnapshot, BluetoothStatus, Capabilities, ModelsState, ParamValues, RadarSnapshot, SettingsSchema,
+  SoftwareStatus, StatusSnapshot, VehicleState, WifiStatus,
 } from "./schema";
 
 export class ApiError extends Error {
@@ -45,6 +45,7 @@ export const api = {
   allParams: () => request<ParamValues>("/api/params/_all"),
   status: () => request<StatusSnapshot>("/api/status"),
   radar: () => request<RadarSnapshot>("/api/radar"),
+  avoidance: () => request<AvoidanceSnapshot>("/api/avoidance"),
 
   // ---- 单 key 写 ----
   putParam: (key: string, value: string) =>

@@ -161,6 +161,42 @@ export interface RadarSnapshot {
   errors?: { canError?: boolean; radarUnavailableTemporary?: boolean };
 }
 
+/** /api/avoidance：avoidanceDebug 最新一帧的快照（avoidanced.py AvoidanceCache）。
+ *  字段逐一对上 _target()/快照 dict；direction = 障碍物侧（-1 左/0 无/1 右），
+ *  yDes 左正（与 yRel 同号）。targets 含视觉目标（vision=true）与雷达点
+ *  （vision=false），配对双方共享 pairId（0=未配对）。 */
+export interface AvoidanceTarget {
+  dRel: number; // m，车头原点
+  yRel: number; // m，左正
+  vRel: number; // m/s，雷达点才有，视觉目标 0
+  cls: string; // person/bicycle/motorcycle/car；雷达点 ""
+  conf: number; // YOLO conf，雷达点 0
+  weight: number; // planner 权重（VRU 1.0 / car 0.6）
+  matched: boolean; // 雷达↔视觉关联上
+  inGate: boolean; // planner 门内（dRel≤40, |yRel|≤2.5）
+  vision: boolean; // true=YOLO 投影目标；false=雷达点
+  pairId: number;
+}
+
+export interface AvoidanceSnapshot {
+  stale?: boolean;
+  logMonoTime?: number;
+  valid?: boolean;
+  active?: boolean;
+  direction?: number;
+  yDes?: number; // 期望横向偏移 m，左正
+  bias?: number; // 曲率偏置 1/m
+  maxOffset?: number; // BSM 门控后的本帧生效上限 m
+  bsmLeft?: boolean;
+  bsmRight?: boolean;
+  vEgo?: number; // m/s
+  nRadar?: number;
+  nVision?: number;
+  nAssociated?: number;
+  edgeClearance?: number; // 避让侧路沿余量 m；inf 时后端发 999.0
+  targets?: AvoidanceTarget[];
+}
+
 export interface ModelBundle {
   ref: string;
   displayName: string;

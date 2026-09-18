@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 状态页：设备遥测（CPU/GPU/内存/温度/功耗）+ 雷达点阵。
+/** 状态页：设备遥测（CPU/GPU/内存/温度/功耗）+ 避让监测。
  *
  * 遥测用页面级 1s 轮询而不是全局 4s 的 pollStatus——那个还承担着
  * paramsVersion 同步，不该被高频触发；这里只读不写 store。
@@ -8,7 +8,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "@/lib/api";
 import type { DeviceStatus } from "@/lib/schema";
 import Badge from "./ui/Badge.vue";
-import RadarView from "./RadarView.vue";
+import AvoidanceView from "./AvoidanceView.vue";
 
 const dev = ref<DeviceStatus | null>(null);
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -119,6 +119,6 @@ function coreBarClass(load: number): string {
       </div>
     </section>
 
-    <RadarView />
+    <AvoidanceView />
   </div>
 </template>

@@ -54,7 +54,7 @@ export const TRACK_LABEL: Record<TrackBucket, string> = {
  * 映射为屏幕左。绘图区左右各留 padX，圆点不会压在边框上。越界的点
  * 钳到量程边缘——比直接丢弃好，能看到"150m 外还有东西"。
  */
-export function projectPoint(p: RadarPoint, vb: RadarViewBox): { x: number; y: number } {
+export function projectPoint(p: Pick<RadarPoint, "dRel" | "yRel">, vb: RadarViewBox): { x: number; y: number } {
   const plotLeft = vb.padX;
   const plotRight = vb.width - vb.padX;
   const usableH = vb.height - vb.padTop - vb.padBottom;
@@ -69,12 +69,12 @@ export function projectPoint(p: RadarPoint, vb: RadarViewBox): { x: number; y: n
 
 /** 横向网格线（yRel 米值，从 -lateralM 到 +lateralM）的 x 坐标 */
 export function lateralX(yRel: number, vb: RadarViewBox): number {
-  return projectPoint({ trackId: -1, dRel: 0, yRel, vRel: 0 }, vb).x;
+  return projectPoint({ dRel: 0, yRel }, vb).x;
 }
 
 /** 纵向网格线（dRel 米值）的 y 坐标 */
 export function rangeY(dRel: number, vb: RadarViewBox): number {
-  return projectPoint({ trackId: -1, dRel, yRel: 0, vRel: 0 }, vb).y;
+  return projectPoint({ dRel, yRel: 0 }, vb).y;
 }
 
 /** 量程刻度线的 dRel 值（含 0 与 rangeM） */
