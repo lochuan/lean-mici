@@ -33,6 +33,7 @@ from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd import wifi_api
 from openpilot.system.lanlinkd import software_api
+from openpilot.system.lanlinkd.avoidanced import AvoidanceCache
 from openpilot.system.lanlinkd.radard import RadarCache
 from openpilot.system.lanlinkd.statusd import StatusCache
 
@@ -51,12 +52,14 @@ class LanlinkApp:
     self.version_info = {k: params_api.to_str(self.params.get(k)) or "" for k in VERSION_PARAMS}
     self.cache = StatusCache(self.version_info, device_type="pc" if PC else HARDWARE.get_device_type(), params=self.params)
     self.radar = RadarCache()
+    self.avoidance = AvoidanceCache()
     self.exit_event = threading.Event()
     self._settings_ui: dict | None = None
     self._wifi_manager = None
     self._wifi_lock = threading.Lock()
     threading.Thread(target=self.cache.run, args=(self.exit_event,), name="lanlink_status", daemon=True).start()
     threading.Thread(target=self.radar.run, args=(self.exit_event,), name="lanlink_radar", daemon=True).start()
+    threading.Thread(target=self.avoidance.run, args=(self.exit_event,), name="lanlink_avoidance", daemon=True).start()
 
   # ---- helpers ----
   @staticmethod
@@ -263,6 +266,9 @@ class LanlinkApp:
   async def radar_get(self, request: Request) -> HTTPResponse:
     return json_response(self.radar.snapshot())
 
+  async def avoidance_get(self, request: Request) -> HTTPResponse:
+    return json_response(self.avoidance.snapshot())
+
   async def capabilities(self, request: Request) -> HTTPResponse:
     return json_response(self.cache.capabilities())
 
@@ -325,6 +331,7 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/software/<action:str>", "software_action"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/radar", "radar_get"),
+  ("GET", "/api/avoidance", "avoidance_get"),
   ("GET", "/api/capabilities", "capabilities"),
   ("GET", "/api/settings_ui", "settings_ui"),
   ("GET", "/api/logs", "logs_list"),

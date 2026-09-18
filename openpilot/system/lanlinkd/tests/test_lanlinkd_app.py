@@ -77,6 +77,9 @@ def app(monkeypatch):
   # RadarCache 同理：真实 run 会起 SubMaster
   monkeypatch.setattr(mod.RadarCache, "run", lambda self, ev: None)
   monkeypatch.setattr(mod.RadarCache, "snapshot", lambda self: {"stale": True})
+  # AvoidanceCache 同理
+  monkeypatch.setattr(mod.AvoidanceCache, "run", lambda self, ev: None)
+  monkeypatch.setattr(mod.AvoidanceCache, "snapshot", lambda self: {"stale": True})
   # Sanic 要求 app name 唯一，否则跨测试复用同一实例
   a = mod.create_app(name=f"lanlinkd_test_{os.urandom(4).hex()}")
   a.ctx.fake_params = params
@@ -89,7 +92,7 @@ class TestOpenSurface:
   @pytest.mark.parametrize("path", [
     "/api/params", "/api/params/_all", "/api/params/TestToggle", "/api/models",
     "/api/status", "/api/capabilities", "/api/settings_ui", "/api/logs",
-    "/api/vehicle", "/api/radar", "/api/bluetooth",
+    "/api/vehicle", "/api/radar", "/api/avoidance", "/api/bluetooth",
   ])
   def test_read_endpoints_need_no_token(self, app, path):
     _, r = app.test_client.get(path)
@@ -165,6 +168,30 @@ class TestRadarRoute:
     # 无数据时（熄火/无雷达平台）必须返回 {"stale": true}，而不是 500 或空体
     app.ctx.state.radar.snapshot = lambda: {"stale": True}
     _, r = app.test_client.get("/api/radar")
+    assert r.status == 200
+    assert r.json == {"stale": True}
+
+
+class TestAvoidanceRoute:
+  def test_avoidance_returns_cached_snapshot(self, app):
+    fake = {
+      "stale": False,
+      "logMonoTime": 42,
+      "valid": True, "active": True, "direction": 1, "yDes": 0.2, "bias": 0.1,
+      "maxOffset": 0.35, "bsmLeft": False, "bsmRight": False, "vEgo": 20.0,
+      "nRadar": 1, "nVision": 1, "nAssociated": 1, "edgeClearance": 999.0,
+      "targets": [{"dRel": 20.0, "yRel": -1.0, "vRel": 0.0, "cls": "", "conf": 0.0,
+                   "weight": 0.6, "matched": True, "inGate": True, "vision": False, "pairId": 1}],
+    }
+    app.ctx.state.avoidance.snapshot = lambda: fake
+    _, r = app.test_client.get("/api/avoidance")
+    assert r.status == 200
+    assert r.json == fake
+
+  def test_avoidance_stale_shape(self, app):
+    # 无数据时（熄火/avoidanced 未跑）必须返回 {"stale": true}
+    app.ctx.state.avoidance.snapshot = lambda: {"stale": True}
+    _, r = app.test_client.get("/api/avoidance")
     assert r.status == 200
     assert r.json == {"stale": True}
 
