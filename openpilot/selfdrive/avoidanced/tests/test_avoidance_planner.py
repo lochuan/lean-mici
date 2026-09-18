@@ -154,7 +154,7 @@ def test_planner_edge_clearance_gate():
   p = _planner()
   _step(p, 0.0, [_right_target()])
   _, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
-                      edge_clearance=C.EDGE_CLEAR_MIN - 0.1, now=C.ENTER_HOLD_S + 0.01)
+                      clearance=C.EDGE_CLEAR_MIN - 0.1, now=C.ENTER_HOLD_S + 0.01)
   assert not valid
 
 
@@ -216,3 +216,78 @@ def test_planner_both_bsm_sides_zero():
 def test_avoidanced_module_imports():
   from openpilot.selfdrive.avoidanced.avoidanced import AvoidanceDaemon
   assert hasattr(AvoidanceDaemon, "update")
+
+
+class _FakePubMaster:
+  def __init__(self):
+    self.sent = []
+
+  def send(self, service, msg):
+    self.sent.append((service, msg))
+
+
+class _FakeParams:
+  def __init__(self, enabled=True, max_offset=None):
+    self._enabled = enabled
+    self._max_offset = max_offset
+
+  def get_bool(self, key, block=False):
+    return self._enabled
+
+  def get(self, key, block=False, return_default=False):
+    return self._max_offset
+
+
+class _FakeSubMaster:
+  def __init__(self, model_v2, car_state, radar):
+    self._data = {"modelV2": model_v2, "carState": car_state, "radarTracks": radar}
+
+  def update(self, timeout=0):
+    pass
+
+  def __getitem__(self, service):
+    return self._data[service]
+
+
+class _NS:
+  def __init__(self, **kwargs):
+    self.__dict__.update(kwargs)
+
+
+MODEL_CURVATURE = 0.012
+
+
+def _make_daemon(enabled=True):
+  from openpilot.selfdrive.avoidanced.avoidanced import AvoidanceDaemon
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[])
+  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
+  radar = _NS(points=[_RadarPoint(8.0, -1.0)])
+  pm = _FakePubMaster()
+  daemon = AvoidanceDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=enabled))
+  return daemon, pm
+
+
+def test_daemon_sends_valid_flag_every_frame():
+  daemon, pm = _make_daemon()
+  daemon.update(0.0)                    # enter hysteresis not yet satisfied -> invalid
+  daemon.update(C.ENTER_HOLD_S + 0.01)  # active -> valid
+
+  assert len(pm.sent) == 2
+  service0, msg0 = pm.sent[0]
+  service1, msg1 = pm.sent[1]
+  assert service0 == service1 == "lateralManeuverPlan"
+  assert msg0.valid is False
+  assert msg0.lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
+  assert msg1.valid is True
+  assert msg1.lateralManeuverPlan.desiredCurvature > MODEL_CURVATURE
+
+
+def test_daemon_invalid_frame_carries_model_curvature():
+  daemon, pm = _make_daemon(enabled=False)
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+
+  assert len(pm.sent) == 2
+  for _, msg in pm.sent:
+    assert msg.valid is False
+    assert msg.lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)

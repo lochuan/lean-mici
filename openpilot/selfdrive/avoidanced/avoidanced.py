@@ -31,11 +31,11 @@ PARAMS_REFRESH_PERIOD = 1.0  # s
 
 
 class AvoidanceDaemon:
-  def __init__(self):
-    self.params = Params()
-    self.sm = messaging.SubMaster(['modelV2', 'carState', 'radarTracks'])
-    self.pm = messaging.PubMaster(['lateralManeuverPlan'])
-    self.planner = AvoidancePlanner()
+  def __init__(self, sm=None, pm=None, params=None, planner=None):
+    self.params = params if params is not None else Params()
+    self.sm = sm if sm is not None else messaging.SubMaster(['modelV2', 'carState', 'radarTracks'])
+    self.pm = pm if pm is not None else messaging.PubMaster(['lateralManeuverPlan'])
+    self.planner = planner if planner is not None else AvoidancePlanner()
     self.max_offset = C.MAX_OFFSET_FREE
     self.enabled = False
     self._last_params_t = -PARAMS_REFRESH_PERIOD
@@ -67,17 +67,20 @@ class AvoidanceDaemon:
       v_ego=car_state.vEgo,
       bsm_left=car_state.leftBlindspot,
       bsm_right=car_state.rightBlindspot,
-      edge_clearance=edge_clearance(model_v2.roadEdges),
+      clearance=edge_clearance(model_v2.roadEdges),
       enabled=self.enabled,
       steering_pressed=car_state.steeringPressed,
       max_offset=self.max_offset,
       now=now,
     )
 
-    if valid:
-      msg = messaging.new_message('lateralManeuverPlan')
-      msg.lateralManeuverPlan.desiredCurvature = float(curvature)
-      self.pm.send('lateralManeuverPlan', msg)
+    # Publish every frame. ``valid`` is the message envelope flag controlsd reads
+    # via ``sm.valid['lateralManeuverPlan']``; an invalid plan still carries the
+    # model curvature so a fresh-but-invalid frame falls back cleanly.
+    msg = messaging.new_message('lateralManeuverPlan')
+    msg.lateralManeuverPlan.desiredCurvature = float(curvature)
+    msg.valid = bool(valid)
+    self.pm.send('lateralManeuverPlan', msg)
 
 
 def main() -> None:

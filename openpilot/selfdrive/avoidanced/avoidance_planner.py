@@ -65,8 +65,8 @@ def _best_target(targets: Iterable[Target], max_offset: float) -> tuple[Target, 
   return best
 
 
-def _avoid_direction(targets: Iterable[Target]) -> int:
-  best = _best_target(targets, MAX_OFFSET_FREE)
+def _avoid_direction(targets: Iterable[Target], max_offset: float = MAX_OFFSET_FREE) -> int:
+  best = _best_target(targets, max_offset)
   return 0 if best is None else -_sign(best[0].yRel)
 
 
@@ -91,11 +91,13 @@ def plan(targets: Iterable[Target] | None = None, max_offset: float = MAX_OFFSET
 
 
 def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] | None = None) -> list[Target]:
-  """Build planner targets from radar points, optionally upgraded by detections.
+  """Build planner targets from radar points, plus any already-projected detections.
 
-  ``detections`` are expected to be already projected to car frame (``dRel`` /
-  ``yRel``), i.e. the output of the camera-radar association step. They only
-  raise the class weight here.
+  ``detections`` must carry car-frame ``dRel`` / ``yRel`` (the output of the
+  camera-radar association step) and are currently **appended as independent
+  targets** — no dedup/association with radar points yet, and their only effect
+  is a class weight (VRU vs vehicle). Association is a follow-up task; see the
+  Task 5 report.
   """
   targets: list[Target] = []
   for point in radar_points:
@@ -149,18 +151,18 @@ class AvoidancePlanner:
     self._last_target_t: float | None = None
 
   def update(self, model_curvature: float, targets: Iterable[Target], v_ego: float,
-             bsm_left: bool = False, bsm_right: bool = False, edge_clearance: float = float("inf"),
+             bsm_left: bool = False, bsm_right: bool = False, clearance: float = float("inf"),
              enabled: bool = True, lat_active: bool = True, steering_pressed: bool = False,
              max_offset: float = MAX_OFFSET_FREE, now: float | None = None) -> tuple[float, bool]:
     """Return ``(desired_curvature, valid)`` for one 5Hz frame.
 
-    ``valid=False`` means the caller must not publish (freshness falls back to
-    the model curvature in controlsd).
+    ``valid=False`` means the caller must not trust the plan (publish the frame
+    with the envelope ``valid`` flag cleared and the model curvature).
     """
     now = self._clock() if now is None else now
     targets = tuple(targets)
 
-    direction = _avoid_direction(targets)
+    direction = _avoid_direction(targets, max_offset)
     bsm_same = (direction > 0 and bsm_left) or (direction < 0 and bsm_right)
     bsm_opposite = (direction > 0 and bsm_right) or (direction < 0 and bsm_left)
     y_des = plan(targets, max_offset=max_offset, bsm_opposite=bsm_opposite, bsm_same=bsm_same)
@@ -180,7 +182,7 @@ class AvoidancePlanner:
 
     gated = (enabled and lat_active and not steering_pressed
              and V_EGO_MIN <= v_ego <= V_EGO_MAX
-             and edge_clearance >= EDGE_CLEAR_MIN)
+             and clearance >= EDGE_CLEAR_MIN)
     if not (gated and self._active):
       self._bias.update(0.0)
       return float(model_curvature), False
