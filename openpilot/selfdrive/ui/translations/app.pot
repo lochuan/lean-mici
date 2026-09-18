@@ -865,11 +865,3 @@ msgstr ""
 msgid "camera starting"
 msgstr ""
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering.py
-msgid "Gentle lateral nudge away from nearby vehicles and vulnerable road users."
-msgstr ""
-
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering.py
-msgid "Lateral Avoidance"
-msgstr ""
-

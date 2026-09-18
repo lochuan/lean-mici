@@ -96,11 +96,6 @@ class SteeringLayout(Widget):
       title=lambda: tr("Neural Network Lateral Control (NNLC)"),
       description=""
     )
-    self._avoidance_toggle = toggle_item_sp(
-      param="AvoidanceEnabled",
-      title=lambda: tr("Lateral Avoidance"),
-      description=lambda: tr("Gentle lateral nudge away from nearby vehicles and vulnerable road users."),
-    )
 
     items = [
       self._mads_toggle,
@@ -116,8 +111,6 @@ class SteeringLayout(Widget):
       self._torque_customization_button,
       LineSeparatorSP(40),
       self._nnlc_toggle,
-      LineSeparatorSP(40),
-      self._avoidance_toggle,
     ]
     return items
 

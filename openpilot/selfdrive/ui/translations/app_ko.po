@@ -342,10 +342,6 @@ msgstr "Wi‑Fi 네트워크 \"{}\"를 삭제하시겠습니까?"
 msgid "GOOD"
 msgstr "양호"
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering.py
-msgid "Gentle lateral nudge away from nearby vehicles and vulnerable road users."
-msgstr ""
-
 #: openpilot/selfdrive/ui/widgets/pairing_dialog.py
 msgid "Go to https://connect.comma.ai on your phone"
 msgstr "휴대폰에서 https://connect.comma.ai 에 접속하세요"
@@ -389,10 +385,6 @@ msgstr "로딩 중"
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "LTE"
 msgstr "LTE"
-
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering.py
-msgid "Lateral Avoidance"
-msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "Longitudinal Maneuver Mode"

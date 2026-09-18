@@ -342,10 +342,6 @@ msgstr "ลืมเครือข่าย Wi-Fi \"{}\" หรือไม่"
 msgid "GOOD"
 msgstr "ดี"
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering.py
-msgid "Gentle lateral nudge away from nearby vehicles and vulnerable road users."
-msgstr ""
-
 #: openpilot/selfdrive/ui/widgets/pairing_dialog.py
 msgid "Go to https://connect.comma.ai on your phone"
 msgstr "ไปที่ https://connect.comma.ai บนโทรศัพท์ของคุณ"
@@ -389,10 +385,6 @@ msgstr "กำลังโหลด"
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "LTE"
 msgstr "แอลทีที"
-
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering.py
-msgid "Lateral Avoidance"
-msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "Longitudinal Maneuver Mode"
