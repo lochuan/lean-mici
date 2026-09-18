@@ -16,6 +16,7 @@ curvature, which is also what an invalid frame carries.
 | radar<->vision nearest-neighbour association (shared with shadow) | `association.py` |
 | tunables (offset caps, gates, weights, speed, camera mount) | `constants.py` |
 | offline shadow harness (proxy vision, or detector-injected fused path) | `shadow.py` |
+| online calibration collector (pairId residuals -> constant increments) | `calibrate.py` |
 | YOLO detector shell + build recipe | `yolo_detector.py`, `models/README.md` |
 
 ## Fusion chain (per 5Hz tick)
@@ -95,16 +96,13 @@ publishes until P1.
    resolution/fps before anything else.
 3. **Calibrate pitch / yaw / CAMERA_TO_FRONT.** Initial mount values live in
    `constants.py` (`CAMERA_HEIGHT` 1.2 m, `CAMERA_PITCH` 0, `CAMERA_YAW` 0,
-   `CAMERA_TO_FRONT` 1.5 m):
-   - Find a straight, daylight stretch with static objects at known
-     distance/lateral offset (parked cars, cones).
-   - Run the daemon (or a detector-injected shadow over synthetic frames) and
-     read the per-pair radar↔vision residuals.
-   - Tune in this order: `CAMERA_TO_FRONT` for a constant dRel shift,
-     `CAMERA_PITCH` (down-positive) for dRel error that grows with distance,
-     `CAMERA_YAW` (left-positive) for a constant lateral offset.
-   - Accept when the max lateral residual stays < 0.30 m across the route
-     (spec §4: 0.3 m is the unacceptable threshold).
+   `CAMERA_TO_FRONT` 1.5 m) — the full workflow is the
+   [Calibration & physical-realism verification](#calibration--physical-realism-verification-标定与物理真实性验证)
+   section below. Quick order of attack: `CAMERA_TO_FRONT` for a constant dRel
+   shift, `CAMERA_PITCH` (down-positive) for dRel error that grows with
+   distance, `CAMERA_YAW` (left-positive) for a lateral error that grows with
+   distance. Accept when the post-correction residual p95 stays < 0.30 m
+   (spec §4: 0.3 m is the unacceptable threshold).
 4. **30 min real-route shadow.** Run the daemon for ≥30 min of representative
    driving and grade the lanlink/CSV telemetry against the P0 thresholds:
    association rate > 0.80, calibration max lateral residual < 0.30 m, false
@@ -115,6 +113,95 @@ publishes until P1.
    **0.25 m**; confirm the jerk limit is never exceeded (everything still
    passes `clip_curvature`) and that any takeover immediately drops the bias
    (`steeringPressed` gate + the 1 s freshness gate).
+
+## Calibration & physical-realism verification (标定与物理真实性验证)
+
+The radar is the metric ground truth in the car frame (factory calibrated). The
+daemon's `avoidanceDebug` stream stamps every associated radar↔vision pair with
+a shared `pairId`, which gives the same object's position from both sources.
+The residual `vision − radar` decomposes into the three projection-constant
+errors, and that is what the calibration tooling below fits and verifies.
+
+### Online calibration (`calibrate.py`)
+
+`calibrate.py` is a standalone collector process (it never publishes — it only
+subscribes to `avoidanceDebug`). Run it **on the device** while driving:
+
+```bash
+python -m openpilot.selfdrive.avoidanced.calibrate [--duration 120] [--min-pairs 30] [--max-pairs 500]
+```
+
+Workflow:
+
+1. Enable `AvoidanceEnabled` and drive with real lead vehicles ahead — follow
+   different vehicles at **varied distances** (the fit separates a constant
+   `CAMERA_TO_FRONT` term from the distance-growing pitch term only if pairs
+   span a wide distance range), 2-10 minutes is plenty.
+2. Run `calibrate` while driving (or over a recorded `avoidanceDebug` session).
+   It collects paired `(d_radar, y_radar, d_vision, y_vision, vEgo)` samples and
+   least-squares fits:
+   - forward residual `e_d = d_vis − d_radar` on basis `[1, d_r²/h]` →
+     `CAMERA_TO_FRONT += Δfront`, `CAMERA_PITCH += Δpitch`;
+   - lateral residual `e_y = y_vis − y_radar` on basis `[1, d_r]` →
+     `CAMERA_YAW += Δyaw` (slope). A constant intercept is reported as a
+     **lateral mount-offset warning** — it means the camera/radar origins are
+     sideways of each other; fix it physically, never patch it into a constant.
+3. Paste the printed `constants.py` block, rebuild, and re-run. **Iteration
+   semantics:** the vision coordinates already include the constants currently
+   compiled in, so the fitted deltas are *increments* — 1-2 rounds converge.
+4. Accept when the post-correction residual p95 < 0.30 m (the tool exits 0;
+   exit 1 means insufficient pairs or out-of-tolerance fit).
+
+The report shows pair count, vEgo range, residual p95 before/after correction,
+per-constant suggestions, and pass/fail vs 0.3 m.
+
+### Static tape-measure spot check (静态卷尺抽查)
+
+Before trusting the online fit, sanity-check the projection against physically
+measured positions:
+
+1. Place a large cardboard box or corner reflector at a known distance ahead
+   (tape-measure from the front bumper, e.g. 10 m / 20 m / 30 m) and a known
+   lateral offset (tape from car centreline, e.g. ±1 m, keep |yRel| ≤ 2.5 m so
+   it stays in-gate).
+2. Park with the target visible, run the daemon, and read the target's
+   `dRel`/`yRel` from `avoidanceDebug` (lanlink bird's-eye view or a log tap).
+3. Compare against the tape values: a constant dRel error → `CAMERA_TO_FRONT`;
+   dRel error growing with distance → `CAMERA_PITCH`; yRel error growing with
+   distance → `CAMERA_YAW`. This cross-checks the online fit with independent
+   ground truth and catches gross mount errors the regression could absorb.
+
+### Three-layer physical-realism verification (三层物理真实性验证)
+
+| layer | what it proves | tool / metric | gate |
+|---|---|---|---|
+| ① Perception | the vision projection agrees with the radar truth | `calibrate.py` post-correction residual p95 < 0.3 m | perception |
+| ② Execution | the plan actually moves the car as commanded | `shadow.py` `execution_closure` metrics (below) | execution |
+| ③ Final | end-to-end behaviour is correct on video | record a run, review the lanlink avoidance view against the road | final acceptance |
+
+Layer ② in detail — `shadow.py` extends its summary with an
+`execution_closure` field (also printed per segment in the terminal). Per
+activation segment it records:
+
+- **target yRel drift** — nearest in-gate target's `yRel`, segment end minus
+  start: the object the avoidance pushes away from should actually recede
+  laterally;
+- **yDes mean** — the executed offset command over the segment;
+- **road-edge clearance change** on the avoidance side: the manoeuvre must not
+  eat into the `EDGE_CLEAR_MIN` margin;
+- **closure ratio** — displacement integrated from the executed curvature bias
+  (`∫∫ v²·(curvature − model_curvature) dt²`) vs the displacement the raw
+  commanded offset implies (`∫∫ v²·2·yDes/L² dt²`). In shadow replay the two
+  differ only by the low-pass lag, so the ratio grades the plan's own execution
+  (→ 1 for steady segments); on device, computing the same metric from
+  telemetry curvature closes the loop on the real vehicle response
+  (actual displacement ≈ `max_offset` when avoidance activates).
+
+```bash
+python -m openpilot.selfdrive.avoidanced.shadow <route> --out /tmp/shadow
+# summary JSON now carries "execution_closure"; main() also prints a
+# per-segment block to the terminal
+```
 
 ## P0 concerns (deferred limitations)
 
