@@ -272,6 +272,7 @@ def test_summarize_execution_closure_perfect_tracking_gives_ratio_one():
   assert seg["displacement_measured_m"] == pytest.approx(seg["displacement_commanded_m"], rel=1e-6)
   assert seg["target_y_change_m"] == pytest.approx(0.2)
   assert seg["y_des_mean_m"] == pytest.approx(kappa_cmd * C.L_LOOKAHEAD ** 2 / 2.0)
+  assert seg["y_des_cmd_mean_m"] == pytest.approx(0.2)  # raw command, distinct from executed y_des
 
 
 def test_summarize_execution_closure_low_pass_lag_gives_ratio_below_one():

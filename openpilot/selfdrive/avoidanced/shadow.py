@@ -284,11 +284,13 @@ def _segment_closure(segment: Sequence[ShadowRecord]) -> dict:
   * yDes mean: the executed (post-low-pass) offset command;
   * road-edge clearance change on the avoidance side;
   * closure ratio: displacement integrated from the executed curvature bias
-    (``∫∫ v²·(curvature - model_curvature) dt²``) vs the displacement the raw
-    commanded offset implies (``∫∫ v²·2·y_des_cmd/L² dt²``). In replay the two
-    differ only by the low-pass lag, so the ratio measures how much of the
-    commanded offset the executed plan integrates to within the segment; on
-    device the same metric over telemetry curvature is the full vehicle closure.
+    (``∫∫ v²·(curvature - model_curvature) dt²`` — post-low-pass, what the plan
+    actually bends) vs the displacement the RAW pre-low-pass commanded offset
+    implies (``∫∫ v²·2·y_des_cmd/L² dt²``). Both terms share the left-positive
+    y convention; the ratio (executed / commanded) deliberately compares the
+    executed plan against the raw command: in replay the gap is the low-pass
+    lag (→ 1 for steady segments); on device the same metric over telemetry
+    curvature is the full vehicle closure.
   """
   times = [r.t for r in segment]
   measured = _double_integral(times, [r.v_ego ** 2 * (r.curvature - r.model_curvature) for r in segment])
@@ -297,6 +299,7 @@ def _segment_closure(segment: Sequence[ShadowRecord]) -> dict:
   target_ys = [r.target_y for r in segment if r.target_y is not None]
   clearances = [r.edge_clearance for r in segment if r.edge_clearance is not None]
   y_des_values = [r.y_des for r in segment]
+  y_des_cmd_values = [r.y_des_cmd for r in segment]
 
   return {
     "start_t": segment[0].t,
@@ -306,6 +309,7 @@ def _segment_closure(segment: Sequence[ShadowRecord]) -> dict:
     "target_y_end_m": target_ys[-1] if target_ys else None,
     "target_y_change_m": (target_ys[-1] - target_ys[0]) if len(target_ys) >= 2 else None,
     "y_des_mean_m": sum(y_des_values) / len(y_des_values),
+    "y_des_cmd_mean_m": sum(y_des_cmd_values) / len(y_des_cmd_values),
     "edge_clearance_start_m": clearances[0] if clearances else None,
     "edge_clearance_end_m": clearances[-1] if clearances else None,
     "edge_clearance_change_m": (clearances[-1] - clearances[0]) if len(clearances) >= 2 else None,
