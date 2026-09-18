@@ -32,7 +32,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR = REPO_ROOT / "openpilot/system/lanlinkd/static"
-DEFAULT_HOST = "comma@10.223.134.33"
+DEFAULT_HOST = "comma@10.0.0.27"
 REMOTE_ROOT = "/data/openpilot"
 REMOTE_STATIC = f"{REMOTE_ROOT}/openpilot/system/lanlinkd/static"
 

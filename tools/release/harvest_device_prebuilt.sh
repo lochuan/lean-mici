@@ -15,12 +15,12 @@
 #   ./tools/release/harvest_device_prebuilt.sh
 #
 # Environment:
-#   DEVICE  comma device SSH target (default comma@10.223.134.33)
+#   DEVICE  comma device SSH target (default comma@10.0.0.27)
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 ROOT="$(git -C "$DIR" rev-parse --show-toplevel)"
-DEVICE="${DEVICE:-comma@10.223.134.33}"
+DEVICE="${DEVICE:-comma@10.0.0.27}"
 DEST="$ROOT/release/prebuilt/arm64"
 
 echo "[-] reading device state"

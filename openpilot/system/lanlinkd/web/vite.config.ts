@@ -36,7 +36,7 @@ export default defineConfig({
     // 开发时把 API 代理到真设备，这样本机就能对着真实 params 调 UI
     proxy: {
       "/api": {
-        target: process.env.LANLINK_DEVICE || "http://10.223.134.33:8088",
+        target: process.env.LANLINK_DEVICE || "http://10.0.0.27:8088",
         changeOrigin: true,
       },
     },
