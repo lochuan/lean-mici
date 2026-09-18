@@ -382,12 +382,14 @@ const gridX = (y: number) => lateralX(y, VB);
       <span class="text-sl-text-3">R {{ counts.r }} · V {{ counts.v }} · A {{ counts.a }}</span>
       <span>vEgo <span class="sl-tabular">{{ vEgoKmh }} km/h</span></span>
       <span>路沿余量 <span class="sl-tabular">{{ edgeClearance }}</span></span>
+    </div>
 
-      <!-- 在线标定会话 -->
+    <!-- 在线标定会话（始终可见：avoidanced 未运行时给出开启提示） -->
+    <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px]">
       <button
         type="button"
         :class="cn(
-          'ml-auto rounded-md px-3 py-1 text-[12px] font-semibold transition-colors',
+          'rounded-md px-3 py-1 text-[12px] font-semibold transition-colors',
           calibRunning
             ? 'bg-sl-warn/15 text-sl-warn hover:bg-sl-warn/25'
             : 'bg-sl-accent/15 text-sl-accent hover:bg-sl-accent/25',
@@ -397,6 +399,9 @@ const gridX = (y: number) => lateralX(y, VB);
         {{ calibRunning ? "停止标定" : "开始标定" }}
       </button>
       <Badge v-if="calibRunning" kind="info">标定中 {{ calib?.n_pairs ?? 0 }} 对</Badge>
+      <span v-if="avStale" class="text-sl-text-3">
+        avoidanced 未运行——先到 设置 → 转向 → 横向避让 开启后才有配对数据
+      </span>
     </div>
 
     <!-- 标定结果 / 错误 -->
