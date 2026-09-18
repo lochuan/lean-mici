@@ -133,17 +133,24 @@ python -m openpilot.selfdrive.avoidanced.calibrate [--duration 120] [--min-pairs
 
 Workflow:
 
-1. Enable `AvoidanceEnabled` and drive with real lead vehicles ahead — follow
-   different vehicles at **varied distances** (the fit separates a constant
-   `CAMERA_TO_FRONT` term from the distance-growing pitch term only if pairs
-   span a wide distance range), 2-10 minutes is plenty.
+1. Turn `AvoidanceEnabled` on so the avoidanced process runs at all — the
+   process itself is gated on the param (`avoidance_run` in
+   `process_config.py`: onroad + car + param). Calibration does **not** require
+   avoidance manoeuvres: `avoidanceDebug`, including the pairId-matched
+   targets, is published every frame the daemon runs, regardless of planner
+   validity or bias. Drive with real lead vehicles ahead at **varied
+   distances** (the fit separates a constant `CAMERA_TO_FRONT` term from the
+   distance-growing pitch term only if pairs span a wide distance range);
+   2-10 minutes is plenty.
 2. Run `calibrate` while driving (or over a recorded `avoidanceDebug` session).
    It collects paired `(d_radar, y_radar, d_vision, y_vision, vEgo)` samples and
    least-squares fits:
    - forward residual `e_d = d_vis − d_radar` on basis `[1, d_r²/h]` →
      `CAMERA_TO_FRONT += Δfront`, `CAMERA_PITCH += Δpitch`;
-   - lateral residual `e_y = y_vis − y_radar` on basis `[1, d_r]` →
-     `CAMERA_YAW += Δyaw` (slope). A constant intercept is reported as a
+   - lateral residual `e_y = y_vis − y_radar` on basis `[1, d_r]` → the slope
+     is `−Δyaw` (the projection *undoes* the camera yaw, so a camera truly
+     yawed left by Δyaw maps forward distance to `e_y = −Δyaw·d`); the tool
+     suggests `CAMERA_YAW += −slope`. A constant intercept is reported as a
      **lateral mount-offset warning** — it means the camera/radar origins are
      sideways of each other; fix it physically, never patch it into a constant.
 3. Paste the printed `constants.py` block, rebuild, and re-run. **Iteration
@@ -186,13 +193,18 @@ activation segment it records:
 - **target yRel drift** — nearest in-gate target's `yRel`, segment end minus
   start: the object the avoidance pushes away from should actually recede
   laterally;
-- **yDes mean** — the executed offset command over the segment;
+- **yDes mean** — the executed (post-low-pass) offset command over the segment;
+  the summary also carries `y_des_cmd_mean_m`, the raw pre-low-pass command;
 - **road-edge clearance change** on the avoidance side: the manoeuvre must not
-  eat into the `EDGE_CLEAR_MIN` margin;
+  eat into the `EDGE_CLEAR_MIN` margin (shadow records use `None` for "no edge
+  visible" where the daemon's `avoidanceDebug` message sends `999.0` for the
+  same condition — don't compare the two directly);
 - **closure ratio** — displacement integrated from the executed curvature bias
-  (`∫∫ v²·(curvature − model_curvature) dt²`) vs the displacement the raw
-  commanded offset implies (`∫∫ v²·2·yDes/L² dt²`). In shadow replay the two
-  differ only by the low-pass lag, so the ratio grades the plan's own execution
+  (`∫∫ v²·(curvature − model_curvature) dt²`, post-low-pass: what the plan
+  actually bends) vs the displacement the **raw** pre-low-pass command implies
+  (`∫∫ v²·2·yDes_cmd/L² dt²`). Both terms share the left-positive y convention;
+  the ratio (executed / commanded) deliberately compares the executed plan
+  against the raw command: in shadow replay the gap is the low-pass lag
   (→ 1 for steady segments); on device, computing the same metric from
   telemetry curvature closes the loop on the real vehicle response
   (actual displacement ≈ `max_offset` when avoidance activates).
@@ -202,6 +214,26 @@ python -m openpilot.selfdrive.avoidanced.shadow <route> --out /tmp/shadow
 # summary JSON now carries "execution_closure"; main() also prints a
 # per-segment block to the terminal
 ```
+
+### Known limitations (已知限制)
+
+- **Segment target drift can switch objects**: the per-segment yRel drift tracks
+  whichever in-gate target is nearest each frame — if the nearest target changes
+  mid-segment, the drift mixes two objects' motion and is not a single-object
+  closure signal.
+- **Lateral intercept aliases mount offset with the Δyaw·CAMERA_TO_FRONT cross
+  term**: the yaw rotation acts about the camera origin (`d_r + CAMERA_TO_FRONT`)
+  while the regression basis uses bumper-frame `d_r`, so part of a pure yaw
+  error shows up as intercept — a small intercept is not proof of a physical
+  mount offset (and vice versa).
+- **Forward constant term re-absorbs a pitch cross-term every round**: the pitch
+  basis `[1, d²/h]` ignores the constant `Δpitch·h` piece of the true pitch
+  error, so each round's `CAMERA_TO_FRONT` suggestion carries a small
+  pitch-dependent component; convergence still holds (verified by round-trip
+  test) but the split between the two constants is approximate.
+- **Curvature double integral ignores initial lateral velocity**: the measured
+  displacement assumes zero lateral velocity at segment start, so it is relative
+  to the segment-start state, not absolute.
 
 ## P0 concerns (deferred limitations)
 
