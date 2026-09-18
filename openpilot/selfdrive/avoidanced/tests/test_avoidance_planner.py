@@ -25,8 +25,8 @@ def _left_target(dRel=5.0, w=C.VRU_WEIGHT, conf=1.0):
 # --- brief Step 1 (verbatim) -------------------------------------------------
 
 def test_bsm_gates_offset():
-  assert plan(max_offset=0.35, bsm_opposite=True) <= 0.12 + 1e-6
-  assert plan(max_offset=0.35, bsm_opposite=False) <= 0.35 + 1e-6
+  assert plan(targets=[_right_target()], max_offset=0.35, bsm_opposite=True) <= 0.12 + 1e-6
+  assert plan(targets=[_right_target()], max_offset=0.35, bsm_opposite=False) <= 0.35 + 1e-6
 
 
 def test_no_target_no_bias():

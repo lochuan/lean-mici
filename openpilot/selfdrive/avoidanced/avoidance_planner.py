@@ -39,11 +39,6 @@ class Target:
   conf: float  # detector confidence [0, 1]
 
 
-# Canonical close VRU on the ego's right, used only when ``plan`` is called
-# without targets so the BSM gate can be exercised in isolation (Task 5 brief).
-DEFAULT_TARGETS = (Target(side=-1, dRel=1.0, yRel=-1.0, w=VRU_WEIGHT, conf=1.0),)
-
-
 def _sign(value: float) -> int:
   return 1 if value >= 0.0 else -1
 
@@ -69,15 +64,13 @@ def _avoid_direction(targets: Iterable[Target], max_offset: float = MAX_OFFSET_F
   return 0 if best is None else -_sign(best[0].yRel)
 
 
-def plan(targets: Iterable[Target] | None = None, max_offset: float = MAX_OFFSET_FREE,
+def plan(targets: Iterable[Target], max_offset: float = MAX_OFFSET_FREE,
          bsm_opposite: bool = False, bsm_same: bool = False) -> float:
   """Desired lateral offset (m) for the nearest in-gate target, signed.
 
   ``bsm_same`` (blind-spot vehicle on the side the bias would move toward)
   forbids the bias; ``bsm_opposite`` caps it at ``MAX_OFFSET_BSM``.
   """
-  if targets is None:
-    targets = DEFAULT_TARGETS
   targets = tuple(targets)
   if not targets or bsm_same:
     return 0.0

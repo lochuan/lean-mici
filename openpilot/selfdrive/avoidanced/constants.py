@@ -31,6 +31,10 @@ LOWPASS_TAU_S = 0.5
 ENTER_HOLD_S = 0.5
 EXIT_HOLD_S = 1.0
 
+# Consumer-side freshness gate (s): lateralManeuverPlan older than this falls
+# back to the model curvature even if the message valid flag is sticky-true.
+AVOIDANCE_STALE_S = 1.0
+
 # YOLO classes treated as vulnerable road users (higher avoidance weight)
 VRU_CLASSES = frozenset({"person", "bicycle", "motorcycle"})
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import time
 from numbers import Number
 
 from openpilot.cereal import log
@@ -19,6 +20,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, S
 from openpilot.selfdrive.controls.lib.latcontrol_curvature import LatControlCurvature
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+from openpilot.selfdrive.avoidanced.constants import AVOIDANCE_STALE_S
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
@@ -31,8 +33,8 @@ LaneChangeDirection = log.LaneChangeDirection
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 
 
-def fuse_curvature(model: float, avoid: float, valid: bool, enabled: bool) -> float:
-  return avoid if (valid and enabled) else model
+def fuse_curvature(model: float, avoid: float, valid: bool, enabled: bool, fresh: bool = True) -> float:
+  return avoid if (valid and enabled and fresh) else model
 
 
 class Controls(ControlsExt):
@@ -56,6 +58,9 @@ class Controls(ControlsExt):
     self.steer_limited_by_safety = False
     self.curvature = 0.0
     self.desired_curvature = 0.0
+    self.frame = 0
+    self.last_avoidance_recv_s = -math.inf
+    self.avoidance_enabled = False
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -144,12 +149,18 @@ class Controls(ControlsExt):
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage
     if CC.latActive:
+      if self.sm.updated['lateralManeuverPlan']:
+        self.last_avoidance_recv_s = time.monotonic()
+      fresh = (time.monotonic() - self.last_avoidance_recv_s) < AVOIDANCE_STALE_S
+      if self.frame % 100 == 0:
+        self.avoidance_enabled = self.params.get_bool("AvoidanceEnabled")
       new_desired_curvature = fuse_curvature(model_v2.action.desiredCurvature,
                                              self.sm['lateralManeuverPlan'].desiredCurvature,
                                              self.sm.valid['lateralManeuverPlan'],
-                                             self.params.get_bool("AvoidanceEnabled"))
+                                             self.avoidance_enabled, fresh)
     else:
       new_desired_curvature = self.curvature
+    self.frame += 1
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 
