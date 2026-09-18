@@ -8,25 +8,34 @@ supercombo, so avoidanced ships its own pkl.
 **Weights and ONNX are not stored in the repo.** Only the code and build recipe
 live here. `*.onnx` and `*.pkl` in this directory are gitignored.
 
-## 1. Export the ONNX (one-off, on the comma 4 / mici)
+## 1. Export the ONNX (one-off; any machine — Mac/uv verified)
 
 Per the lean-mici build split (see KB 发版流程), the pkl is device-only (QCOM
-tinygrad JIT); the ONNX itself is a plain file with no ABI coupling, so the
-export location is flexible — but the default flow does everything on-device:
+tinygrad JIT); the ONNX itself is a plain file with no ABI coupling, so export
+wherever convenient and scp it to the device. Export **fp32** (no `half=True`):
+CPU torch cannot export fp16 — it fails on the comma 4 and on the Mac alike —
+and FP16 happens anyway at the tinygrad compile step (`FLOAT16=1` below).
+Verified end-to-end on macOS arm64 (uv venv + ultralytics + onnx): input
+`(1, 3, 384, 640)`, output `(1, 84, 5040)`, `DEV=CPU` compile and live
+inference through `YoloDetector` both pass (bus.jpg → 4 persons).
 
 ```bash
-# on the comma 4 (mici)
-python3 -m venv /tmp/yolo-export && /tmp/yolo-export/bin/pip install ultralytics
-/tmp/yolo-export/bin/yolo export model=yolov8n.pt format=onnx imgsz=384,640 half=True opset=12
-mv yolov8n.onnx openpilot/selfdrive/avoidanced/models/yolov8n-det-640x384-fp16.onnx
-rm -rf /tmp/yolo-export
+# with uv (ephemeral venv, delete afterwards)
+uv venv /tmp/yolo-export && VIRTUAL_ENV=/tmp/yolo-export uv pip install ultralytics onnx
+cd /tmp && /tmp/yolo-export/bin/yolo export model=yolov8n.pt format=onnx imgsz=384,640 opset=12
+mv /tmp/yolov8n.onnx <repo>/openpilot/selfdrive/avoidanced/models/yolov8n-det-640x384.onnx
+rm -rf /tmp/yolo-export /tmp/yolo-export-work
+
+# then to the device (ONNX is gitignored, it does not travel via git)
+scp openpilot/selfdrive/avoidanced/models/yolov8n-det-640x384.onnx \
+    comma@<device>:/data/openpilot/openpilot/selfdrive/avoidanced/models/
 ```
 
-Fallback: the ONNX is architecture-neutral, so exporting it on any machine
-(including the arm64 OrbStack container) and scp'ing it to the device works
-too. What must NOT happen off-device is the pkl compile below.
+Plain `python3 -m venv` + `pip install ultralytics onnx` works the same way on
+the device itself; `imgsz=384,640` is H,W (verified: input comes out
+`(1,3,384,640)`).
 
-The ONNX input must be `(1, 3, 384, 640)` float16/float32 and the detect head
+The ONNX input must be `(1, 3, 384, 640)` float32 and the detect head
 output `(1, 4 + 80, N)` (YOLOv8 has no objectness head).
 
 ## 2. Compile to tinygrad pkl

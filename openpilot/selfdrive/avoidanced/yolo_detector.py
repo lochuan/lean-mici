@@ -42,8 +42,13 @@ class TinygradRunner:
     self._input_name = self._jit.captured.expected_names[0]
 
   def run(self, inp: np.ndarray) -> np.ndarray:
-    from tinygrad import Device, Tensor
-    tensor = Tensor(inp, device=Device.DEFAULT).realize()
+    # compile3.py keeps non-"img" inputs (our "images") on the NPY device: the
+    # captured graph itself moves them to Device.DEFAULT, and TinyJit's arg
+    # matcher rejects a tensor realized on any other source device. Feeding a
+    # realized Device.DEFAULT tensor raises JitError "args mismatch" — verified
+    # against a real DEV=CPU compile on 2026-09-18.
+    from tinygrad import Tensor
+    tensor = Tensor(inp, device="NPY")
     return self._jit(**{self._input_name: tensor}).numpy()
 
 

@@ -5,7 +5,7 @@
 #   ./compile_yolo.sh [input.onnx] [output.pkl]
 #
 # Defaults:
-#   input  = models/yolov8n-det-640x384-fp16.onnx
+#   input  = models/yolov8n-det-640x384.onnx
 #   output = models/yolo_tinygrad.pkl
 #
 # On a comma 4 (mici) this MUST run on 12V: mici keeps CPU 4-7 powered down
@@ -20,7 +20,7 @@ set -euo pipefail
 MODELS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(git -C "$MODELS_DIR" rev-parse --show-toplevel)"
 
-ONNX="${1:-$MODELS_DIR/yolov8n-det-640x384-fp16.onnx}"
+ONNX="${1:-$MODELS_DIR/yolov8n-det-640x384.onnx}"
 OUT="${2:-$MODELS_DIR/yolo_tinygrad.pkl}"
 
 if [[ ! -f "$ONNX" ]]; then

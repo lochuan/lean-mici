@@ -57,6 +57,39 @@ class _FakeParams:
 
 # --- brief Step 1: on-device interface test (weights excluded from the repo) ---
 
+def test_runner_feeds_npy_device(monkeypatch, tmp_path):
+  """compile3.py 把非 "img" 名输入（我们的 "images"）捕获在 NPY 设备上，
+  捕获图自带到 Device.DEFAULT 的搬运；runner 若把输入 realize 到默认设备，
+  TinyJit 参数匹配直接抛 JitError（2026-09-18 在真 DEV=CPU pkl 上抓到过）。
+  用 fake jit 断言喂进来的张量确实在 NPY 设备。"""
+  import numpy as _np
+
+  class _Captured:
+    expected_names = ["images"]
+
+  class _FakeJit:
+    captured = _Captured()
+
+    def __call__(self, **kwargs):
+      self.fed = kwargs["images"]
+      return self
+
+    def numpy(self):
+      return _np.zeros((1, 84, 5040), dtype=_np.float32)
+
+  fake = _FakeJit()
+  import openpilot.selfdrive.modeld.helpers as modeld_helpers
+  from openpilot.selfdrive.avoidanced import yolo_detector as yd
+
+  monkeypatch.setattr(modeld_helpers, "load_oob", lambda f: fake)
+  pkl = tmp_path / "fake.pkl"
+  pkl.write_bytes(b"")
+  runner = yd.TinygradRunner(pkl)
+  out = runner.run(_np.zeros((1, 3, 384, 640), dtype=_np.float32))
+  assert out.shape == (1, 84, 5040)
+  assert fake.fed.device == "NPY", "input must stay on the NPY device the captured graph expects"
+
+
 @pytest.mark.skipif(not PKL_PATH.exists(), reason="yolo_tinygrad.pkl not built; weights are not stored in the repo")
 def test_detector_returns_boxes():
   det = YoloDetector(str(PKL_PATH))
