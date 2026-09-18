@@ -41,8 +41,9 @@ class _FakeParams:
 
 
 class _FakeSubMaster:
-  def __init__(self, model_v2, car_state, radar):
+  def __init__(self, model_v2, car_state, radar, valid=None):
     self._data = {"modelV2": model_v2, "carState": car_state, "radarTracks": radar}
+    self.valid = valid if valid is not None else dict.fromkeys(self._data, True)
 
   def update(self, timeout=0):
     pass
@@ -80,7 +81,8 @@ def _box_at(d_rel, y_rel, cls="person", conf=0.9):
   return {"x1": u - 10.0, "y1": v - 20.0, "x2": u + 10.0, "y2": v, "cls": cls, "conf": conf}
 
 
-def _daemon(*, camera=None, detector=None, camera_factory=None, radar_points=(), enabled=True):
+def _daemon(*, camera=None, detector=None, camera_factory=None, radar_points=(), enabled=True,
+            model_valid=True):
   model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[])
   car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
   radar = _NS(points=[_NS(dRel=d, yRel=y, vRel=0.0) for d, y in radar_points])
@@ -92,8 +94,9 @@ def _daemon(*, camera=None, detector=None, camera_factory=None, radar_points=(),
   if detector is not None:
     kwargs["detector"] = detector
   pm = _FakePubMaster()
-  daemon = AvoidanceDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm,
-                           params=_FakeParams(enabled=enabled), **kwargs)
+  sm = _FakeSubMaster(model_v2, car_state, radar,
+                      valid={"modelV2": model_valid, "carState": True, "radarTracks": True})
+  daemon = AvoidanceDaemon(sm=sm, pm=pm, params=_FakeParams(enabled=enabled), **kwargs)
   return daemon, pm
 
 
@@ -229,3 +232,15 @@ def test_daemon_skips_vision_when_no_new_frame():
   daemon.update(C.DT_5HZ)                     # no frame -> radar-only this tick
   assert pm.sent[-1][1].valid is False        # enter hysteresis not satisfied yet
   assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
+
+
+def test_daemon_gates_valid_on_modelv2_validity():
+  # Defensive: a frame whose modelV2 failed validation must never be published
+  # as a valid plan, even with a target that would otherwise drive the bias.
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0, cls="person")]),
+                       model_valid=False)
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  assert len(pm.sent) == 2                    # every-frame publish invariant holds
+  assert pm.sent[-1][1].valid is False        # controlsd falls back to its own modelV2

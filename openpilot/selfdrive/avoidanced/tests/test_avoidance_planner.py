@@ -268,6 +268,7 @@ class _FakeParams:
 class _FakeSubMaster:
   def __init__(self, model_v2, car_state, radar):
     self._data = {"modelV2": model_v2, "carState": car_state, "radarTracks": radar}
+    self.valid = dict.fromkeys(self._data, True)
 
   def update(self, timeout=0):
     pass

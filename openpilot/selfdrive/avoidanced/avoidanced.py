@@ -132,9 +132,13 @@ class AvoidanceDaemon:
     # Publish every frame. ``valid`` is the message envelope flag controlsd reads
     # via ``sm.valid['lateralManeuverPlan']``; an invalid plan still carries the
     # model curvature so a fresh-but-invalid frame falls back cleanly.
+    # Defensive gate: if this frame's modelV2 failed validation its curvature is
+    # suspect, so the plan is never published as valid. We keep sending (instead
+    # of skipping the frame) to preserve the every-frame freshness invariant in
+    # controlsd; the invalid envelope makes controlsd ignore the curvature.
     msg = messaging.new_message('lateralManeuverPlan')
     msg.lateralManeuverPlan.desiredCurvature = float(curvature)
-    msg.valid = bool(valid)
+    msg.valid = bool(valid) and bool(self.sm.valid['modelV2'])
     self.pm.send('lateralManeuverPlan', msg)
 
 
