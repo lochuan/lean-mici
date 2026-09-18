@@ -482,6 +482,15 @@ CONFIGS = [
     should_recv_callback=MessageBasedRcvCallback("modelV2"),
   ),
   ProcessConfig(
+    proc_name="avoidanced",
+    pubs=["modelV2", "carState", "radarTracks"],
+    subs=["lateralManeuverPlan"],
+    ignore=["logMonoTime"],
+    should_recv_callback=MessageBasedRcvCallback("modelV2"),
+    tolerance=NUMPY_TOLERANCE,
+    processing_time=0.2,
+  ),
+  ProcessConfig(
     proc_name="plannerd",
     pubs=["modelV2", "carControl", "carState", "controlsState", "vehicleParameters", "radarState", "selfdriveState"],
     subs=["longitudinalPlan", "driverAssistance"],

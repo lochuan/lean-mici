@@ -69,7 +69,10 @@ excluded_interfaces = {brand for brand, platforms in interface_names.items()
 
 BASE_URL = "https://raw.githubusercontent.com/sunnypilot/ci-artifacts/refs/heads/process-replay/"
 REF_COMMIT_FN = os.path.join(PROC_REPLAY_DIR, "ref_commit")
-EXCLUDED_PROCS = {"modeld", "dmonitoringmodeld"}
+# avoidanced has no reference logs in the CI artifacts yet; validate it with the
+# offline shadow harness (`openpilot.selfdrive.avoidanced.shadow`) or replay it
+# explicitly with --whitelist-procs avoidanced.
+EXCLUDED_PROCS = {"modeld", "dmonitoringmodeld", "avoidanced"}
 
 
 def run_test_process(data):
