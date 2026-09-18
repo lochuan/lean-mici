@@ -134,6 +134,13 @@ publishes until P1.
 - **No per-tick fusion-stat export yet**: the daemon computes association
   counts per tick but publishes only the plan; the lanlink/CSV tap for
   checklist item 4 is part of P0 device bring-up.
+- **Shadow metric semantics differ from the daemon path**: the shadow
+  association metric gates at 3.0 m / 1.5 m while the daemon absorbs
+  detections at 2.0 m / 1.0 m, and `n_vision` counts all projected detections
+  unfiltered whereas `n_radar` counts only in-gate radar targets. The
+  association rate is therefore optimistic as a P0 gate signal; when reviewing
+  `shadow.csv` false triggers, read the counts against these definitions, not
+  the daemon's tighter gates.
 
 ## P1 small open
 
@@ -149,6 +156,9 @@ pytest openpilot/selfdrive/avoidanced/ openpilot/selfdrive/controls/tests/ -q
 ## Replay
 
 `process_replay` has an `avoidanced` config (inputs `modelV2`, `carState`,
-`radarTracks`; output `lateralManeuverPlan` at 5Hz). It is in
-`EXCLUDED_PROCS` because there are no reference logs for it yet; replay it
-explicitly with `--whitelist-procs avoidanced`.
+`radarTracks`; output `lateralManeuverPlan` at 5Hz). It is in `EXCLUDED_PROCS`
+and **no reference log exists for it**, so `--whitelist-procs avoidanced`
+cannot produce a passing comparison today — there is nothing to diff against.
+The whitelist flag becomes useful only after a reference log is generated
+(ref-commit pipeline or a device run); until then the config is a structural
+check of the pubs/subs wiring, not a runnable regression test.
