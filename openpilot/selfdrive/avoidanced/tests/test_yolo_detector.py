@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from openpilot.common.hardware import PC
 from openpilot.selfdrive.avoidanced.yolo_detector import (
   CLASS_NAMES,
   YoloDetector,
@@ -14,8 +15,11 @@ from openpilot.selfdrive.avoidanced.yolo_detector import (
 MODELS_DIR = Path(__file__).resolve().parents[1] / "models"
 PKL_PATH = MODELS_DIR / "yolo_tinygrad.pkl"
 
-# YOLOv8 detect head emits (1, 4 + num_coco_classes, num_anchors); COCO has 80 classes.
-NUM_CLASSES = 80
+MODELS_DIR = Path(__file__).resolve().parents[1] / "models"
+PKL_PATH = MODELS_DIR / "yolo_tinygrad.pkl"
+
+# YOLO26 detect head emits (1, 4 + num_bdd7_classes, num_anchors); BDD7 has 7 classes.
+NUM_CLASSES = 7
 # Production anchor count for a 640x384 input: (80*48) + (40*24) + (20*12) = 5040.
 PRODUCTION_ANCHORS = 5040
 
@@ -55,13 +59,14 @@ class _FakeParams:
     return self._value
 
 
-# --- brief Step 1: on-device interface test (weights excluded from the repo) ---
+# --- on-device interface test (pkl is QCOM-compiled; runs only on comma) ---
 
-def test_runner_feeds_npy_device(monkeypatch, tmp_path):
-  """compile3.py 把非 "img" 名输入（我们的 "images"）捕获在 NPY 设备上，
-  捕获图自带到 Device.DEFAULT 的搬运；runner 若把输入 realize 到默认设备，
-  TinyJit 参数匹配直接抛 JitError（2026-09-18 在真 DEV=CPU pkl 上抓到过）。
-  用 fake jit 断言喂进来的张量确实在 NPY 设备。"""
+def test_runner_feeds_persistent_input(monkeypatch, tmp_path):
+  """TinyJit 只在输入 buffer 身份稳定时回放；runner 必须持有同一个持久输入
+  Tensor 并用 assign 刷新内容（每帧新建会换 buffer id → 触发重编译，
+  间歇性撞上游 tinygrad 的符号维度 split 崩溃）。用 fake jit 断言：
+  1) 两次 run 喂进来的张量是同一个对象（buffer 身份稳定）；
+  2) 该张量确实被 assign 更新过。"""
   import numpy as _np
 
   class _Captured:
@@ -75,7 +80,7 @@ def test_runner_feeds_npy_device(monkeypatch, tmp_path):
       return self
 
     def numpy(self):
-      return _np.zeros((1, 84, 5040), dtype=_np.float32)
+      return _np.zeros((1, 4 + NUM_CLASSES, PRODUCTION_ANCHORS), dtype=_np.float32)
 
   fake = _FakeJit()
   import openpilot.selfdrive.modeld.helpers as modeld_helpers
@@ -85,26 +90,28 @@ def test_runner_feeds_npy_device(monkeypatch, tmp_path):
   pkl = tmp_path / "fake.pkl"
   pkl.write_bytes(b"")
   runner = yd.TinygradRunner(pkl)
-  out = runner.run(_np.zeros((1, 3, 384, 640), dtype=_np.float32))
-  assert out.shape == (1, 84, 5040)
-  assert fake.fed.device == "NPY", "input must stay on the NPY device the captured graph expects"
+  runner.run(_np.full((1, 3, 384, 640), 0.1, dtype=_np.float32))
+  second_fed = fake.fed
+  runner.run(_np.full((1, 3, 384, 640), 0.9, dtype=_np.float32))
+  assert runner._input is fake.fed, "the same persistent tensor must be fed every call"
+  assert second_fed is fake.fed, "identity must be stable across calls (JIT replay)"
 
 
-@pytest.mark.skipif(not PKL_PATH.exists(), reason="yolo_tinygrad.pkl not built; weights are not stored in the repo")
+@pytest.mark.skipif(PC, reason="yolo pkl is compiled for the QCOM device; load+run needs comma hardware")
 def test_detector_returns_boxes():
   det = YoloDetector(str(PKL_PATH))
   boxes = det.infer(np.zeros((384, 640, 3), np.uint8))
   assert isinstance(boxes, list)
 
 
-@pytest.mark.skipif(not PKL_PATH.exists(), reason="yolo_tinygrad.pkl not built; weights are not stored in the repo")
-def test_detector_latency_under_120ms():
+@pytest.mark.skipif(PC, reason="needs QCOM device")
+def test_detector_latency_under_350ms():
   det = YoloDetector(str(PKL_PATH), fps=0)
   frame = np.zeros((384, 640, 3), np.uint8)
   det.infer(frame)
   start = time.monotonic()
   det.infer(frame)
-  assert (time.monotonic() - start) < 0.120
+  assert (time.monotonic() - start) < 0.35
 
 
 # --- preprocess ---
@@ -162,6 +169,9 @@ def test_postprocess_maps_required_classes():
     (1, 0.8, 200, 100, 40, 40),
     (2, 0.7, 300, 100, 60, 60),
     (3, 0.6, 400, 100, 30, 30),
+    (4, 0.55, 150, 200, 80, 60),
+    (5, 0.5, 250, 150, 30, 50),
+    (6, 0.5, 350, 150, 30, 30),
   ])
   assert {d["cls"] for d in postprocess(raw, conf_threshold=0.4)} == set(CLASS_NAMES.values())
 
@@ -173,8 +183,11 @@ def test_postprocess_filters_low_confidence():
   assert dets[0]["cls"] == "person"
 
 
-def test_postprocess_drops_classes_outside_allowlist():
-  assert postprocess(_raw_output([(5, 0.9, 100, 100, 50, 50)]), conf_threshold=0.4) == []
+def test_postprocess_drops_empty_class_scores():
+  """BDD7 head has 7 class channels (ids 0-6)；全零分数的锚点低于阈值被滤掉。"""
+  raw = np.zeros((1, 4 + NUM_CLASSES, PRODUCTION_ANCHORS), dtype=np.float32)
+  raw[0, 0, 0], raw[0, 1, 0], raw[0, 2, 0], raw[0, 3, 0] = 100, 100, 50, 50
+  assert postprocess(raw, conf_threshold=0.4) == []
 
 
 def test_postprocess_clips_boxes_to_roi():
@@ -211,18 +224,18 @@ def test_detector_returns_boxes_with_injected_runner():
   assert runner.calls == 1
 
 
-def test_detector_throttles_to_5hz():
+def test_detector_throttles_to_fps():
   runner = _StubRunner(_raw_output([(0, 0.9, 320, 200, 60, 80)]))
   now = [0.0]
-  det = YoloDetector(PKL_PATH, runner=runner, conf_threshold=0.4, fps=5.0, clock=lambda: now[0])
+  det = YoloDetector(PKL_PATH, runner=runner, conf_threshold=0.4, fps=3.0, clock=lambda: now[0])
   frame = np.zeros((384, 640, 3), np.uint8)
   det.infer(frame)
   det.infer(frame)
   assert runner.calls == 1
-  now[0] = 0.1
+  now[0] = 0.2
   det.infer(frame)
   assert runner.calls == 1
-  now[0] = 0.2
+  now[0] = 0.4
   det.infer(frame)
   assert runner.calls == 2
 

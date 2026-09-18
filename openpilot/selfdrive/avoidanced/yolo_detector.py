@@ -1,13 +1,16 @@
-"""5Hz YOLOv8n-det ROI detector for avoidanced.
+"""3Hz YOLO26n BDD7 ROI detector for avoidanced.
 
-Consumes a 640x384 uint8 ROI frame and produces a list of detections::
+Consumes a 640x384 uint8 ROI frame (the model's native input, zero resize) and
+produces a list of detections::
 
     [{"x1": float, "y1": float, "x2": float, "y2": float, "cls": str, "conf": float}, ...]
 
-``cls`` is one of ``person`` / ``bicycle`` / ``car`` / ``motorcycle`` (the COCO
-classes the lateral avoidance planner cares about). The model runs from a
-tinygrad ``.pkl`` built by ``models/compile_yolo.sh`` (see ``models/README.md``);
-weights are intentionally not stored in the repo.
+``cls`` is one of ``person`` / ``rider`` / ``car`` / ``bus`` / ``truck`` /
+``bicycle`` / ``motorcycle`` (the BDD7 classes; the planner weights VRUs
+person/rider/bicycle/motorcycle above vehicles car/bus/truck). The compiled
+tinygrad pkl is committed in ``models/`` (built by
+``models/compile_yolo_onnx.py`` on the device, QCOM backend); the trained ONNX
+itself stays in the training project.
 """
 
 from __future__ import annotations
@@ -22,10 +25,11 @@ import numpy as np
 INPUT_H, INPUT_W = 384, 640
 DEFAULT_CONF_THRESHOLD = 0.4
 DEFAULT_IOU_THRESHOLD = 0.45
-DEFAULT_FPS = 5.0
+DEFAULT_FPS = 3.0
 
-# COCO class id -> name. Only these are emitted; everything else is dropped.
-CLASS_NAMES = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle"}
+# BDD7 class id -> name. The whole output head is emitted; everything maps to a
+# planner weight (VRU vs vehicle) in avoidance_planner.
+CLASS_NAMES = {0: "person", 1: "rider", 2: "car", 3: "bus", 4: "truck", 5: "bicycle", 6: "motorcycle"}
 
 
 class Runner(Protocol):
@@ -33,23 +37,30 @@ class Runner(Protocol):
 
 
 class TinygradRunner:
-  """Loads a compile3.py-produced pkl and runs the captured TinyJit graph."""
+  """Loads the committed yolo pkl (our OOB format, see models/compile_yolo_onnx.py)
+  and runs the captured TinyJit graph on the QCOM device.
+
+  The captured input is a tensor realized on Device.DEFAULT; TinyJit replays
+  only while the input buffer identity is stable, so the runner holds ONE
+  persistent input tensor and refreshes its contents with ``assign`` (an
+  in-place copy kernel that preserves the buffer). Allocating a fresh tensor
+  per frame changes the buffer id and forces a re-lower, which intermittently
+  crashes on a symbolic split dim inside upstream tinygrad (device-validated).
+  """
 
   def __init__(self, pkl_path: str | Path):
+    from tinygrad import Device, Tensor, dtypes
     from openpilot.selfdrive.modeld.helpers import load_oob
     with open(pkl_path, "rb") as f:
       self._jit = load_oob(f)
     self._input_name = self._jit.captured.expected_names[0]
+    # Persistent input buffer: same object every call -> stable buffer id -> JIT replay.
+    self._input = Tensor.zeros(1, 3, INPUT_H, INPUT_W, dtype=dtypes.float32, device=Device.DEFAULT).realize()
 
   def run(self, inp: np.ndarray) -> np.ndarray:
-    # compile3.py keeps non-"img" inputs (our "images") on the NPY device: the
-    # captured graph itself moves them to Device.DEFAULT, and TinyJit's arg
-    # matcher rejects a tensor realized on any other source device. Feeding a
-    # realized Device.DEFAULT tensor raises JitError "args mismatch" — verified
-    # against a real DEV=CPU compile on 2026-09-18.
-    from tinygrad import Tensor
-    tensor = Tensor(inp, device="NPY")
-    return self._jit(**{self._input_name: tensor}).numpy()
+    from tinygrad import Device, Tensor
+    self._input.assign(Tensor(np.ascontiguousarray(inp), device=Device.DEFAULT))
+    return self._jit(**{self._input_name: self._input}).numpy()
 
 
 def preprocess(frame: np.ndarray) -> np.ndarray:
