@@ -169,6 +169,41 @@ class TestAvoidanceRoute:
     assert r.json == {"stale": True}
 
 
+class TestCalibrationRoutes:
+  def test_start_conflict_returns_409(self, app):
+    import threading
+    alive = threading.Event()
+    ctl = app.ctx.state.calibration
+    ctl._thread = threading.Thread(target=alive.wait, daemon=True)
+    ctl._thread.start()
+    try:
+      _, r = app.test_client.post("/api/calibration/start")
+      assert r.status == 409
+    finally:
+      alive.set()
+      ctl._thread.join()
+      ctl._thread = None
+
+  def test_status_shape(self, app):
+    app.ctx.state.calibration.last_result = None
+    _, r = app.test_client.get("/api/calibration/status")
+    assert r.status == 200
+    assert r.json["running"] is False
+    assert r.json["last_result"] is None
+
+  def test_stop_returns_fit_result(self, app):
+    from openpilot.selfdrive.avoidanced.calibrate import CalibPair
+    ctl = app.ctx.state.calibration
+    ctl._pairs = [CalibPair(d_radar=d, y_radar=-1.0, d_vision=d + 0.3, y_vision=-1.0, v_ego=20.0)
+                  for d in (5, 10, 15, 20, 25, 30, 35, 40)]
+    ctl._thread = None
+    _, r = app.test_client.post("/api/calibration/stop")
+    assert r.status == 200
+    assert r.json["running"] is False
+    assert r.json["last_result"]["n_pairs"] == 8
+    assert "constants_block" in r.json["last_result"]
+
+
 class TestStaticRoutes:
   def test_index_is_served(self, app):
     _, r = app.test_client.get("/")

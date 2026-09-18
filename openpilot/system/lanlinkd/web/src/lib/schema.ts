@@ -181,6 +181,33 @@ export interface AvoidanceSnapshot {
   targets?: AvoidanceTarget[];
 }
 
+/** /api/calibration/status：在线标定会话状态（CalibrationController）。
+ *  last_result 是 fit_calibrated_offsets 的输出 + constants_block（可直接
+ *  粘贴进 constants.py 的建议值）；insufficient = 配对数低于推荐下限 30。 */
+export interface CalibrationResult {
+  n_pairs: number;
+  v_ego_min?: number;
+  v_ego_max?: number;
+  d_front_m: number;
+  d_pitch_rad: number;
+  d_yaw_rad: number;
+  lateral_bias_m: number;
+  residual_p95_before_m: number;
+  residual_p95_after_m: number;
+  warnings?: string[];
+  pass: boolean;
+  insufficient?: boolean;
+  constants_block: string;
+}
+
+export interface CalibrationStatus {
+  running: boolean;
+  n_pairs: number;
+  elapsed_s: number;
+  last_error?: string | null;
+  last_result?: CalibrationResult | null;
+}
+
 export interface ModelBundle {
   ref: string;
   displayName: string;

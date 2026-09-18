@@ -34,6 +34,7 @@ from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd import wifi_api
 from openpilot.system.lanlinkd import software_api
 from openpilot.system.lanlinkd.avoidanced import AvoidanceCache
+from openpilot.system.lanlinkd.calibration import CalibrationController
 from openpilot.system.lanlinkd.statusd import StatusCache
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -51,6 +52,7 @@ class LanlinkApp:
     self.version_info = {k: params_api.to_str(self.params.get(k)) or "" for k in VERSION_PARAMS}
     self.cache = StatusCache(self.version_info, device_type="pc" if PC else HARDWARE.get_device_type(), params=self.params)
     self.avoidance = AvoidanceCache()
+    self.calibration = CalibrationController()
     self.exit_event = threading.Event()
     self._settings_ui: dict | None = None
     self._wifi_manager = None
@@ -263,6 +265,19 @@ class LanlinkApp:
   async def avoidance_get(self, request: Request) -> HTTPResponse:
     return json_response(self.avoidance.snapshot())
 
+  # ---- avoidance calibration session (collect/fit avoidanced projection constants) ----
+
+  async def calibration_start(self, request: Request) -> HTTPResponse:
+    if not self.calibration.start():
+      return _json_error(409, "calibration session already running")
+    return json_response(self.calibration.status())
+
+  async def calibration_stop(self, request: Request) -> HTTPResponse:
+    return json_response(self.calibration.stop())
+
+  async def calibration_status(self, request: Request) -> HTTPResponse:
+    return json_response(self.calibration.status())
+
   async def capabilities(self, request: Request) -> HTTPResponse:
     return json_response(self.cache.capabilities())
 
@@ -325,6 +340,9 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/software/<action:str>", "software_action"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/avoidance", "avoidance_get"),
+  ("POST", "/api/calibration/start", "calibration_start"),
+  ("POST", "/api/calibration/stop", "calibration_stop"),
+  ("GET", "/api/calibration/status", "calibration_status"),
   ("GET", "/api/capabilities", "capabilities"),
   ("GET", "/api/settings_ui", "settings_ui"),
   ("GET", "/api/logs", "logs_list"),
