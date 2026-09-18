@@ -252,6 +252,129 @@ def test_summarize_counts_false_triggers_and_activations():
   assert s["valid_frames"] == 3
 
 
+# --- execution closure ---------------------------------------------------------
+
+def _closure_record(t, curvature_bias, y_des_cmd, v_ego=20.0, model_curvature=0.01, **kwargs):
+  """Record whose y_des is consistent with the executed curvature bias."""
+  return _record(t=t, model_curvature=model_curvature, curvature=model_curvature + curvature_bias,
+                 valid=True, y_des=curvature_bias * C.L_LOOKAHEAD ** 2 / 2.0,
+                 v_ego=v_ego, y_des_cmd=y_des_cmd, **kwargs)
+
+
+def test_summarize_execution_closure_perfect_tracking_gives_ratio_one():
+  # Executed curvature == commanded curvature -> displacement ratio exactly 1.
+  kappa_cmd = 2.0 * 0.2 / C.L_LOOKAHEAD ** 2
+  records = [_closure_record(t, kappa_cmd, 0.2, target_y=-1.0 + 0.1 * i, edge_clearance=1.5)
+             for i, t in enumerate((0.0, 0.2, 0.4))]
+  s = summarize(records)
+  seg = s["execution_closure"]["segments"][0]
+  assert s["execution_closure"]["mean_closure_ratio"] == pytest.approx(1.0, rel=1e-6)
+  assert seg["displacement_measured_m"] == pytest.approx(seg["displacement_commanded_m"], rel=1e-6)
+  assert seg["target_y_change_m"] == pytest.approx(0.2)
+  assert seg["y_des_mean_m"] == pytest.approx(kappa_cmd * C.L_LOOKAHEAD ** 2 / 2.0)
+
+
+def test_summarize_execution_closure_low_pass_lag_gives_ratio_below_one():
+  # Filtered bias ramps 0 -> 0.1 -> 0.2 m while the raw command holds 0.2 m:
+  # hand-computed trapezoid values (v=20 m/s, L_LOOKAHEAD^2 = 1225).
+  records = [_closure_record(t, 2.0 * bias / C.L_LOOKAHEAD ** 2, 0.2)
+             for bias, t in zip((0.0, 0.1, 0.2), (0.0, 0.2, 0.4), strict=True)]
+  s = summarize(records)
+  seg = s["execution_closure"]["segments"][0]
+  assert seg["displacement_measured_m"] == pytest.approx(0.00391837, rel=1e-4)
+  assert seg["displacement_commanded_m"] == pytest.approx(0.0104490, rel=1e-4)
+  assert seg["closure_ratio"] == pytest.approx(0.375, rel=1e-3)
+  assert s["execution_closure"]["mean_closure_ratio"] == pytest.approx(0.375, rel=1e-4)
+
+
+def test_summarize_execution_closure_tracks_edge_clearance_change():
+  records = [
+    _closure_record(0.0, 0.001, 0.2, edge_clearance=1.5),
+    _closure_record(0.2, 0.001, 0.2, edge_clearance=1.1),
+  ]
+  seg = summarize(records)["execution_closure"]["segments"][0]
+  assert seg["edge_clearance_change_m"] == pytest.approx(-0.4)
+
+
+def test_summarize_execution_closure_handles_missing_observability():
+  # Old-style records (no target/clearance/v_ego): segment still forms, ratio
+  # is None (zero commanded displacement), no crash.
+  records = [_record(t=0.0, valid=True, y_des=0.1), _record(t=0.2, valid=True, y_des=0.1)]
+  s = summarize(records)
+  seg = s["execution_closure"]["segments"][0]
+  assert seg["target_y_change_m"] is None
+  assert seg["edge_clearance_change_m"] is None
+  assert seg["closure_ratio"] is None
+  assert s["execution_closure"]["mean_closure_ratio"] is None
+
+
+def test_summarize_execution_closure_no_segments():
+  s = summarize([_record(t=0.0)])
+  assert s["execution_closure"]["segments"] == []
+  assert s["execution_closure"]["mean_closure_ratio"] is None
+
+
+def test_evaluator_fills_execution_closure_fields():
+  # One in-gate target on the right + a road edge on the avoidance (left) side:
+  # the record must carry the planner decision state and nearest target yRel.
+  edge = SimpleNamespace(x=[5.0, 30.0], y=[1.8, 1.8])  # left edge at 1.8 m
+  evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0))
+  evaluator.step(_frame(0.0, radar=[(20.0, -1.0)], curvature=0.01, road_edges=[edge]))
+  evaluator.step(_frame(C.ENTER_HOLD_S + 0.01, radar=[(20.0, -1.0)], curvature=0.01, road_edges=[edge]))
+  rec = evaluator.records[-1]
+  assert rec.valid is True
+  assert rec.direction == 1                    # target right -> avoid left
+  assert rec.target_y == pytest.approx(-1.0)
+  assert rec.edge_clearance == pytest.approx(1.8)
+  assert rec.v_ego == pytest.approx(20.0)
+  assert rec.y_des_cmd > 0.0
+  assert rec.y_des == pytest.approx(rec.y_des_cmd * C.DT_5HZ / (C.LOWPASS_TAU_S + C.DT_5HZ), rel=1e-6)
+
+
+def test_evaluator_target_y_none_without_in_gate_target():
+  evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0))
+  evaluator.step(_frame(0.0, radar=[(80.0, -1.0)]))  # far outside the gate
+  rec = evaluator.records[-1]
+  assert rec.target_y is None
+  assert rec.direction == 0
+
+
+def test_main_prints_execution_closure_block(capsys, tmp_path):
+  """main() prints the per-segment closure block after the summary JSON."""
+  from openpilot.selfdrive.avoidanced.shadow import main
+
+  import openpilot.cereal.messaging as messaging
+
+  msgs = []
+  for i in range(60):  # 3 s at 20 Hz, one in-gate target -> one activation segment
+    t = i * 0.05
+    car = messaging.new_message('carState')
+    car.logMonoTime = int(t * 1e9)
+    car.carState.vEgo = 20.0
+    model = messaging.new_message('modelV2')
+    model.logMonoTime = int(t * 1e9)
+    model.modelV2.action.desiredCurvature = 0.01
+    model.modelV2.init('leadsV3', 1)
+    lead = model.modelV2.leadsV3[0]
+    lead.prob = 0.9
+    lead.x = [10.0, 10.0]
+    lead.y = [-1.0, -1.0]
+    radar = messaging.new_message('radarTracks')
+    radar.logMonoTime = int(t * 1e9)
+    radar.radarTracks.init('points', 1)
+    point = radar.radarTracks.points[0]
+    point.dRel, point.yRel, point.vRel = 10.0, -1.0, 0.0
+    msgs.extend([car, model, radar])
+
+  log_path = tmp_path / "synthetic"
+  log_path.write_bytes(b"".join(m.to_bytes() for m in msgs))
+
+  assert main([str(log_path), "--out", str(tmp_path / "out")]) == 0
+  out = capsys.readouterr().out
+  assert "execution closure:" in out
+  assert "closure ratio" in out
+
+
 # --- frame extraction --------------------------------------------------------
 
 def test_iter_frames_samples_at_5hz_and_carries_latest_state():

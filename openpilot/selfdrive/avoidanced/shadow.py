@@ -21,6 +21,12 @@ What it records (per 5Hz frame, plus a summary):
   the device).
 * **jerk** — ``v_ego**2 * d(curvature)/dt``, the same quantity ``clip_curvature``
   bounds with ``MAX_LATERAL_JERK``.
+* **execution closure** — per activation segment: nearest in-gate target yRel
+  drift, mean ``yDes``, avoidance-side road-edge clearance change, and the
+  displacement integrated from the executed curvature bias vs the raw commanded
+  offset (``closure_ratio``). In replay this grades the plan's own execution
+  (low-pass lag); on device the same metric over telemetry curvature is the
+  full vehicle closure. See the ``execution_closure`` summary field.
 
 The real P0 run is the avoidanced daemon on the device (real camera + YOLO pkl)
 with metrics collected over lanlink/CSV; this replay tool grades offline planner
@@ -36,6 +42,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import time
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass
@@ -107,6 +114,14 @@ class ShadowRecord:
   lat_residual: float | None
   latency_ms: float
   jerk: float | None
+  # Execution-closure observability (see summarize's ``execution_closure``).
+  # Defaults keep record constructors that predate the closure metrics working;
+  # ShadowEvaluator.step fills them every frame.
+  v_ego: float = 0.0
+  direction: int = 0                  # -1 right / 0 none / +1 left (planner decision)
+  target_y: float | None = None       # yRel of the nearest in-gate target, None if none
+  edge_clearance: float | None = None  # avoidance-side road-edge clearance, None if no edge
+  y_des_cmd: float = 0.0              # raw (pre-low-pass) commanded offset from the planner
 
 
 def associate(radar_points: Iterable[RadarTarget], vision_objects: Iterable[VisionObject],
@@ -191,6 +206,14 @@ class ShadowEvaluator:
     # The planner returns model + bias, so invert bias_curv = 2*y_des/L^2.
     y_des = (curvature - frame.model_curvature) * C.L_LOOKAHEAD ** 2 / 2.0
 
+    # Execution-closure observability: the planner's decision state (direction,
+    # raw yDes, direction-aware edge clearance) plus the nearest in-gate target
+    # the segment's yRel drift is tracked against.
+    state = self.planner.last_state
+    in_gate_targets = [tg for tg in targets if _in_gate(float(tg.dRel), float(tg.yRel))]
+    nearest = min(in_gate_targets, key=lambda tg: float(tg.dRel)) if in_gate_targets else None
+    clearance = float(state.get("edgeClearance", float("inf")))
+
     record = ShadowRecord(
       t=frame.t,
       model_curvature=frame.model_curvature,
@@ -203,6 +226,11 @@ class ShadowEvaluator:
       lat_residual=residual,
       latency_ms=latency_ms,
       jerk=jerk,
+      v_ego=float(frame.v_ego),
+      direction=int(state.get("direction", 0)),
+      target_y=float(nearest.yRel) if nearest is not None else None,
+      edge_clearance=None if math.isinf(clearance) else clearance,
+      y_des_cmd=float(state.get("yDes", 0.0)),
     )
     self.records.append(record)
     return record
@@ -219,6 +247,72 @@ def _percentile(values: list[float], pct: float) -> float:
   ordered = sorted(values)
   idx = min(len(ordered) - 1, int(round((pct / 100.0) * (len(ordered) - 1))))
   return ordered[idx]
+
+
+def _valid_segments(records: Sequence[ShadowRecord]) -> list[list[ShadowRecord]]:
+  """Maximal runs of consecutive valid frames (the activation segments)."""
+  segments: list[list[ShadowRecord]] = []
+  current: list[ShadowRecord] = []
+  for record in records:
+    if record.valid:
+      current.append(record)
+    elif current:
+      segments.append(current)
+      current = []
+  if current:
+    segments.append(current)
+  return segments
+
+
+def _double_integral(times: Sequence[float], values: Sequence[float]) -> float:
+  """Trapezoidal ∫∫ values dt dt (accel -> velocity -> displacement), zero initial velocity."""
+  velocity = 0.0
+  displacement = 0.0
+  for i in range(1, len(times)):
+    dt = times[i] - times[i - 1]
+    velocity_next = velocity + 0.5 * (values[i - 1] + values[i]) * dt
+    displacement += 0.5 * (velocity + velocity_next) * dt
+    velocity = velocity_next
+  return displacement
+
+
+def _segment_closure(segment: Sequence[ShadowRecord]) -> dict:
+  """Execution-closure stats for one activation segment.
+
+  * target yRel drift: nearest in-gate target yRel, segment end minus start —
+    the object the avoidance is pushing away from;
+  * yDes mean: the executed (post-low-pass) offset command;
+  * road-edge clearance change on the avoidance side;
+  * closure ratio: displacement integrated from the executed curvature bias
+    (``∫∫ v²·(curvature - model_curvature) dt²``) vs the displacement the raw
+    commanded offset implies (``∫∫ v²·2·y_des_cmd/L² dt²``). In replay the two
+    differ only by the low-pass lag, so the ratio measures how much of the
+    commanded offset the executed plan integrates to within the segment; on
+    device the same metric over telemetry curvature is the full vehicle closure.
+  """
+  times = [r.t for r in segment]
+  measured = _double_integral(times, [r.v_ego ** 2 * (r.curvature - r.model_curvature) for r in segment])
+  commanded = _double_integral(times, [r.v_ego ** 2 * 2.0 * r.y_des_cmd / C.L_LOOKAHEAD ** 2 for r in segment])
+
+  target_ys = [r.target_y for r in segment if r.target_y is not None]
+  clearances = [r.edge_clearance for r in segment if r.edge_clearance is not None]
+  y_des_values = [r.y_des for r in segment]
+
+  return {
+    "start_t": segment[0].t,
+    "end_t": segment[-1].t,
+    "frames": len(segment),
+    "target_y_start_m": target_ys[0] if target_ys else None,
+    "target_y_end_m": target_ys[-1] if target_ys else None,
+    "target_y_change_m": (target_ys[-1] - target_ys[0]) if len(target_ys) >= 2 else None,
+    "y_des_mean_m": sum(y_des_values) / len(y_des_values),
+    "edge_clearance_start_m": clearances[0] if clearances else None,
+    "edge_clearance_end_m": clearances[-1] if clearances else None,
+    "edge_clearance_change_m": (clearances[-1] - clearances[0]) if len(clearances) >= 2 else None,
+    "displacement_measured_m": measured,
+    "displacement_commanded_m": commanded,
+    "closure_ratio": measured / commanded if abs(commanded) > 1e-4 else None,
+  }
 
 
 def summarize(records: Sequence[ShadowRecord]) -> dict:
@@ -248,6 +342,13 @@ def summarize(records: Sequence[ShadowRecord]) -> dict:
   p95_latency = _percentile(latencies, 95.0)
   max_latency = max(latencies) if latencies else 0.0
 
+  closure_segments = [_segment_closure(segment) for segment in _valid_segments(records)]
+  ratios = [s["closure_ratio"] for s in closure_segments if s["closure_ratio"] is not None]
+  execution_closure = {
+    "segments": closure_segments,
+    "mean_closure_ratio": sum(ratios) / len(ratios) if ratios else None,
+  }
+
   checks = {
     "association_rate": None if association_rate is None else association_rate >= ASSOC_RATE_MIN,
     "calibration": None if calib_max is None else calib_max <= CALIB_MAX_RESIDUAL_M,
@@ -268,6 +369,7 @@ def summarize(records: Sequence[ShadowRecord]) -> dict:
     "bias_frames": len(bias_frames),
     "false_trigger_frames": false_triggers,
     "activation_segments": activation_segments,
+    "execution_closure": execution_closure,
     "insufficient_data": radar_total == 0,
     "checks": checks,
     "pass": all(v is not False for v in checks.values()),
@@ -372,6 +474,29 @@ def evaluate_log(route: str, out_dir: str | Path | None = None, max_offset: floa
   return summary
 
 
+def _fmt(value: float | None, spec: str = "{:+.3f}") -> str:
+  return "n/a" if value is None else spec.format(value)
+
+
+def print_execution_closure(summary: dict) -> None:
+  """Human-readable per-segment execution-closure block for the terminal."""
+  closure = summary.get("execution_closure") or {}
+  segments = closure.get("segments") or []
+  if not segments:
+    print("execution closure: no activation segments")
+    return
+  mean_ratio = closure.get("mean_closure_ratio")
+  print(f"execution closure: {len(segments)} segment(s), mean closure ratio {_fmt(mean_ratio)}")
+  for seg in segments:
+    line = (f"  t {seg['start_t']:.1f}-{seg['end_t']:.1f}s frames={seg['frames']}"
+            + f" | target yRel {_fmt(seg['target_y_start_m'])} -> {_fmt(seg['target_y_end_m'])} (d {_fmt(seg['target_y_change_m'])})"
+            + f" | yDes mean {_fmt(seg['y_des_mean_m'])} m"
+            + f" | edge clearance {_fmt(seg['edge_clearance_start_m'])} -> {_fmt(seg['edge_clearance_end_m'])} (d {_fmt(seg['edge_clearance_change_m'])})"
+            + f" | displacement meas/cmd {_fmt(seg['displacement_measured_m'])}/{_fmt(seg['displacement_commanded_m'])} m"
+            + f" | closure ratio {_fmt(seg['closure_ratio'])}")
+    print(line)
+
+
 def main(argv: list[str] | None = None) -> int:
   parser = argparse.ArgumentParser(description="Offline P0 shadow evaluation for avoidanced (records, never publishes).")
   parser.add_argument("route", help="route or local log path accepted by LogReader")
@@ -382,6 +507,7 @@ def main(argv: list[str] | None = None) -> int:
 
   summary = evaluate_log(args.route, out_dir=args.out, max_offset=args.max_offset, limit=args.limit)
   print(json.dumps(summary, indent=2))
+  print_execution_closure(summary)
   return 0 if summary["pass"] else 1
 
 
