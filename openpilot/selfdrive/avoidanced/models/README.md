@@ -1,0 +1,82 @@
+# avoidanced YOLO model
+
+YOLOv8n-det runs on a 640x384 (WxH) lower-ROI frame at 5Hz to classify VRUs
+(person / bicycle / motorcycle) and cars for lateral avoidance. It is a separate
+model from `modeld`'s supercombo: `modeld`'s input contract is hard-bound to
+supercombo, so avoidanced ships its own pkl.
+
+**Weights and ONNX are not stored in the repo.** Only the code and build recipe
+live here. `*.onnx` and `*.pkl` in this directory are gitignored.
+
+## 1. Export the ONNX (one-off, on a dev machine)
+
+Not required on the device, and not installed by avoidanced. Use upstream
+ultralytics in a throwaway environment:
+
+```bash
+pip install ultralytics
+yolo export model=yolov8n.pt format=onnx imgsz=384,640 half=True opset=12
+mv yolov8n.onnx openpilot/selfdrive/avoidanced/models/yolov8n-det-640x384-fp16.onnx
+```
+
+The ONNX input must be `(1, 3, 384, 640)` float16/float32 and the detect head
+output `(1, 4 + 80, N)` (YOLOv8 has no objectness head).
+
+## 2. Compile to tinygrad pkl
+
+Run on the comma 3X, **on 12V** (mici powers down CPU 4-7 otherwise, and the
+compile needs CPU 4). The script sets `DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1`
+and drives `tinygrad_repo/examples/openpilot/compile3.py`:
+
+```bash
+openpilot/selfdrive/avoidanced/models/compile_yolo.sh
+# -> models/yolo_tinygrad.pkl
+```
+
+Local CPU smoke test (no QCOM backend): `DEV=CPU openpilot/selfdrive/avoidanced/models/compile_yolo.sh`.
+
+`modeld/SConscript` is intentionally not modified: the ONNX is not in the repo,
+so a build-graph entry would fail clean builds. The standalone script is the
+"independent script" option from the plan.
+
+## 3. Use
+
+```python
+from openpilot.selfdrive.avoidanced.yolo_detector import YoloDetector
+
+det = YoloDetector("openpilot/selfdrive/avoidanced/models/yolo_tinygrad.pkl")
+detections = det.infer(roi_384x640_rgb_uint8)  # 5Hz throttled
+# [{"x1": .., "y1": .., "x2": .., "y2": .., "cls": "person", "conf": 0.71}, ...]
+```
+
+- `cls` is one of `person` / `bicycle` / `car` / `motorcycle`; other COCO classes
+  are dropped.
+- Boxes are in ROI pixel coordinates (0..640, 0..384), xyxy, clipped to the ROI.
+- Confidence threshold comes from the `AvoidanceMinConfidence` param; when unset
+  the detector falls back to `DEFAULT_CONF_THRESHOLD` (0.4). NMS IoU 0.45,
+  per class.
+- `infer()` is throttled to 5Hz (`fps` arg); a faster call returns the cached
+  detections.
+
+## 4. Latency budget
+
+Target **< 120ms/frame** on comma 3X (5Hz = 200ms budget), leaving headroom for
+the modeld process on CPU 7. Measure after building the pkl:
+
+```bash
+DEV=QCOM .venv/bin/python - <<'PY'
+import time, numpy as np
+from openpilot.selfdrive.avoidanced.yolo_detector import YoloDetector
+d = YoloDetector("openpilot/selfdrive/avoidanced/models/yolo_tinygrad.pkl", fps=0)
+f = np.zeros((384, 640, 3), np.uint8)
+d.infer(f)
+ts = []
+for _ in range(20):
+  t = time.monotonic(); d.infer(f, now=0.0); ts.append((time.monotonic() - t) * 1e3)
+print(f"min {min(ts):.1f} ms  median {sorted(ts)[len(ts)//2]:.1f} ms")
+PY
+```
+
+Measured on 3X: **pending** (no weights/device in the authoring environment).
+The unit tests run the real pre/post pipeline with an injected runner and skip
+the pkl test when the pkl is absent.

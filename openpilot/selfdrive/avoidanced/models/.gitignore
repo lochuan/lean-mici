@@ -1,0 +1,4 @@
+# Model weights/artifacts are not stored in the repo (see README.md).
+*.onnx
+*.pkl
+*.pkl.*
