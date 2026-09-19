@@ -23,13 +23,84 @@ from typing import Protocol
 import numpy as np
 
 INPUT_H, INPUT_W = 384, 640
-DEFAULT_CONF_THRESHOLD = 0.4
+DEFAULT_CONF_THRESHOLD = 0.15
 DEFAULT_IOU_THRESHOLD = 0.45
 DEFAULT_FPS = 3.0
 
-# BDD7 class id -> name. The whole output head is emitted; everything maps to a
+# BDD8 class id -> name. The whole output head is emitted; everything maps to a
 # planner weight (VRU vs vehicle) in avoidance_planner.
-CLASS_NAMES = {0: "person", 1: "rider", 2: "car", 3: "bus", 4: "truck", 5: "bicycle", 6: "motorcycle"}
+CLASS_NAMES = {0: "person", 1: "rider", 2: "car", 3: "bus", 4: "truck", 5: "bicycle", 6: "motorcycle", 7: "tricycle"}
+
+
+class TemporalFilter:
+  """Detection-level temporal smoothing for low-confidence distant targets.
+
+  A VRU detected at 0.06-0.15 conf on consecutive frames (common for 20-60m
+  targets in the reduced 384x640 crop) flickers in and out. This filter:
+
+  * **confirmation boost**: a detection IoU-matched to last frame's detection of
+    the same class gets ``+boost`` conf (capped at 1.0) — repeated sightings of
+    an object reinforce it instead of each frame re-deciding on raw conf;
+  * **carry-forward**: a previously confirmed detection missing this frame is
+    re-emitted for up to ``carry_frames`` with ``conf * carry_decay``, so a
+    one-frame dropout (NMS juggling, quantisation noise) does not drop the
+    object the planner is mid-manoeuvre on.
+
+  Runs per 3Hz tick in numpy postprocessing; cheap (few detections / tick).
+  """
+
+  def __init__(self, boost: float = 0.05, boost_cap: float = 1.0, carry_frames: int = 1,
+               carry_decay: float = 0.8, iou_threshold: float = 0.3):
+    self.boost = boost
+    self.boost_cap = boost_cap
+    self.carry_frames = carry_frames
+    self.carry_decay = carry_decay
+    self.iou_threshold = iou_threshold
+    self._prev: list[tuple[dict, int]] = []  # (detection, remaining carry budget)
+
+  def _iou(self, a: dict, b: dict) -> float:
+    ax1, ay1, ax2, ay2 = a["x1"], a["y1"], a["x2"], a["y2"]
+    bx1, by1, bx2, by2 = b["x1"], b["y1"], b["x2"], b["y2"]
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+  def __call__(self, detections: list[dict]) -> list[dict]:
+    prev = self._prev  # [(detection, carry_left)]
+    out: list[dict] = []
+    emitted: list[tuple[dict, int]] = []
+    used: set[int] = set()
+
+    # confirmation boost: current detection matched to last frame's same-class box.
+    for d in detections:
+      best_i, best_iou = None, self.iou_threshold
+      for i, (p, _cl) in enumerate(prev):
+        if i in used or p["cls"] != d["cls"]:
+          continue
+        iou = self._iou(p, d)
+        if iou > best_iou:
+          best_i, best_iou = i, iou
+      if best_i is not None:
+        used.add(best_i)
+        d["conf"] = min(self.boost_cap, d["conf"] + self.boost)
+      out.append(d)
+      emitted.append((d, self.carry_frames))
+
+    # carry-forward: unmatched previous detections re-emitted while budget lasts.
+    for i, (p, cl) in enumerate(prev):
+      if i not in used and cl > 0:
+        carried = dict(p)
+        carried["conf"] = p["conf"] * self.carry_decay
+        out.append(carried)
+        emitted.append((carried, cl - 1))
+
+    self._prev = emitted
+    out.sort(key=lambda d: d["conf"], reverse=True)
+    return out
 
 
 class Runner(Protocol):
@@ -142,11 +213,12 @@ def postprocess(raw: np.ndarray, conf_threshold: float = DEFAULT_CONF_THRESHOLD,
 
 
 class YoloDetector:
-  """5Hz YOLO detector. ``runner``/``params``/``clock`` are injectable for tests."""
+  """3Hz YOLO detector. ``runner``/``params``/``clock`` are injectable for tests."""
 
   def __init__(self, pkl_path: str | Path, conf_threshold: float | None = None,
                iou_threshold: float = DEFAULT_IOU_THRESHOLD, fps: float = DEFAULT_FPS,
-               runner: Runner | None = None, params=None, clock: Callable[[], float] = time.monotonic):
+               runner: Runner | None = None, params=None, clock: Callable[[], float] = time.monotonic,
+               temporal: TemporalFilter | None = None):
     self.pkl_path = Path(pkl_path)
     self.conf_threshold = conf_threshold
     self.iou_threshold = iou_threshold
@@ -154,6 +226,7 @@ class YoloDetector:
     self._runner = runner
     self._params = params
     self._clock = clock
+    self._temporal = temporal if temporal is not None else TemporalFilter()
     self._last_run_t: float | None = None
     self._last_detections: list[dict] = []
 
@@ -190,6 +263,7 @@ class YoloDetector:
       return self._last_detections
     raw = self._ensure_runner().run(preprocess(frame))
     detections = postprocess(raw, conf_threshold=self._confidence(), iou_threshold=self.iou_threshold)
+    detections = self._temporal(detections)
     self._last_run_t = now
     self._last_detections = detections
     return detections

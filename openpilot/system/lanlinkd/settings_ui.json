@@ -564,11 +564,11 @@
        "key": "AvoidanceMinConfidence",
        "widget": "option",
        "title": "检测置信度阈值",
-       "min": 0.25,
+       "min": 0.05,
        "max": 0.7,
        "step": 0.05,
        "unit": "",
-       "details": "YOLO 检测置信度低于此值的目标不参与避让，值越高越保守。默认 0.40。"
+       "details": "YOLO 检测置信度低于此值的目标不参与避让。远距 VRU 检出多在 0.06-0.24 区间，建议 0.10-0.15 起步配合时序平滑；默认 0.15。"
       },
       {
        "key": "AvoidanceMaxLateralOffset",

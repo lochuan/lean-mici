@@ -18,7 +18,7 @@ EDGE_CLEAR_MIN = 0.6    # m, minimum road-edge clearance
 
 # Target weighting: y_des = -sign(yRel) * min(max_offset, K * w_cls * proximity)
 K_GAIN = 0.5
-VRU_WEIGHT = 1.0      # person / rider / bicycle / motorcycle
+VRU_WEIGHT = 1.0      # person / rider / bicycle / motorcycle / tricycle
 VEHICLE_WEIGHT = 0.6  # car / bus / truck
 
 # Speed envelope (m/s) — spec §3 suggests 30-120 kph
@@ -36,7 +36,7 @@ EXIT_HOLD_S = 1.0
 AVOIDANCE_STALE_S = 1.0
 
 # YOLO classes treated as vulnerable road users (higher avoidance weight)
-VRU_CLASSES = frozenset({"person", "rider", "bicycle", "motorcycle"})
+VRU_CLASSES = frozenset({"person", "rider", "bicycle", "motorcycle", "tricycle"})
 
 # Camera -> car-frame projection (spec §4). Initial mount values; the P0
 # calibration (shadow harness, spec §4) refines them.
