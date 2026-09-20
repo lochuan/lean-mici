@@ -42,17 +42,57 @@ python -m openpilot.selfdrive.avoidanced.shadow <route> --out /tmp/shadow
 # -> /tmp/shadow/shadow_summary.json
 ```
 
-The summary is graded against the P0 thresholds:
+The summary is graded against the P0 thresholds. A single global residual
+threshold is physically unreachable beyond ~10 m: the ground-plane projection's
+dRel sensitivity to pitch would demand 0.203° pitch accuracy at 10 m, 0.051° at
+20 m and 0.013° at 40 m for a 0.30 m p95, while vehicle pitch swings ~1° under
+braking and openpilot's own calibration lands in the 0.1–0.2° range. Grading is
+therefore **banded by distance**; beyond 25 m only the bearing residual is
+graded — bearing is what a monocular camera actually measures well (independent
+of pitch and the ground-plane assumption):
 
-| metric | threshold | source |
+| 距离档 | 距离残差 p95 | 关联率 |
 |---|---|---|
-| radar↔vision association rate | > 0.80 | Task 6 brief |
-| calibration max lateral residual | < 0.30 m | design §4 |
-| max lateral jerk (`v² · dcurv/dt`) | < 5.0 m/s³ | `drive_helpers.MAX_LATERAL_JERK` |
-| p95 planner latency | < 200 ms | 5Hz budget (planner only; measure the full process on-device) |
+| ≤ 10m | < 0.40m | > 0.85 |
+| 10–25m | < 1.2m | > 0.75 |
+| 25–40m | 不作距离判据(方位角残差 < 0.6°) | > 0.60 |
+
+**关联率定义(写死):** `被匹配的视觉检测数 / 落在雷达视野内且 D_GATE 以内的视觉检测数`。
+分母排除雷达物理上看不到的目标(雷达 FOV 外或 D_GATE 以外),否则指标衡量的
+是雷达覆盖范围而不是视觉质量;互斥匹配保证比率 ≤ 1。注意 `shadow.py` 的
+replay 汇总目前仍以全部雷达目标为分母(见其源码 NOTE),上表定义是设备端 P0
+采集的目标口径。
+
+其余判据(不分档):max lateral jerk < 5.0 m/s³(`drive_helpers.MAX_LATERAL_JERK`);
+p95 planner latency < 200 ms(5Hz budget,planner only;measure the full process
+on-device)。`pass` 还要求 **execution_closure** 达标(见三层验证 layer ②:
+每个激活段的 closure ratio 与目标 yRel 实际漂移量)。
 
 `pass` is false when a graded metric is out of range. `insufficient_data` is true
-when the route had no in-gate radar targets (association cannot be judged).
+when the route had no in-gate radar targets (association cannot be judged). An
+empty distance band reports `pass: None` — 没有数据的档位不视为通过,否则门限
+会在静默中失去把关作用。
+
+### 阴性场景集(不该触发)
+
+P0 不仅要证明"该避让时避让",还要证明"不该触发时不触发"。以下场景在 shadow
+记录里必须逐一 review(预期 ~0 触发;`shadow.csv` 里 valid 且非零 bias 且无
+关联目标的帧即疑似误触发):
+
+1. 对向车道来车(对向目标 yRel 大、接近快,容易扫进门限)
+2. 匝道汇入 / 分流(横向相对运动大,方位角变化快)
+3. 雨天路面反光(雷达杂波与视觉误检叠加)
+4. 隧道出入口(标定与曝光最不稳)
+5. 过减速带 / 坑洼(瞬时 pitch 剧变,地平面投影距离跳变)
+6. **上下坡** —— 地平面假设在坡道上直接失效,必须单列
+
+### Vision metrics need calibration first
+
+未标定时视觉路径整体 gate off:`avoidanced._detect` 在 `extrinsicsCalibration`
+未达 `calibrated` 时直接 `_degrade("calibration")` 并返回空,投影根本不运行。
+所以 P0 的视觉相关指标(关联率、距离/方位角残差、分档表)必须在
+`extrinsicsCalibration` 达到 `calibrated` 之后才开始采集;此前采集的帧只有
+雷达侧数据,不能计入视觉判据。
 
 Recorded per frame: model curvature, planner curvature, `valid`, `y_des` (m),
 radar/vision/associated counts, lateral residual, latency, jerk. Use
@@ -94,20 +134,21 @@ publishes until P1.
 2. **YOLO inference + ROI latency < 120 ms.** Measure per `models/README.md` §4
    (`DEV=QCOM`, 20 runs, report min/median). Over budget: drop ROI
    resolution/fps before anything else.
-3. **Calibrate pitch / yaw / CAMERA_TO_FRONT.** Initial mount values live in
-   `constants.py` (`CAMERA_HEIGHT` 1.2 m, `CAMERA_PITCH` 0, `CAMERA_YAW` 0,
-   `CAMERA_TO_FRONT` 1.5 m) — the full workflow is the
+3. **Hand-calibrate only `CAMERA_TO_FRONT`.** Pitch/yaw/roll come from
+   openpilot's live `extrinsicsCalibration` and the projection no longer reads
+   `CAMERA_PITCH`/`CAMERA_YAW` — never patch them into constants. The one
+   quantity live calibration does not provide is the longitudinal camera→bumper
+   mount offset: initial values live in `constants.py` (`CAMERA_HEIGHT` 1.2 m,
+   `CAMERA_TO_FRONT` 1.5 m) and the full workflow is the
    [Calibration & physical-realism verification](#calibration--physical-realism-verification-标定与物理真实性验证)
-   section below. Quick order of attack: `CAMERA_TO_FRONT` for a constant dRel
-   shift, `CAMERA_PITCH` (down-positive) for dRel error that grows with
-   distance, `CAMERA_YAW` (left-positive) for a lateral error that grows with
-   distance. Accept when the post-correction residual p95 stays < 0.30 m
-   (spec §4: 0.3 m is the unacceptable threshold).
+   section below. Accept when `calibrate.py`'s **banded** verdict passes
+   (distance p95 per band, bearing p95 < 0.6° past 25 m; exit 0).
 4. **30 min real-route shadow.** Run the daemon for ≥30 min of representative
-   driving and grade the lanlink/CSV telemetry against the P0 thresholds:
-   association rate > 0.80, calibration max lateral residual < 0.30 m, false
-   triggers reviewed in the per-frame records (expect ~0), max lateral jerk
-   < 5.0 m/s³.
+   driving and grade the lanlink/CSV telemetry against the **banded** P0
+   thresholds above (distance p95 / bearing / association rate per band), the
+   `execution_closure` metrics, and false triggers reviewed in the per-frame
+   records (expect ~0, including the negative-scenario list). Max lateral
+   jerk < 5.0 m/s³.
 5. **P1 release conditions** — only after 1-4 pass: enable `AvoidanceEnabled`
    for straight, daytime driving with `AvoidanceMaxLateralOffset` capped at
    **0.25 m**; confirm the jerk limit is never exceeded (everything still
@@ -119,8 +160,14 @@ publishes until P1.
 The radar is the metric ground truth in the car frame (factory calibrated). The
 daemon's `avoidanceDebug` stream stamps every associated radar↔vision pair with
 a shared `pairId`, which gives the same object's position from both sources.
-The residual `vision − radar` decomposes into the three projection-constant
-errors, and that is what the calibration tooling below fits and verifies.
+
+**Division of labour (Task 7):** pitch/yaw/roll are openpilot's job — the
+projection takes them from live `extrinsicsCalibration`
+(`projection.CalibratedGeometry`) and no longer reads `CAMERA_PITCH`/
+`CAMERA_YAW`, so manually fitting them here would produce numbers nothing
+consumes and invite "correcting" a calibration openpilot maintains
+continuously. The only quantity live calibration cannot provide is the
+longitudinal camera→bumper mount offset, so that is all this tool fits.
 
 ### Online calibration (`calibrate.py`)
 
@@ -133,8 +180,9 @@ python -m openpilot.selfdrive.avoidanced.calibrate [--duration 120] [--min-pairs
 
 **lanlink 一键版（推荐）**：避让监测图状态条右侧的"开始标定/停止标定"按钮
 走同一套拟合（`POST /api/calibration/start|stop`，`GET /api/calibration/status`），
-无固定时长，开/停由你控制；停止后页面直接显示 p95 残差、Δfront/Δpitch/Δyaw、
-警告和**可复制的 constants.py 建议块**。配对 <30 时结果标记"仅供参考"。
+无固定时长，开/停由你控制；停止后页面直接显示 p95 残差、Δfront、警告和
+**可复制的 constants.py 建议块**（Δpitch/Δyaw 不再拟合 —— 在线标定负责，
+页面显示为 "—"）。配对 <30 时结果标记"仅供参考"。
 
 Workflow:
 
@@ -143,29 +191,36 @@ Workflow:
    `process_config.py`: onroad + car + param). Calibration does **not** require
    avoidance manoeuvres: `avoidanceDebug`, including the pairId-matched
    targets, is published every frame the daemon runs, regardless of planner
-   validity or bias. Drive with real lead vehicles ahead at **varied
-   distances** (the fit separates a constant `CAMERA_TO_FRONT` term from the
-   distance-growing pitch term only if pairs span a wide distance range);
-   2-10 minutes is plenty.
+   validity or bias — but the vision side only runs once `extrinsicsCalibration`
+   reports `calibrated` (see [above](#vision-metrics-need-calibration-first)).
+   Drive with real lead vehicles ahead at **varied distances** so all three
+   bands get pairs; 2-10 minutes is plenty.
 2. Run `calibrate` while driving (or over a recorded `avoidanceDebug` session).
-   It collects paired `(d_radar, y_radar, d_vision, y_vision, vEgo)` samples and
-   least-squares fits:
-   - forward residual `e_d = d_vis − d_radar` on basis `[1, d_r²/h]` →
-     `CAMERA_TO_FRONT += Δfront`, `CAMERA_PITCH += Δpitch`;
-   - lateral residual `e_y = y_vis − y_radar` on basis `[1, d_r]` → the slope
-     is `−Δyaw` (the projection *undoes* the camera yaw, so a camera truly
-     yawed left by Δyaw maps forward distance to `e_y = −Δyaw·d`); the tool
-     suggests `CAMERA_YAW += −slope`. A constant intercept is reported as a
-     **lateral mount-offset warning** — it means the camera/radar origins are
-     sideways of each other; fix it physically, never patch it into a constant.
-3. Paste the printed `constants.py` block, rebuild, and re-run. **Iteration
-   semantics:** the vision coordinates already include the constants currently
-   compiled in, so the fitted deltas are *increments* — 1-2 rounds converge.
-4. Accept when the post-correction residual p95 < 0.30 m (the tool exits 0;
-   exit 1 means insufficient pairs or out-of-tolerance fit).
+   It collects paired `(d_radar, y_radar, d_vision, y_vision, vEgo)` samples.
+   **Only `CAMERA_TO_FRONT` is fitted**: the forward residual
+   `e_d = d_vis − d_radar` is regressed on basis `[1]` (constant only) →
+   `CAMERA_TO_FRONT += Δfront`. Everything else is diagnostic, reported but
+   never folded into a constant:
+   - a **constant** lateral residual (`e_y` intercept) → lateral mount-offset
+     warning: the camera/radar origins are sideways of each other; fix it
+     physically;
+   - a **distance-growing** forward residual → pitch error, a
+     **distance-growing** lateral residual (`e_y` slope = `−Δyaw`) → yaw error:
+     both are `extrinsicsCalibration`'s job — the tool warns and tells you to
+     re-collect after it reports `calibrated`;
+   - the **banded residual table** (≤10 m / 10–25 m / 25–40 m, see the P0
+     criteria above) grades the post-correction residuals; empty bands report
+     `pass: None` and are listed as a coverage warning.
+3. Paste the printed `constants.py` block (one line: `CAMERA_TO_FRONT`),
+   rebuild, and re-run. **Iteration semantics:** the vision coordinates already
+   include the constant currently compiled in, so the fitted delta is an
+   *increment* — 1-2 rounds converge.
+4. Accept when the **banded verdict** passes (the tool exits 0; exit 1 means
+   insufficient pairs or a populated band out of tolerance).
 
-The report shows pair count, vEgo range, residual p95 before/after correction,
-per-constant suggestions, and pass/fail vs 0.3 m.
+The report shows pair count, vEgo range, forward residual p95 before/after the
+`CAMERA_TO_FRONT` increment, lateral residual p95 (report only), the banded
+table, warnings, and the banded pass/fail verdict.
 
 ### Static tape-measure spot check (静态卷尺抽查)
 
@@ -178,16 +233,19 @@ measured positions:
    it stays in-gate).
 2. Park with the target visible, run the daemon, and read the target's
    `dRel`/`yRel` from `avoidanceDebug` (lanlink bird's-eye view or a log tap).
-3. Compare against the tape values: a constant dRel error → `CAMERA_TO_FRONT`;
-   dRel error growing with distance → `CAMERA_PITCH`; yRel error growing with
-   distance → `CAMERA_YAW`. This cross-checks the online fit with independent
-   ground truth and catches gross mount errors the regression could absorb.
+3. Compare against the tape values: a constant dRel error → `CAMERA_TO_FRONT`
+   (the one constant this tool fits); dRel error growing with distance → pitch
+   error and yRel error growing with distance → yaw error — both are
+   `extrinsicsCalibration`'s job now, so a persistent growth means recalibration
+   has not converged (or the mount physically moved), not a constants.py edit.
+   This cross-checks the online fit with independent ground truth and catches
+   gross mount errors the regression could absorb.
 
 ### Three-layer physical-realism verification (三层物理真实性验证)
 
 | layer | what it proves | tool / metric | gate |
 |---|---|---|---|
-| ① Perception | the vision projection agrees with the radar truth | `calibrate.py` post-correction residual p95 < 0.3 m | perception |
+| ① Perception | the vision projection agrees with the radar truth | `calibrate.py` banded verdict (distance p95 per band; bearing p95 < 0.6° past 25 m) | perception |
 | ② Execution | the plan actually moves the car as commanded | `shadow.py` `execution_closure` metrics (below) | execution |
 | ③ Final | end-to-end behaviour is correct on video | record a run, review the lanlink avoidance view against the road | final acceptance |
 
@@ -228,14 +286,16 @@ python -m openpilot.selfdrive.avoidanced.shadow <route> --out /tmp/shadow
   closure signal.
 - **Lateral intercept aliases mount offset with the Δyaw·CAMERA_TO_FRONT cross
   term**: the yaw rotation acts about the camera origin (`d_r + CAMERA_TO_FRONT`)
-  while the regression basis uses bumper-frame `d_r`, so part of a pure yaw
-  error shows up as intercept — a small intercept is not proof of a physical
-  mount offset (and vice versa).
-- **Forward constant term re-absorbs a pitch cross-term every round**: the pitch
-  basis `[1, d²/h]` ignores the constant `Δpitch·h` piece of the true pitch
-  error, so each round's `CAMERA_TO_FRONT` suggestion carries a small
-  pitch-dependent component; convergence still holds (verified by round-trip
-  test) but the split between the two constants is approximate.
+  while the diagnostic regression basis uses bumper-frame `d_r`, so part of a
+  pure yaw error shows up as intercept — a small intercept is not proof of a
+  physical mount offset (and vice versa). Yaw is no longer fitted, so the
+  cross-term only slightly pollutes the lateral-bias *diagnostic*; the
+  distance-growing part is flagged as yaw contamination instead.
+- **The `CAMERA_TO_FRONT` suggestion absorbs a pitch cross-term**: the constant
+  fit cannot separate the `Δpitch·h` piece of a pitch error from a true forward
+  shift, so with pitch contamination the suggestion carries a pitch-dependent
+  component. The contamination warning fires in that case — re-collect after
+  `extrinsicsCalibration` converges instead of pasting.
 - **Curvature double integral ignores initial lateral velocity**: the measured
   displacement assumes zero lateral velocity at segment start, so it is relative
   to the segment-start state, not absolute.
@@ -244,7 +304,7 @@ python -m openpilot.selfdrive.avoidanced.shadow <route> --out /tmp/shadow
 
 - **ROI inverse mapping omits the half-pixel centre term** (`u_full = u·scale`
   instead of `(u+0.5)·scale − 0.5`): ~0.5 px systematic bias, equivalent to a
-  small pitch offset — absorbed by the P0 pitch calibration.
+  small pitch offset — absorbed by openpilot's live pitch calibration.
 - **Fisheye distortion unmodelled**: the wide-road camera config is a pinhole
   approximation of a fisheye module; projection error grows toward the frame
   edges (distant/small targets).
@@ -262,7 +322,9 @@ python -m openpilot.selfdrive.avoidanced.shadow <route> --out /tmp/shadow
   association metric gates at 3.0 m / 1.5 m while the daemon absorbs
   detections at 2.0 m / 1.0 m, and `n_vision` counts all projected detections
   unfiltered whereas `n_radar` counts only in-gate radar targets. The
-  association rate is therefore optimistic as a P0 gate signal; when reviewing
+  association rate is therefore optimistic as a P0 gate signal, and its
+  denominator (all radar targets) is not yet the P0 definition written above
+  (vision detections within the radar FOV and `D_GATE`); when reviewing
   `shadow.csv` false triggers, read the counts against these definitions, not
   the daemon's tighter gates.
 

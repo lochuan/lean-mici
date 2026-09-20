@@ -14,7 +14,8 @@ import numpy as np
 import pytest
 
 from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.calibrate import (CalibPair, MIN_FIT_PAIRS, RESIDUAL_PASS_M, extract_pairs,
+from openpilot.selfdrive.avoidanced.calibrate import (BANDS, BEARING_PASS_DEG, CalibPair, MIN_FIT_PAIRS,
+                                                      banded_residuals, extract_pairs,
                                                       fit_calibrated_offsets, format_constants_block, main)
 from openpilot.selfdrive.avoidanced.projection import project_box_to_vehicle
 
@@ -37,19 +38,21 @@ def _pixel_at(d_rel, y_rel, ctf, pitch, yaw, height=C.CAMERA_HEIGHT):
 
 
 def _synth_pairs(d_front=0.0, d_pitch=0.0, d_yaw=0.0, lateral_bias=0.0,
-                 noise=0.0, n=200, seed=0, current=None, true=None):
+                 noise=0.0, n=200, seed=0, current=None, true=None, distances=None):
   """Pairs whose vision side comes from the real projection round-trip.
 
   ``current`` is the (ctf, pitch, yaw) triple the projection runs with; the
   pixels are generated with the TRUE mount — by default ``current + deltas``,
   or the explicit ``true`` triple (pass it to keep the mount fixed across
-  fit/apply iterations).
+  fit/apply iterations). ``distances`` overrides the default uniform 5-45 m
+  spread with an explicit distance list (one pair per entry).
   """
   current = current if current is not None else (C.CAMERA_TO_FRONT, C.CAMERA_PITCH, C.CAMERA_YAW)
   true = true if true is not None else (current[0] + d_front, current[1] + d_pitch, current[2] + d_yaw)
   rng = np.random.default_rng(seed)
   pairs = []
-  for d, y in zip(rng.uniform(5.0, 45.0, n), rng.uniform(-2.0, 2.0, n), strict=True):
+  ds = rng.uniform(5.0, 45.0, n) if distances is None else np.asarray(distances, dtype=float)
+  for d, y in zip(ds, rng.uniform(-2.0, 2.0, len(ds)), strict=True):
     u, v = _pixel_at(float(d), float(y), *true)
     vis = project_box_to_vehicle(u=u, v=v, fx=FX, fy=FY, cx=CX, cy=CY, height=C.CAMERA_HEIGHT,
                                  pitch=current[1], yaw=current[2], camera_to_front=current[0])
@@ -61,61 +64,58 @@ def _synth_pairs(d_front=0.0, d_pitch=0.0, d_yaw=0.0, lateral_bias=0.0,
 
 
 # --- fit ----------------------------------------------------------------------
-
-# Real-projection residuals are only approximately linear in the constants
-# (the pitch term gains a constant Δpitch·h piece and grows faster than d²/h at
-# range), so recovery tolerances are statistical, not exact; the round-trip
+# Task 7: only CAMERA_TO_FRONT is hand-fitted (basis [1]); pitch/yaw/roll are
+# openpilot's extrinsicsCalibration's job and appear only as contamination
+# warnings. A pure constant offset round-trips exactly; the round-trip
 # convergence test below pins the end-to-end behaviour.
 
 def test_fit_recovers_injected_constants():
-  pairs = _synth_pairs(d_front=0.3, d_pitch=math.radians(0.1), d_yaw=math.radians(0.3))
+  pairs = _synth_pairs(d_front=0.3)
   result = fit_calibrated_offsets(pairs)
   assert result["d_front_m"] == pytest.approx(0.3, abs=0.06)
-  assert result["d_pitch_rad"] == pytest.approx(math.radians(0.1), rel=0.25)
-  assert result["d_yaw_rad"] == pytest.approx(math.radians(0.3), rel=0.10)
-  assert result["residual_p95_after_m"] < RESIDUAL_PASS_M
+  assert "d_pitch_rad" not in result
+  assert "d_yaw_rad" not in result
+  assert result["forward_p95_after_m"] < 0.1
   assert result["pass"] is True
   assert result["warnings"] == []
 
 
 def test_fit_recovers_injected_constants_with_noise():
-  pairs = _synth_pairs(n=400, d_front=0.3, d_pitch=math.radians(0.1), d_yaw=math.radians(0.3),
-                       noise=0.03, seed=42)
+  pairs = _synth_pairs(n=400, d_front=0.3, noise=0.03, seed=42)
   result = fit_calibrated_offsets(pairs)
   assert result["d_front_m"] == pytest.approx(0.3, abs=0.06)
-  assert result["d_pitch_rad"] == pytest.approx(math.radians(0.1), rel=0.25)
-  assert result["d_yaw_rad"] == pytest.approx(math.radians(0.3), rel=0.10)
 
 
-def test_fit_yaw_suggestion_sign_matches_projection():
+def test_fit_flags_yaw_contamination_without_fitting_it():
   # Reviewer's numeric case: a camera truly yawed LEFT by +0.05 rad relative to
-  # the compiled constant produces e_y slope = -0.04998 (= -sin 0.05, verified
-  # against project_box_to_vehicle); the suggestion must be the NEGATED slope,
-  # and applying it must shrink the lateral residual, not double it.
+  # the live-calibrated geometry produces e_y slope = -0.04998 (= -sin 0.05,
+  # verified against project_box_to_vehicle). The old fit turned that into a
+  # CAMERA_YAW suggestion; now it must only WARN (yaw is extrinsicsCalibration's
+  # job) and the constant lateral bias must stay ~0 instead of absorbing the slope.
   pairs = _synth_pairs(d_yaw=0.05, n=300, seed=7)
   result = fit_calibrated_offsets(pairs)
-  assert result["d_yaw_rad"] > 0.0
-  assert result["d_yaw_rad"] == pytest.approx(math.sin(0.05), abs=0.002)
-  e_y_before = np.mean(np.abs([p.y_vision - p.y_radar for p in pairs]))
-  e_y_after = np.mean(np.abs([p.y_vision + result["d_yaw_rad"] * p.d_radar - p.y_radar for p in pairs]))
-  assert e_y_after < e_y_before / 10.0
+  assert "d_yaw_rad" not in result
+  assert any("yaw" in w.lower() for w in result["warnings"])
+  # The intercept keeps the Δyaw·CAMERA_TO_FRONT cross term (known aliasing),
+  # NOT the distance-growing slope: |bias| stays below the mount-offset warning.
+  assert result["lateral_bias_m"] == pytest.approx(-math.sin(0.05) * C.CAMERA_TO_FRONT, abs=0.02)
 
 
 def test_roundtrip_convergence_two_iterations():
-  # Applying the suggestions and re-fitting must monotonically shrink the raw
-  # residual across two iterations (linearized fit of a mildly nonlinear
-  # geometry: round 1 removes the bulk, round 2 the cross-terms). The true
-  # mount stays FIXED while the compiled constants converge onto it.
+  # Only CAMERA_TO_FRONT is hand-fitted now; with pitch/yaw owned by live
+  # calibration (and correct in this round-trip), applying the suggestion and
+  # re-fitting must collapse the residual in one round and stay there. The true
+  # mount stays FIXED while the compiled constant converges onto it.
   base = (C.CAMERA_TO_FRONT, C.CAMERA_PITCH, C.CAMERA_YAW)
-  true = (base[0] + 0.3, base[1] + math.radians(0.1), base[2] + math.radians(0.3))
+  true = (base[0] + 0.3, base[1], base[2])
   current = list(base)
   p95s = []
   for _ in range(3):
     pairs = _synth_pairs(n=300, seed=7, current=tuple(current), true=true)
     result = fit_calibrated_offsets(pairs)
-    p95s.append(result["residual_p95_before_m"])
-    current = [current[0] + result["d_front_m"], current[1] + result["d_pitch_rad"], current[2] + result["d_yaw_rad"]]
-  assert p95s[0] > p95s[1] > p95s[2]
+    p95s.append(result["forward_p95_before_m"])
+    current = [current[0] + result["d_front_m"], current[1], current[2]]
+  assert p95s[0] > p95s[1]
   assert p95s[2] < 0.1
 
 
@@ -123,9 +123,7 @@ def test_fit_zero_residual_gives_zero_suggestions_and_passes():
   # Zero deltas: the projection round-trip is the identity, so vision == radar.
   result = fit_calibrated_offsets(_synth_pairs())
   assert result["d_front_m"] == pytest.approx(0.0, abs=1e-9)
-  assert result["d_pitch_rad"] == pytest.approx(0.0, abs=1e-12)
-  assert result["d_yaw_rad"] == pytest.approx(0.0, abs=1e-12)
-  assert result["residual_p95_after_m"] == pytest.approx(0.0, abs=1e-9)
+  assert result["forward_p95_after_m"] == pytest.approx(0.0, abs=1e-9)
   assert result["pass"] is True
 
 
@@ -135,28 +133,70 @@ def test_fit_too_few_pairs_raises():
 
 
 def test_fit_reports_lateral_bias_as_warning_without_absorbing_it():
-  # A constant lateral residual must surface as a warning; the yaw fit stays
-  # on the distance-proportional term and must not eat the constant.
+  # A constant lateral residual must surface as a warning; with no yaw fit the
+  # [1, d] regression is diagnostic only, so the distance-growing yaw term must
+  # not eat the constant intercept either.
   pairs = _synth_pairs(d_yaw=math.radians(0.3), lateral_bias=0.15)
   result = fit_calibrated_offsets(pairs)
   assert result["lateral_bias_m"] == pytest.approx(0.15, abs=0.01)
   assert any("lateral mount" in w for w in result["warnings"])
-  assert result["d_yaw_rad"] == pytest.approx(math.sin(math.radians(0.3)), rel=0.10)
+  assert "d_yaw_rad" not in result
+  assert any("yaw" in w.lower() for w in result["warnings"])
 
 
 def test_fit_reports_p95_improvement():
-  pairs = _synth_pairs(d_front=0.5, d_pitch=math.radians(0.1), d_yaw=math.radians(0.5))
+  pairs = _synth_pairs(d_front=1.5)
   result = fit_calibrated_offsets(pairs)
-  assert result["residual_p95_before_m"] > 1.0
-  assert result["residual_p95_after_m"] < RESIDUAL_PASS_M
+  assert result["forward_p95_before_m"] > 1.0
+  assert result["forward_p95_after_m"] < 0.1
 
 
 def test_format_constants_block_applies_increments():
-  result = fit_calibrated_offsets(_synth_pairs(d_front=0.3, d_pitch=math.radians(0.1), d_yaw=math.radians(0.3)))
+  result = fit_calibrated_offsets(_synth_pairs(d_front=0.3))
   block = format_constants_block(result)
   assert f"CAMERA_TO_FRONT = {C.CAMERA_TO_FRONT + result['d_front_m']:.4f}" in block
-  assert f"CAMERA_PITCH = {C.CAMERA_PITCH + result['d_pitch_rad']:.6f}" in block
-  assert f"CAMERA_YAW = {C.CAMERA_YAW + result['d_yaw_rad']:.6f}" in block
+  assert "CAMERA_PITCH" not in block
+  assert "CAMERA_YAW" not in block
+
+
+# --- banded residuals (Task 7) --------------------------------------------------
+
+def test_fit_no_longer_reports_pitch_or_yaw():
+  """Task 2 之后 pitch/yaw 由 extrinsicsCalibration 提供, 手工拟合它们会与
+  在线标定打架。只剩 CAMERA_TO_FRONT 需要手工标。"""
+  pairs = _synth_pairs(d_front=0.4)          # 本文件 :39 已有的 helper
+  result = fit_calibrated_offsets(pairs)
+  assert "d_front_m" in result
+  assert "d_pitch_rad" not in result
+  assert "d_yaw_rad" not in result
+  assert result["d_front_m"] == pytest.approx(0.4, abs=0.05)
+
+
+def _pairs_across_distances():
+  """每个距离档至少 3 对, 用于分档残差报告。"""
+  out = []
+  for d in (5.0, 7.0, 9.0, 12.0, 18.0, 24.0, 28.0, 34.0, 39.0):
+    out.extend(_synth_pairs(d_front=0.0, distances=(d,)))
+  return out
+
+
+def test_banded_residuals_report_each_distance_band():
+  bands = banded_residuals(_pairs_across_distances())
+  assert set(bands) == {"le10m", "10to25m", "25to40m"}
+  assert "p95_m" in bands["le10m"]
+  assert "bearing_p95_deg" in bands["25to40m"]
+
+
+def test_banded_residuals_marks_an_empty_band():
+  bands = banded_residuals(_synth_pairs(distances=(5.0, 6.0)))
+  assert bands["le10m"]["n"] > 0
+  assert bands["25to40m"]["n"] == 0
+  assert bands["25to40m"]["pass"] is None
+
+
+def test_pass_uses_banded_thresholds():
+  bands = banded_residuals(_pairs_across_distances())
+  assert isinstance(bands["le10m"]["pass"], bool)
 
 
 # --- pair extraction ------------------------------------------------------------
@@ -257,5 +297,9 @@ def test_main_fails_on_out_of_tolerance_residual():
   assert code == 1
 
 
-def test_residual_threshold_matches_spec():
-  assert RESIDUAL_PASS_M == pytest.approx(0.30)
+def test_residual_thresholds_match_banded_spec():
+  # Task 7: the single global 0.30 m threshold is gone (physically unreachable
+  # beyond ~10 m); grading is per distance band, bearing-only past 25 m.
+  assert BANDS == (("le10m", 0.0, 10.0, 0.40), ("10to25m", 10.0, 25.0, 1.20),
+                   ("25to40m", 25.0, 40.0, None))
+  assert BEARING_PASS_DEG == pytest.approx(0.6)
