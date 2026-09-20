@@ -98,3 +98,86 @@ def test_cache_goes_stale_after_silence(publisher, monkeypatch):
   finally:
     exit_event.set()
     t.join(timeout=2)
+
+
+# --- 标定状态透传 ---------------------------------------------------------
+# 未标定时 avoidanced 会整体关掉视觉路径,前端只会看到 nVision 恒为 0 而没有
+# 任何解释。AvoidanceDebug 的 capnp 结构里没有降级原因字段,而 openpilot/cereal
+# 在 release_lib 的 NATIVE_INPUT_PATHS 里 —— 加字段要设备全量重建。所以标定
+# 状态由 lanlinkd 自己订阅 extrinsicsCalibration 透传。
+
+def _publish_calibration(pm: messaging.PubMaster, status: str, perc: int, valid: bool = True) -> None:
+  msg = messaging.new_message('extrinsicsCalibration')
+  msg.valid = valid   # new_message 默认 valid=False;快照要求 valid 才认标定
+  cal = msg.extrinsicsCalibration
+  cal.calStatus = status
+  cal.calPerc = perc
+  if status == "calibrated":
+    cal.rpyCalib = [0.0, 0.01, 0.0]
+  pm.send('extrinsicsCalibration', msg)
+
+
+@pytest.fixture
+def cal_publisher() -> messaging.PubMaster:
+  return messaging.PubMaster(['avoidanceDebug', 'extrinsicsCalibration'])
+
+
+def test_cache_reports_uncalibrated_so_the_ui_can_explain_no_vision(cal_publisher):
+  """未标定时快照必须说明原因,否则 nVision=0 在前端无从解释。"""
+  cache, exit_event, t = _start_cache()
+  try:
+    for _ in range(20):
+      _publish_debug(cal_publisher)
+      _publish_calibration(cal_publisher, "uncalibrated", 42)
+      time.sleep(0.1)
+      if cache.snapshot().get("calStatus") == "uncalibrated":
+        break
+    snap = cache.snapshot()
+    assert snap["calStatus"] == "uncalibrated"
+    assert snap["calPerc"] == 42
+    assert snap["calValid"] is False
+    assert snap["visionGated"] is True   # 前端据此解释 nVision=0
+  finally:
+    exit_event.set()
+    t.join(timeout=2)
+
+
+def test_cache_reports_calibrated(cal_publisher):
+  cache, exit_event, t = _start_cache()
+  try:
+    for _ in range(20):
+      _publish_debug(cal_publisher)
+      _publish_calibration(cal_publisher, "calibrated", 100)
+      time.sleep(0.1)
+      if cache.snapshot().get("calStatus") == "calibrated":
+        break
+    snap = cache.snapshot()
+    assert snap["calValid"] is True
+    assert snap["visionGated"] is False
+  finally:
+    exit_event.set()
+    t.join(timeout=2)
+
+
+def test_cache_does_not_trust_calibrated_status_on_an_invalid_message(cal_publisher):
+  """calStatus 说已标定但消息无效时不能当成已标定。
+
+  与 projection.geometry_from_calibration 的判定保持一致 —— 那边同样要求
+  valid 且 rpyCalib 长度为 3,一个空的 rpyCalib 配 "calibrated" 不能当成
+  零角度使用。两处判定若分叉,前端就会声称视觉在跑而 daemon 其实关掉了。
+  """
+  cache, exit_event, t = _start_cache()
+  try:
+    for _ in range(20):
+      _publish_debug(cal_publisher)
+      _publish_calibration(cal_publisher, "calibrated", 100, valid=False)
+      time.sleep(0.1)
+      if cache.snapshot().get("calStatus") == "calibrated":
+        break
+    snap = cache.snapshot()
+    assert snap["calStatus"] == "calibrated"
+    assert snap["calValid"] is False      # 消息无效 -> 不认
+    assert snap["visionGated"] is True
+  finally:
+    exit_event.set()
+    t.join(timeout=2)

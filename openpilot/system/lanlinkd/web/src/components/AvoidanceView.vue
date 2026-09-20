@@ -156,6 +156,20 @@ const counts = computed(() => ({
   a: av.value?.nAssociated ?? 0,
 }));
 
+// 视觉路径被标定门关掉时，V 会恒为 0。不解释的话这看起来像视觉坏了，而实际
+// 上是 avoidanced 有意关掉的：地平面投影的距离对 pitch 极度敏感（40m 处 0.5°
+// 误差 = 41%），用未标定的 pitch 会直接生成虚假偏移。
+const visionGated = computed(() => Boolean(av.value?.visionGated) && !avStale.value);
+
+const visionGatedWhy = computed(() => {
+  const status = av.value?.calStatus ?? "unknown";
+  const perc = av.value?.calPerc ?? 0;
+  if (status === "uncalibrated" || status === "recalibrating") {
+    return `相机标定未完成（${status === "recalibrating" ? "重新标定中" : "未标定"} ${perc}%），视觉路径已关闭，当前为纯雷达避让。继续正常驾驶让 openpilot 完成标定即可——静止目标需要视觉确认，所以此期间只对运动目标避让。`;
+  }
+  return `相机标定状态为 ${status}，视觉路径已关闭，当前为纯雷达避让。`;
+});
+
 const fmtYDes = computed(() => {
   const v = planner.value?.yDes;
   return v === undefined ? "—" : `${v.toFixed(2)} m`;
@@ -213,8 +227,25 @@ const calibRunning = computed(() => Boolean(calib.value?.running));
 const calibResult = computed(() => calib.value?.last_result ?? null);
 const calibError = computed(() => calib.value?.last_error ?? null);
 
-const fmtDeg = (rad?: number) =>
-  rad === undefined ? "—" : `${(rad * (180 / Math.PI)).toFixed(3)}°`;
+// 分档残差。后端的 pass 为 null 表示该档没有配对 —— 必须显示成「无数据」而不是
+// 通过，否则一份全部落在 40m 以外的数据会让每一档都显示绿色。
+const BAND_LABELS: Record<string, string> = {
+  le10m: "≤ 10m",
+  "10to25m": "10–25m",
+  "25to40m": "25–40m",
+};
+
+const calibBands = computed(() =>
+  Object.entries(calibResult.value?.bands ?? {}).map(([key, b]) => ({
+    key,
+    label: BAND_LABELS[key] ?? key,
+    n: b.n,
+    p95: b.p95_m,
+    bearing: b.bearing_p95_deg,
+    verdict: b.pass === null ? "无数据" : b.pass ? "达标" : "未达标",
+    kind: b.pass === null ? ("muted" as const) : b.pass ? ("accent" as const) : ("warn" as const),
+  })),
+);
 
 const tickY = (d: number) => rangeY(d, VB);
 const gridX = (y: number) => lateralX(y, VB);
@@ -380,8 +411,17 @@ const gridX = (y: number) => lateralX(y, VB);
       <Badge :kind="bsmLeft ? 'warn' : 'muted'">BSM 左</Badge>
       <Badge :kind="bsmRight ? 'warn' : 'muted'">BSM 右</Badge>
       <span class="text-sl-text-3">R {{ counts.r }} · V {{ counts.v }} · A {{ counts.a }}</span>
+      <Badge v-if="visionGated" kind="warn" :title="visionGatedWhy">视觉已关</Badge>
       <span>vEgo <span class="sl-tabular">{{ vEgoKmh }} km/h</span></span>
       <span>路沿余量 <span class="sl-tabular">{{ edgeClearance }}</span></span>
+    </div>
+
+    <!-- 视觉被标定门关掉时解释 V=0：否则「视觉一直是 0」看起来像坏了 -->
+    <div
+      v-if="visionGated"
+      class="mt-1 rounded-md bg-sl-warn/10 px-3 py-2 text-[12px] text-sl-warn"
+    >
+      {{ visionGatedWhy }}
     </div>
 
     <!-- 在线标定会话（始终可见：avoidanced 未运行时给出开启提示） -->
@@ -422,8 +462,33 @@ const gridX = (y: number) => lateralX(y, VB);
       </summary>
       <div class="mt-2 grid gap-1 text-sl-text-3 md:grid-cols-3">
         <span>Δfront {{ calibResult.d_front_m.toFixed(3) }} m</span>
-        <span>Δpitch {{ fmtDeg(calibResult.d_pitch_rad) }}</span>
-        <span>Δyaw {{ fmtDeg(calibResult.d_yaw_rad) }}</span>
+        <span>侧向偏置 {{ calibResult.lateral_bias_m.toFixed(3) }} m</span>
+      </div>
+      <p class="mt-1 text-[11px] text-sl-text-3">
+        pitch / yaw 已由 openpilot 的在线标定持续维护，不再手工拟合；这里只标
+        CAMERA_TO_FRONT（在线标定不提供的纵向安装偏移）。侧向偏置是诊断项——它
+        持续不为零说明相机横向装偏了，应该动硬件而不是改常数。
+      </p>
+      <div v-if="calibBands.length" class="mt-2">
+        <div class="text-sl-text-2">分档残差（25m 以上只看方位角）</div>
+        <div
+          v-for="b in calibBands"
+          :key="b.key"
+          class="mt-1 flex items-center gap-2 text-sl-text-3"
+        >
+          <span class="w-20">{{ b.label }}</span>
+          <Badge :kind="b.kind">{{ b.verdict }}</Badge>
+          <span v-if="b.n">
+            {{ b.n }} 对 ·
+            <template v-if="b.p95 !== undefined">p95 {{ b.p95.toFixed(2) }} m · </template>
+            方位 {{ b.bearing?.toFixed(2) ?? "—" }}°
+          </span>
+        </div>
+        <p class="mt-1 text-[11px] text-sl-text-3">
+          单一全局阈值在 10m 以外物理不可达（40m 处 0.30m 残差需要 0.013° 的
+          pitch 精度，而车辆俯仰变化就有 1° 量级），所以按距离分档。无数据的档
+          不计入通过。
+        </p>
       </div>
       <div v-for="w in calibResult.warnings" :key="w" class="mt-1 text-sl-warn">{{ w }}</div>
       <pre class="mt-2 overflow-x-auto rounded bg-sl-bg p-2 font-mono text-[11px] leading-relaxed text-sl-text-2">{{ calibResult.constants_block }}</pre>
