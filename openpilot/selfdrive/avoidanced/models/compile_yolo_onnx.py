@@ -12,11 +12,36 @@ intermittently rebuilds a graph with a symbolic split dim (crash). Our format
 captures a plain TinyJit with concrete shapes; modeld runs the same path at
 20Hz on this device without issues.
 
-Usage (run ON the device, on 12V; QCOM is the deployment target):
+Usage (run ON the device; QCOM is the deployment target):
 
-    PYTHONPATH=/data/tinygrad_upstream PARALLEL=0 DEV=QCOM FLOAT16=1 NOLOCALS=1 \
-        JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PICKLE_OOB=1 \
+    cd /tmp && DEV=QCOM:IR3 IMAGE=1 FLOAT16=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 \
+        PARALLEL=0 PYTHONPATH=<tinygrad-at-submodule-rev>:/data/openpilot \
         python3 compile_yolo_onnx.py model.onnx model.pkl [--input-name images]
+
+``DEV=QCOM:IR3`` selects tinygrad's Mesa NIR -> freedreno ir3 renderer instead of
+the default ``QCOM:CL``, which compiles OpenCL C through Qualcomm's proprietary
+LLVM blob. That blob aborts on this model's conv kernels
+("Custom lowering code for this instruction is not implemented yet: 150",
+QGPUISelLowering.cpp:1285), which is why IMAGE=1 was long believed impossible
+here. IR3 has no such limit and, unlike ``QCOMCLRenderer`` -- whose
+``supported_dtypes`` gates half behind ``IMAGE && FLOAT16`` -- supports fp16
+unconditionally. Measured on comma 4 (mici, Adreno 630), 384x640:
+
+    QCOM:CL, no IMAGE (old)   290.6 ms p50   out (1, 11, 5040)  <- 7-class!
+    QCOM:IR3 + IMAGE=1 + fp16  67.9 ms p50   out (1, 12, 5040)     8-class
+
+Requires ``tinymesa`` (already present in AGNOS's venv; tinygrad pins
+``tinymesa==25.2.7.2``). IR3 is gated to a630 only. Numerically validated against
+the tinygrad CPU backend on road frames: identical detection counts, 17/17 class
+match, box IoU >= 0.989, confidence delta <= 0.013.
+
+WARNING: run this from a directory OTHER than /data/openpilot. That tree contains
+a ``tinygrad -> tinygrad_repo/tinygrad`` symlink, and python puts the cwd (for
+``-c``) or the script dir ahead of PYTHONPATH, so a stale in-tree tinygrad can
+silently shadow the one you selected -- which then fails to load the pkl with
+"CallInfo.__init__() takes from 1 to 6 positional arguments but 7 were given".
+
+Do NOT pass ``NOLOCALS=1``: it is a no-op in this tinygrad tree.
 
 DEV=CPU can be used for a local smoke test (no QCOM backend).
 """
