@@ -173,6 +173,29 @@ def test_daemon_associated_detection_not_double_counted():
   assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(expected, rel=1e-6)
 
 
+def test_daemon_confirms_static_radar_across_reiteration():
+  """设备形态回归钉:radar.points 每次迭代产出新包装对象(模拟 pycapnp)。
+
+  associate 在内部物化一份点对象,fuse_targets 再迭代 radar.points 拿到的是
+  全新等价对象 —— 确认键必须跟 trackId 走。键逻辑退回 id() 时,静止点会被
+  当成未确认的杂波丢掉,本测试变红。"""
+  class _ReiteratedPoints:
+    def __init__(self, **fields):
+      self._fields = fields
+
+    def __iter__(self):
+      return iter([_NS(**self._fields)])
+
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
+  daemon.sm["radarTracks"].points = _ReiteratedPoints(dRel=20.0, yRel=-1.8, vRel=-20.0, trackId=7)
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  assert pm.sent[-1][1].valid is True   # 静止点被视觉确认 → 仍然驱动计划
+  expected = MODEL_CURVATURE + _first_frame_bias(_expected_offset(20.0, C.VRU_WEIGHT))
+  assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(expected, rel=1e-6)
+
+
 def test_daemon_projects_through_roi_inverse_mapping():
   # A box given in ROI pixels of a 1344x760 frame must land on the same
   # car-frame point as its full-frame equivalent.

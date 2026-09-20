@@ -9,7 +9,7 @@ import pytest
 
 from openpilot.selfdrive.avoidanced import constants as C
 from openpilot.selfdrive.avoidanced.association import associate as associate_daemon
-from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner
+from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, fuse_targets
 from openpilot.selfdrive.avoidanced.projection import RoiMeta
 from openpilot.selfdrive.avoidanced.shadow import (ASSOC_MAX_DBEARING_SHADOW, ASSOC_MAX_DRANGE_SHADOW,
                                                    CALIB_MAX_RESIDUAL_M, MAX_LATERAL_JERK, RadarTarget,
@@ -99,7 +99,8 @@ def test_associate_handles_empty_inputs():
 def test_evaluator_records_association_and_calibration():
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0))
   # 10 radar targets, 9 corroborated by vision, one far ghost with no vision match.
-  radar = [(10.0 + i, -0.5) for i in range(9)] + [(35.0, -0.5)]
+  # vRel=0.0 explicit: cruising traffic (ground speed = v_ego), not "vRel unknown".
+  radar = [(10.0 + i, -0.5, 0.0) for i in range(9)] + [(35.0, -0.5, 0.0)]
   vision = [(10.0 + i, -0.5) for i in range(9)]
   evaluator.step(_frame(0.0, radar=radar, vision=vision))
   rec = evaluator.records[-1]
@@ -214,7 +215,7 @@ def test_proxy_path_kept_without_detector():
   # No detector injected: even a frame carrying camera data stays on the
   # leadsV3 proxy (route replay has no YOLO boxes anyway).
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0))
-  frame = _frame(0.0, radar=[(20.0, -1.0)], vision=[(20.0, -1.0)],
+  frame = _frame(0.0, radar=[(20.0, -1.0, 0.0)], vision=[(20.0, -1.0)],
                  roi_frame=np.zeros((384, 640, 3), np.uint8), roi_meta=RoiMeta(1.0, 1.0, 0.0),
                  intrinsics=(FX, FY, CX, CY))
   rec = evaluator.step(frame)
@@ -359,8 +360,8 @@ def test_evaluator_fills_execution_closure_fields():
   # the record must carry the planner decision state and nearest target yRel.
   edge = SimpleNamespace(x=[5.0, 30.0], y=[1.8, 1.8])  # left edge at 1.8 m
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0))
-  evaluator.step(_frame(0.0, radar=[(20.0, -1.0)], curvature=0.01, road_edges=[edge]))
-  evaluator.step(_frame(C.ENTER_HOLD_S + 0.01, radar=[(20.0, -1.0)], curvature=0.01, road_edges=[edge]))
+  evaluator.step(_frame(0.0, radar=[(20.0, -1.0, 0.0)], curvature=0.01, road_edges=[edge]))
+  evaluator.step(_frame(C.ENTER_HOLD_S + 0.01, radar=[(20.0, -1.0, 0.0)], curvature=0.01, road_edges=[edge]))
   rec = evaluator.records[-1]
   assert rec.valid is True
   assert rec.direction == 1                    # target right -> avoid left
@@ -441,6 +442,21 @@ def test_iter_frames_skips_until_state_present():
   ]
   frames = list(iter_frames(msgs, sample_period=0.2))
   assert len(frames) == 1
+
+
+def test_iter_frames_missing_vrel_stays_none_and_is_static():
+  """vRel 缺失不得被折算成 0.0 —— 那会被当成运动目标(0.0 + vEgo)。
+
+  两端必须一致:iter_frames 保留 None,fuse_targets 把缺失当静止(无确认即丢弃)。"""
+  radar = SimpleNamespace(points=[SimpleNamespace(dRel=10.0, yRel=-1.0)])  # 根本没有 vRel
+  msgs = [
+    _Msg("modelV2", 0.0, modelV2=_model()),
+    _Msg("carState", 0.0, carState=_car()),
+    _Msg("radarTracks", 0.0, radarTracks=radar),
+  ]
+  frame = list(iter_frames(msgs))[0]
+  assert frame.radar_points[0].vRel is None
+  assert fuse_targets(frame.radar_points, v_ego=20.0) == []
 
 
 # --- report ------------------------------------------------------------------

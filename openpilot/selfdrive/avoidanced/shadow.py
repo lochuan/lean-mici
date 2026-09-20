@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING
 from openpilot.selfdrive.avoidanced import constants as C
 from openpilot.selfdrive.avoidanced.association import associate as associate_daemon
 from openpilot.selfdrive.avoidanced.association import nearest_pairs_by_bearing
-from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets
+from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets, radar_point_key
 from openpilot.selfdrive.avoidanced.projection import RoiMeta, project_detections
 
 if TYPE_CHECKING:
@@ -79,8 +79,10 @@ VISION_MIN_PROB = 0.5
 class RadarTarget:
   dRel: float
   yRel: float
-  vRel: float = 0.0  # m/s, relative velocity; fuse_targets needs it to separate
-                     # static clutter (needs vision confirmation) from movers.
+  # m/s relative velocity; None means the source did not provide one. It must
+  # stay None (NOT default to 0.0): fuse_targets treats a missing vRel as
+  # static (needs vision confirmation), while 0.0 + v_ego reads as a mover.
+  vRel: float | None = None
 
 
 @dataclass(frozen=True)
@@ -185,11 +187,11 @@ class ShadowEvaluator:
       # pairs also feed fuse_targets: confirmed points survive the static-speed
       # gate and take the vision class weight, exactly like the daemon.
       _, fused, pairs = associate_daemon(frame.radar_points, projected, fy=fy)
-      matched_radar = tuple(id(p[0]) for p in pairs)
-      vision_cls_by_radar = {id(p[0]): p[3] for p in pairs}
+      confirmed_keys = tuple(radar_point_key(p[0]) for p in pairs)
+      vision_cls_by_key = {radar_point_key(p[0]): p[3] for p in pairs}
       targets = fuse_targets(frame.radar_points, fused, v_ego=frame.v_ego,
-                             matched_radar=matched_radar,
-                             vision_cls_by_radar=vision_cls_by_radar)
+                             confirmed_keys=confirmed_keys,
+                             vision_cls_by_key=vision_cls_by_key)
       vision_objects = [VisionObject(x=float(d["dRel"]), y=float(d["yRel"])) for d in projected]
       # Metrics radar side stays radar-only (in-gate), so a vision-only target
       # cannot pair with itself and inflate the association rate.
@@ -450,7 +452,7 @@ def iter_frames(messages: Iterable, sample_period: float = 0.2, limit: int | Non
       model_curvature=float(model.action.desiredCurvature),
       v_ego=float(car.vEgo),
       radar_points=[RadarTarget(dRel=float(p.dRel), yRel=float(p.yRel),
-                                vRel=float(getattr(p, "vRel", 0.0))) for p in radar.points],
+                                vRel=getattr(p, "vRel", None)) for p in radar.points],
       vision_objects=_vision_from_model(model),
       bsm_left=bool(getattr(car, "leftBlindspot", False)),
       bsm_right=bool(getattr(car, "rightBlindspot", False)),

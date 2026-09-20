@@ -1,5 +1,7 @@
 """Tests for the 5Hz lateral avoidance planner (radar fusion + BSM gating)."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from openpilot.selfdrive.avoidanced import constants as C
@@ -102,19 +104,19 @@ def test_static_radar_point_needs_vision_confirmation():
   """护栏/桥墩的对地速度是 0 —— 但抛锚车也是。所以判据不是「动不动」,
   而是「有没有视觉确认」。"""
   guardrail = _RadarPoint(dRel=20.0, yRel=-2.0, vRel=-15.0)   # 对地速度 0
-  targets = fuse_targets([guardrail], v_ego=15.0, matched_radar=())
+  targets = fuse_targets([guardrail], v_ego=15.0, confirmed_keys=())
   assert targets == []
 
 
 def test_static_radar_point_is_kept_when_vision_confirms_it():
   stopped_car = _RadarPoint(dRel=20.0, yRel=-2.0, vRel=-15.0)
-  targets = fuse_targets([stopped_car], v_ego=15.0, matched_radar=(id(stopped_car),))
+  targets = fuse_targets([stopped_car], v_ego=15.0, confirmed_keys=(id(stopped_car),))
   assert len(targets) == 1
 
 
 def test_moving_radar_point_needs_no_confirmation():
   mover = _RadarPoint(dRel=20.0, yRel=-2.0, vRel=-3.0)        # 对地速度 12 m/s
-  assert len(fuse_targets([mover], v_ego=15.0, matched_radar=())) == 1
+  assert len(fuse_targets([mover], v_ego=15.0, confirmed_keys=())) == 1
 
 
 def test_matched_radar_point_takes_the_vision_class_weight():
@@ -124,8 +126,8 @@ def test_matched_radar_point_takes_the_vision_class_weight():
   本车道内的目标不再是避让目标 —— 夹具必须留在门外,否则 Task 6 会打破本测试。
   """
   moto = _RadarPoint(dRel=10.0, yRel=1.8, vRel=-1.0)
-  targets = fuse_targets([moto], v_ego=15.0, matched_radar=(id(moto),),
-                         vision_cls_by_radar={id(moto): "motorcycle"})
+  targets = fuse_targets([moto], v_ego=15.0, confirmed_keys=(id(moto),),
+                         vision_cls_by_key={id(moto): "motorcycle"})
   assert targets[0].w == C.VRU_WEIGHT
 
 
@@ -133,7 +135,31 @@ def test_missing_vrel_is_treated_as_static():
   """vRel 缺失时保守处理:按静止对待,需视觉确认。"""
   class NoVRel:
     dRel, yRel = 20.0, -2.0
-  assert fuse_targets([NoVRel()], v_ego=15.0, matched_radar=()) == []
+  assert fuse_targets([NoVRel()], v_ego=15.0, confirmed_keys=()) == []
+
+
+class _ReiteratedRadarPoints:
+  """每次迭代都产出等价但全新的点对象 —— 模拟 pycapnp:每次访问 radar.points
+  都构造新的 _DynamicStructReader 包装,id() 跨迭代必然不同。"""
+
+  def __init__(self, **fields):
+    self._fields = fields
+
+  def __iter__(self):
+    return iter([SimpleNamespace(**self._fields)])
+
+
+def test_confirmation_and_class_weight_survive_radar_reiteration():
+  """设备形态回归钉:radar.points 被迭代两次(associate 物化一次、fuse 再迭代
+  一次)时,静止目标的视觉确认与类别权重必须仍然生效 —— 确认键跟 trackId 走,
+  不跟 id() 走。把键逻辑退回 id()-only 会让本测试变红。"""
+  points = _ReiteratedRadarPoints(dRel=10.0, yRel=1.8, vRel=-15.0, trackId=7)  # 对地速度 0
+  first, second = list(points), list(points)
+  assert id(first[0]) != id(second[0]) and first[0].dRel == second[0].dRel  # mimicry precondition
+  targets = fuse_targets(points, v_ego=15.0, confirmed_keys={7},
+                         vision_cls_by_key={7: "motorcycle"})
+  assert len(targets) == 1              # 静止但有视觉确认 → 保留
+  assert targets[0].w == C.VRU_WEIGHT   # 类别权重跟视觉走
 
 
 class _Edge:

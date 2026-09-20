@@ -33,7 +33,7 @@ from openpilot.common.realtime import Priority, Ratekeeper, config_realtime_proc
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.avoidanced import constants as C
 from openpilot.selfdrive.avoidanced.association import associate
-from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets
+from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets, radar_point_key
 from openpilot.selfdrive.avoidanced.camera_stream import CameraStream
 from openpilot.selfdrive.avoidanced.projection import geometry_from_calibration, horizon_row_for, project_detections
 from openpilot.selfdrive.avoidanced.yolo_detector import YoloDetector
@@ -134,11 +134,15 @@ class AvoidanceDaemon:
     # and with no detections associate never reads fy, so 0.0 is a safe fallback.
     fy = self.camera.intrinsics[1] if self.camera is not None and self.camera.intrinsics else 0.0
     n_associated, fused, pairs = associate(radar.points, detections, fy=fy)
-    matched_radar = tuple(id(p[0]) for p in pairs)
-    vision_cls_by_radar = {id(p[0]): p[3] for p in pairs}
+    # Confirmation keys are trackId-based (radar_point_key): pycapnp hands out a
+    # fresh wrapper object on every access to radar.points, so id() keys built
+    # from associate's materialized points would never match the points
+    # fuse_targets iterates here.
+    confirmed_keys = tuple(radar_point_key(p[0]) for p in pairs)
+    vision_cls_by_key = {radar_point_key(p[0]): p[3] for p in pairs}
     targets = fuse_targets(radar.points, fused, v_ego=car_state.vEgo,
-                           matched_radar=matched_radar,
-                           vision_cls_by_radar=vision_cls_by_radar)
+                           confirmed_keys=confirmed_keys,
+                           vision_cls_by_key=vision_cls_by_key)
     curvature, valid = self.planner.update(
       model_curvature=model_v2.action.desiredCurvature,
       targets=targets,
@@ -180,17 +184,21 @@ class AvoidanceDaemon:
     """
     radar_points = list(radar_points)
     # Association pairs reference this frame's radar/detection objects, so match
-    # them back by identity to stamp the shared pairId on both sides.
-    radar_pair_ids = {id(p[0]): p[2] for p in pairs}
+    # them back by identity to stamp the shared pairId on both sides. Radar
+    # identity must go through radar_point_key: this list is a fresh capnp
+    # re-iteration, so id() would never match the pairs' objects (vision dicts
+    # are plain Python objects, id() is stable for them).
+    radar_pair_ids = {radar_point_key(p[0]): p[2] for p in pairs}
     vision_pair_ids = {id(p[1]): p[2] for p in pairs}
     targets: list[tuple] = []
     for point in radar_points:
       in_gate = _in_gate(float(point.dRel), float(point.yRel))
+      key = radar_point_key(point)
       targets.append((in_gate, {
         "dRel": float(point.dRel), "yRel": float(point.yRel), "vRel": float(point.vRel),
         "cls": "", "conf": 0.0, "weight": C.VEHICLE_WEIGHT,
-        "matched": id(point) in radar_pair_ids, "inGate": in_gate, "vision": False,
-        "pairId": radar_pair_ids.get(id(point), 0),
+        "matched": key in radar_pair_ids, "inGate": in_gate, "vision": False,
+        "pairId": radar_pair_ids.get(key, 0),
       }))
     for det in detections:
       in_gate = _in_gate(float(det["dRel"]), float(det["yRel"]))
