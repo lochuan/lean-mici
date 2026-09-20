@@ -104,7 +104,7 @@ class TestBuildCapabilities:
     assert caps["has_longitudinal_control"] is False
     assert caps["stock_longitudinal"] is False
     assert caps["is_development"] is False
-    assert len(caps) == 19
+    assert len(caps) == 20
 
   def test_angle_steering_from_persistent_cp(self):
     caps = build_capabilities(angle_cp_params(), device_type="mici")
@@ -172,6 +172,13 @@ class TestBuildCapabilities:
     assert caps["is_sp_release"] is True
     assert caps["is_release"] is False
     assert caps["stock_longitudinal"] is True
+
+  def test_cruise_buttons_capability_from_param(self):
+    """stock-ACC 平台:启用巡航按钮控制 = has_cruise_buttons(SCC-V 弯道场景可用)。"""
+    p = FakeParams(bools={"CruiseButtonsEnabled": True})
+    caps = build_capabilities(p, device_type="mici")
+    assert caps["has_cruise_buttons"] is True
+    assert build_capabilities(FakeParams(), device_type="mici")["has_cruise_buttons"] is False
 
   def test_corrupt_bytes_falls_back_to_defaults(self):
     p = FakeParams(data={"CarParamsPersistent": b"\x00garbage",

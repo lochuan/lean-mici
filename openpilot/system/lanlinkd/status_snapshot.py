@@ -88,6 +88,7 @@ def build_snapshot(services: dict, version_info: dict, capabilities: dict) -> di
 
 _CAP_KEYS = (
   "protocol_version", "has_longitudinal_control", "has_icbm", "icbm_available",
+  "has_cruise_buttons",
   "torque_allowed", "brand", "pcm_cruise", "alpha_long_available",
   "steer_control_type", "enable_bsm", "is_release", "is_sp_release",
   "is_development", "tesla_has_vehicle_bus", "has_stop_and_go", "stock_longitudinal",
@@ -116,6 +117,8 @@ def build_capabilities(params, device_type: str) -> dict:
   caps["is_sp_release"] = bool_param("IsReleaseSpBranch")
   caps["is_development"] = bool_param("IsDevelopmentBranch")
   caps["stock_longitudinal"] = bool_param("ToyotaEnforceStockLongitudinal")
+  # 巡航按钮控制平台(stock-ACC Toyota):cruisebuttond 消费 SCC-V 弯道 vTarget
+  caps["has_cruise_buttons"] = bool_param("CruiseButtonsEnabled")
 
   # CarPlatformBundle（JSON dict）优先定 brand；CP 兜底
   bundle = params.get("CarPlatformBundle") if params is not None else None

@@ -34,6 +34,7 @@ from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd import wifi_api
 from openpilot.system.lanlinkd import software_api
 from openpilot.system.lanlinkd.avoidanced import AvoidanceCache
+from openpilot.system.lanlinkd.cruisebuttonsd import CruiseButtonsCache
 from openpilot.system.lanlinkd.calibration import CalibrationController
 from openpilot.system.lanlinkd.statusd import StatusCache
 
@@ -52,6 +53,7 @@ class LanlinkApp:
     self.version_info = {k: params_api.to_str(self.params.get(k)) or "" for k in VERSION_PARAMS}
     self.cache = StatusCache(self.version_info, device_type="pc" if PC else HARDWARE.get_device_type(), params=self.params)
     self.avoidance = AvoidanceCache()
+    self.cruise_buttons = CruiseButtonsCache()
     self.calibration = CalibrationController()
     self.exit_event = threading.Event()
     self._settings_ui: dict | None = None
@@ -59,6 +61,7 @@ class LanlinkApp:
     self._wifi_lock = threading.Lock()
     threading.Thread(target=self.cache.run, args=(self.exit_event,), name="lanlink_status", daemon=True).start()
     threading.Thread(target=self.avoidance.run, args=(self.exit_event,), name="lanlink_avoidance", daemon=True).start()
+    threading.Thread(target=self.cruise_buttons.run, args=(self.exit_event,), name="lanlink_cruise_buttons", daemon=True).start()
 
   # ---- helpers ----
   @staticmethod
@@ -265,6 +268,9 @@ class LanlinkApp:
   async def avoidance_get(self, request: Request) -> HTTPResponse:
     return json_response(self.avoidance.snapshot())
 
+  async def cruise_buttons_get(self, request: Request) -> HTTPResponse:
+    return json_response(self.cruise_buttons.snapshot())
+
   # ---- avoidance calibration session (collect/fit avoidanced projection constants) ----
 
   async def calibration_start(self, request: Request) -> HTTPResponse:
@@ -340,6 +346,7 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/software/<action:str>", "software_action"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/avoidance", "avoidance_get"),
+  ("GET", "/api/cruise-buttons", "cruise_buttons_get"),
   ("POST", "/api/calibration/start", "calibration_start"),
   ("POST", "/api/calibration/stop", "calibration_stop"),
   ("GET", "/api/calibration/status", "calibration_status"),

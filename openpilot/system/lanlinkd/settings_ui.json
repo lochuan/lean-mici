@@ -980,6 +980,11 @@
          "type": "capability",
          "field": "has_icbm",
          "equals": true
+        },
+        {
+         "type": "capability",
+         "field": "has_cruise_buttons",
+         "equals": true
         }
        ]
       }
@@ -1003,6 +1008,11 @@
            "type": "capability",
            "field": "has_icbm",
            "equals": true
+          },
+          {
+           "type": "capability",
+           "field": "has_cruise_buttons",
+           "equals": true
           }
          ]
         }
@@ -1019,6 +1029,11 @@
           {
            "type": "capability",
            "field": "has_icbm",
+           "equals": true
+          },
+          {
+           "type": "capability",
+           "field": "has_cruise_buttons",
            "equals": true
           }
          ]
@@ -1062,6 +1077,84 @@
            "equals": true
           }
          ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "cruise_button_control",
+     "title": "巡航按钮控制",
+     "description": "",
+     "visibility": [
+      {
+       "type": "not",
+       "condition": {
+        "type": "capability",
+        "field": "has_longitudinal_control",
+        "equals": true
+       }
+      }
+     ],
+     "items": [
+      {
+       "key": "CruiseButtonsEnabled",
+       "widget": "toggle",
+       "title": "启用巡航按钮控制",
+       "details": "蓝牙模拟方向盘 RES+/RES- 按钮塑形原车巡航:弯道与雷达前车决定目标,按你设定的加速度节奏按压,绝不越过你设定的上限,绝不发送任何 CAN 消息 —— 唯一执行器是蓝牙模拟器对方向盘按钮的物理按压,原车 ACC 始终全权负责实际刹车与车距保持。需要蓝牙模拟器硬件(未配对时守护进程空转,状态卡片可见)。"
+      },
+      {
+       "key": "CruiseButtonsAccel",
+       "widget": "option",
+       "title": "向上爬升加速度",
+       "min": 0.3,
+       "max": 2.0,
+       "step": 0.1,
+       "unit": "m/s²",
+       "details": "向上追赶(慢车消失、出弯恢复)时 setSpeed 的爬升速率,即模拟 RES+ 按压的节奏。默认 0.8 m/s²。",
+       "enablement": [
+        {
+         "type": "param",
+         "key": "CruiseButtonsEnabled",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "CruiseButtonsCurve",
+       "widget": "toggle",
+       "title": "弯道减速 (SCC-V)",
+       "enablement": [
+        {
+         "type": "param",
+         "key": "CruiseButtonsEnabled",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "CruiseButtonsLead",
+       "widget": "toggle",
+       "title": "跟车管理",
+       "details": "停车补拍 + 跟随保持 + 跟升:跟随中把 setSpeed 贴着前车留 3 km/h 余量,前车提速/消失后按滑条节奏放。",
+       "enablement": [
+        {
+         "type": "param",
+         "key": "CruiseButtonsEnabled",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "CruiseButtonsStandstill",
+       "widget": "toggle",
+       "title": "停车自动起步",
+       "details": "红灯跟停后前车起步,自动补一拍 RES+(每次停车一次),起步温和。",
+       "enablement": [
+        {
+         "type": "param",
+         "key": "CruiseButtonsEnabled",
+         "equals": true
         }
        ]
       }
@@ -1720,9 +1813,9 @@
   },
   {
    "id": "vehicle",
-    "label": "车辆",
-    "icon": "vehicle",
-    "order": 10,
+   "label": "车辆",
+   "icon": "vehicle",
+   "order": 10,
    "sections": [
     {
      "title": "车辆",
@@ -1732,9 +1825,9 @@
   },
   {
    "id": "developer",
-    "label": "开发者",
-    "icon": "developer",
-    "order": 11,
+   "label": "开发者",
+   "icon": "developer",
+   "order": 11,
    "sections": [
     {
      "id": "connectivity",
@@ -1891,9 +1984,9 @@
   },
   {
    "id": "models",
-    "label": "模型",
-    "icon": "models",
-    "order": 12,
+   "label": "模型",
+   "icon": "models",
+   "order": 12,
    "sections": [
     {
      "id": "model_behavior",

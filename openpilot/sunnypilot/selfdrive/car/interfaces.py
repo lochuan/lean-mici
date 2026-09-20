@@ -81,7 +81,10 @@ def _cleanup_unsupported_params(CP: structs.CarParams, CP_SP: structs.CarParamsS
     cloudlog.warning("openpilot Longitudinal Control and ICBM not available, cleaning up params")
     params.remove("DynamicExperimentalControl")
     params.remove("CustomAccIncrementsEnabled")
-    params.remove("SmartCruiseControlVision")
+    # SCC-V 弯道 vTarget 在 stock-ACC 平台由 cruisebuttond 消费(Task 6):
+    # 用户启用了巡航按钮控制的弯道减速时保留该 param,否则照常清理。
+    if not params.get_bool("CruiseButtonsEnabled"):
+      params.remove("SmartCruiseControlVision")
     params.remove("SmartCruiseControlMap")
 
   set_speed_limit_assist_availability(CP, CP_SP, params)

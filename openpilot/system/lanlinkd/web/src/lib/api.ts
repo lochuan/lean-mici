@@ -45,6 +45,7 @@ export const api = {
   allParams: () => request<ParamValues>("/api/params/_all"),
   status: () => request<StatusSnapshot>("/api/status"),
   avoidance: () => request<AvoidanceSnapshot>("/api/avoidance"),
+  cruiseButtons: () => request<Record<string, unknown>>("/api/cruise-buttons"),
   calibrationStatus: () => request<CalibrationStatus>("/api/calibration/status"),
   calibrationStart: () => request<CalibrationStatus>("/api/calibration/start", { method: "POST" }),
   calibrationStop: () => request<CalibrationStatus>("/api/calibration/stop", { method: "POST" }),
