@@ -71,6 +71,35 @@ SOURCE_BRANCH="${SOURCE_BRANCH:-lean-master}"
 RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
 BUILD_BRANCH="build-mici"
 
+# ===== 构建的是 origin/$SOURCE_BRANCH,不是本地 HEAD =====
+# 容器 `reset --hard origin/$SOURCE_BRANCH`,所以未推送的本地提交不会进 release。
+# 以前这只是文档里的一句提醒,结果就是"改完直接发版、发出去的还是上一版"。
+# 这里做成硬检查。
+echo "[-] verifying $SOURCE_BRANCH is pushed T=$SECONDS"
+git -C "$SOURCE_DIR" fetch --quiet fork "$SOURCE_BRANCH" 2>/dev/null \
+  || git -C "$SOURCE_DIR" fetch --quiet origin "$SOURCE_BRANCH" 2>/dev/null || true
+local_head=$(git -C "$SOURCE_DIR" rev-parse HEAD)
+remote_head=$(git -C "$SOURCE_DIR" rev-parse "refs/remotes/fork/$SOURCE_BRANCH" 2>/dev/null \
+  || git -C "$SOURCE_DIR" rev-parse "refs/remotes/origin/$SOURCE_BRANCH" 2>/dev/null || echo "")
+if [ "$local_head" != "$remote_head" ]; then
+  ahead=$(git -C "$SOURCE_DIR" rev-list --count "${remote_head:-$local_head}..$local_head" 2>/dev/null || echo "?")
+  echo "====================================================================" >&2
+  echo "❌ FATAL: 本地 $SOURCE_BRANCH 未推送,容器会构建远端的旧提交" >&2
+  echo "   local : $local_head" >&2
+  echo "   remote: ${remote_head:-<none>}  (本地领先 $ahead 个提交)" >&2
+  echo "   先推送:  git push fork $SOURCE_BRANCH" >&2
+  echo "====================================================================" >&2
+  exit 1
+fi
+# 未提交的改动同样不会进 release,静默丢弃比失败更危险。
+if ! git -C "$SOURCE_DIR" diff --quiet HEAD -- || \
+   [ -n "$(git -C "$SOURCE_DIR" ls-files --others --exclude-standard -- openpilot tools release)" ]; then
+  echo "⚠️  工作区有未提交改动,它们不会进本次 release(容器只认 origin/$SOURCE_BRANCH)" >&2
+  git -C "$SOURCE_DIR" status --short | head -10 >&2
+  sleep 3
+fi
+echo "[ok] $SOURCE_BRANCH == origin @ $local_head"
+
 echo "=== OrbStack lean release build === T=$SECONDS"
 echo "SOURCE_DIR=$SOURCE_DIR"
 echo "ORB_MACHINE=$ORB_MACHINE"
@@ -285,8 +314,13 @@ if [ \"\$pushed\" -ne 1 ]; then
   git worktree remove --force /tmp/opilot-release 2>/dev/null || true
   exit 1
 fi
+git rev-parse HEAD > /tmp/opilot-release-commit
 git worktree remove --force /tmp/opilot-release 2>/dev/null || true
 "
+
+# 记下刚推出去的 release commit,交给 smoke gate 校验设备确实更新到了它
+RELEASE_COMMIT=$($SSH 'cat /tmp/opilot-release-commit 2>/dev/null' | tr -d '\r\n' || true)
+echo "[release] $RELEASE_BRANCH = ${RELEASE_COMMIT:-<unknown>}"
 
 echo "=== done T=$SECONDS ==="
 
@@ -297,9 +331,11 @@ if [ "${SKIP_SMOKE_GATE:-0}" = "1" ]; then
   echo "[release] WARN: smoke gate skipped by SKIP_SMOKE_GATE=1" >&2
 else
   echo "[-] smoke gate T=$SECONDS"
-  echo "    注意：设备需已更新到本次 release 才有意义"
-  if ! "$DIR/smoke_gate.sh" "${SMOKE_DURATION:-60}"; then
-    echo "FATAL: smoke gate failed — release 已推送但请勿上车，先修复" >&2
+  # EXPECT_COMMIT 让门禁先确认设备真的在这次 release 上;否则它测的是上一版,
+  # 报出来的 PASS 毫无意义(这正是 2026-09-09 事故的形态)。
+  # 设备侧的更新是人工步骤,所以这里失败是预期的提示,不是构建坏了。
+  if ! EXPECT_COMMIT="$RELEASE_COMMIT" "$DIR/smoke_gate.sh" "${SMOKE_DURATION:-60}"; then
+    echo "FATAL: smoke gate failed — release 已推送但请勿上车,先修复" >&2
     exit 1
   fi
 fi

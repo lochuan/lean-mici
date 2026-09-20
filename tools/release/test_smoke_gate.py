@@ -71,6 +71,52 @@ class TestSmokeGateScript(unittest.TestCase):
     self.assertIn('"$rc" -ne 0', self.src)
     self.assertIn("grep -q", self.src)
 
+  def test_expect_commit_gates_the_device_revision(self):
+    """Without this the gate silently validates the previous release."""
+    self.assertIn("EXPECT_COMMIT", self.src)
+    self.assertIn("rev-parse HEAD", self.src)
+
+  def test_shipped_pkls_are_checked(self):
+    """A pkl is only readable by the tinygrad that wrote it, and nothing else
+    in the pipeline checks it: native_hash only guards release/prebuilt, and
+    avoidanced's YOLO pkl is plain committed source."""
+    self.assertIn("check_device_pkls.py", self.src)
+
+  def test_pkl_check_skip_is_explicit(self):
+    self.assertIn("SKIP_PKL_CHECK", self.src)
+
+
+class TestPklCheck(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    cls.src = (Path(__file__).resolve().parent / "check_device_pkls.py").read_text()
+
+  def test_covers_both_shipped_pkls(self):
+    self.assertIn("driving_tinygrad.pkl", self.src)
+    self.assertIn("yolo_tinygrad.pkl", self.src)
+
+  def test_missing_pkl_is_not_a_silent_pass(self):
+    """An empty artifact list must fail, or a wrong --root looks like a PASS."""
+    self.assertIn("checked == 0", self.src)
+
+  def test_resolves_chunked_artifacts(self):
+    self.assertIn("open_file_chunked", self.src)
+    self.assertIn("chunkmanifest", self.src)
+
+
+class TestBuildScriptGuards(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    cls.src = (Path(__file__).resolve().parent / "build_lean_release_on_orb.sh").read_text()
+
+  def test_refuses_to_build_an_unpushed_branch(self):
+    """The container resets --hard to origin, so unpushed work is not built."""
+    self.assertIn("未推送", self.src)
+    self.assertIn("refs/remotes", self.src)
+
+  def test_passes_the_release_commit_to_the_gate(self):
+    self.assertIn("EXPECT_COMMIT=", self.src)
+    self.assertIn("opilot-release-commit", self.src)
 
 if __name__ == "__main__":
   unittest.main()
