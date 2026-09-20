@@ -8,11 +8,23 @@
 
 export type Widget = "toggle" | "option" | "multiple_button" | "button" | "info";
 
+/** 在线标定摘要（/api/avoidance 透传的 extrinsicsCalibration 字段）。
+ *  avoidanced 在相机未标定时整体关掉视觉路径——地平面投影的 dRel 对 pitch
+ *  的敏感度在 40m 处是 0.5° → 41%，未标定的 pitch 会直接生成虚假偏移。
+ *  这份状态独立于 avoidanced 是否运行：lanlinkd 自己订阅标定消息。 */
+export interface CalState {
+  calStatus: string; // "uncalibrated" | "calibrated" | "recalibrating" | "unknown"
+  calPerc: number; // 0-100
+  calValid: boolean; // valid && calStatus=="calibrated" && rpyCalib 长度为 3
+  visionGated: boolean; // = !calValid，前端据此解释 nVision=0
+}
+
 export interface Rule {
   type:
     | "param"
     | "param_compare"
     | "capability"
+    | "calibrated" // 在线标定完成（extrinsicsCalibration）；数据来自 store.cal
     | "offroad_only"
     | "not_engaged"
     | "any"

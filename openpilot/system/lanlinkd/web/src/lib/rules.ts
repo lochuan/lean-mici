@@ -8,11 +8,13 @@
  * 返回 reasons 是关键：sunnylink 的做法是**置灰 + 说明原因**，不是隐藏
  * （实测 UNAVAILABLE 徽章），否则用户以为功能消失了。见 FRONTEND_SPEC.md §3。
  */
-import type { Capabilities, ParamValues, Rule } from "./schema";
+import type { CalState, Capabilities, ParamValues, Rule } from "./schema";
 
 export interface RuleContext {
   params: ParamValues;
   caps: Capabilities;
+  /** 在线标定摘要；undefined 视为状态未知（按不可用处理并说明原因） */
+  cal?: CalState;
 }
 
 export interface RuleResult {
@@ -107,6 +109,20 @@ function evalRule(rule: Rule | undefined, ctx: RuleContext): [boolean, string | 
       const v = Number(ctx.params[rule.key ?? ""]);
       const ok = !Number.isNaN(v) && compare(v, rule.op, rule.value ?? 0);
       return [ok, ok ? null : paramReason(rule.key)];
+    }
+
+    case "calibrated": {
+      // 在线标定（extrinsicsCalibration）完成与否。标定在行驶中自动收敛，
+      // 没有任何手动步骤——原因里要说清这一点，否则用户会去找不存在的标定按钮。
+      const cal = ctx.cal;
+      if (cal?.calValid) return [true, null];
+      if (!cal || cal.calStatus === "unknown") {
+        return [false, "相机在线标定状态未知——上车行驶后 openpilot 会自动开始标定"];
+      }
+      if (cal.calStatus === "recalibrating") {
+        return [false, `相机重新标定中 ${cal.calPerc}%——行驶中自动收敛，完成前不可启用`];
+      }
+      return [false, `相机在线标定进行中 ${cal.calPerc}%——继续行驶自动收敛，完成后可启用`];
     }
 
     case "any": {

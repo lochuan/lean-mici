@@ -7,6 +7,11 @@
 import type { Capabilities, Item, ParamValues, Rule } from "./schema";
 import { evalRules, requiresAdvanced, requiresOffroad, type RuleContext } from "./rules";
 
+/** param 值归一化：与 rules.ts 的 norm 同语义，这里只需要"是否为开" */
+function isOn(v: unknown): boolean {
+  return v === true || v === "1" || v === "True" || v === "true";
+}
+
 export type BadgeKind = "muted" | "warn" | "danger" | "info" | "accent";
 
 export interface Badge {
@@ -49,9 +54,18 @@ export function itemState(item: Item, ctx: RuleContext): ItemState {
 
   const en = evalRules(item.enablement, ctx);
   if (!en.ok) {
-    disabled = true;
     for (const r of en.reasons) if (!reasons.includes(r)) reasons.push(r);
-    badges.push({ text: "不可用", kind: "muted" });
+    // enablement 只挡"打开"，且只对开关（toggle）放宽：一个已经开着的开关
+    // 必须永远能关——比如避让开着时标定被支架变动触发重置，此时把开关锁死
+    // 在"不可用"里，用户连关都关不掉。非开关控件没有"关闭是安全方向"的
+    // 语义，保持完全禁用。
+    const isOpenToggle = item.widget === "toggle" && isOn(ctx.params[item.key]);
+    if (isOpenToggle) {
+      badges.push({ text: "条件未满足", kind: "warn" });
+    } else {
+      disabled = true;
+      badges.push({ text: "不可用", kind: "muted" });
+    }
   }
 
   // 下面两个是"提示"而非禁用：offroad_only 由设备在写入时裁决，

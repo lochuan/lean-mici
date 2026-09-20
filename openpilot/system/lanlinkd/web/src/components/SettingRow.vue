@@ -21,7 +21,7 @@ import type { Item } from "@/lib/schema";
 
 const props = withDefaults(defineProps<{ item: Item; depth?: number }>(), { depth: 0 });
 
-const ctx = computed(() => ({ params: store.params, caps: store.caps }));
+const ctx = computed(() => ({ params: store.params, caps: store.caps, cal: store.cal }));
 const st = computed(() => itemState(props.item, ctx.value));
 const title = computed(() => resolveTitle(props.item, store.params));
 const metric = computed(() => store.params.IsMetric === "1");

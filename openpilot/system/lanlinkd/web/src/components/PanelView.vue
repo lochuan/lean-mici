@@ -16,7 +16,7 @@ import type { Panel } from "@/lib/schema";
 
 const props = defineProps<{ panel: Panel }>();
 
-const ctx = computed(() => ({ params: store.params, caps: store.caps }));
+const ctx = computed(() => ({ params: store.params, caps: store.caps, cal: store.cal }));
 
 const brandSettings = computed(() => {
   const brand = String(store.caps.brand ?? "");

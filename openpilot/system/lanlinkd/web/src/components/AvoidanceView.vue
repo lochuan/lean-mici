@@ -12,7 +12,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "@/lib/api";
-import type { AvoidanceSnapshot, CalibrationStatus } from "@/lib/schema";
+import type { AvoidanceSnapshot } from "@/lib/schema";
 import {
   CLS_FILL,
   CLS_LABEL,
@@ -32,7 +32,7 @@ import {
   type RadarViewBox,
 } from "@/lib/radar";
 import Badge from "./ui/Badge.vue";
-import { cn } from "@/lib/utils";
+
 
 const AVOID_POLL_MS = 500;
 // 连续失败这么多次才判无数据——单次网络抖动不该闪徽章
@@ -191,61 +191,6 @@ const bsmLeft = computed(() => Boolean(planner.value?.bsmLeft));
 const bsmRight = computed(() => Boolean(planner.value?.bsmRight));
 
 const sideLabel = computed(() => obstacleSide(av.value?.direction));
-
-// ---- 在线标定会话（收集 avoidanceDebug 配对目标，停止时拟合投影常数）----
-
-const calib = ref<CalibrationStatus | null>(null);
-let calibTimer: ReturnType<typeof setInterval> | undefined;
-
-async function pollCalib(): Promise<void> {
-  try {
-    calib.value = await api.calibrationStatus();
-  } catch {
-    // 端点不可用（旧后端）时静默——按钮功能随之不可用
-  }
-}
-
-async function toggleCalibration(): Promise<void> {
-  try {
-    calib.value = calib.value?.running
-      ? await api.calibrationStop()
-      : await api.calibrationStart();
-  } catch {
-    // 409 等：忽略，下一轮轮询会校正状态
-  }
-}
-
-onMounted(() => {
-  void pollCalib();
-  calibTimer = setInterval(() => void pollCalib(), 1000);
-});
-onUnmounted(() => {
-  if (calibTimer) clearInterval(calibTimer);
-});
-
-const calibRunning = computed(() => Boolean(calib.value?.running));
-const calibResult = computed(() => calib.value?.last_result ?? null);
-const calibError = computed(() => calib.value?.last_error ?? null);
-
-// 分档残差。后端的 pass 为 null 表示该档没有配对 —— 必须显示成「无数据」而不是
-// 通过，否则一份全部落在 40m 以外的数据会让每一档都显示绿色。
-const BAND_LABELS: Record<string, string> = {
-  le10m: "≤ 10m",
-  "10to25m": "10–25m",
-  "25to40m": "25–40m",
-};
-
-const calibBands = computed(() =>
-  Object.entries(calibResult.value?.bands ?? {}).map(([key, b]) => ({
-    key,
-    label: BAND_LABELS[key] ?? key,
-    n: b.n,
-    p95: b.p95_m,
-    bearing: b.bearing_p95_deg,
-    verdict: b.pass === null ? "无数据" : b.pass ? "达标" : "未达标",
-    kind: b.pass === null ? ("muted" as const) : b.pass ? ("accent" as const) : ("warn" as const),
-  })),
-);
 
 const tickY = (d: number) => rangeY(d, VB);
 const gridX = (y: number) => lateralX(y, VB);
@@ -424,77 +369,12 @@ const gridX = (y: number) => lateralX(y, VB);
       {{ visionGatedWhy }}
     </div>
 
-    <!-- 在线标定会话（始终可见：avoidanced 未运行时给出开启提示） -->
-    <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px]">
-      <button
-        type="button"
-        :class="cn(
-          'rounded-md px-3 py-1 text-[12px] font-semibold transition-colors',
-          calibRunning
-            ? 'bg-sl-warn/15 text-sl-warn hover:bg-sl-warn/25'
-            : 'bg-sl-accent/15 text-sl-accent hover:bg-sl-accent/25',
-        )"
-        @click="toggleCalibration"
-      >
-        {{ calibRunning ? "停止标定" : "开始标定" }}
-      </button>
-      <Badge v-if="calibRunning" kind="info">标定中 {{ calib?.n_pairs ?? 0 }} 对</Badge>
-      <span v-if="avStale" class="text-sl-text-3">
-        avoidanced 未运行——先到 设置 → 转向 → 横向避让 开启后才有配对数据
-      </span>
+    <!-- 标定/启用入口已移到 设置 → 转向 → 横向避让:未完成在线标定时开关
+         在那里置灰,进度与原因同屏可见,不再两头找 -->
+    <div v-if="avStale" class="mt-2 text-[12px] leading-relaxed text-sl-text-3">
+      avoidanced 未运行——先在 设置 → 转向 → 横向避让 完成相机在线标定并开启
+      避让（行驶中自动收敛，无需手动操作），这里才有配对数据。
+      标定进度与安装偏移精修也都在那一栏。
     </div>
-
-    <!-- 标定结果 / 错误 -->
-    <div v-if="calibError" class="mt-2 rounded-md bg-sl-warn/10 px-3 py-2 text-[12px] text-sl-warn">
-      {{ calibError }}
-    </div>
-    <details v-else-if="calibResult" class="mt-2 rounded-md bg-sl-surface-2 px-3 py-2 text-[12px]">
-      <summary class="cursor-pointer select-none text-sl-text-2">
-        <Badge :kind="calibResult.pass ? 'accent' : 'warn'">
-          {{ calibResult.pass ? "标定达标" : "未达标" }}
-        </Badge>
-        {{ calibResult.n_pairs }} 对 · 残差 p95
-        {{ calibResult.residual_p95_before_m.toFixed(3) }} →
-        {{ calibResult.residual_p95_after_m.toFixed(3) }} m
-        <span v-if="calibResult.insufficient" class="text-sl-warn">
-          （配对 &lt; 30，结果仅供参考）
-        </span>
-      </summary>
-      <div class="mt-2 grid gap-1 text-sl-text-3 md:grid-cols-3">
-        <span>Δfront {{ calibResult.d_front_m.toFixed(3) }} m</span>
-        <span>侧向偏置 {{ calibResult.lateral_bias_m.toFixed(3) }} m</span>
-      </div>
-      <p class="mt-1 text-[11px] text-sl-text-3">
-        pitch / yaw 已由 openpilot 的在线标定持续维护，不再手工拟合；这里只标
-        CAMERA_TO_FRONT（在线标定不提供的纵向安装偏移）。侧向偏置是诊断项——它
-        持续不为零说明相机横向装偏了，应该动硬件而不是改常数。
-      </p>
-      <div v-if="calibBands.length" class="mt-2">
-        <div class="text-sl-text-2">分档残差（25m 以上只看方位角）</div>
-        <div
-          v-for="b in calibBands"
-          :key="b.key"
-          class="mt-1 flex items-center gap-2 text-sl-text-3"
-        >
-          <span class="w-20">{{ b.label }}</span>
-          <Badge :kind="b.kind">{{ b.verdict }}</Badge>
-          <span v-if="b.n">
-            {{ b.n }} 对 ·
-            <template v-if="b.p95 !== undefined">p95 {{ b.p95.toFixed(2) }} m · </template>
-            方位 {{ b.bearing?.toFixed(2) ?? "—" }}°
-          </span>
-        </div>
-        <p class="mt-1 text-[11px] text-sl-text-3">
-          单一全局阈值在 10m 以外物理不可达（40m 处 0.30m 残差需要 0.013° 的
-          pitch 精度，而车辆俯仰变化就有 1° 量级），所以按距离分档。无数据的档
-          不计入通过。
-        </p>
-      </div>
-      <div v-for="w in calibResult.warnings" :key="w" class="mt-1 text-sl-warn">{{ w }}</div>
-      <pre class="mt-2 overflow-x-auto rounded bg-sl-bg p-2 font-mono text-[11px] leading-relaxed text-sl-text-2">{{ calibResult.constants_block }}</pre>
-      <p class="mt-1 text-[11px] text-sl-text-3">
-        粘贴到 constants.py 后重编再跑一轮（增量语义，1-2 轮收敛）。
-      </p>
-    </details>
   </section>
 </template>
