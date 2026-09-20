@@ -25,7 +25,13 @@ import numpy as np
 INPUT_H, INPUT_W = 384, 640
 DEFAULT_CONF_THRESHOLD = 0.15
 DEFAULT_IOU_THRESHOLD = 0.45
-DEFAULT_FPS = 3.0
+# Capped by the avoidanced loop itself (Ratekeeper(5.0)), so 5Hz is the ceiling
+# without also raising the daemon rate. Affordable since the IR3/IMAGE pkl runs
+# in 68ms on an idle GPU (85ms end-to-end incl. preprocess + NMS), i.e. ~34% GPU
+# duty at 5Hz. NOT yet validated against modeld at 20Hz on a moving car: in a
+# two-consumer GPU contention test each side went 70.9ms -> 105ms, so collisions
+# cost ~50%. Re-check onroad before raising the daemon rate.
+DEFAULT_FPS = 5.0
 
 # BDD8 class id -> name. The whole output head is emitted; everything maps to a
 # planner weight (VRU vs vehicle) in avoidance_planner.
