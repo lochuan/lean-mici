@@ -1,9 +1,7 @@
 import pytest
-from openpilot.selfdrive.avoidanced.ranging import (bearing_from_pixel, is_truncated,
-                                                    range_from_box_height)
+from openpilot.selfdrive.avoidanced.ranging import is_truncated, range_from_box_height
 
-FX = FY = 425.25
-CX = 672.0
+FY = 425.25
 
 
 def test_box_height_range_is_the_pinhole_relation():
@@ -23,17 +21,11 @@ def test_box_height_range_rejects_degenerate_input():
   assert range_from_box_height(10.0, FY, "unknown_class") is None
 
 
-def test_bearing_is_zero_on_the_optical_axis():
-  assert bearing_from_pixel(CX, CX, FX, yaw=0.0) == pytest.approx(0.0)
-
-
-def test_bearing_is_positive_to_the_image_right():
-  assert bearing_from_pixel(CX + 100, CX, FX, yaw=0.0) > 0.0
-
-
-def test_bearing_subtracts_camera_yaw():
-  raw = bearing_from_pixel(CX + 100, CX, FX, yaw=0.0)
-  assert bearing_from_pixel(CX + 100, CX, FX, yaw=0.05) == pytest.approx(raw - 0.05)
+# bearing_from_pixel(像素列方位角,绕相机光心)已删除:它与雷达侧的保险杠原点
+# 方位角差一个视差角,混用曾同时污染匹配和未匹配检测的 yRel(见
+# test_association.py 的视差回归测试)。方位角现在一律由投影后的车体坐标
+# atan2(-yRel, dRel) 推出,钉在 test_projection.py 的
+# test_projected_bearing_is_the_bumper_origin_bearing。
 
 
 def test_truncated_box_is_rejected():

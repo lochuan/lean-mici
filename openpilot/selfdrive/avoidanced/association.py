@@ -42,8 +42,14 @@ def _box_height_range_bumper(h_px: float, fy: float, cls) -> float | None:
 
 
 def _vision_bearing(obj) -> float:
-  """视觉侧方位角:投影 dict 自带 ``bearing``;对象侧(shadow 的 VisionObject)
-  从它自己的车体坐标推出 —— bearing 向图像右为正而 y 向左为正,故取 ``atan2(-y, x)``。"""
+  """视觉侧方位角(**保险杠原点**,与 ``_radar_bearing`` 同一参照)。
+
+  两条路径必须给出同一个原点的角:投影 dict 的 ``bearing`` 由
+  ``projection.project_detections`` 从投影后的车体坐标算出(atan2(-yRel, dRel),
+  保险杠系);对象侧(shadow 的 VisionObject)的 x/y 本就是保险杠系坐标,直接
+  ``atan2(-y, x)`` —— bearing 向图像右为正而 y 向左为正,故取负号。不要引入
+  像素列方位角(绕相机光心):相机在保险杠后方 CAMERA_TO_FRONT 处,混用两个
+  原点会缩小未匹配检测的 yRel 并给匹配注入假 Δbearing。"""
   if isinstance(obj, dict):
     return float(obj["bearing"])
   return math.atan2(-float(obj.y), float(obj.x))
@@ -118,8 +124,9 @@ def associate(radar_points: Iterable, detections: Iterable, fy: float,
 
   ``fused`` 只含**未匹配**的视觉目标 —— 雷达漏检的那些, 典型是 VRU。它们的距离
   来自框高测距(不依赖 pitch, 经 ``_box_height_range_bumper`` 换算到保险杠系,
-  与雷达 dRel 同参照), 横向由方位角推出。无法定距的直接丢弃, 因为一个没有
-  距离的目标进不了 planner 的 gate。
+  与雷达 dRel 同参照), 横向由**保险杠原点**方位角推出(与雷达侧同参照, 见
+  ``_vision_bearing``)。无法定距的直接丢弃, 因为一个没有距离的目标进不了
+  planner 的 gate。
   """
   detections = list(detections)
   matches, matched = nearest_pairs_by_bearing(radar_points, detections, fy, max_dbearing, max_drange)

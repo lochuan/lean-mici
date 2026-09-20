@@ -302,6 +302,25 @@ def test_project_detections_emits_bearing_and_source():
   assert out[0]["dRelSource"] == "ground"
 
 
+def test_projected_bearing_is_the_bumper_origin_bearing():
+  """投影 dict 的 bearing 必须是**保险杠原点**方位角 atan2(-yRel, dRel),与
+  association._radar_bearing 同一参照。像素列方位角绕的是相机光心 —— 相机在
+  保险杠后方 CAMERA_TO_FRONT 处,两个原点差一个视差角(横向偏移越大/距离越近
+  差得越多),混用会同时污染匹配和未匹配检测的 yRel 反推。"""
+  # 保险杠系 (5.0, 1.5) 的点在相机系位于 5.0 + CAMERA_TO_FRONT 处。
+  u_full, v_full = _forward_project(5.0 + C.CAMERA_TO_FRONT, 1.5, C.CAMERA_HEIGHT, 0.0)
+  out = project_detections([{"x1": u_full - 10.0, "y1": v_full - 40.0,
+                             "x2": u_full + 10.0, "y2": v_full, "cls": "person", "conf": 0.9}],
+                           fx=FX, fy=FY, cx=CX, cy=CY, height=C.CAMERA_HEIGHT,
+                           pitch=0.0, yaw=0.0, roll=0.0, camera_to_front=C.CAMERA_TO_FRONT,
+                           roi_meta=None, frame_height=H)
+  assert len(out) == 1
+  assert out[0]["dRel"] == pytest.approx(5.0, abs=0.01)
+  assert out[0]["yRel"] == pytest.approx(1.5, abs=0.01)
+  # 保险杠原点 5m/1.5m -> atan2(-1.5, 5.0) = -0.2915;相机原点(像素列)给 -0.227。
+  assert out[0]["bearing"] == pytest.approx(math.atan2(-1.5, 5.0), abs=1e-6)
+
+
 def test_project_detections_drops_truncated_boxes():
   dets = [{"x1": 600.0, "y1": 600.0, "x2": 700.0, "y2": H, "cls": "person", "conf": 0.9}]
   out = project_detections(dets, fx=FX, fy=FY, cx=CX, cy=CY, height=C.CAMERA_HEIGHT,

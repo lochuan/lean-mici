@@ -22,7 +22,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.avoidanced.constants import (D_GATE, D_MAX, DT_5HZ, EDGE_CLEAR_MIN, ENTER_HOLD_S, EXIT_HOLD_S,
                                                       K_GAIN, L_LOOKAHEAD, LOWPASS_TAU_S, MAX_OFFSET_BSM,
                                                       MAX_OFFSET_FREE, OWN_LANE_HALF_WIDTH, STATIC_SPEED_THRESH,
-                                                      VEHICLE_WEIGHT, V_EGO_MAX, V_EGO_MIN, VRU_CLASSES, VRU_WEIGHT,
+                                                      V_EGO_MAX, V_EGO_MIN, class_weight,
                                                       Y_GATE)
 
 
@@ -146,7 +146,7 @@ def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] 
     if (ground_speed is None or ground_speed < STATIC_SPEED_THRESH) and key not in confirmed:
       continue
     cls = cls_by_key.get(key)
-    weight = VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT
+    weight = class_weight(cls)
     targets.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=weight, conf=1.0))
   for det in detections or []:
     try:
@@ -155,7 +155,7 @@ def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] 
       continue
     if not _in_gate(dRel, yRel):
       continue
-    weight = VRU_WEIGHT if det.get("cls") in VRU_CLASSES else VEHICLE_WEIGHT
+    weight = class_weight(det.get("cls"))
     targets.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=weight,
                           conf=float(det.get("conf", 1.0))))
   return targets
