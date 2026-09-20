@@ -9,6 +9,13 @@ radarUnavailable，来自 radarTracks.errors，随 debug 透传），所以前�
 
 staleness 用本地接收时刻（time.monotonic）判断：
 avoidanceDebug 是 5Hz，STALE_AFTER_MS 取 1s（5 帧没新数据即视为停更）。
+
+标定状态单独订阅 extrinsicsCalibration 透传：avoidanced 在相机未标定时整体
+关掉视觉路径（地平面投影的 dRel 对 pitch 的敏感度在 40m 处是 0.5° → 41%，
+未标定的 pitch 会直接生成虚假偏移），前端否则只会看到 nVision 恒为 0 而没有
+任何解释。AvoidanceDebug 的 capnp 结构里没有降级原因字段，而 openpilot/cereal
+在 release_lib 的 NATIVE_INPUT_PATHS 里 —— 加一个字段就要设备全量重建 30-60
+分钟。lanlinkd 自己订阅是等价且免费的。
 """
 import threading
 import time
@@ -34,20 +41,45 @@ def _target(t) -> dict:
   }
 
 
+def _calibration(msg, valid: bool) -> dict:
+  """extrinsicsCalibration -> 前端要的标定摘要。
+
+  ``visionGated`` 是给前端解释 ``nVision == 0`` 用的：avoidanced 只在标定
+  有效时才跑视觉路径，判定与 projection.geometry_from_calibration 一致
+  （必须 valid、calStatus == "calibrated"、且 rpyCalib 长度为 3 —— 一个
+  空的 rpyCalib 配 "calibrated" 不能当成零角度）。
+  """
+  status = str(getattr(msg, "calStatus", "unknown"))
+  rpy = list(getattr(msg, "rpyCalib", []) or [])
+  cal_valid = bool(valid) and status == "calibrated" and len(rpy) == 3
+  return {
+    "calStatus": status,
+    "calPerc": int(getattr(msg, "calPerc", 0) or 0),
+    "calValid": cal_valid,
+    "visionGated": not cal_valid,
+  }
+
+
 class AvoidanceCache:
   def __init__(self):
     self._lock = threading.Lock()
     self._snapshot: dict = {"stale": True}
     self._recv_ms: float = 0.0
+    # 标定状态与 avoidanceDebug 分开缓存：两者频率不同（100Hz vs 5Hz），
+    # 且标定即使停更也仍然是有效信息，不该被 debug 的 staleness 抹掉。
+    self._cal: dict = {"calStatus": "unknown", "calPerc": 0, "calValid": False, "visionGated": True}
 
   def run(self, exit_event: threading.Event) -> None:
     try:
-      sm = messaging.SubMaster(['avoidanceDebug'])
+      sm = messaging.SubMaster(['avoidanceDebug', 'extrinsicsCalibration'])
     except Exception:
       cloudlog.exception("lanlink avoidanced: SubMaster init failed")
       return
     while not exit_event.is_set():
       sm.update(1000)
+      if sm.updated['extrinsicsCalibration']:
+        with self._lock:
+          self._cal = _calibration(sm['extrinsicsCalibration'], sm.valid['extrinsicsCalibration'])
       if not sm.updated['avoidanceDebug']:
         continue
       dbg = sm['avoidanceDebug']
@@ -83,6 +115,10 @@ class AvoidanceCache:
     with self._lock:
       snap = dict(self._snapshot)
       recv_ms = self._recv_ms
+      cal = dict(self._cal)
     if not snap.get("stale") and (time.monotonic() * 1000.0 - recv_ms) > STALE_AFTER_MS:
-      return {"stale": True}
+      snap = {"stale": True}
+    # 标定状态即使 debug 停更也要带上：前端用它区分「避让没在跑」和
+    # 「避让在跑但视觉被标定门关掉了」。
+    snap.update(cal)
     return snap

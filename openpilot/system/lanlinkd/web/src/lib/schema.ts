@@ -179,21 +179,47 @@ export interface AvoidanceSnapshot {
   canError?: boolean; // radarTracks.errors.canError（随 debug 透传）
   radarUnavailable?: boolean; // radarTracks.errors.radarUnavailableTemporary
   targets?: AvoidanceTarget[];
+
+  // 标定状态：lanlinkd 自己订阅 extrinsicsCalibration 透传。avoidanced 在
+  // 相机未标定时整体关掉视觉路径，否则前端只会看到 nVision 恒为 0 而无从解释。
+  // AvoidanceDebug 的 capnp 结构里没有降级原因字段，而加字段要设备全量重建。
+  calStatus?: string; // "uncalibrated" | "calibrated" | "recalibrating" | "unknown"
+  calPerc?: number; // 标定进度 0-100
+  calValid?: boolean; // 消息 valid 且 calStatus=="calibrated" 且 rpyCalib 长度为 3
+  visionGated?: boolean; // 视觉路径是否被标定门关掉（= !calValid）
 }
 
 /** /api/calibration/status：在线标定会话状态（CalibrationController）。
  *  last_result 是 fit_calibrated_offsets 的输出 + constants_block（可直接
- *  粘贴进 constants.py 的建议值）；insufficient = 配对数低于推荐下限 30。 */
+ *  粘贴进 constants.py 的建议值）；insufficient = 配对数低于推荐下限 30。
+ *
+ *  pitch/yaw 已不再由这里拟合：投影改用 openpilot 的 extrinsicsCalibration
+ *  实时 rpy，CAMERA_PITCH/CAMERA_YAW 常数不再被读取，手工拟合它们只会给出
+ *  不起作用的数字。剩下 CAMERA_TO_FRONT（纵向安装偏移）是在线标定不提供、
+ *  因而仍需手工标的唯一量。
+ *
+ *  通过判据改为按距离分档：单一全局 0.30m 阈值在 10m 以外物理不可达（地平面
+ *  投影的 dRel 对 pitch 的敏感度使 40m 处需要 0.013° 精度，而车辆俯仰变化
+ *  就有 1° 量级）。25m 以上只考核方位角残差 —— 那是单目真正测得准的量。 */
+export interface CalibrationBand {
+  n: number;
+  p95_m?: number;
+  bearing_p95_deg?: number;
+  pass: boolean | null; // null = 该档无数据，不能算通过
+}
+
 export interface CalibrationResult {
   n_pairs: number;
   v_ego_min?: number;
   v_ego_max?: number;
   d_front_m: number;
-  d_pitch_rad: number;
-  d_yaw_rad: number;
   lateral_bias_m: number;
+  forward_p95_before_m?: number;
+  forward_p95_after_m?: number;
+  lateral_p95_m?: number;
   residual_p95_before_m: number;
-  residual_p95_after_m: number;
+  residual_p95_after_m: number; // = max(forward_after, lateral)
+  bands?: Record<string, CalibrationBand>;
   warnings?: string[];
   pass: boolean;
   insufficient?: boolean;
