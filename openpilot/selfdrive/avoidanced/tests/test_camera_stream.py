@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from openpilot.cereal.visionipc import VisionStreamType
 
 from openpilot.selfdrive.avoidanced import camera_stream as cs
 from openpilot.selfdrive.avoidanced import constants as C
@@ -98,3 +99,34 @@ def test_camera_stream_connect_throttles_retries():
   now[0] = 101.5
   stream.connect()
   assert stream.last_connect_t == 101.5       # window elapsed: tried again
+
+
+# --- connect() success path: intrinsics + frame_size together ---------------------
+
+class _FakeIpcClient:
+  """Stands in for VisionIpcClient so connect() runs its real success path."""
+
+  streams = [VisionStreamType.VISION_STREAM_WIDE_ROAD]
+
+  def __init__(self, name, stream, conflate):
+    self.width, self.height = 1344, 760
+
+  def connect(self, block):
+    return True
+
+  def is_connected(self):
+    return True
+
+  @classmethod
+  def available_streams(cls, name, block=False):
+    return cls.streams
+
+
+def test_camera_stream_connect_sets_frame_size_and_intrinsics(monkeypatch):
+  # frame_height for truncated-box rejection comes from this attribute; if
+  # connect() stops setting it the daemon silently loses the rejection.
+  monkeypatch.setattr(cs, "VisionIpcClient", _FakeIpcClient)
+  stream = CameraStream(clock=lambda: 100.0)
+  assert stream.connect() is True
+  assert stream.frame_size == (1344, 760)
+  assert stream.intrinsics == cs.scaled_intrinsics(1344, 760)
