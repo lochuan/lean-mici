@@ -41,9 +41,15 @@ class _FakeParams:
 
 
 class _FakeSubMaster:
-  def __init__(self, model_v2, car_state, radar, valid=None):
-    self._data = {"modelV2": model_v2, "carState": car_state, "radarTracks": radar}
+  def __init__(self, model_v2, car_state, radar, valid=None,
+               cal_status="calibrated", rpy=(0.0, 0.0, 0.0)):
+    # Default calibration message is calibrated with zero rpy: identical to the
+    # pre-calibration mount constants (C.CAMERA_PITCH / C.CAMERA_YAW are 0.0),
+    # so existing tests keep their exact expected projections.
+    self._data = {"modelV2": model_v2, "carState": car_state, "radarTracks": radar,
+                  "extrinsicsCalibration": _NS(calStatus=cal_status, rpyCalib=list(rpy))}
     self.valid = valid if valid is not None else dict.fromkeys(self._data, True)
+    self.valid.setdefault("extrinsicsCalibration", True)
 
   def update(self, timeout=0):
     pass
@@ -59,7 +65,7 @@ class _FakeCamera:
     self._frames = list(frames)
     self.intrinsics = (FX, FY, CX, CY)
 
-  def frame(self):
+  def frame(self, horizon_row=None):
     return self._frames.pop(0) if self._frames else None
 
 
@@ -179,7 +185,7 @@ def test_daemon_degrades_to_radar_only_without_camera():
   class _DeadCamera:
     intrinsics = None
 
-    def frame(self):
+    def frame(self, horizon_row=None):
       return None
 
   daemon, pm = _daemon(camera=_DeadCamera(), radar_points=[(8.0, -1.0)])
@@ -245,3 +251,13 @@ def test_daemon_gates_valid_on_modelv2_validity():
   daemon.update(C.ENTER_HOLD_S + 0.01)
   assert len(pm.sent) == 4                    # every-frame publish invariant holds (debug+plan)
   assert pm.sent[-1][1].valid is False        # controlsd falls back to its own modelV2
+
+
+def test_vision_is_gated_off_when_uncalibrated():
+  """未标定时不得产生任何视觉目标,雷达路径不受影响。"""
+  daemon, pm = _daemon()           # 沿用本文件现有 helper
+  daemon.sm.valid["extrinsicsCalibration"] = True
+  daemon.sm["extrinsicsCalibration"].calStatus = "uncalibrated"
+  dets = daemon._detect(0.0)
+  assert dets == []
+  assert daemon.degraded == {"calibration"}

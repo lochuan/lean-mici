@@ -208,3 +208,60 @@ def test_geometry_closes_the_loop_in_both_roi_modes():
       assert pt is not None
       assert abs(pt["dRel"] - d) < 0.01, f"{mode} d={d}"
       assert abs(pt["yRel"] - y) < 0.01, f"{mode} y={y}"
+
+
+# --- live extrinsics calibration (task 2 brief) ---------------------------------
+
+from openpilot.selfdrive.avoidanced.projection import (CalibratedGeometry,
+                                                       geometry_from_calibration,
+                                                       horizon_row_for)
+
+
+class _FakeCal:
+  def __init__(self, status, rpy):
+    self.calStatus = status
+    self.rpyCalib = rpy
+
+
+def test_uncalibrated_geometry_is_invalid():
+  g = geometry_from_calibration(_FakeCal("uncalibrated", []), valid=True)
+  assert not g.valid
+
+
+def test_calibrated_geometry_carries_rpy():
+  g = geometry_from_calibration(_FakeCal("calibrated", [0.01, 0.02, 0.03]), valid=True)
+  assert g.valid
+  assert (g.roll, g.pitch, g.yaw) == (0.01, 0.02, 0.03)
+
+
+def test_stale_message_is_invalid_even_if_calibrated():
+  g = geometry_from_calibration(_FakeCal("calibrated", [0.0, 0.0, 0.0]), valid=False)
+  assert not g.valid
+
+
+def test_short_rpy_is_invalid():
+  g = geometry_from_calibration(_FakeCal("calibrated", [0.0, 0.0]), valid=True)
+  assert not g.valid
+
+
+def test_horizon_row_tracks_pitch():
+  flat = horizon_row_for(CY, FY, CalibratedGeometry(True, 0.0, 0.0, 0.0))
+  assert flat == CY
+  nose_down = horizon_row_for(CY, FY, CalibratedGeometry(True, 0.0, 0.01, 0.0))
+  assert nose_down > CY          # 车头下俯 -> 地平线在图像中更低
+  invalid = horizon_row_for(CY, FY, CalibratedGeometry(False, 0.0, 0.5, 0.0))
+  assert invalid == CY           # 未标定时忽略 pitch
+
+
+def test_projection_closes_the_loop_with_live_pitch():
+  pitch = 0.012
+  meta = roi_meta_for(W, H, mode=C.ROI_MODE_NATIVE,
+                      horizon_row=horizon_row_for(CY, FY, CalibratedGeometry(True, 0.0, pitch, 0.0)))
+  for d, y in [(15.0, 1.0), (35.0, -1.5)]:
+    u_full, v_full = _forward_project(d, y, C.CAMERA_HEIGHT, pitch)
+    pt = project_box_to_vehicle(u=u_full, v=v_full, fx=FX, fy=FY, cx=CX, cy=CY,
+                                height=C.CAMERA_HEIGHT, pitch=pitch, yaw=0.0,
+                                roll=0.0, camera_to_front=0.0)
+    assert pt is not None
+    assert abs(pt["dRel"] - d) < 0.01 and abs(pt["yRel"] - y) < 0.01
+  assert meta.offset_v > CY - C.ROI_HORIZON_MARGIN   # ROI 跟着地平线下移

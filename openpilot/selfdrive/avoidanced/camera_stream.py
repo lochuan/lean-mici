@@ -101,11 +101,15 @@ class CameraStream:
     self.intrinsics = scaled_intrinsics(client.width, client.height)
     return True
 
-  def frame(self) -> tuple[np.ndarray, RoiMeta] | None:
-    """Latest ROI frame ``(roi uint8 (384, 640, 3), RoiMeta)``, or ``None``."""
+  def frame(self, horizon_row: float | None = None) -> tuple[np.ndarray, RoiMeta] | None:
+    """Latest ROI frame ``(roi uint8 (384, 640, 3), RoiMeta)``, or ``None``.
+
+    ``horizon_row`` positions the NATIVE ROI window on the calibrated horizon;
+    ``None`` keeps the historical frame-centre fallback.
+    """
     if not self.connect() or self._client is None:
       return None
     buf = self._client.recv(0)
     if buf is None:
       return None
-    return roi_from_rgb(extract_image(buf))
+    return roi_from_rgb(extract_image(buf), horizon_row=horizon_row)

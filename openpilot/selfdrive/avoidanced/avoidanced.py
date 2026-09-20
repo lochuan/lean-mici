@@ -35,7 +35,7 @@ from openpilot.selfdrive.avoidanced import constants as C
 from openpilot.selfdrive.avoidanced.association import associate
 from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets
 from openpilot.selfdrive.avoidanced.camera_stream import CameraStream
-from openpilot.selfdrive.avoidanced.projection import project_detections
+from openpilot.selfdrive.avoidanced.projection import geometry_from_calibration, horizon_row_for, project_detections
 from openpilot.selfdrive.avoidanced.yolo_detector import YoloDetector
 
 PARAMS_REFRESH_PERIOD = 1.0  # s
@@ -46,7 +46,8 @@ class AvoidanceDaemon:
   def __init__(self, sm=None, pm=None, params=None, planner=None, camera=None, detector=None,
                camera_factory=CameraStream):
     self.params = params if params is not None else Params()
-    self.sm = sm if sm is not None else messaging.SubMaster(['modelV2', 'carState', 'radarTracks'])
+    self.sm = sm if sm is not None else messaging.SubMaster(
+      ['modelV2', 'carState', 'radarTracks', 'extrinsicsCalibration'])
     self.pm = pm if pm is not None else messaging.PubMaster(['lateralManeuverPlan', 'avoidanceDebug'])
     self.planner = planner if planner is not None else AvoidancePlanner()
     self.camera = camera                  # lazy: created via camera_factory on first use
@@ -78,9 +79,21 @@ class AvoidanceDaemon:
 
   def _detect(self, now: float) -> list[dict]:
     """Camera -> YOLO -> car-frame projections; ``[]`` keeps the frame radar-only."""
+    geom = geometry_from_calibration(self.sm['extrinsicsCalibration'],
+                                     self.sm.valid['extrinsicsCalibration'])
+    if not geom.valid:
+      # 0.5deg pitch error = 41% distance error at 40m. Running the vision path
+      # on an uncalibrated camera is exactly how spurious biases get produced,
+      # so fall back to radar-only until openpilot's calibration converges.
+      self._degrade("calibration")
+      return []
     if self.camera is None:
       self.camera = self.camera_factory()
-    frame = self.camera.frame()
+    # Intrinsics are only known after the first successful connect; until then
+    # the ROI falls back to the frame centre (horizon_row=None).
+    intrinsics = self.camera.intrinsics
+    horizon_row = horizon_row_for(intrinsics[3], intrinsics[1], geom) if intrinsics is not None else None
+    frame = self.camera.frame(horizon_row=horizon_row)
     if frame is None:
       # No camerad stream (PC) or no fresh frame this tick; connect keeps
       # retrying inside CameraStream, the reason is only logged once.
@@ -102,7 +115,8 @@ class AvoidanceDaemon:
       return []
     fx, fy, cx, cy = self.camera.intrinsics
     return project_detections(detections, fx=fx, fy=fy, cx=cx, cy=cy,
-                              height=C.CAMERA_HEIGHT, pitch=C.CAMERA_PITCH, yaw=C.CAMERA_YAW,
+                              height=C.CAMERA_HEIGHT, pitch=geom.pitch,
+                              yaw=geom.yaw, roll=geom.roll,
                               camera_to_front=C.CAMERA_TO_FRONT, roi_meta=roi_meta)
 
   def update(self, now: float) -> None:

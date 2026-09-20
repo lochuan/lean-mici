@@ -66,19 +66,60 @@ def roi_to_full(u: float, v: float, meta: RoiMeta) -> tuple[float, float]:
   return u * meta.scale_u + meta.offset_u, v * meta.scale_v + meta.offset_v
 
 
+@dataclass(frozen=True)
+class CalibratedGeometry:
+  """openpilot 的 device->road 外参,来自 ``extrinsicsCalibration``。
+
+  ``valid=False`` 意味着视觉路径必须整体关掉:地平面投影的 dRel 对 pitch 的
+  敏感度在 40m 处是 0.5deg -> 41%,用未标定的 pitch 会直接生成虚假的大幅偏移。
+  """
+
+  valid: bool
+  roll: float
+  pitch: float
+  yaw: float
+
+
+UNCALIBRATED = CalibratedGeometry(False, 0.0, 0.0, 0.0)
+
+
+def geometry_from_calibration(msg, valid: bool) -> CalibratedGeometry:
+  """``extrinsicsCalibration`` -> CalibratedGeometry. 任何疑点都判为无效。"""
+  if not valid or str(getattr(msg, "calStatus", "")) != "calibrated":
+    return UNCALIBRATED
+  rpy = list(getattr(msg, "rpyCalib", []) or [])
+  if len(rpy) != 3:
+    return UNCALIBRATED
+  return CalibratedGeometry(True, float(rpy[0]), float(rpy[1]), float(rpy[2]))
+
+
+def horizon_row_for(cy: float, fy: float, geom: CalibratedGeometry) -> float:
+  """标定 pitch 下地平线所在的全帧行。未标定时退回光心行。"""
+  if not geom.valid:
+    return cy
+  return cy + fy * math.tan(geom.pitch)
+
+
 def project_box_to_vehicle(u: float, v: float, fx: float, fy: float, cx: float, cy: float,
                            height: float, pitch: float, yaw: float = CAMERA_YAW,
-                           camera_to_front: float = 0.0) -> dict | None:
+                           roll: float = 0.0, camera_to_front: float = 0.0) -> dict | None:
   """Box bottom-centre pixel -> car-frame ground point, ``None`` if the ray never hits the ground.
 
   ``pitch`` is positive with the camera tilted down, ``yaw`` positive looking
   left; both are mount constants (initially 0, refined by P0 calibration).
+  ``roll`` undoes camera roll about the optical axis (from live calibration).
   ``camera_to_front`` shifts the origin from the windshield camera back to the
   radar's front-bumper origin (subtracted, see module docstring); callers that
   want radar-aligned ``dRel`` pass ``CAMERA_TO_FRONT``.
   """
   x_n = (u - cx) / fx
   y_n = (v - cy) / fy
+  # Undo camera roll about the optical axis before building the ray: roll mixes
+  # horizontal displacement into the vertical component, which the ground-plane
+  # intersection would otherwise read as a distance error.
+  if roll:
+    cr, sr = math.cos(roll), math.sin(roll)
+    x_n, y_n = x_n * cr + y_n * sr, -x_n * sr + y_n * cr
   # Ray in the level vehicle frame (x forward, y left, z up); camera pitched
   # down by ``pitch``: forward axis (cos p, 0, -sin p), right axis (0, -1, 0).
   cos_p, sin_p = math.cos(pitch), math.sin(pitch)
@@ -98,7 +139,7 @@ def project_box_to_vehicle(u: float, v: float, fx: float, fy: float, cx: float, 
 
 def project_detections(dets: Iterable[dict] | None, fx: float, fy: float, cx: float, cy: float,
                        height: float, pitch: float = CAMERA_PITCH, yaw: float = CAMERA_YAW,
-                       camera_to_front: float = CAMERA_TO_FRONT,
+                       roll: float = 0.0, camera_to_front: float = CAMERA_TO_FRONT,
                        roi_meta: RoiMeta | None = None) -> list[dict]:
   """YOLO ROI boxes -> car-frame detections for ``fuse_targets`` / ``associate``.
 
@@ -114,7 +155,7 @@ def project_detections(dets: Iterable[dict] | None, fx: float, fy: float, cx: fl
     if roi_meta is not None:
       u, v = roi_to_full(u, v, roi_meta)
     point = project_box_to_vehicle(u=u, v=v, fx=fx, fy=fy, cx=cx, cy=cy, height=height,
-                                   pitch=pitch, yaw=yaw, camera_to_front=camera_to_front)
+                                   pitch=pitch, yaw=yaw, roll=roll, camera_to_front=camera_to_front)
     if point is None:
       continue
     cls = det.get("cls")

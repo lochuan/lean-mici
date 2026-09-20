@@ -267,7 +267,11 @@ class _FakeParams:
 
 class _FakeSubMaster:
   def __init__(self, model_v2, car_state, radar):
-    self._data = {"modelV2": model_v2, "carState": car_state, "radarTracks": radar}
+    # Calibrated with zero rpy: identical to the pre-calibration mount constants
+    # (C.CAMERA_PITCH / C.CAMERA_YAW are 0.0), so the vision path behaves exactly
+    # as it did before live extrinsics were wired in.
+    self._data = {"modelV2": model_v2, "carState": car_state, "radarTracks": radar,
+                  "extrinsicsCalibration": _NS(calStatus="calibrated", rpyCalib=[0.0, 0.0, 0.0])}
     self.valid = dict.fromkeys(self._data, True)
 
   def update(self, timeout=0):
