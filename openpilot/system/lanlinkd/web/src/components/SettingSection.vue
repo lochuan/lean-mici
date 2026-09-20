@@ -3,6 +3,7 @@
 import { computed } from "vue";
 import Accordion, { type AccordionEntry } from "./ui/Accordion.vue";
 import SettingRow from "./SettingRow.vue";
+import AvoidanceCalibration from "./AvoidanceCalibration.vue";
 import Badge from "./ui/Badge.vue";
 import { evalRules } from "@/lib/rules";
 import { itemState, subPanelOpenable } from "@/lib/itemState";
@@ -11,7 +12,7 @@ import type { Section } from "@/lib/schema";
 
 const props = defineProps<{ section: Section }>();
 
-const ctx = computed(() => ({ params: store.params, caps: store.caps }));
+const ctx = computed(() => ({ params: store.params, caps: store.caps, cal: store.cal }));
 
 const visible = computed(() => evalRules(props.section.visibility, ctx.value).ok);
 const enabled = computed(() => evalRules(props.section.enablement, ctx.value));
@@ -57,6 +58,9 @@ function subRows(id: string) {
     </header>
 
     <div :class="!enabled.ok && 'pointer-events-none opacity-45'">
+      <!-- 横向避让区:标定状态 + 手工精修会话。放设置里而不是监测页——
+           未完成在线标定时启用开关就在下面置灰,进度和原因要在同一屏。 -->
+      <AvoidanceCalibration v-if="section.id === 'lateral_avoidance'" />
       <div class="divide-y divide-sl-border/70">
         <SettingRow v-for="item in rows" :key="item.key" :item="item" />
       </div>
