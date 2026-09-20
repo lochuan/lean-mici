@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from collections.abc import Callable
 import os
+from pathlib import Path
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 import time
@@ -27,7 +28,7 @@ from openpilot.selfdrive.modeld.compile_modeld import (make_input_queues, make_s
                                                        derive_frame_skip, MODELD_INPUTS, WARP_INPUTS, POLICY_INPUTS)
 from openpilot.selfdrive.modeld.fill_model_msg import (fill_model_msg, fill_driving_model_data, fill_pose_msg,
                                                        PublishState, get_curvature_from_output)
-from openpilot.common.file_chunker import open_file_chunked, get_manifest_path
+from openpilot.common.file_chunker import open_file_chunked, get_manifest_path, get_chunk_name
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
 from openpilot.selfdrive.modeld.helpers import modeld_pkl_path, load_oob
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
@@ -48,7 +49,33 @@ class ModelUnavailable(Exception):
 
 
 def _pkl_exists(path):
-  return os.path.exists(path) or os.path.exists(get_manifest_path(path))
+  """True only if ``open_file_chunked`` can actually read ``path``.
+
+  A chunked artifact is a ``.chunkmanifest`` naming N chunks plus those N
+  files. Accepting the manifest alone made an interrupted download look like a
+  usable model: _find_driving_pkl's fallback to the built-in pkl never fired,
+  and open_file_chunked then raised FileNotFoundError, so modeld died and
+  openpilot refused to start ("Driving model failed to load, so openpilot
+  cannot start"). Seen on-device with 77 manifest stubs and zero chunks in
+  /data/media/0/models, which is a recoverable state -- the built-in pkl was
+  right there.
+
+  NOTE: this duplicates a little of common/file_chunker rather than living
+  there, because openpilot/common is in release_lib's NATIVE_INPUT_PATHS and
+  touching it invalidates every prebuilt artifact, forcing a full on-device
+  rebuild. modeld.py is not a native input.
+  """
+  if os.path.isfile(path):
+    return True
+  manifest = get_manifest_path(path)
+  if not os.path.isfile(manifest):
+    return False
+  try:
+    num_chunks = int(Path(manifest).read_text().strip())
+  except (OSError, ValueError):
+    return False
+  return num_chunks > 0 and all(os.path.isfile(get_chunk_name(path, i, num_chunks))
+                                for i in range(num_chunks))
 
 
 def _find_driving_pkl(bundle):
