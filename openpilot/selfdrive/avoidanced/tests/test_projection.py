@@ -180,12 +180,17 @@ def test_squash_mode_is_unchanged():
   assert m.offset_u == 0.0
 
 
-def _forward_project(d, y, height, pitch):
+def _forward_project(d, y, height, pitch, roll=0.0):
   """车体坐标 (d, y, 地面) -> 全帧像素 (u, v)。project_box_to_vehicle 的解析逆。"""
   cp, sp = math.cos(pitch), math.sin(pitch)
   y_n = (height * cp - d * sp) / (d * cp + height * sp)
   t = height / (y_n * cp + sp)
   x_n = -y / t
+  # project_box_to_vehicle 反投影前把像素归一化坐标旋转 -roll(绕光轴),
+  # 正向投影必须施加其逆旋转 (+roll) 才能闭环。
+  if roll:
+    cr, sr = math.cos(roll), math.sin(roll)
+    x_n, y_n = x_n * cr - y_n * sr, x_n * sr + y_n * cr
   return x_n * FX + CX, y_n * FY + CY
 
 
@@ -247,8 +252,10 @@ def test_short_rpy_is_invalid():
 def test_horizon_row_tracks_pitch():
   flat = horizon_row_for(CY, FY, CalibratedGeometry(True, 0.0, 0.0, 0.0))
   assert flat == CY
-  nose_down = horizon_row_for(CY, FY, CalibratedGeometry(True, 0.0, 0.01, 0.0))
-  assert nose_down > CY          # 车头下俯 -> 地平线在图像中更低
+  # rpyCalib pitch 为正 = 相机下俯(见 calibrationd.py 的 observed_rpy 拟合);
+  # 相机下俯时地平线在图像中上移,所以正 pitch 的地平线行必须小于光心行。
+  pitched_down = horizon_row_for(CY, FY, CalibratedGeometry(True, 0.0, 0.01, 0.0))
+  assert pitched_down < CY
   invalid = horizon_row_for(CY, FY, CalibratedGeometry(False, 0.0, 0.5, 0.0))
   assert invalid == CY           # 未标定时忽略 pitch
 
@@ -264,4 +271,20 @@ def test_projection_closes_the_loop_with_live_pitch():
                                 roll=0.0, camera_to_front=0.0)
     assert pt is not None
     assert abs(pt["dRel"] - d) < 0.01 and abs(pt["yRel"] - y) < 0.01
-  assert meta.offset_v > CY - C.ROI_HORIZON_MARGIN   # ROI 跟着地平线下移
+  # 正 pitch(相机下俯)让地平线上移,NATIVE ROI 顶边跟着上移(行号变小)。
+  assert meta.offset_v < CY - C.ROI_HORIZON_MARGIN
+
+
+def test_projection_closes_the_loop_with_live_roll():
+  """roll != 0 闭环:正向投影施加 +roll 旋转,反投影应恢复车体坐标。
+
+  roll 旋转方向若写反,此测试失败(d=15 处 dRel 偏差约 0.53m >> 0.01m)。
+  """
+  pitch, roll = 0.012, 0.02
+  for d, y in [(15.0, 1.0), (35.0, -1.5)]:
+    u_full, v_full = _forward_project(d, y, C.CAMERA_HEIGHT, pitch, roll)
+    pt = project_box_to_vehicle(u=u_full, v=v_full, fx=FX, fy=FY, cx=CX, cy=CY,
+                                height=C.CAMERA_HEIGHT, pitch=pitch, yaw=0.0,
+                                roll=roll, camera_to_front=0.0)
+    assert pt is not None
+    assert abs(pt["dRel"] - d) < 0.01 and abs(pt["yRel"] - y) < 0.01

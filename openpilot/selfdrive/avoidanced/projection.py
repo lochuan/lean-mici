@@ -94,10 +94,16 @@ def geometry_from_calibration(msg, valid: bool) -> CalibratedGeometry:
 
 
 def horizon_row_for(cy: float, fy: float, geom: CalibratedGeometry) -> float:
-  """标定 pitch 下地平线所在的全帧行。未标定时退回光心行。"""
+  """标定 pitch 下地平线所在的全帧行。未标定时退回光心行。
+
+  负号是物理正确的,不要"修"回正号:openpilot 的 rpyCalib pitch 为正表示相机
+  下俯(calibrationd.py 的 observed_rpy 拟合,device 系 z 朝下),相机下俯时
+  地平线在图像中上移(行号变小)。与 project_box_to_vehicle 的射线方程一致:
+  地平线掠射射线 d_z = 0 -> y_n = -tan(pitch) -> v = cy - fy*tan(pitch)。
+  """
   if not geom.valid:
     return cy
-  return cy + fy * math.tan(geom.pitch)
+  return cy - fy * math.tan(geom.pitch)
 
 
 def project_box_to_vehicle(u: float, v: float, fx: float, fy: float, cx: float, cy: float,
