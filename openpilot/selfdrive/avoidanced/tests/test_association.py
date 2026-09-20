@@ -31,11 +31,12 @@ class VO:
 def test_matching_is_mutually_exclusive():
   """1 个视觉目标 + 2 个同方位雷达点 -> 只能配一次。
 
-  旧实现每个雷达点各自挑最近视觉目标且不互斥,n_associated 会超过检测总数,
-  既虚高关联率,又让行人被并入 VEHICLE_WEIGHT 的雷达点而丢掉 VRU 权重。
+  框高测距换算到保险杠系后 ≈20.0m, 两个雷达点(20.0/20.5m)都在二级距离门内,
+  都是活候选 —— n==1 只能由互斥保证。去掉 used_r/used_v 守卫此测试必红(已验证)。
   """
+  h_px = FY * C.CLASS_HEIGHTS_M["person"] / (20.0 + C.CAMERA_TO_FRONT)  # 保险杠系 20.0m
   radars = [R(20.0, 0.5), R(20.5, 0.6)]
-  dets = [_det(math.atan2(-0.55, 20.2))]
+  dets = [_det(math.atan2(-0.55, 20.2), h_px=h_px)]
   n, fused, pairs = associate(radars, dets, fy=FY)
   assert n == 1
   assert len(pairs) == 1
@@ -47,7 +48,8 @@ def test_unmatched_detection_gets_box_height_range():
   n, fused, pairs = associate([], dets, fy=FY)
   assert n == 0 and pairs == []
   assert len(fused) == 1
-  assert fused[0]["dRel"] == pytest.approx(25.0, rel=1e-3)
+  # 25.0 是相机系; dRel 与雷达同参照(保险杠系), 必须减安装偏置。
+  assert fused[0]["dRel"] == pytest.approx(25.0 - C.CAMERA_TO_FRONT, rel=1e-3)
   assert fused[0]["dRelSource"] == "boxheight"
 
 
@@ -69,10 +71,10 @@ def test_bearing_gate_rejects_a_far_off_target():
   assert len(fused) == 1          # 未匹配 -> 退回框高测距
 
 
-def test_lateral_secondary_gate_rejects_same_bearing_different_range():
+def test_range_gate_rejects_same_bearing_different_range():
   """同方位但距离差极大的目标不应配上(方位角单独不足以判别)。"""
   radars = [R(40.0, 0.0)]
-  dets = [_det(0.0, cls="person", h_px=FY * 1.7 / 5.0)]   # 框高说 5m
+  dets = [_det(0.0, cls="person", h_px=FY * 1.7 / 5.0)]   # 框高说相机系 5m
   n, fused, pairs = associate(radars, dets, fy=FY)
   assert n == 0
 
@@ -104,7 +106,7 @@ def test_object_style_secondary_gate_uses_object_x():
   """无 cls/boxHeightPx 的对象: 二级门退用对象自带的 x 作为它的距离。"""
   radar = [R(40.0, 0.0)]
   pairs, _ = nearest_pairs_by_bearing(radar, [VO(x=5.0, y=0.0)], FY,
-                                      C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DY_M)
+                                      C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DRANGE_M)
   assert pairs == []          # 同方位, 但对象自报 5m vs 雷达 40m
 
 
@@ -113,7 +115,7 @@ def test_object_style_box_height_attrs_drive_the_gate():
   radar = [R(40.0, 0.0)]
   obj = VO(x=40.0, y=0.0, cls="person", box_height_px=FY * 1.7 / 5.0)  # 框高说 5m
   pairs, _ = nearest_pairs_by_bearing(radar, [obj], FY,
-                                      C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DY_M)
+                                      C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DRANGE_M)
   assert pairs == []
 
 
@@ -128,7 +130,7 @@ def test_dict_without_gate_inputs_skips_secondary_gate():
 def test_nearest_pairs_by_bearing_pair_shape():
   radars = [R(20.0, 0.0)]
   dets = [_det(0.0, cls="motorcycle", h_px=FY * 1.7 / 20.0)]
-  pairs, matched = nearest_pairs_by_bearing(radars, dets, FY, C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DY_M)
+  pairs, matched = nearest_pairs_by_bearing(radars, dets, FY, C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DRANGE_M)
   assert matched == {0}
   radar, obj, db, cls = pairs[0]
   assert radar is radars[0] and obj is dets[0]

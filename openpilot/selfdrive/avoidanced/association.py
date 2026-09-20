@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 
-from openpilot.selfdrive.avoidanced.constants import ASSOC_MAX_DBEARING, ASSOC_MAX_DY_M
+from openpilot.selfdrive.avoidanced.constants import ASSOC_MAX_DBEARING, ASSOC_MAX_DRANGE_M, CAMERA_TO_FRONT
 from openpilot.selfdrive.avoidanced.ranging import range_from_box_height
 
 
@@ -29,6 +29,18 @@ def _radar_range(point) -> float:
   return float(point["dRel"]) if isinstance(point, dict) else float(point.dRel)
 
 
+def _box_height_range_bumper(h_px: float, fy: float, cls) -> float | None:
+  """框高测距,换算到**前保险杠系**(与雷达 dRel、地平面投影同一参照)。
+
+  ``range_from_box_height`` 返回的是相机系距离;相机在风挡上、位于保险杠之后,
+  相机系距离因此偏大,必须减 ``CAMERA_TO_FRONT`` 才能和雷达 dRel 比较 —— 与
+  地平面投影在 projection 里的处理一致。框高测距与地平面投影两条视觉路径共用
+  这一个换算点,不要在别处再单独换算。
+  """
+  d = range_from_box_height(h_px, fy, cls)
+  return None if d is None else d - CAMERA_TO_FRONT
+
+
 def _vision_bearing(obj) -> float:
   """视觉侧方位角:投影 dict 自带 ``bearing``;对象侧(shadow 的 VisionObject)
   从它自己的车体坐标推出 —— bearing 向图像右为正而 y 向左为正,故取 ``atan2(-y, x)``。"""
@@ -38,20 +50,21 @@ def _vision_bearing(obj) -> float:
 
 
 def _vision_gate_range(obj, fy: float) -> float | None:
-  """二级横向门的视觉侧距离;``None`` 表示跳过该门。
+  """二级距离门的视觉侧距离(**保险杠系**);``None`` 表示跳过该门。
 
-  优先框高测距(cls + boxHeightPx 都在时);否则对象若暴露 ``x``(它的车体
-  距离)就用它;都没有则不做二级校验。
+  优先框高测距(cls + boxHeightPx 都在时, 经 ``_box_height_range_bumper`` 换算);
+  否则对象若暴露 ``x``(它自带的保险杠系距离, 如 shadow 的 VisionObject)就用它;
+  都没有则不做二级校验。
   """
   if isinstance(obj, dict):
     cls, h_px = obj.get("cls"), obj.get("boxHeightPx")
     if cls is not None and h_px is not None:
-      return range_from_box_height(float(h_px), fy, cls)
+      return _box_height_range_bumper(float(h_px), fy, cls)
     return None
   d = None
   cls, h_px = getattr(obj, "cls", None), getattr(obj, "boxHeightPx", None)
   if cls is not None and h_px is not None:
-    d = range_from_box_height(float(h_px), fy, cls)
+    d = _box_height_range_bumper(float(h_px), fy, cls)
   if d is None:
     x = getattr(obj, "x", None)
     d = float(x) if x is not None else None
@@ -63,7 +76,7 @@ def _vision_cls(obj):
 
 
 def nearest_pairs_by_bearing(radar_points: Iterable, vision_objects: Iterable, fy: float,
-                             max_dbearing: float, max_dy: float) -> tuple[list[tuple], set[int]]:
+                             max_dbearing: float, max_drange: float) -> tuple[list[tuple], set[int]]:
   """按 |Δbearing| 升序贪心匹配, 雷达点与视觉目标各自只能配一次。
 
   返回 ``(pairs, matched_vision_idx)``, ``pairs`` 每项是
@@ -79,9 +92,9 @@ def nearest_pairs_by_bearing(radar_points: Iterable, vision_objects: Iterable, f
       db = abs(rb - _vision_bearing(obj))
       if db > max_dbearing:
         continue
-      # 二级校验: 框高测距与雷达距离的横向差不得离谱
+      # 二级校验: 同方位但框高测距(保险杠系)与雷达 dRel 的距离差不得离谱
       vd = _vision_gate_range(obj, fy)
-      if vd is not None and abs(vd - rd) * math.cos(rb) > max_dy:
+      if vd is not None and abs(vd - rd) * math.cos(rb) > max_drange:
         continue
       cands.append((db, ri, vi))
 
@@ -100,21 +113,22 @@ def nearest_pairs_by_bearing(radar_points: Iterable, vision_objects: Iterable, f
 
 def associate(radar_points: Iterable, detections: Iterable, fy: float,
               max_dbearing: float = ASSOC_MAX_DBEARING,
-              max_dy: float = ASSOC_MAX_DY_M) -> tuple[int, list[dict], list[tuple]]:
+              max_drange: float = ASSOC_MAX_DRANGE_M) -> tuple[int, list[dict], list[tuple]]:
   """``(n_associated, fused, pairs)``。
 
   ``fused`` 只含**未匹配**的视觉目标 —— 雷达漏检的那些, 典型是 VRU。它们的距离
-  来自框高测距(不依赖 pitch), 横向由方位角推出。无法定距的直接丢弃, 因为一个
-  没有距离的目标进不了 planner 的 gate。
+  来自框高测距(不依赖 pitch, 经 ``_box_height_range_bumper`` 换算到保险杠系,
+  与雷达 dRel 同参照), 横向由方位角推出。无法定距的直接丢弃, 因为一个没有
+  距离的目标进不了 planner 的 gate。
   """
   detections = list(detections)
-  matches, matched = nearest_pairs_by_bearing(radar_points, detections, fy, max_dbearing, max_dy)
+  matches, matched = nearest_pairs_by_bearing(radar_points, detections, fy, max_dbearing, max_drange)
 
   fused: list[dict] = []
   for idx, det in enumerate(detections):
     if idx in matched:
       continue
-    d = range_from_box_height(float(det.get("boxHeightPx", 0.0)), fy, det.get("cls"))
+    d = _box_height_range_bumper(float(det.get("boxHeightPx", 0.0)), fy, det.get("cls"))
     if d is None or d <= 0.0:
       continue
     out = dict(det)

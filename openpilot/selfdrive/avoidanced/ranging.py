@@ -14,7 +14,12 @@ from openpilot.selfdrive.avoidanced.constants import CLASS_HEIGHTS_M, TRUNCATION
 
 
 def range_from_box_height(h_px: float, fy: float, cls: str) -> float | None:
-  """针孔关系 ``d = fy * H / h_px``。类别未知或框高非正时返回 ``None``。"""
+  """针孔关系 ``d = fy * H / h_px``。类别未知或框高非正时返回 ``None``。
+
+  返回的是**相机系**距离:相机装在风挡上、位于前保险杠之后,与雷达 dRel(保险杠
+  系)比较前必须减 ``CAMERA_TO_FRONT`` —— 换算点在 ``association._box_height_range_bumper``,
+  不要在别处再单独做一次。
+  """
   height = CLASS_HEIGHTS_M.get(cls)
   if height is None or h_px <= 0.0 or fy <= 0.0:
     return None

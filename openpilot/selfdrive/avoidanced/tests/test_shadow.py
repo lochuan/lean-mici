@@ -1,17 +1,21 @@
 """Tests for the offline P0 shadow evaluation harness (no publishing)."""
 
 import json
+import math
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from openpilot.selfdrive.avoidanced import constants as C
+from openpilot.selfdrive.avoidanced.association import associate as associate_daemon
 from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner
 from openpilot.selfdrive.avoidanced.projection import RoiMeta
-from openpilot.selfdrive.avoidanced.shadow import (ASSOC_MAX_DY, CALIB_MAX_RESIDUAL_M, MAX_LATERAL_JERK, RadarTarget,
-                                                   ShadowEvaluator, ShadowFrame, VisionObject, associate, evaluate_log,
-                                                   evaluate_records, iter_frames, summarize, write_report)
+from openpilot.selfdrive.avoidanced.shadow import (ASSOC_MAX_DBEARING_SHADOW, ASSOC_MAX_DRANGE_SHADOW,
+                                                   CALIB_MAX_RESIDUAL_M, MAX_LATERAL_JERK, RadarTarget,
+                                                   ShadowEvaluator, ShadowFrame, VisionObject, associate,
+                                                   evaluate_log, evaluate_records, iter_frames, summarize,
+                                                   write_report)
 
 
 class _Msg:
@@ -54,10 +58,35 @@ def test_associate_matches_nearest_within_gates():
   assert pairs[0][1].x == pytest.approx(10.4)
 
 
-def test_associate_rejects_out_of_gate():
+def test_associate_rejects_same_bearing_out_of_range_gate():
+  """同方位但对象自报距离(x)与雷达 dRel 差超过二级距离门 -> 不配。
+
+  旧名 test_associate_rejects_out_of_gate 实际走的是方位角门;这里构造同方位、
+  仅距离超门的目标,真正钉住 ASSOC_MAX_DRANGE_SHADOW 这道二级校验。
+  """
   radar = [RadarTarget(10.0, -1.0)]
-  vision = [VisionObject(10.0, -1.0 + ASSOC_MAX_DY + 0.1)]
+  bearing = math.atan2(1.0, 10.0)                    # radar bearing
+  d = 10.0 + ASSOC_MAX_DRANGE_SHADOW + 0.1           # same bearing, farther out
+  vision = [VisionObject(d, -d * math.tan(bearing))]
   assert associate(radar, vision) == []
+
+
+def test_shadow_bearing_gate_is_wider_than_daemons():
+  """0.035 < |Δbearing| < 0.06 的目标: shadow 宽门配上, daemon 窄门拒绝。
+
+  钉死两个门不得悄悄收敛(ASSOC_MAX_DBEARING_SHADOW 必须始终宽于 daemon 的
+  ASSOC_MAX_DBEARING)。"""
+  dbearing = (C.ASSOC_MAX_DBEARING + ASSOC_MAX_DBEARING_SHADOW) / 2.0
+  radar = [RadarTarget(20.0, 0.0)]
+  vision = [VisionObject(20.0, -20.0 * math.tan(dbearing))]
+  assert len(associate(radar, vision)) == 1          # inside the shadow gate
+  # Daemon side: same bearing, box height chosen so the range gate passes
+  # (bumper-frame range == 20 m) — rejection must come from the bearing gate.
+  det = {"bearing": dbearing, "cls": "person",
+         "boxHeightPx": FY * C.CLASS_HEIGHTS_M["person"] / (20.0 + C.CAMERA_TO_FRONT)}
+  n, fused, _ = associate_daemon(radar, [det], fy=FY)
+  assert n == 0
+  assert len(fused) == 1                             # falls back to box-height ranging
 
 
 def test_associate_handles_empty_inputs():
@@ -106,15 +135,17 @@ CX, CY = 672.0, 380.0
 def _box_at(d_rel, y_rel, cls="person", conf=0.9):
   """ROI box (1:1 scale) whose bottom-centre projects to (d_rel, y_rel).
 
-  The height is chosen so box-height ranging (fy * H / h_px) returns d_rel too:
-  the bearing matcher re-distances unmatched detections by box height, so a
-  synthetic box whose height disagrees with its ground distance would silently
-  move the fused target (and trip the secondary range gate).
+  The height is chosen so box-height ranging returns d_rel in the BUMPER frame
+  (camera-frame range d_rel + CAMERA_TO_FRONT, i.e. h_px = fy*H/d_cam) — the
+  same frame the ground-plane projection and the radar use. The bearing matcher
+  re-distances unmatched detections by box height, so a synthetic box whose
+  height disagrees with its ground distance would silently move the fused
+  target (and trip the secondary range gate).
   """
   d_cam = d_rel + C.CAMERA_TO_FRONT
   v = CY + FY * C.CAMERA_HEIGHT / d_cam
   u = CX - FX * y_rel / d_cam
-  h_px = FY * C.CLASS_HEIGHTS_M[cls] / d_rel
+  h_px = FY * C.CLASS_HEIGHTS_M[cls] / d_cam
   return {"x1": u - 10.0, "y1": v - h_px, "x2": u + 10.0, "y2": v, "cls": cls, "conf": conf}
 
 

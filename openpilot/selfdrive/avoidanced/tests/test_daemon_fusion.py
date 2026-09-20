@@ -83,15 +83,17 @@ class _FakeDetector:
 def _box_at(d_rel, y_rel, cls="person", conf=0.9):
   """ROI box (1:1 scale) whose bottom-centre projects to (d_rel, y_rel).
 
-  The height is chosen so box-height ranging (fy * H / h_px) returns d_rel too:
-  the bearing matcher re-distances unmatched detections by box height, so a
-  synthetic box whose height disagrees with its ground distance would silently
-  move the fused target (and trip the secondary range gate).
+  The height is chosen so box-height ranging returns d_rel in the BUMPER frame
+  (camera-frame range d_rel + CAMERA_TO_FRONT, i.e. h_px = fy*H/d_cam) — the
+  same frame the ground-plane projection and the radar use. The bearing matcher
+  re-distances unmatched detections by box height, so a synthetic box whose
+  height disagrees with its ground distance would silently move the fused
+  target (and trip the secondary range gate).
   """
   d_cam = d_rel + C.CAMERA_TO_FRONT
   v = CY + FY * C.CAMERA_HEIGHT / d_cam
   u = CX - FX * y_rel / d_cam
-  h_px = FY * C.CLASS_HEIGHTS_M[cls] / d_rel
+  h_px = FY * C.CLASS_HEIGHTS_M[cls] / d_cam
   return {"x1": u - 10.0, "y1": v - h_px, "x2": u + 10.0, "y2": v, "cls": cls, "conf": conf}
 
 
@@ -179,8 +181,9 @@ def test_daemon_projects_through_roi_inverse_mapping():
   v_full = CY + FY * C.CAMERA_HEIGHT / d_cam
   u_roi, v_roi = u_full / meta.scale_u, v_full / meta.scale_v
   # Height in ROI px such that the FULL-FRAME height makes box-height ranging
-  # return 20 m (same convention as _box_at; boxHeightPx is full-frame).
-  h_roi = (FY * C.CLASS_HEIGHTS_M["person"] / 20.0) / meta.scale_v
+  # return 20 m in the BUMPER frame (camera-frame 21.5 m; same convention as
+  # _box_at — boxHeightPx is full-frame).
+  h_roi = (FY * C.CLASS_HEIGHTS_M["person"] / (20.0 + C.CAMERA_TO_FRONT)) / meta.scale_v
   box = {"x1": u_roi - 5.0, "y1": v_roi - h_roi, "x2": u_roi + 5.0, "y2": v_roi, "cls": "person", "conf": 0.9}
   daemon, pm = _daemon(camera=_FakeCamera(frames=[(np.zeros((384, 640, 3), np.uint8), meta)] * 2),
                        detector=_FakeDetector(detections=[box]))
