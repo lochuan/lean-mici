@@ -32,7 +32,7 @@ STANDSTILL_RESUME_DEBOUNCE_S = 1.0
 BLE_SERVICE_UUID = "9f2d0001-6b4e-4c2a-9d1f-3e8a5c7b2f01"
 BLE_COMMAND_UUID = "9f2d0002-6b4e-4c2a-9d1f-3e8a5c7b2f02"
 BLE_STATUS_UUID = "9f2d0003-6b4e-4c2a-9d1f-3e8a5c7b2f03"
-# 命令帧 8B: [op][seq][button][mode][count][duration_ms u16 LE][interval_ms u16 LE]
+# 命令帧 9B: [op][seq][button][mode][count][duration_ms u16 LE][interval_ms u16 LE]
 OP_PRESS, OP_ABORT, OP_PING = 0, 1, 2
 BUTTON_RES_UP, BUTTON_RES_DOWN = 0, 1
 MODE_TAP, MODE_HOLD = 0, 1
