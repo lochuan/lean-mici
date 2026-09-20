@@ -124,13 +124,20 @@ class TinygradRunner:
     from openpilot.selfdrive.modeld.helpers import load_oob
     with open(pkl_path, "rb") as f:
       self._jit = load_oob(f)
+    # expected_names mirrors how the JIT was captured: an int is a POSITIONAL
+    # arg index, a str is a keyword. compile_yolo_onnx.py captures ``run(x)``
+    # positionally, so this is normally [0] -- and ``jit(**{0: t})`` would raise
+    # "TypeError: keywords must be strings" (device-validated).
     self._input_name = self._jit.captured.expected_names[0]
+    self._positional = isinstance(self._input_name, int)
     # Persistent input buffer: same object every call -> stable buffer id -> JIT replay.
     self._input = Tensor.zeros(1, 3, INPUT_H, INPUT_W, dtype=dtypes.float32, device=Device.DEFAULT).realize()
 
   def run(self, inp: np.ndarray) -> np.ndarray:
     from tinygrad import Device, Tensor
     self._input.assign(Tensor(np.ascontiguousarray(inp), device=Device.DEFAULT))
+    if self._positional:
+      return self._jit(self._input).numpy()
     return self._jit(**{self._input_name: self._input}).numpy()
 
 
