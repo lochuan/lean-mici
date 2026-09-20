@@ -278,14 +278,61 @@ def overlay_prebuilt(repo_root: Path, worktree: Path) -> tuple[bool, str]:
   return True, "ok"
 
 
+def _chunk_name(name: str, idx: int, num_chunks: int) -> str:
+  """Mirror of ``openpilot.common.file_chunker.get_chunk_name``.
+
+  Duplicated rather than imported to keep this script stdlib-only: it runs
+  standalone (and inside the build container) without the openpilot package on
+  sys.path. Keep in sync with file_chunker.
+  """
+  return f"{name}.chunk{idx + 1:02d}of{num_chunks:02d}"
+
+
 def find_data_artifacts(root: Path) -> list[str]:
-  """Resolve DATA_ARTIFACT_GLOBS against ``root``, returning sorted relative paths."""
+  """Non-ELF data artifacts under ``root``, as relative paths.
+
+  Chunk sets are resolved through each ``*.chunkmanifest`` rather than by
+  globbing ``chunk*``. ``chunk_file`` names chunks ``chunkNNofMM`` where MM is
+  an *estimate*, so when the estimate changes between builds the previous set
+  is left behind (e.g. a 74MB pkl writes chunk01of02+chunk02of02 while an older
+  86MB build's chunk01of03..chunk03of03 stay on disk). Globbing picked those up
+  too, shipping ~91MB of dead weight and listing it in the manifest. Honouring
+  the manifest count keeps only the set that ``open_file_chunked`` will read.
+  """
   found: set[str] = set()
   for pattern in DATA_ARTIFACT_GLOBS:
-    for path in root.glob(pattern):
-      if path.is_file():
-        found.add(str(path.relative_to(root)))
+    if pattern.endswith(".chunkmanifest"):
+      for manifest in root.glob(pattern):
+        if not manifest.is_file():
+          continue
+        found.add(str(manifest.relative_to(root)))
+        base = manifest.with_suffix("")  # strip .chunkmanifest
+        try:
+          num_chunks = int(manifest.read_text().strip())
+        except ValueError:
+          continue
+        for i in range(num_chunks):
+          chunk = base.parent / _chunk_name(base.name, i, num_chunks)
+          if chunk.is_file():
+            found.add(str(chunk.relative_to(root)))
+    elif "chunk*" in pattern:
+      continue  # covered by the chunkmanifest branch above
+    else:
+      for path in root.glob(pattern):
+        if path.is_file():
+          found.add(str(path.relative_to(root)))
   return sorted(found)
+
+
+def stale_data_artifacts(root: Path) -> list[str]:
+  """Chunk files under ``root`` that no ``*.chunkmanifest`` claims."""
+  keep = set(find_data_artifacts(root))
+  stale: set[str] = set()
+  for pattern in DATA_ARTIFACT_GLOBS:
+    for path in root.glob(pattern):
+      if path.is_file() and (rel := str(path.relative_to(root))) not in keep:
+        stale.add(rel)
+  return sorted(stale)
 
 
 # A git-lfs pointer file is ASCII and short; real binary media never is.

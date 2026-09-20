@@ -71,20 +71,35 @@ done
 # kernels compiled for the device's QCOM backend, so it cannot be cross-built;
 # it must come from the device just like the native ELFs.
 echo "[-] pulling device data artifacts"
-# Globs can overlap (chunk* also matches chunkmanifest), so dedupe before scp;
-# these are ~45MB each and we don't want to transfer any of them twice.
-matches=""
+# Drop any chunk set already staged here first. chunk_file names chunks
+# chunkNNofMM where MM is an estimate, so a pkl whose size crossed a 45MB
+# boundary leaves the previous set behind; copying on top of it would keep both
+# and ship the dead one (~91MB was being carried this way).
 for pattern in $(python3 "$DIR/release_lib.py" data-artifact-globs); do
-  found=$(ssh -o BatchMode=yes "$DEVICE" "ls -1 /data/openpilot/$pattern 2>/dev/null" || true)
-  matches="$matches$found
-"
+  # shellcheck disable=SC2086  # intentional glob expansion
+  rm -f $DEST/$pattern
 done
+# Ask the device which chunks its own chunkmanifest claims, so a stale set left
+# on the device is not pulled either. Globs can overlap (chunk* also matches
+# chunkmanifest), so dedupe before scp; these are ~45MB each.
+matches=$(ssh -o BatchMode=yes "$DEVICE" '
+  cd /data/openpilot || exit 0
+  for mf in openpilot/selfdrive/modeld/models/*.chunkmanifest; do
+    [ -f "$mf" ] || continue
+    echo "$mf"
+    base=${mf%.chunkmanifest}
+    n=$(cat "$mf")
+    i=1
+    while [ "$i" -le "$n" ]; do
+      printf "%s.chunk%02dof%02d\n" "$base" "$i" "$n"
+      i=$((i + 1))
+    done
+  done' || true)
 matches=$(printf '%s' "$matches" | sed '/^$/d' | sort -u)
 data_found=0
-for m in $matches; do
-  rel="${m#/data/openpilot/}"
+for rel in $matches; do
   mkdir -p "$DEST/$(dirname "$rel")"
-  scp -q -o BatchMode=yes "$DEVICE:$m" "$DEST/$rel"
+  scp -q -o BatchMode=yes "$DEVICE:/data/openpilot/$rel" "$DEST/$rel"
   data_found=$((data_found + 1))
 done
 if [ "$data_found" -eq 0 ]; then

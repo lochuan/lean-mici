@@ -345,6 +345,43 @@ class TestDataArtifacts(unittest.TestCase):
       self.assertTrue(all("driving_tinygrad.pkl" in f for f in found))
       self.assertFalse(any("onnx" in f for f in found))
 
+  def test_find_data_artifacts_ignores_a_stale_chunk_set(self):
+    """Only the set the chunkmanifest claims counts.
+
+    chunk_file names chunks chunkNNofMM where MM is an estimate, so a pkl whose
+    size crosses a 45MB boundary leaves the previous set on disk. Globbing
+    chunk* shipped both and listed the dead one in the manifest.
+    """
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      models = root / "openpilot/selfdrive/modeld/models"
+      models.mkdir(parents=True)
+      # current set, per the manifest
+      (models / "driving_tinygrad.pkl.chunk01of02").write_bytes(b"a")
+      (models / "driving_tinygrad.pkl.chunk02of02").write_bytes(b"b")
+      (models / "driving_tinygrad.pkl.chunkmanifest").write_bytes(b"2")
+      # leftovers from an earlier build that estimated three chunks
+      (models / "driving_tinygrad.pkl.chunk01of03").write_bytes(b"stale")
+      (models / "driving_tinygrad.pkl.chunk02of03").write_bytes(b"stale")
+      (models / "driving_tinygrad.pkl.chunk03of03").write_bytes(b"")
+
+      found = release_lib.find_data_artifacts(root)
+      self.assertEqual(len(found), 3, found)
+      self.assertFalse(any("of03" in f for f in found), found)
+
+      stale = release_lib.stale_data_artifacts(root)
+      self.assertEqual(len(stale), 3, stale)
+      self.assertTrue(all("of03" in f for f in stale), stale)
+
+  def test_find_data_artifacts_needs_a_chunkmanifest(self):
+    """Chunks with no manifest are unreadable, so they are not artifacts."""
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      models = root / "openpilot/selfdrive/modeld/models"
+      models.mkdir(parents=True)
+      (models / "driving_tinygrad.pkl.chunk01of02").write_bytes(b"orphan")
+      self.assertEqual(release_lib.find_data_artifacts(root), [])
+
 
 class TestOverlayPrebuilt(unittest.TestCase):
   def _make_repo(self, td: Path) -> Path:
@@ -383,9 +420,13 @@ class TestOverlayPrebuilt(unittest.TestCase):
       src.write_bytes(elf_bytes(machine))
     data_files: list[str] = []
     if with_data:
-      pkl = prebuilt_root / "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk01of02"
-      pkl.parent.mkdir(parents=True, exist_ok=True)
-      pkl.write_bytes(b"pickled tinygrad kernels")
+      models = prebuilt_root / "openpilot/selfdrive/modeld/models"
+      models.mkdir(parents=True, exist_ok=True)
+      # A real chunk set always carries its chunkmanifest -- chunk_file writes
+      # it, and open_file_chunked needs it to know how many chunks to read.
+      (models / "driving_tinygrad.pkl.chunk01of02").write_bytes(b"pickled tinygrad kernels")
+      (models / "driving_tinygrad.pkl.chunk02of02").write_bytes(b"more kernels")
+      (models / "driving_tinygrad.pkl.chunkmanifest").write_bytes(b"2")
       data_files = release_lib.find_data_artifacts(prebuilt_root)
     native_hash = compute_native_hash(worktree, "HEAD")
     write_manifest(prebuilt_root, "abc123", native_hash, list(ARTIFACT_PATHS), data_files)
