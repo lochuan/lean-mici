@@ -48,3 +48,17 @@ CAMERA_YAW = 0.0       # rad, camera yaw, positive = looking left
 # point is therefore FARTHER than the radar-frame distance, so this offset is
 # subtracted when aligning projected dRel to radar dRel.
 CAMERA_TO_FRONT = 1.5  # m, windshield camera behind the front bumper
+
+# ROI 模式。SQUASH 是历史行为:整帧压进 640x384。在 mici 宽相机(1344x760)上
+# 它一行都没裁(crop_h = min(760, 806) = 760),整帧被压 2.1x/1.98x 且带 6%
+# 各向异性,40m 行人只剩 9 像素 —— 这是远距 VRU 置信度低的根因。
+# NATIVE 原生 1:1 裁 640x384:Y_GATE=2.5m 在 40m 处只有 ±27px,原生裁剪的
+# ±320px 完整覆盖决策区域直到 3.32m 以内,所以像素翻倍而有效 FOV 无损。
+# 默认保持 SQUASH:尺度分布偏移对 BDD 训练的模型是好是坏尚未上车实测。
+ROI_MODE_SQUASH = "squash"
+ROI_MODE_NATIVE = "native"
+ROI_MODE = ROI_MODE_SQUASH
+
+# NATIVE 模式下 ROI 顶边在地平线上方留多少行。64 行使 ROI 落在 [316, 700]:
+# 远端覆盖无穷远,近端接地距离 1.59m,40m 卡车顶(行 350)在窗口内。
+ROI_HORIZON_MARGIN = 64

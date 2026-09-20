@@ -8,16 +8,18 @@ from openpilot.selfdrive.avoidanced.projection import (project_box_to_vehicle, p
                                                        roi_meta_for, roi_to_full)
 
 # Synthetic intrinsics from the brief: fx=fy=1000, cx=320, cy=192, camera 1.2 m up, pitch 0.
-FX = FY = 1000.0
-CX, CY = 320.0, 192.0
+# Suffixed _0 because the native-ROI tests below bind FX/FY/CX/CY to the mici
+# reference intrinsics; a module-level rebinding would silently change _project.
+FX0 = FY0 = 1000.0
+CX0, CY0 = 320.0, 192.0
 HEIGHT = 1.2
 
 
 def _project(u, v, **kwargs):
-  kwargs.setdefault("fx", FX)
-  kwargs.setdefault("fy", FY)
-  kwargs.setdefault("cx", CX)
-  kwargs.setdefault("cy", CY)
+  kwargs.setdefault("fx", FX0)
+  kwargs.setdefault("fy", FY0)
+  kwargs.setdefault("cx", CX0)
+  kwargs.setdefault("cy", CY0)
   kwargs.setdefault("height", HEIGHT)
   kwargs.setdefault("pitch", 0.0)
   return project_box_to_vehicle(u=u, v=v, **kwargs)
@@ -143,3 +145,66 @@ def test_project_detections_skips_sky_boxes():
 def test_project_detections_empty():
   assert _project_dets([]) == []
   assert _project_dets(None) == []
+
+
+# --- ROI modes: native 1:1 window + RoiMeta.offset_u (task 1 brief) -------------
+
+import math
+from openpilot.selfdrive.avoidanced import constants as C
+from openpilot.selfdrive.avoidanced.projection import (RoiMeta, project_box_to_vehicle,
+                                                       roi_meta_for, roi_to_full)
+
+W, H, FX, FY, CX, CY = 1344.0, 760.0, 425.25, 425.25, 672.0, 380.0
+
+
+def test_offset_u_is_appended_so_positional_construction_still_works():
+  """RoiMeta 在 test_shadow / test_daemon_fusion 里是位置参数构造的。"""
+  m = RoiMeta(1.0, 2.0, 3.0)
+  assert (m.scale_u, m.scale_v, m.offset_v, m.offset_u) == (1.0, 2.0, 3.0, 0.0)
+
+
+def test_native_mode_is_one_to_one_and_centred():
+  m = roi_meta_for(W, H, mode=C.ROI_MODE_NATIVE, horizon_row=CY)
+  assert m.scale_u == 1.0
+  assert m.scale_v == 1.0
+  assert m.offset_u == (W - 640) / 2.0            # 居中于 cx
+  assert m.offset_v == CY - C.ROI_HORIZON_MARGIN  # 顶边在地平线上方 margin 行
+
+
+def test_squash_mode_is_unchanged():
+  m = roi_meta_for(W, H, mode=C.ROI_MODE_SQUASH)
+  crop_h = min(H, round(W * 384 / 640))
+  assert m.scale_u == W / 640
+  assert m.scale_v == crop_h / 384
+  assert m.offset_v == H - crop_h
+  assert m.offset_u == 0.0
+
+
+def _forward_project(d, y, height, pitch):
+  """车体坐标 (d, y, 地面) -> 全帧像素 (u, v)。project_box_to_vehicle 的解析逆。"""
+  cp, sp = math.cos(pitch), math.sin(pitch)
+  y_n = (height * cp - d * sp) / (d * cp + height * sp)
+  t = height / (y_n * cp + sp)
+  x_n = -y / t
+  return x_n * FX + CX, y_n * FY + CY
+
+
+def test_geometry_closes_the_loop_in_both_roi_modes():
+  """给定车体坐标 -> 正向算像素 -> 映射进 ROI -> 反投影, 闭环误差应 < 1cm。
+
+  这条能同时抓住 offset_u 缺失、ROI 模式与投影不一致、缩放方向写反。
+  """
+  for mode in (C.ROI_MODE_SQUASH, C.ROI_MODE_NATIVE):
+    meta = roi_meta_for(W, H, mode=mode, horizon_row=CY)
+    for d, y in [(10.0, 0.0), (20.0, 1.5), (40.0, -2.0), (5.0, 2.0)]:
+      u_full, v_full = _forward_project(d, y, C.CAMERA_HEIGHT, 0.0)
+      u_roi = (u_full - meta.offset_u) / meta.scale_u
+      v_roi = (v_full - meta.offset_v) / meta.scale_v
+      u_back, v_back = roi_to_full(u_roi, v_roi, meta)
+      assert abs(u_back - u_full) < 1e-6 and abs(v_back - v_full) < 1e-6
+      pt = project_box_to_vehicle(u=u_back, v=v_back, fx=FX, fy=FY, cx=CX, cy=CY,
+                                  height=C.CAMERA_HEIGHT, pitch=0.0, yaw=0.0,
+                                  camera_to_front=0.0)
+      assert pt is not None
+      assert abs(pt["dRel"] - d) < 0.01, f"{mode} d={d}"
+      assert abs(pt["yRel"] - y) < 0.01, f"{mode} y={y}"

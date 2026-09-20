@@ -15,6 +15,7 @@ import numpy as np
 from msgq.visionipc import VisionIpcClient
 from openpilot.cereal.visionipc import VisionStreamType
 from openpilot.common.transformations.camera import DEVICE_CAMERAS
+from openpilot.selfdrive.avoidanced.constants import ROI_MODE, ROI_MODE_NATIVE
 from openpilot.selfdrive.avoidanced.projection import RoiMeta, roi_meta_for
 from openpilot.selfdrive.avoidanced.yolo_detector import INPUT_H, INPUT_W
 from openpilot.system.camerad.snapshot import extract_image
@@ -52,12 +53,23 @@ def resize_bilinear(img: np.ndarray, out_w: int, out_h: int) -> np.ndarray:
   return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def roi_from_rgb(rgb: np.ndarray) -> tuple[np.ndarray, RoiMeta]:
-  """Bottom-crop + resize a full RGB frame to the YOLO ROI; returns ``(roi, RoiMeta)``."""
+def roi_from_rgb(rgb: np.ndarray, mode: str = ROI_MODE,
+                 horizon_row: float | None = None) -> tuple[np.ndarray, RoiMeta]:
+  """Full RGB frame -> YOLO ROI (384, 640, 3) plus the RoiMeta to invert it.
+
+  SQUASH resizes; NATIVE is a pure slice, so it must not go through
+  resize_bilinear at all -- resampling a 1:1 window would throw away the
+  sharpness the mode exists to keep.
+  """
   h, w = rgb.shape[:2]
-  crop_h = min(h, round(w * INPUT_H / INPUT_W))
-  roi = resize_bilinear(rgb[h - crop_h:], INPUT_W, INPUT_H)
-  return np.ascontiguousarray(roi), roi_meta_for(w, h)
+  meta = roi_meta_for(w, h, mode=mode, horizon_row=horizon_row)
+  if mode == ROI_MODE_NATIVE:
+    top, left = int(meta.offset_v), int(meta.offset_u)
+    roi = rgb[top:top + INPUT_H, left:left + INPUT_W]
+  else:
+    crop_h = min(h, round(w * INPUT_H / INPUT_W))
+    roi = resize_bilinear(rgb[h - crop_h:], INPUT_W, INPUT_H)
+  return np.ascontiguousarray(roi), meta
 
 
 class CameraStream:

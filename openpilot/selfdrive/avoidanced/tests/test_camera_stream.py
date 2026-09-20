@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from openpilot.selfdrive.avoidanced import camera_stream as cs
+from openpilot.selfdrive.avoidanced import constants as C
 from openpilot.selfdrive.avoidanced.camera_stream import CameraStream, resize_bilinear
 from openpilot.selfdrive.avoidanced.projection import roi_meta_for
 
@@ -49,6 +50,16 @@ def test_roi_from_rgb_bottom_crop():
   assert meta.offset_v == pytest.approx(1208 - round(1928 * 384 / 640))
   assert roi[-1].mean() == 255    # bottom band kept
   assert roi.mean() < 10          # everything else (incl. the top band) cropped out
+
+
+def test_roi_from_rgb_native_mode_does_not_resample():
+  rgb = np.random.randint(0, 255, (760, 1344, 3), dtype=np.uint8)
+  roi, meta = cs.roi_from_rgb(rgb, mode=C.ROI_MODE_NATIVE, horizon_row=380.0)
+  assert roi.shape == (384, 640, 3)
+  assert meta.scale_u == 1.0 and meta.scale_v == 1.0
+  # 原生模式必须是纯切片,像素逐字节相同(不经插值)
+  top, left = int(meta.offset_v), int(meta.offset_u)
+  assert np.array_equal(roi, rgb[top:top + 384, left:left + 640])
 
 
 # --- intrinsics ------------------------------------------------------------------
