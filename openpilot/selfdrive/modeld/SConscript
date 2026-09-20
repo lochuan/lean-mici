@@ -12,6 +12,21 @@ from openpilot.selfdrive.modeld.helpers import TG_INPUT_DEVICES_PATH, modeld_pkl
 
 Import('env', 'arch')
 chunker_file = File("#openpilot/common/file_chunker.py")
+
+
+def _cpu_usable(n: int) -> bool:
+  """True if CPU ``n`` can be a taskset target right now.
+
+  mici keeps CPUs 4-7 offline until something brings them up (12V, or a plain
+  `echo 1 > /sys/devices/system/cpu/cpu4/online`). taskset against an offline
+  CPU fails with "Invalid argument" and takes the whole pkl target down, and
+  the first boot after a source-only release is exactly when they are offline.
+  """
+  try:
+    return open(f"/sys/devices/system/cpu/cpu{n}/online").read().strip() == "1"
+  except OSError:
+    # cpu0 (and some kernels' boot CPU) has no `online` file: it is always up.
+    return n == 0
 lenv = env.Clone()
 
 tinygrad_root = env.Dir("#").abspath
@@ -70,12 +85,19 @@ if not os.getenv('SKIP_TINYGRAD_COMPILE'):
   driving_onnx_deps = get_existing_chunks(File(f"models/{file_prefix}driving_supercombo.onnx").abspath)
   camera_res_args = ' '.join(f'{cw}x{ch}' for cw, ch in camera_configs)
   # Upstream pins this to CPU 7, which AGNOS isolates via isolcpus=6,7 on the
-  # comma 3X. mici keeps CPUs 4-7 powered down unless the device is on 12V, and
+  # comma 3X. mici keeps CPUs 4-7 offline until something brings them up, and
   # `taskset -c 7` then fails outright ("Invalid argument"), taking the whole pkl
-  # build down with it. CPU 4 comes back online on 12V and is outside the
-  # isolcpus set, so the compile shares it with the rest of the system: slightly
-  # less parallelism, but it actually runs. Build the pkl on 12V power.
-  taskset = 'taskset -c 4 ' if arch == 'comma_arm64' else ''
+  # build down with it. CPU 4 is outside the isolcpus set, so when it is up the
+  # compile shares it with the rest of the system: slightly less parallelism,
+  # but more than CPUs 0-3 alone.
+  #
+  # Only pin when CPU 4 is actually online. The first boot after a source-only
+  # release -- the one case that must build the pkl unattended -- is precisely
+  # when it is offline, and an unconditional pin turns that into a hard build
+  # failure with no driving model. Building on CPUs 0-3 is slower but works
+  # (measured: supercombo ~2 min, YOLO26n ~7.5 min). To get CPU 4 back without
+  # 12V: echo 1 | sudo tee /sys/devices/system/cpu/cpu4/online
+  taskset = 'taskset -c 4 ' if arch == 'comma_arm64' and _cpu_usable(4) else ''
   cmd = (f'{cmd_flags} {mac_brew_string} {taskset}python3 {modeld_dir}/compile_modeld.py '
          f'--model-size {model_w}x{model_h} '
          f'--camera-resolutions {camera_res_args} '
