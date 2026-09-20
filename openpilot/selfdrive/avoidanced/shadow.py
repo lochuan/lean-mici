@@ -101,6 +101,9 @@ class ShadowFrame:
   bsm_left: bool = False
   bsm_right: bool = False
   road_edges: Sequence = ()
+  # modelV2.meta.laneChangeState != off: the planner suppresses the bias during
+  # lane changes (same gate as the daemon, Task 6).
+  lane_change_active: bool = False
   # Camera side for the fused path. Synthetic frames only: route logs carry no
   # camera frames, so iter_frames never fills these.
   roi_frame: np.ndarray | None = None
@@ -212,6 +215,7 @@ class ShadowEvaluator:
       bsm_left=frame.bsm_left,
       bsm_right=frame.bsm_right,
       road_edges=frame.road_edges,
+      lane_change_active=frame.lane_change_active,
       max_offset=self.max_offset,
       now=frame.t,
     )
@@ -457,6 +461,7 @@ def iter_frames(messages: Iterable, sample_period: float = 0.2, limit: int | Non
       bsm_left=bool(getattr(car, "leftBlindspot", False)),
       bsm_right=bool(getattr(car, "rightBlindspot", False)),
       road_edges=getattr(model, "roadEdges", []) or [],
+      lane_change_active=str(getattr(getattr(model, "meta", None), "laneChangeState", "off")) != "off",
     )
     emitted += 1
     if limit is not None and emitted >= limit:

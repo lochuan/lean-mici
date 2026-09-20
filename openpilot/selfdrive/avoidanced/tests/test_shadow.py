@@ -29,8 +29,9 @@ class _Msg:
     return self._which
 
 
-def _model(curvature=0.01, leads=()):
+def _model(curvature=0.01, leads=(), lane_change_state="off"):
   return SimpleNamespace(action=SimpleNamespace(desiredCurvature=curvature), roadEdges=[],
+                         meta=SimpleNamespace(laneChangeState=lane_change_state),
                          leadsV3=[SimpleNamespace(prob=p, x=[x, x], y=[y, y]) for p, x, y in leads])
 
 
@@ -100,8 +101,8 @@ def test_evaluator_records_association_and_calibration():
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0))
   # 10 radar targets, 9 corroborated by vision, one far ghost with no vision match.
   # vRel=0.0 explicit: cruising traffic (ground speed = v_ego), not "vRel unknown".
-  radar = [(10.0 + i, -0.5, 0.0) for i in range(9)] + [(35.0, -0.5, 0.0)]
-  vision = [(10.0 + i, -0.5) for i in range(9)]
+  radar = [(10.0 + i, -1.8, 0.0) for i in range(9)] + [(35.0, -1.8, 0.0)]
+  vision = [(10.0 + i, -1.8) for i in range(9)]
   evaluator.step(_frame(0.0, radar=radar, vision=vision))
   rec = evaluator.records[-1]
   assert rec.n_radar == 10
@@ -175,9 +176,9 @@ def _first_frame_curvature(weight):
 
 
 def test_detector_path_projects_and_associates():
-  detector = _StubDetector([_box_at(20.0, -1.0)])
+  detector = _StubDetector([_box_at(20.0, -1.8)])
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0), detector=detector)
-  evaluator.step(_fused_frame(0.0, radar=[(20.0, -1.0)]))
+  evaluator.step(_fused_frame(0.0, radar=[(20.0, -1.8)]))
   rec = evaluator.records[-1]
   assert rec.n_vision == 1                    # n_vision comes from the projected detections
   assert rec.n_associated == 1                # radar point corroborated by the YOLO box
@@ -189,10 +190,10 @@ def test_detector_path_absorbed_detection_takes_vision_class_weight():
   # Daemon-parity association: the radar point absorbs the co-located person
   # box, so the planner sees ONE target — and since Task 5 it carries the
   # vision class weight (person -> VRU), not the old hardcoded vehicle weight.
-  detector = _StubDetector([_box_at(20.0, -1.0, cls="person")])
+  detector = _StubDetector([_box_at(20.0, -1.8, cls="person")])
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0), detector=detector)
-  evaluator.step(_fused_frame(0.0, radar=[(20.0, -1.0)]))
-  evaluator.step(_fused_frame(C.ENTER_HOLD_S + 0.01, radar=[(20.0, -1.0)]))
+  evaluator.step(_fused_frame(0.0, radar=[(20.0, -1.8)]))
+  evaluator.step(_fused_frame(C.ENTER_HOLD_S + 0.01, radar=[(20.0, -1.8)]))
   rec = evaluator.records[-1]
   assert rec.valid is True
   assert rec.curvature == pytest.approx(_first_frame_curvature(C.VRU_WEIGHT), rel=1e-6)
@@ -200,7 +201,7 @@ def test_detector_path_absorbed_detection_takes_vision_class_weight():
 
 def test_detector_path_unmatched_detection_is_independent_vru_target():
   # Radar sees nothing; the projected person box drives the bias on its own.
-  detector = _StubDetector([_box_at(20.0, -1.0, cls="person")])
+  detector = _StubDetector([_box_at(20.0, -1.8, cls="person")])
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0), detector=detector)
   evaluator.step(_fused_frame(0.0))
   evaluator.step(_fused_frame(C.ENTER_HOLD_S + 0.01))
@@ -215,7 +216,7 @@ def test_proxy_path_kept_without_detector():
   # No detector injected: even a frame carrying camera data stays on the
   # leadsV3 proxy (route replay has no YOLO boxes anyway).
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0))
-  frame = _frame(0.0, radar=[(20.0, -1.0, 0.0)], vision=[(20.0, -1.0)],
+  frame = _frame(0.0, radar=[(20.0, -1.8, 0.0)], vision=[(20.0, -1.8)],
                  roi_frame=np.zeros((384, 640, 3), np.uint8), roi_meta=RoiMeta(1.0, 1.0, 0.0),
                  intrinsics=(FX, FY, CX, CY))
   rec = evaluator.step(frame)
@@ -360,12 +361,12 @@ def test_evaluator_fills_execution_closure_fields():
   # the record must carry the planner decision state and nearest target yRel.
   edge = SimpleNamespace(x=[5.0, 30.0], y=[1.8, 1.8])  # left edge at 1.8 m
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0))
-  evaluator.step(_frame(0.0, radar=[(20.0, -1.0, 0.0)], curvature=0.01, road_edges=[edge]))
-  evaluator.step(_frame(C.ENTER_HOLD_S + 0.01, radar=[(20.0, -1.0, 0.0)], curvature=0.01, road_edges=[edge]))
+  evaluator.step(_frame(0.0, radar=[(20.0, -1.8, 0.0)], curvature=0.01, road_edges=[edge]))
+  evaluator.step(_frame(C.ENTER_HOLD_S + 0.01, radar=[(20.0, -1.8, 0.0)], curvature=0.01, road_edges=[edge]))
   rec = evaluator.records[-1]
   assert rec.valid is True
   assert rec.direction == 1                    # target right -> avoid left
-  assert rec.target_y == pytest.approx(-1.0)
+  assert rec.target_y == pytest.approx(-1.8)
   assert rec.edge_clearance == pytest.approx(1.8)
   assert rec.v_ego == pytest.approx(20.0)
   assert rec.y_des_cmd > 0.0
@@ -399,12 +400,12 @@ def test_main_prints_execution_closure_block(capsys, tmp_path):
     lead = model.modelV2.leadsV3[0]
     lead.prob = 0.9
     lead.x = [10.0, 10.0]
-    lead.y = [-1.0, -1.0]
+    lead.y = [-1.8, -1.8]
     radar = messaging.new_message('radarTracks')
     radar.logMonoTime = int(t * 1e9)
     radar.radarTracks.init('points', 1)
     point = radar.radarTracks.points[0]
-    point.dRel, point.yRel, point.vRel = 10.0, -1.0, 0.0
+    point.dRel, point.yRel, point.vRel = 10.0, -1.8, 0.0
     msgs.extend([car, model, radar])
 
   log_path = tmp_path / "synthetic"
@@ -459,6 +460,38 @@ def test_iter_frames_missing_vrel_stays_none_and_is_static():
   assert fuse_targets(frame.radar_points, v_ego=20.0) == []
 
 
+# --- lane-change state passthrough (Task 6) -----------------------------------
+
+def test_lane_change_frame_suppresses_the_bias():
+  """Shadow replay must mirror the daemon: during a lane change the planner
+  suppresses the bias, so the segment never goes valid."""
+  evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0))
+  evaluator.step(_frame(0.0, radar=[(20.0, -1.8, 0.0)], lane_change_active=True))
+  rec = evaluator.step(_frame(C.ENTER_HOLD_S + 0.01, radar=[(20.0, -1.8, 0.0)],
+                              lane_change_active=True))
+  assert rec.valid is False
+  assert rec.curvature == pytest.approx(0.01)
+
+
+def test_iter_frames_carries_lane_change_state():
+  """iter_frames reads laneChangeState off modelV2.meta (log.capnp MetaData)."""
+  msgs = [
+    _Msg("modelV2", 0.0, modelV2=_model(lane_change_state="preLaneChange")),
+    _Msg("carState", 0.0, carState=_car()),
+    _Msg("radarTracks", 0.0, radarTracks=_radar([(10.0, -1.8)])),
+  ]
+  frame = list(iter_frames(msgs))[0]
+  assert frame.lane_change_active is True
+
+  msgs_off = [
+    _Msg("modelV2", 0.0, modelV2=_model(lane_change_state="off")),
+    _Msg("carState", 0.0, carState=_car()),
+    _Msg("radarTracks", 0.0, radarTracks=_radar([(10.0, -1.8)])),
+  ]
+  frame_off = list(iter_frames(msgs_off))[0]
+  assert frame_off.lane_change_active is False
+
+
 # --- report ------------------------------------------------------------------
 
 def test_write_report_emits_csv_and_json(tmp_path):
@@ -500,12 +533,12 @@ def test_synthetic_log_end_to_end(tmp_path):
     lead = model.modelV2.leadsV3[0]
     lead.prob = 0.9
     lead.x = [10.0, 10.0]
-    lead.y = [-1.0, -1.0]
+    lead.y = [-1.8, -1.8]
     radar = messaging.new_message('radarTracks')
     radar.logMonoTime = int(t * 1e9)
     radar.radarTracks.init('points', 1)
     point = radar.radarTracks.points[0]
-    point.dRel, point.yRel, point.vRel = 10.0, -1.0, 0.0
+    point.dRel, point.yRel, point.vRel = 10.0, -1.8, 0.0
     msgs.extend([car, model, radar])
 
   log_path = tmp_path / "synthetic"  # no extension: read as an uncompressed raw log

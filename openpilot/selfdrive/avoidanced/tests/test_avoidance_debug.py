@@ -33,11 +33,11 @@ def test_debug_message_sent_every_frame_even_invalid():
 def test_debug_targets_radar_and_vision_with_matching_pair_ids():
   # One radar point and one YOLO box at the same spot: both carry matched=True
   # and the same non-zero pairId; nothing else gets a pair.
-  person = _box_at(20.0, -1.0, cls="person", conf=0.8)
+  person = _box_at(20.0, -1.8, cls="person", conf=0.8)
   far_car = _box_at(60.0, 0.0, cls="car", conf=0.9)  # outside the planner gate
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
                        detector=_FakeDetector(detections=[person, far_car]),
-                       radar_points=[(20.0, -1.0)])
+                       radar_points=[(20.0, -1.8)])
   daemon.update(0.0)
   dbg = _debug_msgs(pm)[-1].avoidanceDebug
 
@@ -45,11 +45,13 @@ def test_debug_targets_radar_and_vision_with_matching_pair_ids():
   vision_t = [t for t in dbg.targets if t.vision]
   assert len(radar_t) == 1 and len(vision_t) == 2
 
-  # radar side: no class, has vRel, vehicle weight, matched to pair 1
+  # radar side: vision-confirmed as person -> the vision class and the VRU
+  # weight the planner actually used (not the old hardcoded vehicle default);
+  # has vRel, matched to pair 1
   rt = [t for t in radar_t if t.dRel == pytest.approx(20.0)][0]
-  assert rt.cls == "" and rt.vision is False and rt.matched is True
+  assert rt.cls == "person" and rt.vision is False and rt.matched is True
   assert rt.pairId == 1 and rt.inGate is True
-  assert rt.weight == pytest.approx(C.VEHICLE_WEIGHT)
+  assert rt.weight == pytest.approx(C.VRU_WEIGHT)
 
   # vision side: person matched (pair 1); far car unmatched (pairId 0, not in gate)
   vt = [t for t in vision_t if t.inGate][0]
@@ -63,9 +65,26 @@ def test_debug_targets_radar_and_vision_with_matching_pair_ids():
   assert dbg.vEgo == pytest.approx(20.0)
 
 
+def test_debug_radar_weight_matches_planner_weight_when_vision_confirmed():
+  """A vision-confirmed VRU radar point is planned with the VRU weight
+  (fuse_targets takes the vision class) — the debug row must report THAT
+  weight, not the hardcoded vehicle default. Telemetry that disagrees with the
+  action is how bugs stay invisible in shadow logs."""
+  person = _box_at(20.0, -1.8, cls="person", conf=0.8)
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
+                       detector=_FakeDetector(detections=[person]),
+                       radar_points=[(20.0, -1.8)])
+  daemon.update(0.0)
+  dbg = _debug_msgs(pm)[-1].avoidanceDebug
+  rt = [t for t in dbg.targets if not t.vision][0]
+  assert rt.matched is True
+  assert rt.cls == "person"
+  assert rt.weight == pytest.approx(C.VRU_WEIGHT)
+
+
 def test_debug_counts_and_gate_flags_radar_only():
   # Radar-only degrade path still publishes debug with correct counts/gates.
-  near, far = (8.0, -1.0), (80.0, 0.0)
+  near, far = (8.0, -1.8), (80.0, 0.0)
   daemon, pm = _daemon(camera=_FakeCamera(), radar_points=[near, far])
   daemon.update(0.0)
   dbg = _debug_msgs(pm)[-1].avoidanceDebug
@@ -79,7 +98,7 @@ def test_debug_counts_and_gate_flags_radar_only():
 
 def test_debug_carries_planner_state():
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 4),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0, cls="person")]))
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
   dbg = _debug_msgs(pm)[-1].avoidanceDebug

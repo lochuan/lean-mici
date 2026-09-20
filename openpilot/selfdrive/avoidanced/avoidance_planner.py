@@ -21,8 +21,9 @@ from typing import Protocol
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.avoidanced.constants import (D_GATE, D_MAX, DT_5HZ, EDGE_CLEAR_MIN, ENTER_HOLD_S, EXIT_HOLD_S,
                                                       K_GAIN, L_LOOKAHEAD, LOWPASS_TAU_S, MAX_OFFSET_BSM,
-                                                      MAX_OFFSET_FREE, STATIC_SPEED_THRESH, VEHICLE_WEIGHT,
-                                                      V_EGO_MAX, V_EGO_MIN, VRU_CLASSES, VRU_WEIGHT, Y_GATE)
+                                                      MAX_OFFSET_FREE, OWN_LANE_HALF_WIDTH, STATIC_SPEED_THRESH,
+                                                      VEHICLE_WEIGHT, V_EGO_MAX, V_EGO_MIN, VRU_CLASSES, VRU_WEIGHT,
+                                                      Y_GATE)
 
 
 class RadarPoint(Protocol):
@@ -45,7 +46,7 @@ def _sign(value: float) -> int:
 
 
 def _in_gate(dRel: float, yRel: float) -> bool:
-  return 0.0 < dRel <= D_GATE and abs(yRel) <= Y_GATE
+  return 0.0 < dRel <= D_GATE and OWN_LANE_HALF_WIDTH <= abs(yRel) <= Y_GATE
 
 
 def radar_point_key(point) -> int:
@@ -200,11 +201,17 @@ class AvoidancePlanner:
   def update(self, model_curvature: float, targets: Iterable[Target], v_ego: float,
              bsm_left: bool = False, bsm_right: bool = False, road_edges: Iterable = (),
              enabled: bool = True, lat_active: bool = True, steering_pressed: bool = False,
+             lane_change_active: bool = False,
              max_offset: float = MAX_OFFSET_FREE, now: float | None = None) -> tuple[float, bool]:
     """Return ``(desired_curvature, valid)`` for one 5Hz frame.
 
     ``valid=False`` means the caller must not trust the plan (publish the frame
     with the envelope ``valid`` flag cleared and the model curvature).
+
+    The bias is suppressed while ``lane_change_active``: the model curvature is
+    already executing a large lateral manoeuvre and the target's relative
+    bearing is changing fast, so a bias derived from "target is on the
+    left/right" stacked on top of it is unpredictable.
     """
     now = self._clock() if now is None else now
     targets = tuple(targets)
@@ -235,6 +242,7 @@ class AvoidancePlanner:
         self._active = False
 
     gated = (enabled and lat_active and not steering_pressed
+             and not lane_change_active
              and V_EGO_MIN <= v_ego <= V_EGO_MAX
              and clearance >= EDGE_CLEAR_MIN)
     if not (gated and self._active):

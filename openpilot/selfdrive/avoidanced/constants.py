@@ -10,6 +10,10 @@ L_LOOKAHEAD = 35.0   # m, preview distance used for the curvature bias
 D_MAX = 50.0         # m, proximity ramp far distance
 Y_GATE = 2.5         # m, |yRel| gate: only same-lane-ish targets trigger
 D_GATE = 40.0        # m, near-trigger distance (spec §3)
+# 本车道半宽(m)。|yRel| 小于此值的目标不作为避让目标:0.35m 的偏置绕不开
+# 本车道内的障碍(比如抛锚车),只是白占横向空间,而且 _sign(0.0)=1 会让正
+# 前方目标固定往右让 —— 方向是任意的。留给驾驶员接管。
+OWN_LANE_HALF_WIDTH = 1.2
 
 # Offset limits (m)
 MAX_OFFSET_FREE = 0.35  # no adjacent vehicle

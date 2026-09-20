@@ -17,11 +17,15 @@ class _RadarPoint:
 
 
 def _right_target(dRel=5.0, w=C.VRU_WEIGHT, conf=1.0):
-  return Target(side=-1, dRel=dRel, yRel=-1.0, w=w, conf=conf)
+  # yRel=-1.8 must stay OUTSIDE the own-lane gate (|yRel| >= OWN_LANE_HALF_WIDTH
+  # = 1.2, Task 6): a default inside the own lane gets gated out and silently
+  # disables every test that relies on this helper driving a bias.
+  return Target(side=-1, dRel=dRel, yRel=-1.8, w=w, conf=conf)
 
 
 def _left_target(dRel=5.0, w=C.VRU_WEIGHT, conf=1.0):
-  return Target(side=1, dRel=dRel, yRel=1.0, w=w, conf=conf)
+  # Mirrored _right_target: same own-lane-gate constraint, see above.
+  return Target(side=1, dRel=dRel, yRel=1.8, w=w, conf=conf)
 
 
 # --- brief Step 1 (verbatim) -------------------------------------------------
@@ -84,7 +88,9 @@ def test_vru_weight_exceeds_vehicle_weight():
 def test_fuse_targets_from_radar_points():
   # vRel=-3.0: a moving point needs no vision confirmation (vRel=0.0 with the
   # default v_ego=0.0 is ground-static and now correctly requires one).
-  targets = fuse_targets([_RadarPoint(10.0, -1.0, vRel=-3.0), _RadarPoint(5.0, 4.0), _RadarPoint(60.0, 0.5)])
+  # yRel=-1.8: outside the own-lane gate (Task 6) — |yRel|=1.0 is no longer a
+  # target, so the fixture must sit in the adjacent-lane band to survive.
+  targets = fuse_targets([_RadarPoint(10.0, -1.8, vRel=-3.0), _RadarPoint(5.0, 4.0), _RadarPoint(60.0, 0.5)])
   assert len(targets) == 1
   assert targets[0].dRel == 10.0
   assert targets[0].side == -1
@@ -359,9 +365,12 @@ MODEL_CURVATURE = 0.012
 
 def _make_daemon(enabled=True):
   from openpilot.selfdrive.avoidanced.avoidanced import AvoidanceDaemon
-  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[])
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
+                 meta=_NS(laneChangeState="off"))
   car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
-  radar = _NS(points=[_RadarPoint(8.0, -1.0)], errors=_NS(canError=False, radarUnavailableTemporary=False))
+  # yRel=-1.8: outside the own-lane gate (Task 6) — the target must survive the
+  # gate for the planner to activate.
+  radar = _NS(points=[_RadarPoint(8.0, -1.8)], errors=_NS(canError=False, radarUnavailableTemporary=False))
   pm = _FakePubMaster()
   daemon = AvoidanceDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=enabled))
   return daemon, pm
@@ -449,5 +458,23 @@ def test_zero_max_offset_produces_no_manoeuvre():
   p = _planner()
   for i in range(20):
     curv, valid = _step(p, i * C.DT_5HZ, [_right_target()], max_offset=0.0)
+  assert not valid
+  assert curv == pytest.approx(0.01)
+
+
+# --- own-lane gate + lane-change suppression (Task 6) -------------------------
+
+def test_own_lane_target_is_not_a_target():
+  """Y_GATE=2.5m 让 yRel~0 的目标也能触发, 而 _sign(0.0)=1 会让正前方目标
+  固定往右让 0.35m —— 方向任意, 且 0.35m 绕不开本车道障碍。"""
+  assert fuse_targets([_RadarPoint(dRel=20.0, yRel=0.0, vRel=-5.0)], v_ego=15.0) == []
+  assert fuse_targets([_RadarPoint(dRel=20.0, yRel=1.0, vRel=-5.0)], v_ego=15.0) == []
+  assert len(fuse_targets([_RadarPoint(dRel=20.0, yRel=1.5, vRel=-5.0)], v_ego=15.0)) == 1
+
+
+def test_lane_change_suppresses_the_bias():
+  p = _planner()
+  _step(p, 0.0, [_right_target()], lane_change_active=True)
+  curv, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()], lane_change_active=True)
   assert not valid
   assert curv == pytest.approx(0.01)

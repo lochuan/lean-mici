@@ -143,6 +143,12 @@ class AvoidanceDaemon:
     targets = fuse_targets(radar.points, fused, v_ego=car_state.vEgo,
                            confirmed_keys=confirmed_keys,
                            vision_cls_by_key=vision_cls_by_key)
+    # Suppress the bias during lane changes: the model curvature is already
+    # executing a large lateral manoeuvre and the target's relative bearing is
+    # changing fast, so a bias derived from "target is on the left/right" on
+    # top of it is unpredictable. laneChangeState lives on modelV2.meta
+    # (log.capnp MetaData) — no new subscription needed.
+    lane_change_active = str(model_v2.meta.laneChangeState) != "off"
     curvature, valid = self.planner.update(
       model_curvature=model_v2.action.desiredCurvature,
       targets=targets,
@@ -152,6 +158,7 @@ class AvoidanceDaemon:
       road_edges=model_v2.roadEdges,
       enabled=self.enabled,
       steering_pressed=car_state.steeringPressed,
+      lane_change_active=lane_change_active,
       max_offset=self.max_offset,
       now=now,
     )
@@ -166,7 +173,8 @@ class AvoidanceDaemon:
     # Debug snapshot first so the plan message remains the frame's last publish
     # (the every-frame freshness invariant tests read pm.sent[-1]).
     self._publish_debug(radar.points, detections, n_associated, pairs, car_state,
-                        valid=bool(valid), radar_errors=radar.errors)
+                        valid=bool(valid), radar_errors=radar.errors,
+                        vision_cls_by_key=vision_cls_by_key)
 
     msg = messaging.new_message('lateralManeuverPlan')
     msg.lateralManeuverPlan.desiredCurvature = float(curvature)
@@ -174,13 +182,18 @@ class AvoidanceDaemon:
     self.pm.send('lateralManeuverPlan', msg)
 
   def _publish_debug(self, radar_points, detections, n_associated, pairs, car_state,
-                     valid: bool, radar_errors=None) -> None:
+                     valid: bool, radar_errors=None, vision_cls_by_key=None) -> None:
     """Build and publish the fused avoidanceDebug snapshot for this frame.
 
     Sent every frame regardless of planner validity: the message envelope
     ``valid`` flag is always true (this is a live observation, not a plan), and
     the planner's own validity lives in the struct's ``valid`` field. Consumers
     are lanlink's bird's-eye view and the P0 calibration tool — never controlsd.
+
+    ``vision_cls_by_key`` is the same map the planner consumed this frame
+    (radar_point_key -> vision class): a vision-confirmed radar point is
+    planned with the vision class weight, so the debug row must report that
+    weight — telemetry that disagrees with the action hides faults.
     """
     radar_points = list(radar_points)
     # Association pairs reference this frame's radar/detection objects, so match
@@ -194,9 +207,13 @@ class AvoidanceDaemon:
     for point in radar_points:
       in_gate = _in_gate(float(point.dRel), float(point.yRel))
       key = radar_point_key(point)
+      # Same weight the planner used: a vision-confirmed radar point takes the
+      # vision class weight (fuse_targets), not the vehicle default.
+      cls = (vision_cls_by_key or {}).get(key)
       targets.append((in_gate, {
         "dRel": float(point.dRel), "yRel": float(point.yRel), "vRel": float(point.vRel),
-        "cls": "", "conf": 0.0, "weight": C.VEHICLE_WEIGHT,
+        "cls": cls or "", "conf": 0.0,
+        "weight": C.VRU_WEIGHT if cls in C.VRU_CLASSES else C.VEHICLE_WEIGHT,
         "matched": key in radar_pair_ids, "inGate": in_gate, "vision": False,
         "pairId": radar_pair_ids.get(key, 0),
       }))

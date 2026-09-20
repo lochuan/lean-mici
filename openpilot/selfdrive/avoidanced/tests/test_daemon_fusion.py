@@ -99,7 +99,10 @@ def _box_at(d_rel, y_rel, cls="person", conf=0.9):
 
 def _daemon(*, camera=None, detector=None, camera_factory=None, radar_points=(), enabled=True,
             model_valid=True):
-  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[])
+  # meta.laneChangeState="off" mirrors the real modelV2 message (log.capnp
+  # MetaData): the daemon reads it for the lane-change suppression gate.
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
+                 meta=_NS(laneChangeState="off"))
   car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
   radar = _NS(points=[_NS(dRel=d, yRel=y, vRel=0.0) for d, y in radar_points],
               errors=_NS(canError=False, radarUnavailableTemporary=False))
@@ -136,7 +139,7 @@ def _expected_offset(d_rel, weight):
 def test_daemon_vru_detection_gets_vru_weight():
   # Radar sees nothing; YOLO spots a person on the right -> VRU weight drives the bias.
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0, cls="person")]))
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
   daemon.update(0.0)                    # enter hysteresis
   daemon.update(C.ENTER_HOLD_S + 0.01)  # active
   assert pm.sent[-1][1].valid is True
@@ -147,9 +150,9 @@ def test_daemon_vru_detection_gets_vru_weight():
 def test_daemon_vru_weight_exceeds_vehicle_weight():
   frames = [ROI] * 2
   person, _ = _daemon(camera=_FakeCamera(frames),
-                      detector=_FakeDetector(detections=[_box_at(20.0, -1.0, cls="person")]))
+                      detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
   car, _ = _daemon(camera=_FakeCamera(frames),
-                   detector=_FakeDetector(detections=[_box_at(20.0, -1.0, cls="car")]))
+                   detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="car")]))
   for d in (person, car):
     d.update(0.0)
     d.update(C.ENTER_HOLD_S + 0.01)
@@ -164,8 +167,8 @@ def test_daemon_associated_detection_not_double_counted():
   # detection (one target, not two). Task 5: the absorbed point takes the
   # vision class weight, so a radar point matched to a person box is a VRU.
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0, cls="person")]),
-                       radar_points=[(20.0, -1.0)])
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]),
+                       radar_points=[(20.0, -1.8)])
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
   assert pm.sent[-1][1].valid is True
@@ -196,12 +199,26 @@ def test_daemon_confirms_static_radar_across_reiteration():
   assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(expected, rel=1e-6)
 
 
+def test_daemon_suppresses_bias_during_lane_change():
+  # modelV2.meta.laneChangeState != off: the model curvature is already
+  # executing the lateral manoeuvre, so the avoidance bias must be suppressed
+  # (planner gate, Task 6) and the frame published invalid with the raw model
+  # curvature.
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
+  daemon.sm._data["modelV2"].meta.laneChangeState = "preLaneChange"
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  assert pm.sent[-1][1].valid is False
+  assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
+
+
 def test_daemon_projects_through_roi_inverse_mapping():
   # A box given in ROI pixels of a 1344x760 frame must land on the same
   # car-frame point as its full-frame equivalent.
   meta = RoiMeta(1344.0 / 640.0, 760.0 / 384.0, 0.0)
   d_cam = 20.0 + C.CAMERA_TO_FRONT
-  u_full = CX - FX * (-1.0) / d_cam
+  u_full = CX - FX * (-1.8) / d_cam
   v_full = CY + FY * C.CAMERA_HEIGHT / d_cam
   u_roi, v_roi = u_full / meta.scale_u, v_full / meta.scale_v
   # Height in ROI px such that the FULL-FRAME height makes box-height ranging
@@ -226,7 +243,7 @@ def test_daemon_degrades_to_radar_only_without_camera():
     def frame(self, horizon_row=None):
       return None
 
-  daemon, pm = _daemon(camera=_DeadCamera(), radar_points=[(8.0, -1.0)])
+  daemon, pm = _daemon(camera=_DeadCamera(), radar_points=[(8.0, -1.8)])
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
   assert "camera" in daemon.degraded          # logged once, radar-only fallback
@@ -244,7 +261,7 @@ def test_daemon_degrades_to_radar_only_when_yolo_fails():
       raise FileNotFoundError("pkl missing")
 
   detector = _BrokenDetector()
-  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 4), detector=detector, radar_points=[(8.0, -1.0)])
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 4), detector=detector, radar_points=[(8.0, -1.8)])
   for i in range(4):
     daemon.update(i * C.DT_5HZ)
   assert "yolo" in daemon.degraded
@@ -271,8 +288,8 @@ def test_daemon_creates_camera_lazily_via_factory():
 
 def test_daemon_skips_vision_when_no_new_frame():
   # Camera connected but no fresh frame this tick: radar-only, no crash.
-  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI]), detector=_FakeDetector(detections=[_box_at(20.0, -1.0)]),
-                       radar_points=[(8.0, -1.0)])
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI]), detector=_FakeDetector(detections=[_box_at(20.0, -1.8)]),
+                       radar_points=[(8.0, -1.8)])
   daemon.update(0.0)                          # consumes the only frame
   daemon.update(C.DT_5HZ)                     # no frame -> radar-only this tick
   assert pm.sent[-1][1].valid is False        # enter hysteresis not satisfied yet
@@ -283,7 +300,7 @@ def test_daemon_gates_valid_on_modelv2_validity():
   # Defensive: a frame whose modelV2 failed validation must never be published
   # as a valid plan, even with a target that would otherwise drive the bias.
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0, cls="person")]),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]),
                        model_valid=False)
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
