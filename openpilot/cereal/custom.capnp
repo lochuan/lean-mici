@@ -499,3 +499,22 @@ struct CustomReserved18 @0xc86a3d38d13eb3ef {
 
 struct CustomReserved19 @0xa4f1eb3323f5f582 {
 }
+
+struct CruiseButtonsDebug @0xd4e8a1c6b3f29057 {
+  enabled @0 :Bool;
+  btConnected @1 :Bool;
+  btState @2 :UInt8;          # 模拟器状态: 0=idle 1=executing 2=fault
+  ceilingKph @3 :Float32;      # 用户上限
+  targetKph @4 :Float32;       # 公式目标
+  setSpeedKph @5 :Float32;     # 观测值
+  vEgoKph @6 :Float32;
+  quantumKph @7 :Float32;     # 运行时探测的按压量子
+  sccActive @8 :Bool;
+  leadPresent @9 :Bool;
+  leadSpeedKph @10 :Float32;
+  standstill @11 :Bool;
+  lastButton @12 :UInt8;      # 0=RES+ 1=RES- 255=none(我们最近命令)
+  lastEchoOurs @13 :Bool;     # 最近回显归属
+  unexplained @14 :UInt8;    # 连续无法解释的回显数
+  frozen @15 :Bool;           # 安全冻结
+}

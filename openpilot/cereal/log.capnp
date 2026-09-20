@@ -2641,6 +2641,7 @@ struct Event {
 
     lateralManeuverPlan @150 :LateralManeuverPlan;
     avoidanceDebug @153 :AvoidanceDebug;
+    cruiseButtonsDebug @154 :Custom.CruiseButtonsDebug;
 
     # *********** debug ***********
     testJoystick @52 :Joystick;

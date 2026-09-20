@@ -55,6 +55,9 @@ def lanlink_run(started: bool, params: Params, CP: car.CarParams) -> bool:
 def avoidance_run(started: bool, params: Params, CP: car.CarParams) -> bool:
   return and_(only_onroad, iscar)(started, params, CP) and params.get_bool("AvoidanceEnabled")
 
+def cruise_buttons_run(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return and_(only_onroad, iscar)(started, params, CP) and params.get_bool("CruiseButtonsEnabled")
+
 def or_(*fns):
   return lambda *args: operator.or_(*(fn(*args) for fn in fns))
 
@@ -94,6 +97,7 @@ procs = [
   PythonProcess("plannerd", "openpilot.selfdrive.controls.plannerd", only_onroad),
   PythonProcess("radard", "openpilot.selfdrive.controls.radard", only_onroad),
   PythonProcess("avoidanced", "openpilot.selfdrive.avoidanced.avoidanced", avoidance_run),
+  PythonProcess("cruisebuttond", "openpilot.selfdrive.cruisebuttond.cruisebuttond", cruise_buttons_run),
   PythonProcess("hardwared", "openpilot.system.hardware.hardwared", always_run),
   PythonProcess("modem", "openpilot.common.hardware.comma.modem", always_run, enabled=COMMA_HARDWARE),
   PythonProcess("tombstoned", "openpilot.system.tombstoned", always_run, enabled=not PC),
