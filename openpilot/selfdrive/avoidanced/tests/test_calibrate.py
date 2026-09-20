@@ -199,6 +199,27 @@ def test_pass_uses_banded_thresholds():
   assert isinstance(bands["le10m"]["pass"], bool)
 
 
+def test_fit_all_pairs_beyond_last_band_is_not_a_pass():
+  """零 graded 样本不得读作 pass:所有配对都落在最后一个距离档之外时,每个档
+  都是空的(pass=None),聚合判定绝不能因为"没有档位失败"而变绿 —— 那正是
+  分档 None 规则要防止的失效在聚合层复活。"""
+  pairs = _synth_pairs(distances=(41.0, 42.0, 43.0, 44.0, 45.0))
+  result = fit_calibrated_offsets(pairs)
+  assert all(entry["n"] == 0 for entry in result["bands"].values())
+  assert result["pass"] is False
+
+
+def test_fit_failing_populated_band_is_not_a_pass():
+  """一个有人口且超阈值的档位必须直接判 FAIL(此前只经 main 退出码间接覆盖)。"""
+  # Unmodelable noise survives the CAMERA_TO_FRONT correction, so the populated
+  # le10m band's distance p95 exceeds its 0.40 m threshold post-correction.
+  pairs = _synth_pairs(distances=(5.0, 6.0, 7.0, 8.0, 9.0), noise=0.5, seed=3)
+  result = fit_calibrated_offsets(pairs)
+  assert result["bands"]["le10m"]["n"] > 0
+  assert result["bands"]["le10m"]["pass"] is False
+  assert result["pass"] is False
+
+
 # --- pair extraction ------------------------------------------------------------
 
 def _target(d_rel, y_rel, pair_id=0, vision=False):

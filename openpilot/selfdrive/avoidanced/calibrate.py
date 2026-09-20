@@ -222,6 +222,14 @@ def fit_calibrated_offsets(pairs: Sequence[CalibPair], height: float = C.CAMERA_
   empty_bands = [name for name, entry in bands.items() if entry["n"] == 0]
   if empty_bands:
     warnings.append(f"no pairs in distance band(s) {', '.join(empty_bands)}; coverage incomplete")
+  # The verdict needs at least one POPULATED band that passed, not merely "no
+  # band failed": an all-empty dataset (e.g. every pair beyond 40 m) grades
+  # zero samples, and a gate that returns "passed" without grading anything is
+  # not a gate — that is exactly the spurious-pass failure the per-band
+  # `pass: None` rule exists to prevent, so it must not reappear one level up
+  # as all(None) -> True. Hence any(True) AND not any(False), not all(not False).
+  populated_passed = any(entry["pass"] is True for entry in bands.values())
+  any_failed = any(entry["pass"] is False for entry in bands.values())
 
   return {
     "n_pairs": len(pairs),
@@ -239,7 +247,7 @@ def fit_calibrated_offsets(pairs: Sequence[CalibPair], height: float = C.CAMERA_
     "residual_p95_after_m": max(fwd_p95_after, lat_p95),
     "bands": bands,
     "warnings": warnings,
-    "pass": all(entry["pass"] is not False for entry in bands.values()),
+    "pass": populated_passed and not any_failed,
   }
 
 
