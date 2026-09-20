@@ -12,7 +12,8 @@ DECEL_TAP_INTERVAL_S = 0.8   # 向下固定节奏
 HOLD_RATE_KPH_S = 8.0        # 长按假设速率,上车验证项 5 标定
 TAP_PRESS_MS = 180           # 短按按压时长(手册 ≤600ms=1 量子)
 MIN_CMD_INTERVAL_S = 0.1    # 两拍最小间隔
-MAX_PRESSES_PER_MIN = 60     # 按压节奏限幅
+MAX_ACCEL_PRESSES_PER_MIN = 60   # 加速预算(严格:防失控上冲循环)
+MAX_DECEL_PRESSES_PER_MIN = 120  # 减速预算(高于自然节奏上限 75/min,仅拦真失控;延迟减速是危险方向)
 DEFAULT_ACCEL_MS2 = 0.8      # 滑条默认;范围 0.3–2.0
 
 # 归属

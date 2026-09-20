@@ -35,7 +35,7 @@ class ButtonScheduler:
     self._recent_tap_deltas: list[float] = []   # 量子自适应,最近 10 个中位数
     self._seq = 0
     self._set_speed_kph: float | None = None    # daemon 每帧喂入(update)
-    self._press_times: list[float] = []         # MAX_PRESSES_PER_MIN 滑窗
+    self._press_times: dict[str, list[float]] = {"accel": [], "decel": []}  # 分方向限幅滑窗
 
   # --- 量子自适应(运行时,非学习) ---
   def observe_confirmed_tap(self, delta_kph: float) -> None:
@@ -108,11 +108,13 @@ class ButtonScheduler:
       if ceiling is None or self._set_speed_kph is None or \
          self._set_speed_kph + self.quantum_kph * cmd.count > ceiling + EPS:
         return
-    # 节奏限幅(spec §6.4):每分钟 ≤ MAX_PRESSES_PER_MIN 拍
-    self._press_times = [t for t in self._press_times if t > now - 60.0]
-    if len(self._press_times) >= C.MAX_PRESSES_PER_MIN:
+    # 节奏限幅(spec §6.4,按方向分预算):延迟减速是危险方向,预算独立。
+    # 加速预算严格(防失控上冲循环);减速预算高于自然节奏上限,仅拦真失控。
+    self._press_times[cmd.button] = [t for t in self._press_times[cmd.button] if t > now - 60.0]
+    limit = C.MAX_ACCEL_PRESSES_PER_MIN if cmd.button == "accel" else C.MAX_DECEL_PRESSES_PER_MIN
+    if len(self._press_times[cmd.button]) >= limit:
       return
-    self._press_times.append(now)
+    self._press_times[cmd.button].append(now)
     self.actuator.press(cmd)
     # 每拍一条记录(per-tap 契约:多拍 burst = 多条,归属消耗才正确)
     self.attribution.on_command(CommandRecord(cmd.seq, cmd.button, now, cmd.count))

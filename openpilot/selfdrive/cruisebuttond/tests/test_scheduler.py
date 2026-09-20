@@ -227,17 +227,58 @@ def test_seq_wraps_at_256():
   assert [c.seq for c in mock.commands] == [255, 0]
 
 
-# --- 节奏限幅(spec §6.4)---
+# --- 节奏限幅(spec §6.4,分方向预算)---
 
 
-def test_rate_limited_to_max_presses_per_min():
+def test_rate_limited_to_max_accel_presses_per_min():
   s, mock, _, _ = make_sched(ceiling=200.0)
   cfg = SchedulerConfig(accel_ms2=2.0)
   now = 100.0
   for _ in range(120):
     s.update(inp(ceiling=200.0, set_speed=50.0, v_ego=50.0), cfg, held_s=10.0, now=now)
-    now += 0.15  # > MIN_CMD_INTERVAL_S,但 120 拍/18s 远超 60/min
-  assert len(mock.commands) == C.MAX_PRESSES_PER_MIN
+    now += 0.15  # > MIN_CMD_INTERVAL_S,但 120 拍/18s 远超加速预算 60/min
+  assert len(mock.commands) == C.MAX_ACCEL_PRESSES_PER_MIN
+
+
+def test_rate_limited_to_max_decel_presses_per_min():
+  s, mock, _, _ = make_sched()
+  now = 100.0
+  for _ in range(150):
+    # 每帧 0.4s 间隔 > DECEL_TAP_INTERVAL_S;150 拍/60s 超 120/min 减速预算
+    s.update(inp(ceiling=200.0, set_speed=100.0, v_ego=100.0, lead=50.0), SchedulerConfig(), held_s=10.0, now=now)
+    now += 0.4
+  assert len(mock.commands) == C.MAX_DECEL_PRESSES_PER_MIN
+
+
+def test_saturated_accel_budget_does_not_block_decel():
+  s, mock, _, _ = make_sched(ceiling=200.0)
+  cfg = SchedulerConfig(accel_ms2=2.0)
+  now = 100.0
+  for _ in range(C.MAX_ACCEL_PRESSES_PER_MIN):
+    s.update(inp(ceiling=200.0, set_speed=50.0, v_ego=50.0), cfg, held_s=10.0, now=now)
+    now += 0.15
+  n_accel = len(mock.commands)
+  assert n_accel == C.MAX_ACCEL_PRESSES_PER_MIN  # 加速预算完全耗尽
+  # 弯道切入:减速必须立即发出,不受加速预算影响
+  s.update(inp(ceiling=200.0, set_speed=100.0, v_ego=100.0, scc=60.0), cfg, held_s=10.0, now=now)
+  assert len(mock.commands) == n_accel + 1
+  assert mock.commands[-1].button == "decel"
+
+
+def test_hold_debounce_delayed_retry_counts_once():
+  s, mock, _, _ = make_sched()
+  # 首帧:长按发出并登记一次
+  s.update(inp(set_speed=70.0, v_ego=70.0, lead=30.0), SchedulerConfig(), held_s=10.0, now=100.0)
+  assert len(mock.commands) == 1 and mock.commands[0].mode == "hold"
+  mock._state.executing = True  # 长按在途 -> 防抖拦下重试
+  s.update(inp(set_speed=70.0, v_ego=70.0, lead=30.0), SchedulerConfig(), held_s=10.0, now=100.2)
+  assert len(mock.commands) == 1 and len(s._press_times["decel"]) == 1  # 未多计数
+  # 在途结束后的下一帧重试:仍防抖(距上条 < MIN_CMD_INTERVAL_S 不可能,这里已过 0.2s)
+  mock._state.executing = False
+  s.update(inp(set_speed=70.0, v_ego=70.0, lead=30.0), SchedulerConfig(), held_s=10.0, now=100.4)
+  # delta 仍 37 -> 新长按(上一次已耗尽),限幅窗口只加一条
+  assert len(mock.commands) == 2
+  assert len(s._press_times["decel"]) == 2
 
 
 # --- abort 语义(spec §6.2)---
