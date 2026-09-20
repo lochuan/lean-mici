@@ -83,6 +83,7 @@ class CameraStream:
     self._client: VisionIpcClient | None = None
     self.last_connect_t: float | None = None
     self.intrinsics: tuple[float, float, float, float] | None = None
+    self.frame_size: tuple[int, int] | None = None
 
   def connect(self) -> bool:
     """Connect to camerad, retrying at most every ``CONNECT_RETRY_S``."""
@@ -99,6 +100,7 @@ class CameraStream:
       return False
     self._client = client
     self.intrinsics = scaled_intrinsics(client.width, client.height)
+    self.frame_size = (client.width, client.height)
     return True
 
   def frame(self, horizon_row: float | None = None) -> tuple[np.ndarray, RoiMeta] | None:

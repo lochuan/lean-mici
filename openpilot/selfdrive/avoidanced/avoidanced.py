@@ -117,7 +117,8 @@ class AvoidanceDaemon:
     return project_detections(detections, fx=fx, fy=fy, cx=cx, cy=cy,
                               height=C.CAMERA_HEIGHT, pitch=geom.pitch,
                               yaw=geom.yaw, roll=geom.roll,
-                              camera_to_front=C.CAMERA_TO_FRONT, roi_meta=roi_meta)
+                              camera_to_front=C.CAMERA_TO_FRONT, roi_meta=roi_meta,
+                              frame_height=self.camera.frame_size[1] if self.camera.frame_size else None)
 
   def update(self, now: float) -> None:
     self._refresh_params(now)

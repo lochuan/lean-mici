@@ -62,3 +62,15 @@ ROI_MODE = ROI_MODE_SQUASH
 # NATIVE 模式下 ROI 顶边在地平线上方留多少行。64 行使 ROI 落在 [316, 700]:
 # 远端覆盖无穷远,近端接地距离 1.59m,40m 卡车顶(行 350)在窗口内。
 ROI_HORIZON_MARGIN = 64
+
+# 框高测距用的假设物体高度(m)。40m 处 1px 框高误差约 11% 距离误差,叠加成人
+# 身高方差 ±12%,合计 15-20% —— 对比地平面投影 0.5deg pitch 就 41%,而且框高
+# 测距完全不依赖 pitch。
+CLASS_HEIGHTS_M = {
+  "person": 1.70, "rider": 1.70, "bicycle": 1.70, "motorcycle": 1.70,
+  "tricycle": 1.60, "car": 1.50, "bus": 3.20, "truck": 3.20,
+}
+
+# 框底距图像下边界小于这个像素数即视为截断。截断框的 y2 不是真实接地点,
+# 地平面投影会系统性偏近,框高也被截短导致距离偏远。
+TRUNCATION_MARGIN_PX = 4.0

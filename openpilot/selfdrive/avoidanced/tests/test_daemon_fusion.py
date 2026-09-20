@@ -64,6 +64,7 @@ class _FakeCamera:
   def __init__(self, frames=()):
     self._frames = list(frames)
     self.intrinsics = (FX, FY, CX, CY)
+    self.frame_size = (1344, 760)
 
   def frame(self, horizon_row=None):
     return self._frames.pop(0) if self._frames else None
@@ -261,3 +262,20 @@ def test_vision_is_gated_off_when_uncalibrated():
   dets = daemon._detect(0.0)
   assert dets == []
   assert daemon.degraded == {"calibration"}
+
+
+def test_daemon_passes_frame_height_to_projection(monkeypatch):
+  """截断框丢弃要在生产路径生效,daemon 必须把非 None 的 frame_height 传下去。"""
+  import openpilot.selfdrive.avoidanced.avoidanced as mod
+  seen = []
+  real = mod.project_detections
+
+  def spy(dets, **kwargs):
+    seen.append(kwargs.get("frame_height"))
+    return real(dets, **kwargs)
+
+  monkeypatch.setattr(mod, "project_detections", spy)
+  daemon, _ = _daemon(camera=_FakeCamera(frames=[ROI]),
+                      detector=_FakeDetector(detections=[_box_at(20.0, -1.0)]))
+  daemon._detect(0.0)
+  assert seen == [760]              # 1344x760 帧高,非 None

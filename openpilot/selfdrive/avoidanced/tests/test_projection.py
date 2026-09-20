@@ -120,7 +120,7 @@ def test_project_detections_schema_and_weights():
           _det(100, 180, 140, 200, cls="car", conf=0.7)]
   out = _project_dets(dets, meta=meta)
   assert len(out) == 2
-  assert set(out[0]) == {"dRel", "yRel", "cls", "conf", "w"}
+  assert set(out[0]) == {"dRel", "yRel", "cls", "conf", "w", "bearing", "dRelSource", "boxHeightPx"}
   assert out[0]["w"] == C.VRU_WEIGHT
   assert out[0]["cls"] == "person" and out[0]["conf"] == 0.8
   assert out[1]["w"] == C.VEHICLE_WEIGHT
@@ -288,3 +288,23 @@ def test_projection_closes_the_loop_with_live_roll():
                                 roll=roll, camera_to_front=0.0)
     assert pt is not None
     assert abs(pt["dRel"] - d) < 0.01 and abs(pt["yRel"] - y) < 0.01
+
+
+# --- bearing + truncated-box rejection (task 3 brief) ----------------------------
+
+def test_project_detections_emits_bearing_and_source():
+  dets = [{"x1": 700.0, "y1": 380.0, "x2": 740.0, "y2": 420.0, "cls": "car", "conf": 0.5}]
+  out = project_detections(dets, fx=FX, fy=FY, cx=CX, cy=CY, height=C.CAMERA_HEIGHT,
+                           pitch=0.0, yaw=0.0, roll=0.0, camera_to_front=0.0,
+                           roi_meta=None, frame_height=H)
+  assert len(out) == 1
+  assert out[0]["bearing"] > 0.0          # 框在光心右侧
+  assert out[0]["dRelSource"] == "ground"
+
+
+def test_project_detections_drops_truncated_boxes():
+  dets = [{"x1": 600.0, "y1": 600.0, "x2": 700.0, "y2": H, "cls": "person", "conf": 0.9}]
+  out = project_detections(dets, fx=FX, fy=FY, cx=CX, cy=CY, height=C.CAMERA_HEIGHT,
+                           pitch=0.0, yaw=0.0, roll=0.0, camera_to_front=0.0,
+                           roi_meta=None, frame_height=H)
+  assert out == []
