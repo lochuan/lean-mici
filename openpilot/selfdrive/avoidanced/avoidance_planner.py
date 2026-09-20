@@ -99,11 +99,15 @@ def plan(targets: Iterable[Target], max_offset: float = MAX_OFFSET_FREE,
 def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] | None = None) -> list[Target]:
   """Build planner targets from radar points, plus any already-projected detections.
 
-  ``detections`` must carry car-frame ``dRel`` / ``yRel`` (the output of the
-  camera-radar association step) and are currently **appended as independent
-  targets** — no dedup/association with radar points yet, and their only effect
-  is a class weight (VRU vs vehicle). Association is a follow-up task; see the
-  Task 5 report.
+  ``detections`` must carry car-frame ``dRel`` / ``yRel``. avoidanced runs
+  ``associate()`` first and passes only its *unmatched* detections here, so
+  these are objects the radar missed; matched ones are already represented by
+  their radar point. Nothing here dedups, so passing raw (un-associated)
+  detections would double-count.
+
+  Radar points always get ``VEHICLE_WEIGHT``: a matched detection's class does
+  not currently upgrade its radar point, so a radar-visible motorcycle is
+  weighted as a vehicle (see association.associate docstring).
   """
   targets: list[Target] = []
   for point in radar_points:
