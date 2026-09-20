@@ -48,6 +48,17 @@ AVOIDANCE_STALE_S = 1.0
 # YOLO classes treated as vulnerable road users (higher avoidance weight)
 VRU_CLASSES = frozenset({"person", "rider", "bicycle", "motorcycle", "tricycle"})
 
+
+def class_weight(cls) -> float:
+  """类别 -> 避让权重(VRU > vehicle),未知/缺失类别按 vehicle。
+
+  唯一实现,不许再内联 ``VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT``:
+  planner、projection 和 debug 遥测都必须走这里 —— 各写一份的拷贝曾让 debug
+  上报的权重和 planner 实际使用的不一致(本分支修掉过的遥测 bug)。
+  """
+  return VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT
+
+
 # Camera -> car-frame projection (spec §4). Initial mount values; the P0
 # calibration (shadow harness, spec §4) refines them.
 CAMERA_HEIGHT = 1.2    # m, wide camera above the ground (windshield mount)

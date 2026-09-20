@@ -213,13 +213,13 @@ class AvoidanceDaemon:
       targets.append((in_gate, {
         "dRel": float(point.dRel), "yRel": float(point.yRel), "vRel": float(point.vRel),
         "cls": cls or "", "conf": 0.0,
-        "weight": C.VRU_WEIGHT if cls in C.VRU_CLASSES else C.VEHICLE_WEIGHT,
+        "weight": C.class_weight(cls),
         "matched": key in radar_pair_ids, "inGate": in_gate, "vision": False,
         "pairId": radar_pair_ids.get(key, 0),
       }))
     for det in detections:
       in_gate = _in_gate(float(det["dRel"]), float(det["yRel"]))
-      weight = C.VRU_WEIGHT if det.get("cls") in C.VRU_CLASSES else C.VEHICLE_WEIGHT
+      weight = C.class_weight(det.get("cls"))
       targets.append((in_gate, {
         "dRel": float(det["dRel"]), "yRel": float(det["yRel"]), "vRel": 0.0,
         "cls": det.get("cls", ""), "conf": float(det.get("conf", 1.0)),

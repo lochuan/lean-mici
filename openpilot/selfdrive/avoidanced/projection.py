@@ -20,8 +20,8 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from openpilot.selfdrive.avoidanced.constants import CAMERA_PITCH, CAMERA_TO_FRONT, CAMERA_YAW, ROI_HORIZON_MARGIN, ROI_MODE, ROI_MODE_NATIVE, VEHICLE_WEIGHT, VRU_CLASSES, VRU_WEIGHT
-from openpilot.selfdrive.avoidanced.ranging import bearing_from_pixel, is_truncated
+from openpilot.selfdrive.avoidanced.constants import CAMERA_PITCH, CAMERA_TO_FRONT, CAMERA_YAW, ROI_HORIZON_MARGIN, ROI_MODE, ROI_MODE_NATIVE, class_weight
+from openpilot.selfdrive.avoidanced.ranging import is_truncated
 from openpilot.selfdrive.avoidanced.yolo_detector import INPUT_H, INPUT_W
 
 
@@ -156,7 +156,15 @@ def project_detections(dets: Iterable[dict] | None, fx: float, fy: float, cx: fl
   projected onto the ground plane. Boxes whose ray never reaches the ground are
   dropped. ``w`` is the planner class weight (VRU > vehicle).
 
-  ``bearing`` is the horizontal bearing (rad, positive toward image RIGHT) and
+  ``bearing`` is the horizontal bearing about the FRONT-BUMPER origin,
+  ``atan2(-yRel, dRel)`` on the projected car-frame point — the SAME origin and
+  sign convention as the radar side (``association._radar_bearing``), positive
+  toward image right. It must NOT be computed from the pixel column
+  (``atan2(u - cx, fx)``): that angle is about the CAMERA's optical centre, and
+  the camera sits ``CAMERA_TO_FRONT`` behind the bumper — mixing the two
+  origins shrank unmatched ``yRel`` by ``d / (d + CAMERA_TO_FRONT)`` and injected
+  a spurious Δbearing into matching (the parallax bug this replaced). Yaw is
+  already undone inside :func:`project_box_to_vehicle`'s ground-plane rotation.
   ``dRelSource`` tags where ``dRel`` came from (``"ground"`` here). Boxes whose
   bottom edge touches the frame bottom (``frame_height``) are truncated — their
   y2 is not the true ground contact — and are rejected when ``frame_height`` is
@@ -170,7 +178,6 @@ def project_detections(dets: Iterable[dict] | None, fx: float, fy: float, cx: fl
       u, v = roi_to_full(u, v, roi_meta)
     if frame_height is not None and is_truncated(v, frame_height):
       continue
-    bearing = bearing_from_pixel(u, cx, fx, yaw)
     point = project_box_to_vehicle(u=u, v=v, fx=fx, fy=fy, cx=cx, cy=cy, height=height,
                                    pitch=pitch, yaw=yaw, roll=roll, camera_to_front=camera_to_front)
     if point is None:
@@ -181,8 +188,9 @@ def project_detections(dets: Iterable[dict] | None, fx: float, fy: float, cx: fl
       "yRel": point["yRel"],
       "cls": cls,
       "conf": float(det.get("conf", 1.0)),
-      "w": VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT,
-      "bearing": bearing,
+      "w": class_weight(cls),
+      # 保险杠原点方位角(与雷达同参照),从投影后的车体坐标推出 —— 不要改回像素列。
+      "bearing": math.atan2(-point["yRel"], point["dRel"]),
       "dRelSource": "ground",
       "boxHeightPx": abs(float(det["y2"]) - float(det["y1"])) * (roi_meta.scale_v if roi_meta else 1.0),
     })
