@@ -48,15 +48,29 @@ def _in_gate(dRel: float, yRel: float) -> bool:
 
 
 def _best_target(targets: Iterable[Target], max_offset: float) -> tuple[Target, float] | None:
+  """Highest-desire in-gate target, and its magnitude capped to ``max_offset``.
+
+  Ranking uses the UNCAPPED desire on purpose. Ranking by the capped magnitude
+  makes target selection depend on ``max_offset``: once BSM squeezes the cap to
+  MAX_OFFSET_BSM most in-gate targets saturate at exactly that value, the strict
+  ``>`` tie-break then keeps whichever came first in iteration order, and the
+  selected target -- hence the avoidance side -- can flip. update() derives the
+  BSM gates from the uncapped direction, so a flip there commands a bias toward
+  a side whose blind spot was never checked.
+  """
+  if max_offset <= 0.0:
+    return None
   best: tuple[Target, float] | None = None
   for target in targets:
     if not _in_gate(target.dRel, target.yRel):
       continue
     proximity = max(0.0, 1.0 - target.dRel / D_MAX)
-    magnitude = min(max_offset, K_GAIN * target.w * proximity)
-    if magnitude > 0.0 and (best is None or magnitude > best[1]):
-      best = (target, magnitude)
-  return best
+    desire = K_GAIN * target.w * proximity
+    if desire > 0.0 and (best is None or desire > best[1]):
+      best = (target, desire)
+  if best is None:
+    return None
+  return (best[0], min(max_offset, best[1]))
 
 
 def _avoid_direction(targets: Iterable[Target], max_offset: float = MAX_OFFSET_FREE) -> int:

@@ -319,3 +319,63 @@ def test_daemon_invalid_frame_carries_model_curvature():
   for _, msg in pm.sent[1::2]:
     assert msg.valid is False
     assert msg.lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
+
+
+# --- regression: BSM cap must not flip the avoidance side --------------------
+
+def test_bsm_cap_does_not_reselect_target_on_the_other_side():
+  """Target ranking must not depend on max_offset.
+
+  Ranking by the capped magnitude let BSM's squeeze to MAX_OFFSET_BSM saturate
+  several in-gate targets at the same value; the strict `>` tie-break then kept
+  whichever came first and the chosen side could flip. update() derives the BSM
+  gates from the uncapped direction, so a flip commanded a bias toward a side
+  whose blind spot was never checked.
+  """
+  veh_right = Target(side=-1, dRel=10.0, yRel=-2.0, w=C.VEHICLE_WEIGHT, conf=1.0)
+  vru_left = Target(side=1, dRel=20.0, yRel=2.0, w=C.VRU_WEIGHT, conf=1.0)
+  targets = [veh_right, vru_left]  # fuse_targets emits radar points first
+
+  # both saturate once capped, so only the ranking key keeps the side stable
+  uncapped = plan(targets, max_offset=C.MAX_OFFSET_FREE)
+  capped = plan(targets, max_offset=C.MAX_OFFSET_BSM)
+  assert uncapped < 0.0, "vru_left has the highest desire -> avoid right"
+  assert capped < 0.0, "capping must not move the bias to the other side"
+  assert capped == pytest.approx(-C.MAX_OFFSET_BSM)
+
+
+def test_planner_never_biases_into_an_occupied_blind_spot():
+  veh_right = Target(side=-1, dRel=10.0, yRel=-2.0, w=C.VEHICLE_WEIGHT, conf=1.0)
+  vru_left = Target(side=1, dRel=20.0, yRel=2.0, w=C.VRU_WEIGHT, conf=1.0)
+  targets = [veh_right, vru_left]
+
+  p = _planner()
+  for i in range(20):
+    _step(p, i * C.DT_5HZ, targets, v_ego=25.0, bsm_left=True)
+  st = p.last_state
+  # left blind spot is occupied -> the bias must not be positive (leftward)
+  assert st["bias"] <= 0.0, f"biased {st['bias']:+.3f}m into an occupied left blind spot"
+  # telemetry must agree with the action, otherwise shadow logs hide the fault
+  assert st["direction"] < 0 and st["yDes"] <= 0.0
+
+
+def test_reported_direction_matches_commanded_bias_sign():
+  """last_state['direction'] feeds avoidanceDebug; it must match the bias."""
+  for bsm in ({}, {"bsm_left": True}, {"bsm_right": True}):
+    for targets in ([_right_target()], [_left_target()],
+                    [Target(side=-1, dRel=10.0, yRel=-2.0, w=C.VEHICLE_WEIGHT, conf=1.0),
+                     Target(side=1, dRel=20.0, yRel=2.0, w=C.VRU_WEIGHT, conf=1.0)]):
+      p = _planner()
+      for i in range(20):
+        _step(p, i * C.DT_5HZ, targets, v_ego=25.0, **bsm)
+      st = p.last_state
+      if abs(st["yDes"]) > 1e-9:
+        assert st["direction"] * st["yDes"] > 0.0, f"direction/yDes disagree for {bsm} {targets}"
+
+
+def test_zero_max_offset_produces_no_manoeuvre():
+  p = _planner()
+  for i in range(20):
+    curv, valid = _step(p, i * C.DT_5HZ, [_right_target()], max_offset=0.0)
+  assert not valid
+  assert curv == pytest.approx(0.01)
