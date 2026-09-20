@@ -134,7 +134,11 @@ class AvoidanceDaemon:
     # and with no detections associate never reads fy, so 0.0 is a safe fallback.
     fy = self.camera.intrinsics[1] if self.camera is not None and self.camera.intrinsics else 0.0
     n_associated, fused, pairs = associate(radar.points, detections, fy=fy)
-    targets = fuse_targets(radar.points, fused)
+    matched_radar = tuple(id(p[0]) for p in pairs)
+    vision_cls_by_radar = {id(p[0]): p[3] for p in pairs}
+    targets = fuse_targets(radar.points, fused, v_ego=car_state.vEgo,
+                           matched_radar=matched_radar,
+                           vision_cls_by_radar=vision_cls_by_radar)
     curvature, valid = self.planner.update(
       model_curvature=model_v2.action.desiredCurvature,
       targets=targets,

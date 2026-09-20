@@ -80,7 +80,9 @@ def test_vru_weight_exceeds_vehicle_weight():
 # --- fusion ------------------------------------------------------------------
 
 def test_fuse_targets_from_radar_points():
-  targets = fuse_targets([_RadarPoint(10.0, -1.0), _RadarPoint(5.0, 4.0), _RadarPoint(60.0, 0.5)])
+  # vRel=-3.0: a moving point needs no vision confirmation (vRel=0.0 with the
+  # default v_ego=0.0 is ground-static and now correctly requires one).
+  targets = fuse_targets([_RadarPoint(10.0, -1.0, vRel=-3.0), _RadarPoint(5.0, 4.0), _RadarPoint(60.0, 0.5)])
   assert len(targets) == 1
   assert targets[0].dRel == 10.0
   assert targets[0].side == -1
@@ -92,6 +94,46 @@ def test_fuse_targets_uses_vru_weight_for_detections():
   assert len(targets) == 1
   assert targets[0].w == C.VRU_WEIGHT
   assert targets[0].side == 1
+
+
+# --- static radar needs vision confirmation (Task 5) --------------------------
+
+def test_static_radar_point_needs_vision_confirmation():
+  """护栏/桥墩的对地速度是 0 —— 但抛锚车也是。所以判据不是「动不动」,
+  而是「有没有视觉确认」。"""
+  guardrail = _RadarPoint(dRel=20.0, yRel=-2.0, vRel=-15.0)   # 对地速度 0
+  targets = fuse_targets([guardrail], v_ego=15.0, matched_radar=())
+  assert targets == []
+
+
+def test_static_radar_point_is_kept_when_vision_confirms_it():
+  stopped_car = _RadarPoint(dRel=20.0, yRel=-2.0, vRel=-15.0)
+  targets = fuse_targets([stopped_car], v_ego=15.0, matched_radar=(id(stopped_car),))
+  assert len(targets) == 1
+
+
+def test_moving_radar_point_needs_no_confirmation():
+  mover = _RadarPoint(dRel=20.0, yRel=-2.0, vRel=-3.0)        # 对地速度 12 m/s
+  assert len(fuse_targets([mover], v_ego=15.0, matched_radar=())) == 1
+
+
+def test_matched_radar_point_takes_the_vision_class_weight():
+  """雷达看到的摩托车不该按 vehicle 算 —— 否则感知得越好权重越低。
+
+  yRel=1.8(而非 1.0):Task 6 的本车道门要求 |yRel| >= OWN_LANE_HALF_WIDTH(1.2),
+  本车道内的目标不再是避让目标 —— 夹具必须留在门外,否则 Task 6 会打破本测试。
+  """
+  moto = _RadarPoint(dRel=10.0, yRel=1.8, vRel=-1.0)
+  targets = fuse_targets([moto], v_ego=15.0, matched_radar=(id(moto),),
+                         vision_cls_by_radar={id(moto): "motorcycle"})
+  assert targets[0].w == C.VRU_WEIGHT
+
+
+def test_missing_vrel_is_treated_as_static():
+  """vRel 缺失时保守处理:按静止对待,需视觉确认。"""
+  class NoVRel:
+    dRel, yRel = 20.0, -2.0
+  assert fuse_targets([NoVRel()], v_ego=15.0, matched_radar=()) == []
 
 
 class _Edge:

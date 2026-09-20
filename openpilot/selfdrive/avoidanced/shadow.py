@@ -79,6 +79,8 @@ VISION_MIN_PROB = 0.5
 class RadarTarget:
   dRel: float
   yRel: float
+  vRel: float = 0.0  # m/s, relative velocity; fuse_targets needs it to separate
+                     # static clutter (needs vision confirmation) from movers.
 
 
 @dataclass(frozen=True)
@@ -179,15 +181,24 @@ class ShadowEvaluator:
     fy = frame.intrinsics[1] if frame.intrinsics is not None else 0.0
     if projected is not None:
       # Fused path (daemon parity): association decides which detections the
-      # radar points absorb; the rest stay independent planner targets.
-      _, fused, _ = associate_daemon(frame.radar_points, projected, fy=fy)
-      targets = fuse_targets(frame.radar_points, fused)
+      # radar points absorb; the rest stay independent planner targets. The
+      # pairs also feed fuse_targets: confirmed points survive the static-speed
+      # gate and take the vision class weight, exactly like the daemon.
+      _, fused, pairs = associate_daemon(frame.radar_points, projected, fy=fy)
+      matched_radar = tuple(id(p[0]) for p in pairs)
+      vision_cls_by_radar = {id(p[0]): p[3] for p in pairs}
+      targets = fuse_targets(frame.radar_points, fused, v_ego=frame.v_ego,
+                             matched_radar=matched_radar,
+                             vision_cls_by_radar=vision_cls_by_radar)
       vision_objects = [VisionObject(x=float(d["dRel"]), y=float(d["yRel"])) for d in projected]
       # Metrics radar side stays radar-only (in-gate), so a vision-only target
       # cannot pair with itself and inflate the association rate.
       metric_radar = [p for p in frame.radar_points if _in_gate(float(p.dRel), float(p.yRel))]
     else:
-      targets = fuse_targets(frame.radar_points)
+      # Proxy path has no vision confirmation available (leadsV3 is metrics
+      # only), so it degrades like the daemon's radar-only fallback: static
+      # radar points are dropped, movers still drive the plan.
+      targets = fuse_targets(frame.radar_points, v_ego=frame.v_ego)
       vision_objects = frame.vision_objects
       metric_radar = targets
 
@@ -438,7 +449,8 @@ def iter_frames(messages: Iterable, sample_period: float = 0.2, limit: int | Non
       t=t,
       model_curvature=float(model.action.desiredCurvature),
       v_ego=float(car.vEgo),
-      radar_points=[RadarTarget(dRel=float(p.dRel), yRel=float(p.yRel)) for p in radar.points],
+      radar_points=[RadarTarget(dRel=float(p.dRel), yRel=float(p.yRel),
+                                vRel=float(getattr(p, "vRel", 0.0))) for p in radar.points],
       vision_objects=_vision_from_model(model),
       bsm_left=bool(getattr(car, "leftBlindspot", False)),
       bsm_right=bool(getattr(car, "rightBlindspot", False)),

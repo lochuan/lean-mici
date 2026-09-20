@@ -161,14 +161,15 @@ def test_daemon_vru_weight_exceeds_vehicle_weight():
 
 def test_daemon_associated_detection_not_double_counted():
   # Radar point and YOLO box at the same spot: the radar point absorbs the
-  # detection (one target, vehicle weight) instead of stacking two targets.
+  # detection (one target, not two). Task 5: the absorbed point takes the
+  # vision class weight, so a radar point matched to a person box is a VRU.
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
                        detector=_FakeDetector(detections=[_box_at(20.0, -1.0, cls="person")]),
                        radar_points=[(20.0, -1.0)])
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
   assert pm.sent[-1][1].valid is True
-  expected = MODEL_CURVATURE + _first_frame_bias(_expected_offset(20.0, C.VEHICLE_WEIGHT))
+  expected = MODEL_CURVATURE + _first_frame_bias(_expected_offset(20.0, C.VRU_WEIGHT))
   assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(expected, rel=1e-6)
 
 

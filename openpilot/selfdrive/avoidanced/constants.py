@@ -21,6 +21,12 @@ K_GAIN = 0.5
 VRU_WEIGHT = 1.0      # person / rider / bicycle / motorcycle / tricycle
 VEHICLE_WEIGHT = 0.6  # car / bus / truck
 
+# 对地速度低于此值判为静止(m/s)。静止雷达目标必须有视觉关联确认才保留:
+# 护栏、桥墩的对地速度是 0,但抛锚车、路口停车也是 0。单纯的速度门会把静止
+# 车辆一并滤掉,而静止车辆是需要避让的真实障碍;视觉能区分二者(会把停着的
+# 车报成 car,不会把护栏报成 car/person)。
+STATIC_SPEED_THRESH = 1.0
+
 # Speed envelope (m/s) — spec §3 suggests 30-120 kph
 V_EGO_MIN = 8.0
 V_EGO_MAX = 33.0

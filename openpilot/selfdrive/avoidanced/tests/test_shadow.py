@@ -184,16 +184,17 @@ def test_detector_path_projects_and_associates():
   assert detector.calls == 1
 
 
-def test_detector_path_absorbed_detection_keeps_vehicle_weight():
+def test_detector_path_absorbed_detection_takes_vision_class_weight():
   # Daemon-parity association: the radar point absorbs the co-located person
-  # box, so the planner sees ONE target carrying the vehicle weight.
+  # box, so the planner sees ONE target — and since Task 5 it carries the
+  # vision class weight (person -> VRU), not the old hardcoded vehicle weight.
   detector = _StubDetector([_box_at(20.0, -1.0, cls="person")])
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0), detector=detector)
   evaluator.step(_fused_frame(0.0, radar=[(20.0, -1.0)]))
   evaluator.step(_fused_frame(C.ENTER_HOLD_S + 0.01, radar=[(20.0, -1.0)]))
   rec = evaluator.records[-1]
   assert rec.valid is True
-  assert rec.curvature == pytest.approx(_first_frame_curvature(C.VEHICLE_WEIGHT), rel=1e-6)
+  assert rec.curvature == pytest.approx(_first_frame_curvature(C.VRU_WEIGHT), rel=1e-6)
 
 
 def test_detector_path_unmatched_detection_is_independent_vru_target():

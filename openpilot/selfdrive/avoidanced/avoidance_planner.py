@@ -21,13 +21,14 @@ from typing import Protocol
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.avoidanced.constants import (D_GATE, D_MAX, DT_5HZ, EDGE_CLEAR_MIN, ENTER_HOLD_S, EXIT_HOLD_S,
                                                       K_GAIN, L_LOOKAHEAD, LOWPASS_TAU_S, MAX_OFFSET_BSM,
-                                                      MAX_OFFSET_FREE, VEHICLE_WEIGHT, V_EGO_MAX, V_EGO_MIN, VRU_CLASSES,
-                                                      VRU_WEIGHT, Y_GATE)
+                                                      MAX_OFFSET_FREE, STATIC_SPEED_THRESH, VEHICLE_WEIGHT,
+                                                      V_EGO_MAX, V_EGO_MIN, VRU_CLASSES, VRU_WEIGHT, Y_GATE)
 
 
 class RadarPoint(Protocol):
   dRel: float
   yRel: float
+  vRel: float
 
 
 @dataclass(frozen=True)
@@ -96,24 +97,40 @@ def plan(targets: Iterable[Target], max_offset: float = MAX_OFFSET_FREE,
   return -_sign(best[0].yRel) * best[1]
 
 
-def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] | None = None) -> list[Target]:
-  """Build planner targets from radar points, plus any already-projected detections.
+def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] | None = None,
+                 v_ego: float = 0.0, matched_radar: Iterable[int] = (),
+                 vision_cls_by_radar: dict[int, str] | None = None) -> list[Target]:
+  """Build planner targets from radar points plus unmatched vision detections.
 
-  ``detections`` must carry car-frame ``dRel`` / ``yRel``. avoidanced runs
-  ``associate()`` first and passes only its *unmatched* detections here, so
-  these are objects the radar missed; matched ones are already represented by
-  their radar point. Nothing here dedups, so passing raw (un-associated)
-  detections would double-count.
+  ``matched_radar`` holds ``id()`` of the radar points that a vision detection
+  confirmed, and ``vision_cls_by_radar`` maps those to the vision class. Two
+  things depend on it:
 
-  Radar points always get ``VEHICLE_WEIGHT``: a matched detection's class does
-  not currently upgrade its radar point, so a radar-visible motorcycle is
-  weighted as a vehicle (see association.associate docstring).
+  * A radar point whose ground speed is near zero is kept ONLY when vision
+    confirms it. Guardrails and bridge pillars sit at zero ground speed -- but
+    so does a broken-down car, so a plain speed gate would discard a real
+    hazard. Vision separates them: it reports a stopped car as ``car`` and does
+    not report a guardrail as ``car``/``person``.
+  * A confirmed radar point takes the vision class weight. Otherwise a
+    radar-visible motorcycle is weighted 0.6 while one the radar missed is
+    weighted 1.0 -- the better-perceived target counting for less.
   """
+  matched = set(matched_radar)
+  cls_by_radar = vision_cls_by_radar or {}
   targets: list[Target] = []
   for point in radar_points:
     dRel, yRel = float(point.dRel), float(point.yRel)
-    if _in_gate(dRel, yRel):
-      targets.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=VEHICLE_WEIGHT, conf=1.0))
+    if not _in_gate(dRel, yRel):
+      continue
+    confirmed = id(point) in matched
+    # vRel 缺失时保守按静止处理
+    v_rel = getattr(point, "vRel", None)
+    ground_speed = None if v_rel is None else abs(float(v_rel) + v_ego)
+    if (ground_speed is None or ground_speed < STATIC_SPEED_THRESH) and not confirmed:
+      continue
+    cls = cls_by_radar.get(id(point))
+    weight = VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT
+    targets.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=weight, conf=1.0))
   for det in detections or []:
     try:
       dRel, yRel = float(det["dRel"]), float(det["yRel"])
@@ -122,7 +139,8 @@ def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] 
     if not _in_gate(dRel, yRel):
       continue
     weight = VRU_WEIGHT if det.get("cls") in VRU_CLASSES else VEHICLE_WEIGHT
-    targets.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=weight, conf=float(det.get("conf", 1.0))))
+    targets.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=weight,
+                          conf=float(det.get("conf", 1.0))))
   return targets
 
 
