@@ -104,11 +104,18 @@ CX, CY = 672.0, 380.0
 
 
 def _box_at(d_rel, y_rel, cls="person", conf=0.9):
-  """ROI box (1:1 scale) whose bottom-centre projects to (d_rel, y_rel)."""
+  """ROI box (1:1 scale) whose bottom-centre projects to (d_rel, y_rel).
+
+  The height is chosen so box-height ranging (fy * H / h_px) returns d_rel too:
+  the bearing matcher re-distances unmatched detections by box height, so a
+  synthetic box whose height disagrees with its ground distance would silently
+  move the fused target (and trip the secondary range gate).
+  """
   d_cam = d_rel + C.CAMERA_TO_FRONT
   v = CY + FY * C.CAMERA_HEIGHT / d_cam
   u = CX - FX * y_rel / d_cam
-  return {"x1": u - 10.0, "y1": v - 20.0, "x2": u + 10.0, "y2": v, "cls": cls, "conf": conf}
+  h_px = FY * C.CLASS_HEIGHTS_M[cls] / d_rel
+  return {"x1": u - 10.0, "y1": v - h_px, "x2": u + 10.0, "y2": v, "cls": cls, "conf": conf}
 
 
 class _StubDetector:

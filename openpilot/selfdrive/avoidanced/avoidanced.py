@@ -129,7 +129,11 @@ class AvoidanceDaemon:
     radar = self.sm['radarTracks']
 
     detections = self._detect(now)
-    n_associated, fused, pairs = associate(radar.points, detections)
+    # associate needs fy for the box-height fallback on unmatched detections.
+    # Intrinsics live on the camera (None until the first successful connect),
+    # and with no detections associate never reads fy, so 0.0 is a safe fallback.
+    fy = self.camera.intrinsics[1] if self.camera is not None and self.camera.intrinsics else 0.0
+    n_associated, fused, pairs = associate(radar.points, detections, fy=fy)
     targets = fuse_targets(radar.points, fused)
     curvature, valid = self.planner.update(
       model_curvature=model_v2.action.desiredCurvature,

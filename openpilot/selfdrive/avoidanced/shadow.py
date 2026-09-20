@@ -51,7 +51,7 @@ from typing import TYPE_CHECKING
 
 from openpilot.selfdrive.avoidanced import constants as C
 from openpilot.selfdrive.avoidanced.association import associate as associate_daemon
-from openpilot.selfdrive.avoidanced.association import nearest_pairs
+from openpilot.selfdrive.avoidanced.association import nearest_pairs_by_bearing
 from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets
 from openpilot.selfdrive.avoidanced.projection import RoiMeta, project_detections
 
@@ -64,9 +64,12 @@ CALIB_MAX_RESIDUAL_M = 0.30
 MAX_LATERAL_JERK = 5.0          # m/s^3, mirrors drive_helpers.MAX_LATERAL_JERK
 MAX_PROCESS_LATENCY_MS = 200.0  # 5Hz budget, informational off-device
 
-# Radar <-> vision association gates in the car frame (metres).
-ASSOC_MAX_DX = 3.0
-ASSOC_MAX_DY = 1.5
+# Offline association gates. The bearing gate is wider than the daemon's
+# (0.035 rad) for the P0 statistics; ASSOC_MAX_DY stays as the secondary
+# range-consistency check (same bearing but wildly different range must not
+# pair). The old Cartesian dx gate is meaningless on a bearing matcher.
+ASSOC_MAX_DBEARING_SHADOW = 0.06  # rad, ~3.4deg
+ASSOC_MAX_DY = 1.5                # m, secondary lateral/range gate
 
 # Vision side is only trusted above this model lead probability.
 VISION_MIN_PROB = 0.5
@@ -125,14 +128,17 @@ class ShadowRecord:
 
 
 def associate(radar_points: Iterable[RadarTarget], vision_objects: Iterable[VisionObject],
-              max_dx: float = ASSOC_MAX_DX, max_dy: float = ASSOC_MAX_DY) -> list[tuple[RadarTarget, VisionObject, float, float]]:
-  """Nearest-neighbour radar<->vision association within the dx/dy gates.
+              fy: float = 425.25,
+              max_dbearing: float = ASSOC_MAX_DBEARING_SHADOW,
+              max_dy: float = ASSOC_MAX_DY) -> list[tuple[RadarTarget, VisionObject, float, str | None]]:
+  """Radar<->vision association on bearing (the offline wide-gate variant).
 
-  Thin wrapper over the shared core in :mod:`association` (the daemon path uses
-  the same matcher with tighter gates). Returns ``(radar, vision, dx, dy)``
-  tuples, one per matched radar target.
+  Thin wrapper over the shared bearing matcher in :mod:`association` (the daemon
+  path uses the same matcher with a tighter bearing gate). Returns
+  ``(radar, vision, dbearing, vision_cls)`` tuples, one per matched radar
+  target; ``vision_cls`` is None when the vision side carries no class.
   """
-  pairs, _ = nearest_pairs(radar_points, vision_objects, max_dx, max_dy)
+  pairs, _ = nearest_pairs_by_bearing(radar_points, vision_objects, fy, max_dbearing, max_dy)
   return pairs
 
 
@@ -167,10 +173,14 @@ class ShadowEvaluator:
 
   def step(self, frame: ShadowFrame) -> ShadowRecord:
     projected = self._project(frame)
+    # fy for the association gates: the fused path guarantees intrinsics (see
+    # _project); the proxy path never reads fy (VisionObject ranges come from
+    # the object's own x), so 0.0 is a safe placeholder there.
+    fy = frame.intrinsics[1] if frame.intrinsics is not None else 0.0
     if projected is not None:
       # Fused path (daemon parity): association decides which detections the
       # radar points absorb; the rest stay independent planner targets.
-      _, fused, _ = associate_daemon(frame.radar_points, projected)
+      _, fused, _ = associate_daemon(frame.radar_points, projected, fy=fy)
       targets = fuse_targets(frame.radar_points, fused)
       vision_objects = [VisionObject(x=float(d["dRel"]), y=float(d["yRel"])) for d in projected]
       # Metrics radar side stays radar-only (in-gate), so a vision-only target
@@ -194,7 +204,7 @@ class ShadowEvaluator:
     )
     latency_ms = (self._clock() - t0) * 1e3
 
-    pairs = associate(metric_radar, vision_objects)
+    pairs = associate(metric_radar, vision_objects, fy=fy)
     residual = max((abs(radar.yRel - obj.y) for radar, obj, _, _ in pairs), default=None)
 
     jerk = None
@@ -323,6 +333,9 @@ def summarize(records: Sequence[ShadowRecord]) -> dict:
   """Aggregate records into the P0 acceptance metrics."""
   radar_total = sum(r.n_radar for r in records)
   associated = sum(r.n_associated for r in records)
+  # NOTE(Task 7): the denominator is currently radar_total (every radar target).
+  # The spec wants "vision detections within the radar FOV" instead; re-tier
+  # ASSOC_RATE_MIN together with that change.
   association_rate = associated / radar_total if radar_total else None
 
   residuals = [r.lat_residual for r in records if r.lat_residual is not None]
