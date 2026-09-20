@@ -97,12 +97,16 @@ class MockVehicle:
     self.pending_presses: list = []  # 下一帧注入 buttonEvents(模拟每帧边沿流)
 
   def poll(self, now: float):
-    # ACC 跟随:实际车速向 setSpeed 收敛(1.0 m/s² 上限,模拟原车纵向)
-    err_ms = (self.set_speed_kph - self.v_ego_ms) / 3.6
-    self.v_ego_ms += max(-1.0 * DT, min(1.0 * DT, err_ms / 2.0))
-    self.sm._d["carState"].vEgo = self.v_ego_ms
-
-  def poll(self, now: float):
+    # ACC 跟随:实际车速向 setSpeed 收敛(1.0 m/s² 上限,模拟原车纵向)。
+    # standstill 例外:停车保持时车被刹车持住,不收敛(直到 RES+ 起步)。
+    # 没有这段,偏移帽会在第一拍 hold 后永久堵死向下路径(车永远追不上),
+    # 接近慢车场景在仿真中不成立 —— 集成测试抓出的死代码缺陷。
+    cs = self.sm._d["carState"]
+    if not cs.standstill:
+      # setSpeed 是 km/h,vEgo 是 m/s —— 先统一到 m/s 再求差
+      err_ms = (self.set_speed_kph - self.v_ego_ms * 3.6) / 3.6
+      self.v_ego_ms += max(-1.0 * DT, min(1.0 * DT, err_ms / 2.0))
+      cs.vEgo = self.v_ego_ms
     for cmd in self.actuator.commands[self._consumed:]:
       self._consumed += 1
       press_ms = C.TAP_PRESS_MS
