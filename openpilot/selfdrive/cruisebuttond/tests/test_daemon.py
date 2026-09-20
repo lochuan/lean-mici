@@ -335,6 +335,29 @@ def test_standstill_resume_blocked_without_headroom():
   h.run(2.5)
   assert len([c for c in h.commands if c.button == "accel"]) == 0
 
+  # 近上限:余量不足一个量子(setSpeed = 上限 − Q + tiny)→ 一拍 +Q 会越顶。
+  # 门槛必须是全余量 setSpeed + Q ≤ 上限,而不是 setSpeed < 上限(P2 安全不变量)
+  h2 = Harness(set_speed=30.0, v_ego=0.0)
+  h2.vehicle.set_speed_kph = 30.0
+  h2.user_press("set", 100.0)
+  h2.run(2.5)                          # SET 观察窗关闭,上限锚定 30
+  h2.vehicle.set_speed_kph = 30.0 - Q + 0.1   # 29.1:旧门槛放行,但 +Q 后 30.1 > 30
+  h2.set_env(standstill=True, v_ego=0.0, points=[_Pt(8.0, 1.2, y_rel=0.3, v_ego_ms=0.0)])
+  h2.run(2.5)
+  assert len([c for c in h2.commands if c.button == "accel"]) == 0
+  assert h2.set_speed <= h2.tracker.ceiling_kph + 1e-6
+
+  # 余量足够(≥ 一个量子):单拍起步照常,且起步后仍不越顶
+  h3 = Harness(set_speed=30.0, v_ego=0.0)
+  h3.vehicle.set_speed_kph = 30.0
+  h3.user_press("set", 100.0)
+  h3.run(2.5)
+  h3.vehicle.set_speed_kph = 30.0 - Q - 0.5   # 28.5:28.5 + Q ≤ 30
+  h3.set_env(standstill=True, v_ego=0.0, points=[_Pt(8.0, 1.2, y_rel=0.3, v_ego_ms=0.0)])
+  h3.run(2.5)
+  assert len([c for c in h3.commands if c.button == "accel" and c.mode == "tap"]) == 1
+  assert h3.set_speed <= h3.tracker.ceiling_kph + 1e-6
+
 
 def test_standstill_resume_gated_by_param():
   h = Harness(set_speed=60.0, v_ego=0.0, standstill=False)
@@ -344,6 +367,17 @@ def test_standstill_resume_gated_by_param():
   h.set_env(standstill=True, points=[_Pt(8.0, 1.2, y_rel=0.3, v_ego_ms=0.0)])
   h.run(2.5)
   assert len([c for c in h.commands if c.button == "accel"]) == 0
+
+
+def test_standstill_resume_sets_debug_last_button():
+  # bypass 起步拍也是我们发出的命令:debug.lastButton 必须反映它(5s 窗内)
+  h = Harness(set_speed=60.0, v_ego=0.0)
+  h.run(0.3)                        # 巡航激活沿 -> 上限 = 60
+  h.vehicle.set_speed_kph = 30.0    # 已走到地板(停车 catch-up 后的典型状态)
+  h.set_env(standstill=True, v_ego=0.0, points=[_Pt(8.0, 1.2, y_rel=0.3, v_ego_ms=0.0)])
+  h.run(2.0)
+  assert len([c for c in h.commands if c.button == "accel"]) == 1
+  assert h.pm.dbg.lastButton == 0
 
 
 # ----------------------------------------------------------- 用户操作/上限
@@ -444,6 +478,33 @@ def test_actuator_disconnect_freezes():
   h.run(0.3)
   assert h.pm.dbg.frozen is True
   assert h.pm.dbg.btConnected is False
+
+
+def test_user_set_cancel_presses_do_not_freeze():
+  # 三次普通用户 SET/CANCEL 不得把功能冻成"模拟器故障"(unexplained 只数 ± 回显)
+  h = Harness(set_speed=60.0, v_ego=60 / 3.6)
+  h.vehicle.set_speed_kph = 60.0
+  for _ in range(3):
+    h.user_press("set", 100.0)
+    h.run(0.3)
+  assert h.pm.dbg.unexplained == 0
+  assert h.pm.dbg.frozen is False
+  for _ in range(3):
+    h.user_press("cancel", 100.0)
+    h.run(0.3)
+  assert h.pm.dbg.unexplained == 0   # CANCEL 也不计入 unexplained
+  h.run(5.5)                          # cancel 冻结窗(5s)过后不再冻结
+  assert h.pm.dbg.frozen is False
+
+
+def test_unexplained_accel_echoes_still_freeze():
+  # 无法解释的 ± 回显仍是模拟器误按信号:阈值语义不变,3 次即冻结
+  h = Harness(set_speed=60.0, v_ego=60 / 3.6)
+  h.vehicle.set_speed_kph = 60.0
+  for _ in range(3):
+    h.user_press("accel", 100.0)
+    h.run(0.3)
+  assert h.pm.dbg.frozen is True
 
 
 # ----------------------------------------------------------- 门与发布

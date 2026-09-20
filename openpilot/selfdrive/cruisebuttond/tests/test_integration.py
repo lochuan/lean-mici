@@ -4,15 +4,19 @@ test_daemon.py 已覆盖六个验收场景的确定性断言(弯道/跟车消失
 安全停手/参数门)。这里补的是**语料级**不变量——在固定种子随机化的长程运行里,
 无论剧本如何组合,以下各条永真:
 
-  1. 我们发出的任何命令只有 accel/decel(协议上不可能表达 CANCEL,断言把
+1. 我们发出的任何命令只有 accel/decel(协议上不可能表达 CANCEL,断言把
      设计意图钉进测试,防止未来扩展按钮枚举时无声突破)
   2. 任何时刻观测 setSpeed ≤ 上限 + 一个量子(上限重同步语义的容差)
   3. 每次**发出**向上按压时 setSpeed−vEgo < 偏移帽;向下时 vEgo−setSpeed < 偏移帽
-     (帽子管的是"发",不是"观测"——车追不上时观测偏移可以超帽,那正是停手的原因)
+     (帽子管的是"发",不是"观测"——车追不上时观测偏移可以超帽,那正是停手的原因;
+      停车起步 bypass 是设计例外:车本就停着,不受帽约束)
   4. 连续向上按压的时间间隔 ≥ 量子/(滑条×3.6) − 容差(滑条节奏是下界)
+  5. 每次**发出**向上按压时 setSpeed + quantum ≤ 上限(硬不变量 P2,调度器与
+     停车起步 bypass 同一门槛)
 
 剧本随机化:上限起点/滑条/场景开关/前车出现·变速·消失/弯道 vTarget 进出/
-用户 SET·±·CANCEL/刹车脉冲。种子固定,失败可复现。
+用户 SET·±·CANCEL/刹车脉冲/停车episode(前车停止 → setSpeed 走低到地板 →
+前车起步 → 单拍 RES+ 起步)。种子固定,失败可复现。
 """
 from __future__ import annotations
 
@@ -50,13 +54,16 @@ class _Episode:
     return round(self.rng.uniform(lo, hi)) * 1.0
 
   def _patch_press(self):
-    """记录每条命令的发出时刻与当时的 setSpeed/vEgo(帽子不变量用)。"""
+    """记录每条命令的发出时刻与当时的 setSpeed/vEgo/standstill/上限/量子
+    (帽子不变量与 bypass 全余量不变量用;bypass 拍同样经 actuator.press,已被捕获)。"""
     h = self.h
     orig = h.actuator.press
 
     def recorder(cmd):
       cs = h.sm._d["carState"]
-      self.press_log.append((h.now, cmd, h.vehicle.set_speed_kph, cs.vEgo * 3.6))
+      self.press_log.append((h.now, cmd, h.vehicle.set_speed_kph, cs.vEgo * 3.6,
+                             bool(cs.standstill), h.tracker.ceiling_kph,
+                             h.daemon.scheduler.quantum_kph))
       orig(cmd)
 
     h.actuator.press = recorder
@@ -102,6 +109,20 @@ class _Episode:
     self.h.run(round(self.rng.uniform(0.2, 0.6), 2))
     self.h.set_env(brake=False)
 
+  def standstill_event(self):
+    """停车episode:自车停住 + 前车停止 -> catch-up 把 setSpeed 走低到地板;
+    前车起步 -> 单拍 RES+ 起步(bypass,全余量门槛 setSpeed + Q ≤ 上限)。"""
+    r = self.rng
+    self.h.set_env(standstill=True, v_ego=0.0,
+                   points=[_Pt(round(r.uniform(5, 30)), 0.0, y_rel=0.3, v_ego_ms=0.0)])
+    for _ in range(24):   # 走低到地板(死区内停);长按大步,~10s 内到
+      if self.h.set_speed <= C.FLOOR_KPH + C.DEADBAND_KPH:
+        break
+      self.run(0.5)
+    self.h.set_env(points=[_Pt(8.0, round(r.uniform(0.8, 2.0), 1), y_rel=0.3, v_ego_ms=0.0)])
+    self.run(round(r.uniform(2.0, 3.0), 2))   # 前车起步 -> resume tap
+    self.h.set_env(standstill=False)           # episode 结束,重新武装
+
   # --- 驱动与不变量 ---
 
   def run(self, seconds: float):
@@ -117,10 +138,16 @@ class _Episode:
     if ceiling is not None:
       assert h.set_speed <= ceiling + Q + EPS, \
         f"ep{self.idx} t={h.now:.2f}: setSpeed {h.set_speed:.1f} > 上限 {ceiling:.1f}+q"
-    for t, cmd, set_speed, v_ego_kph in self.press_log:
+    for t, cmd, set_speed, v_ego_kph, standstill, ceil_t, q_t in self.press_log:
       if cmd.button == "accel":
-        assert set_speed - v_ego_kph < C.OFFSET_CAP_KPH + EPS, \
-          f"ep{self.idx} t={t:.2f}: 帽违规向上 setSpeed {set_speed:.1f} vEgo {v_ego_kph:.1f}"
+        if not standstill:
+          # 偏移帽管"行驶中发向上拍";停车起步 bypass 是设计例外(车本就停着)
+          assert set_speed - v_ego_kph < C.OFFSET_CAP_KPH + EPS, \
+            f"ep{self.idx} t={t:.2f}: 帽违规向上 setSpeed {set_speed:.1f} vEgo {v_ego_kph:.1f}"
+        if ceil_t is not None:
+          # 硬不变量 P2:发出时 setSpeed + quantum ≤ 上限(调度器与 bypass 同一门槛)
+          assert set_speed + q_t <= ceil_t + EPS, \
+            f"ep{self.idx} t={t:.2f}: 越顶按压 setSpeed {set_speed:.1f}+q{q_t:.1f} > 上限 {ceil_t:.1f}"
       else:
         assert v_ego_kph - set_speed < C.OFFSET_CAP_KPH + EPS, \
           f"ep{self.idx} t={t:.2f}: 帽违规向下 vEgo {v_ego_kph:.1f} setSpeed {set_speed:.1f}"
@@ -139,12 +166,14 @@ def _run_episode(rng: random.Random, idx: int) -> None:
   ep = _Episode(rng, idx)
   for _ in range(int(ep.rng.uniform(6, 14))):
     pick = ep.rng.random()
-    if pick < 0.30:
+    if pick < 0.25:
       ep.lead_event()
-    elif pick < 0.50:
+    elif pick < 0.45:
       ep.scc_event()
-    elif pick < 0.80:
+    elif pick < 0.65:
       ep.user_event()
+    elif pick < 0.85:
+      ep.standstill_event()
     else:
       ep.brake_burst()
     ep.run(round(ep.rng.uniform(1.0, 3.0), 2))

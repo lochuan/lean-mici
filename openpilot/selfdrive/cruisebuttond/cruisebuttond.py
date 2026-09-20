@@ -82,6 +82,7 @@ class CruiseButtonsDaemon:
     # standstill 起步
     self._go_since: float | None = None
     self._resumed_this_stop = False
+    self._bypass_press_t: float | None = None   # bypass 起步拍时刻(debug lastButton 用)
     # 发布辅助
     self.last_button: int = 255   # 0=RES+ 1=RES- 255=none(我们最近命令)
     self.last_echo_ours = False
@@ -136,6 +137,7 @@ class CruiseButtonsDaemon:
     self._probe = None
     self._go_since = None
     self._resumed_this_stop = False
+    self._bypass_press_t = None
     self._held_reset_t = None
     self.last_button = 255
     self.last_echo_ours = False
@@ -258,7 +260,8 @@ class CruiseButtonsDaemon:
           and act_state.connected and not act_state.executing
           and not self._resumed_this_stop
           and self.ceiling.ceiling_kph is not None
-          and set_speed_kph < self.ceiling.ceiling_kph - EPS)  # 上限余量检查
+          # 全余量门槛(与调度器两层闸一致):一拍 +Q 后仍 ≤ 上限(P2)
+          and set_speed_kph + self.scheduler.quantum_kph <= self.ceiling.ceiling_kph + EPS)
     if not go:
       self._go_since = None
       if not car_state.standstill:
@@ -274,7 +277,7 @@ class CruiseButtonsDaemon:
     self.actuator.press(cmd)
     self.attribution.on_command(CommandRecord(cmd.seq, "accel", now, 1))
     self.scheduler._last_cmd_t = now
-    self.last_button = 0
+    self._bypass_press_t = now   # debug lastButton 由 update() 统一观测
     self._probe = (now, set_speed_kph)
     self._resumed_this_stop = True
     self._go_since = None
@@ -366,10 +369,12 @@ class CruiseButtonsDaemon:
       self._on_freeze(freeze_reasons)
       self._go_since = None
 
-    # 观测最近命令按钮(debug):照 scheduler 命令时间戳
+    # 观测最近命令按钮(debug):照 scheduler 命令时间戳;bypass 起步拍同样计入
     self.last_button = 255
     last_accel = max(self.scheduler._press_times.get("accel", []) or [-1e18])
     last_decel = max(self.scheduler._press_times.get("decel", []) or [-1e18])
+    if self._bypass_press_t is not None:
+      last_accel = max(last_accel, self._bypass_press_t)
     if max(last_accel, last_decel) > now - _ATTRIB_RECENT_S:
       self.last_button = 0 if last_accel >= last_decel else 1
 

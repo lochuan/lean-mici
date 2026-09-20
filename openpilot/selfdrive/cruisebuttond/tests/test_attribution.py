@@ -54,6 +54,24 @@ def test_ack_lost_echo_without_command_is_user():
   assert eng.unexplained == 1
 
 
+def test_user_set_cancel_echoes_do_not_count_unexplained():
+  # 用户 SET/CANCEL 是正常驾驶操作(我们从不命令这两个按钮):不计入 unexplained,
+  # 否则三次普通用户操作就会把功能冻成"模拟器故障"
+  eng = AttributionEngine()
+  assert eng.classify_echo(_echo(button="set", mono_time=100.0)) == "user"
+  assert eng.classify_echo(_echo(button="cancel", mono_time=101.0)) == "user"
+  assert eng.classify_echo(_echo(button="set", mono_time=102.0)) == "user"
+  assert eng.unexplained == 0
+
+
+def test_unexplained_counts_only_accel_decel_toward_freeze_threshold():
+  # ± 是我们模拟的按钮:无法解释的 ± 回显才可能是模拟器误按,阈值语义不变
+  eng = AttributionEngine()
+  for i in range(C.UNEXPLAINED_FREEZE):
+    assert eng.classify_echo(_echo(button="accel", mono_time=100.0 + i)) == "user"
+  assert eng.unexplained == C.UNEXPLAINED_FREEZE
+
+
 def test_simultaneous_user_and_ours():
   eng = AttributionEngine()
   eng.on_command(_rec(button="accel", t_send=100.0))

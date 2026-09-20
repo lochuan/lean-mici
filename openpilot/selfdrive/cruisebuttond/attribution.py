@@ -82,7 +82,10 @@ class AttributionEngine:
         self._ledger.unexplained = 0
         verdict = "ours"
       else:
-        self._ledger.unexplained += 1
+        # 只有 ±(我们模拟的按钮)的无法解释回显才计数:那可能是模拟器误按。
+        # SET/CANCEL 我们从不命令,无法解释只是用户正常操作,不算模拟器故障信号。
+        if echo.button in ("accel", "decel"):
+          self._ledger.unexplained += 1
         verdict = "user"
       self._last_press_verdict[echo.button] = verdict
       return verdict
