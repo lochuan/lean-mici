@@ -109,6 +109,10 @@ class ShadowFrame:
   roi_frame: np.ndarray | None = None
   roi_meta: RoiMeta | None = None
   intrinsics: tuple[float, float, float, float] | None = None
+  # Full-frame height for truncated-box rejection — the same quantity the daemon
+  # passes as ``camera.frame_size[1]``. None keeps the rejection inert (proxy
+  # path / frames that predate the field).
+  frame_height: float | None = None
 
 
 @dataclass
@@ -176,7 +180,8 @@ class ShadowEvaluator:
     fx, fy, cx, cy = frame.intrinsics
     return project_detections(detections, fx=fx, fy=fy, cx=cx, cy=cy,
                               height=C.CAMERA_HEIGHT, pitch=C.CAMERA_PITCH, yaw=C.CAMERA_YAW,
-                              camera_to_front=C.CAMERA_TO_FRONT, roi_meta=frame.roi_meta)
+                              camera_to_front=C.CAMERA_TO_FRONT, roi_meta=frame.roi_meta,
+                              frame_height=frame.frame_height)
 
   def step(self, frame: ShadowFrame) -> ShadowRecord:
     projected = self._project(frame)

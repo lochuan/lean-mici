@@ -166,7 +166,10 @@ def _fused_frame(t, radar=(), curvature=0.01, v_ego=20.0, **kwargs):
                      radar_points=[RadarTarget(*p) for p in radar],
                      roi_frame=np.zeros((384, 640, 3), np.uint8),
                      roi_meta=RoiMeta(1.0, 1.0, 0.0),
-                     intrinsics=(FX, FY, CX, CY), **kwargs)
+                     intrinsics=(FX, FY, CX, CY),
+                     # Full-frame height of the synthetic 1344x760 wide camera:
+                     # same value the daemon passes as camera.frame_size[1].
+                     frame_height=760.0, **kwargs)
 
 
 def _first_frame_curvature(weight):
@@ -230,6 +233,38 @@ def test_detector_path_requires_camera_data():
   with pytest.raises(ValueError):
     evaluator.step(_frame(0.0, radar=[(20.0, -1.0)]))
   assert detector.calls == 0
+
+
+def test_detector_path_passes_frame_height_to_projection(monkeypatch):
+  # Task 3's truncated-box rejection was inert in the shadow harness (no
+  # frame_height passed): P0 metrics must be collected under production
+  # behaviour. The synthetic camera is the mici wide camera (full frame
+  # 1344x760 — same intrinsics and frame size as the daemon fusion tests'
+  # _FakeCamera, whose frame_size[1] is what the daemon passes).
+  import openpilot.selfdrive.avoidanced.shadow as shadow_mod
+  seen = {}
+  real = shadow_mod.project_detections
+
+  def spy(*args, **kwargs):
+    seen["frame_height"] = kwargs.get("frame_height")
+    return real(*args, **kwargs)
+
+  monkeypatch.setattr(shadow_mod, "project_detections", spy)
+  detector = _StubDetector([_box_at(20.0, -1.8)])
+  evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0), detector=detector)
+  evaluator.step(_fused_frame(0.0, radar=[(20.0, -1.8)]))
+  assert seen["frame_height"] == 760.0
+
+
+def test_detector_path_drops_truncated_boxes():
+  # A box whose bottom edge sits at the frame bottom (within the truncation
+  # margin) has no true ground contact — rejected exactly like the daemon path.
+  box = _box_at(20.0, -1.8)
+  box["y2"] = 758.0  # frame_height 760, TRUNCATION_MARGIN_PX 4 -> truncated
+  detector = _StubDetector([box])
+  evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0), detector=detector)
+  rec = evaluator.step(_fused_frame(0.0))
+  assert rec.n_vision == 0
 
 
 # --- summary -----------------------------------------------------------------
