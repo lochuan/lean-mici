@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import os
 import operator
 import platform
+from typing import TYPE_CHECKING
 
-from opendbc.car.structs import car
+if TYPE_CHECKING:
+  from opendbc.car.structs import car
 from openpilot.common.params import Params
 from openpilot.common.hardware import PC, COMMA_HARDWARE
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess

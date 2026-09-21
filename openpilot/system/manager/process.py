@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import importlib
 import os
 import signal
@@ -6,11 +8,13 @@ import subprocess
 from collections.abc import Callable, ValuesView
 from abc import ABC, abstractmethod
 from multiprocessing import Process
+from typing import TYPE_CHECKING
 
 from setproctitle import setproctitle
 
 from openpilot.cereal import log
-from opendbc.car.structs import car
+if TYPE_CHECKING:
+  from opendbc.car.structs import car
 import openpilot.cereal.messaging as messaging
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params

@@ -8,7 +8,6 @@ import uuid
 import socket
 import logging
 import traceback
-import numpy as np
 from threading import local
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -16,7 +15,11 @@ from contextlib import contextmanager
 LOG_TIMESTAMPS = "LOG_TIMESTAMPS" in os.environ
 
 def json_handler(obj):
-  if isinstance(obj, np.bool_):
+  # numpy-free np.bool_ check: np.bool_ is a numpy scalar that is NOT a python
+  # bool subclass. Matching on module/type name avoids importing numpy (~420 ms
+  # cold) on the manager boot path, since swaglog pulls this module.
+  # numpy 1.x names the type bool_, numpy 2.x names it bool.
+  if type(obj).__module__ == "numpy" and type(obj).__name__ in ("bool", "bool_"):
     return bool(obj)
   # if isinstance(obj, (datetime.date, datetime.time)):
   #   return obj.isoformat()
