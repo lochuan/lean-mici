@@ -1,4 +1,4 @@
-"""3Hz YOLO26n BDD7 ROI detector for avoidanced.
+"""3Hz YOLO26n ROI detector for avoidanced (8 classes, see CLASS_NAMES).
 
 Consumes a 640x384 uint8 ROI frame (the model's native input, zero resize) and
 produces a list of detections::
@@ -6,11 +6,11 @@ produces a list of detections::
     [{"x1": float, "y1": float, "x2": float, "y2": float, "cls": str, "conf": float}, ...]
 
 ``cls`` is one of ``person`` / ``rider`` / ``car`` / ``bus`` / ``truck`` /
-``bicycle`` / ``motorcycle`` (the BDD7 classes; the planner weights VRUs
-person/rider/bicycle/motorcycle above vehicles car/bus/truck). The compiled
-tinygrad pkl is committed in ``models/`` (built by
-``models/compile_yolo_onnx.py`` on the device, QCOM backend); the trained ONNX
-itself stays in the training project.
+``bicycle`` / ``motorcycle`` / ``tricycle`` (the planner weights VRUs
+person/rider/bicycle/motorcycle/tricycle above vehicles car/bus/truck). The
+compiled tinygrad pkl is built on-device at first boot by ``../SConscript``
+(``models/compile_yolo_onnx.py``, QCOM backend); the fp32 ONNX is committed in
+``models/`` (trained in ``lochuan/yolo26n-bdd100k``).
 """
 
 from __future__ import annotations
@@ -128,6 +128,13 @@ class TinygradRunner:
   def __init__(self, pkl_path: str | Path):
     from tinygrad import Device, Tensor, dtypes
     from openpilot.selfdrive.modeld.helpers import load_oob
+    from openpilot.sunnypilot.models.pin import pkl_pin_compatible
+    pin = pkl_pin_compatible(pkl_path)
+    if pin is False:
+      raise RuntimeError(
+        f"yolo pkl was compiled with a different tinygrad revision "
+        f"(stale sidecar pin next to {pkl_path}); rebuild it from the committed onnx"
+      )
     with open(pkl_path, "rb") as f:
       self._jit = load_oob(f)
     # expected_names mirrors how the JIT was captured: an int is a POSITIONAL

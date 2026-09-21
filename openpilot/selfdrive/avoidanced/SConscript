@@ -1,0 +1,52 @@
+import glob
+import os
+from SCons.Script import Import, File
+
+Import('env', 'arch')
+
+# The yolo pkl embeds tinygrad JIT kernels compiled for one exact revision, so
+# it is NOT committed: it is compiled on-device at first boot from the committed
+# ONNX (weights are pin-stable). tinygrad_files as a dependency makes every
+# tinygrad bump recompile it, keeping the pkl and the runtime tree in lockstep.
+
+if arch == 'comma_arm64':
+  lenv = env.Clone()
+
+  models_dir = Dir("#openpilot/selfdrive/avoidanced/models").abspath
+  # the source of the committed-pkl era (fingerprint-verified: 105/223 initializers
+  # byte-match the pkl's out-of-band buffers); 8-class head (4+8, adds tricycle)
+  onnx_path = File("#openpilot/selfdrive/avoidanced/models/yolo26n-bdd7-fp32-384x640.onnx").abspath
+  pkl_path = os.path.join(models_dir, "yolo_tinygrad.pkl")
+  sidecar_path = pkl_path + ".tinygrad_pin"
+  script_path = File("#openpilot/selfdrive/avoidanced/models/compile_yolo_onnx.py").abspath
+
+  tinygrad_root = env.Dir("#").abspath
+  tinygrad_files = ["#" + x for x in glob.glob(env.Dir("#tinygrad_repo").relpath + "/**", recursive=True, root_dir=tinygrad_root)
+                    if 'pycache' not in x and os.path.isfile(os.path.join(tinygrad_root, x))]
+
+  def _cpu_usable(n: int) -> bool:
+    """Mirror modeld/SConscript: taskset needs the core online; manager/build.py
+    brings CPUs 4-7 up via HARDWARE.set_power_save(False) before scons. This
+    covers the paths that bypass it (manual scons, silently failed write)."""
+    try:
+      return open(f"/sys/devices/system/cpu/cpu{n}/online").read().strip() == "1"
+    except OSError:
+      return n == 0
+
+  taskset = 'taskset -c 4 ' if _cpu_usable(4) else ''
+
+  # cwd is the SConstruct dir (/data/openpilot on device), so python's sys.path
+  # picks up the in-tree tinygrad -> tinygrad_repo symlink first: that IS the
+  # submodule revision the pkl is being compiled for, which is what we want.
+  # PYTHONPATH must also carry the tree root for openpilot.* imports.
+  pythonpath_string = 'PYTHONPATH="${PYTHONPATH}:' + env.Dir("#tinygrad_repo").abspath + '"'
+  # DEV=QCOM:IR3 + IMAGE=1 + FLOAT16=1: mesa ir3 path, see models/compile_yolo_onnx.py
+  # (QCOM:CL aborts on this model's conv kernels; ir3 supports fp16 unconditionally).
+  cmd_flags = 'DEV=QCOM:IR3 IMAGE=1 FLOAT16=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 '
+
+  cmd = (f'{cmd_flags}{pythonpath_string} {taskset}python3 {script_path} '
+         f'{onnx_path} {pkl_path}')
+
+  lenv.Command([File(pkl_path), File(sidecar_path)],
+               [onnx_path, script_path] + tinygrad_files,
+               cmd)

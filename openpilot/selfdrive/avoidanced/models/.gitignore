@@ -1,6 +1,8 @@
-# The compiled pkl IS committed (yolo_tinygrad.pkl): the device gets it via git,
-# no on-device compile. Regenerate with compile_yolo_onnx.py when the model changes.
-!yolo_tinygrad.pkl
+# The pkl is compiled on-device at first boot (see ../SConscript) — never
+# commit it: it embeds tinygrad JIT kernels for one exact revision and goes
+# stale on every tinygrad bump. The ONNX source IS committed (weights are
+# pin-stable); regenerate the pkl with compile_yolo_onnx.py.
+yolo_tinygrad.pkl
 yolo_tinygrad.pkl.chunk*
-*.onnx
+yolo_tinygrad.pkl.tinygrad_pin
 *.onnx.data
