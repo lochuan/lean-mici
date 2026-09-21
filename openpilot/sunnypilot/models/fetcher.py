@@ -141,7 +141,11 @@ class ModelCache:
 
 class ModelFetcher:
   """Handles fetching and caching of model data from remote source"""
-  MODEL_URL = "https://raw.githubusercontent.com/sunnypilot/sunnypilot-models/refs/heads/gh-pages/docs/driving_models_v22.json"
+  # The catalog's tinygrad_ref must equal this tree's tinygrad_repo pin — the
+  # artifacts were JIT-compiled against that exact revision (positional pickle
+  # contract). When bumping, sync the submodule to the new catalog's
+  # tinygrad_ref in the same change; test_tinygrad_ref is the tripwire.
+  MODEL_URL = "https://raw.githubusercontent.com/sunnypilot/sunnypilot-models/refs/heads/gh-pages/docs/driving_models_v23.json"
 
   MODEL_SOURCES = {
     "qcom": (MODEL_URL, ""),
