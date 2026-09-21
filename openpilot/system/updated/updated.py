@@ -359,6 +359,16 @@ class Updater:
     r = [run(cmd, OVERLAY_MERGED) for cmd in cmds]
     cloudlog.info("git reset success: %s", '\n'.join(r))
 
+    # The runtime-earned prebuilt marker (launch_chffrplus.sh) is untracked, so it
+    # rides along in the overlay and gets copied into every finalized update;
+    # swap-in would then skip the first-boot rebuild even when native inputs
+    # changed (stale artifacts + new code = the 2026-09-11 pandad incident class).
+    # Unlink through the merged view so the swap-in tree starts without the
+    # marker and the first boot recompiles once, per the runtime-earned semantics.
+    marker = os.path.join(OVERLAY_MERGED, "prebuilt")
+    if os.path.lexists(marker):
+      os.remove(marker)
+
     # TODO: show agnos download progress
     if AGNOS:
       handle_agnos_update()
