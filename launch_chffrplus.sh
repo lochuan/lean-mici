@@ -107,9 +107,14 @@ function launch {
   tmux capture-pane -pq -S-1000 > /tmp/launch_log
 
   # start manager
+  # The prebuilt marker is earned at runtime, never shipped in git:
+  #   fresh install / first boot after an update -> build once (few minutes),
+  #   then the marker makes every later boot skip the build entirely.
+  #   Factory reset wipes /data, so fresh installs always rebuild safely.
+  #   If the build fails, no marker is written and the next boot retries.
   cd openpilot/system/manager
   if [ ! -f $DIR/prebuilt ]; then
-    ./build.py
+    ./build.py && touch $DIR/prebuilt
   fi
   ./manager.py
 
