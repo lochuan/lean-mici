@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# harvest_device_prebuilt.sh — pull device-built artifacts from a comma device
-# and stage them under release/prebuilt/arm64.
+# harvest_device_prebuilt.sh — OPTIONAL performance refresh.
+#
+# Since v2026.003.017 the `prebuilt` marker is earned at runtime by the device
+# (launch_chffrplus.sh: build.py && touch prebuilt), so this script is no
+# longer required for recovery. It remains a refresh tool: when native inputs
+# change (SConstruct, common/, pandad/, tinygrad pin, ...), the shipped
+# prebuilt stash goes stale and the release ships source-only, making fresh
+# installs compile everything (~30-60 min). Run this after such a device
+# build to restore fast first boots for future installs.
 #
 # Two classes of artifact cannot be cross-built and must come from a device
 # that has built them with its own AGNOS toolchain:
@@ -8,7 +15,7 @@
 #   2. driving_tinygrad.pkl — holds tinygrad JIT kernels compiled for the
 #      device's QCOM backend; a container build (DEV=CPU) is unusable.
 #
-# Prerequisite: the device must have built both, i.e. it booted without a
+# Prerequisite: the device has built both, i.e. it booted without a
 # `prebuilt` marker and ran build.py (full scons, no SKIP_TINYGRAD_COMPILE).
 #
 # Usage:

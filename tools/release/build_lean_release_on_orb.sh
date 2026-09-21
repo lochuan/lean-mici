@@ -31,6 +31,13 @@
 # 任一输入变动 → hash 不匹配 → prebuilt 被拒 → 本次 release 不含 prebuilt，
 # 设备首启自行 scons 全量重建（含 pkl）。切勿为了"构建更快"放宽这个校验。
 #
+# ── prebuilt 标记语义（v2026.003.017 起）─────────────────────────────────
+# 标记【永远不随 release 发布】。设备运行时挣得：launch_chffrplus.sh 在
+# 首启跑 build.py，编译成功才 touch prebuilt → 之后开机零编译。
+# 全新安装/factory reset 必然重编一次 → fresh install 永不砖。
+# harvest_device_prebuilt.sh 因此从"康复必需"降级为"可选优化"：仅在 native
+# 输入变化后刷新 release/prebuilt 产物，让后续全新安装也享受快启。
+#
 # 用法（mac 上跑）:
 #   ./tools/release/build_lean_release_on_orb.sh
 #
@@ -57,8 +64,8 @@ if [ -f "$manifest" ]; then
     echo "====================================================================" >&2
     echo "⚠️  NATIVE INPUTS CHANGED（自上次 prebuilt 收割后）" >&2
     echo "⚠️  本轮 release 将 SOURCE-ONLY：设备首启 scons 全量编译" >&2
-    echo "⚠️  30–60 分钟黑屏/风扇狂转，切勿断电" >&2
-    echo "⚠️  康复：设备编译完成 → \`./tools/release/harvest_device_prebuilt.sh\` → 重建 release" >&2
+    echo "⚠️  30–60 分钟黑屏/风扇狂转，切勿断电（编译成功后设备自打 prebuilt 标记，之后恢复正常快启）" >&2
+    echo "⚠️  可选优化：设备编译完成 → \`./tools/release/harvest_device_prebuilt.sh\` 刷新产物 → 重建 release 让后续全新安装也快启" >&2
     echo "--------------------------------------------------------------------" >&2
     sleep 3
   fi
@@ -282,7 +289,8 @@ if python3 \$HOME/opilot/tools/release/release_lib.py overlay /tmp/opilot-releas
   echo \"[release] prebuilt shipped\"
 else
   echo \"[release] ⚠️⚠️⚠️ SOURCE-ONLY RELEASE: 设备首启将 scons 全量编译 30–60 分钟（黑屏/风扇狂转，切勿断电）\" >&2
-  echo \"[release] ⚠️ 康复路径：设备编译完成后跑 \`./tools/release/harvest_device_prebuilt.sh\` 收割，再重建 release 恢复秒级启动\" >&2
+  echo \"[release] ⚠️ 设备编译成功后自打 prebuilt 标记恢复正常快启（runtime-earned,无需干预）\" >&2
+  echo \"[release] ⚠️ 可选优化：设备编译完成后跑 \`./tools/release/harvest_device_prebuilt.sh\` 刷新产物，再重建 release 让后续全新安装也快启\" >&2
   echo \"[release] WARN: prebuilt validation failed, shipping source-only release\" >&2
   touch /tmp/opilot-no-prebuilt
   rm -rf /tmp/opilot-release/release/prebuilt

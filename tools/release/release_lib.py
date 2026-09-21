@@ -227,9 +227,11 @@ def validate_artifact(path: Path, expected_sha256: str | None = None, require_el
 def overlay_prebuilt(repo_root: Path, worktree: Path) -> tuple[bool, str]:
   """Validate and overlay device-built artifacts into a release worktree.
 
-  Returns ``(True, "ok")`` when the release may ship with ``prebuilt``.
+  Returns ``(True, "ok")`` when the release ships the prebuilt artifacts.
   Any validation failure returns ``(False, reason)`` and leaves the worktree
-  without a ``prebuilt`` marker or copied native artifacts.
+  without copied native artifacts. The ``prebuilt`` marker itself is never
+  shipped: the device earns it at runtime via ``build.py`` (see
+  launch_chffrplus.sh).
   """
   prebuilt_root = worktree / PREBUILT_DIR
   manifest_path = prebuilt_root / MANIFEST_NAME
@@ -273,7 +275,11 @@ def overlay_prebuilt(repo_root: Path, worktree: Path) -> tuple[bool, str]:
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
 
-  (worktree / "prebuilt").touch()
+  # NOTE: the `prebuilt` marker is NEVER shipped. The device earns it at
+  # runtime: launch_chffrplus.sh runs build.py on first boot and touches the
+  # marker only after a successful build. Shipping it here would skip that
+  # build on fresh installs and brick manager at `import msgq` (the
+  # 2026-09-21 fresh-install incident).
   shutil.rmtree(worktree / "release/prebuilt")
   return True, "ok"
 

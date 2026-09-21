@@ -473,7 +473,8 @@ class TestOverlayPrebuilt(unittest.TestCase):
       self._populate_prebuilt(worktree)
       ok, reason = overlay_prebuilt(repo, worktree)
       self.assertTrue(ok, reason)
-      self.assertTrue((worktree / "prebuilt").exists())
+      # The marker is earned at runtime by the device, never shipped.
+      self.assertFalse((worktree / "prebuilt").exists())
       self.assertFalse((worktree / "release/prebuilt").exists())
       for rel in ARTIFACT_PATHS:
         self.assertTrue((worktree / rel).exists(), rel)
