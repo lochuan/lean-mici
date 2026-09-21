@@ -56,30 +56,29 @@
   },
   {
     "name": "boot",
-    "url": "https://files.firestar.link/x/d61i6okcs0kt/boot29.img.xz",
-    "fallback_urls": [
-      "https://files-east.firestar.link/x/tqgw36v0suj3/boot29.img.xz"
-    ],
-    "hash": "9d826668e81b51d493947f91bc436bb94d3f276364737760b59a6660dae366d6",
-    "hash_raw": "9d826668e81b51d493947f91bc436bb94d3f276364737760b59a6660dae366d6",
+    "url": "http://10.0.0.5:8077/boot-86275abcfd705451a58f5e248f6bcbcc16c6e4284713887efba09a8456251eed.img.xz",
+    "hash": "86275abcfd705451a58f5e248f6bcbcc16c6e4284713887efba09a8456251eed",
+    "hash_raw": "86275abcfd705451a58f5e248f6bcbcc16c6e4284713887efba09a8456251eed",
     "size": 49043456,
     "sparse": false,
     "full_check": true,
     "has_ab": true,
-    "ondevice_hash": "d7b383535d9f8228e871710ff2973e3ccedace4e8a8b79e89d34fd0d0fde00a7"
+    "ondevice_hash": "752e095b3519d658e4fbcabc3d6ee225cc685012d88e67536a43d4cf2a28421c"
   },
   {
     "name": "system",
-    "url": "https://files.firestar.link/x/iss4fjdpqont/system29.img.xz",
-    "fallback_urls": [
-      "https://files-east.firestar.link/x/pg70qwnpkad1/system29.img.xz"
-    ],
-    "hash": "d744641104991cdf13e1294aeb9b2628656cab46ed7f234f0f04092a9a5ead8d",
-    "hash_raw": "2516390281514cde7a9ea8cea5f88035cc55a5124aa23626d12ff1f82554c0e8",
+    "url": "http://10.0.0.5:8077/system-e294c8aecd14bf5f780907bcaf731ddabacd3e3c3b5d405b15d27a25e41ecaf6.img.xz",
+    "hash": "8753281d849bb373a72209ef70340368571ec0b707833500a1a61b31cde75e18",
+    "hash_raw": "e294c8aecd14bf5f780907bcaf731ddabacd3e3c3b5d405b15d27a25e41ecaf6",
     "size": 4718592000,
     "sparse": true,
     "full_check": false,
     "has_ab": true,
-    "ondevice_hash": "11f234a3af7f6f137b2a702f5cf34273786bc1fe7dae8eb790faba8afa0e5b31"
+    "ondevice_hash": "c5ae7736284b3376a2d6884f46e2bd650589a451772ec6245cae4241c99b25fc",
+    "alt": {
+      "hash": "e294c8aecd14bf5f780907bcaf731ddabacd3e3c3b5d405b15d27a25e41ecaf6",
+      "url": "http://10.0.0.5:8077/system-e294c8aecd14bf5f780907bcaf731ddabacd3e3c3b5d405b15d27a25e41ecaf6.img",
+      "size": 4718592000
+    }
   }
 ]
