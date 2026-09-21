@@ -95,6 +95,14 @@ def main() -> int:
   args.output.parent.mkdir(parents=True, exist_ok=True)
   with open(args.output, "wb") as f:
     dump_oob(run, f)
+  # Record the tinygrad revision the kernels were compiled against; the runtime
+  # checks this sidecar before unpickling (positional pickle contract).
+  from openpilot.sunnypilot.models.pin import write_pkl_pin
+  from openpilot.sunnypilot.models.tinygrad_ref import get_tinygrad_ref
+  device_ref = get_tinygrad_ref()
+  if device_ref:
+    write_pkl_pin(args.output, device_ref)
+    print(f"recorded tinygrad pin {device_ref[:12]}")
   print(f"wrote {args.output} ({args.output.stat().st_size/1e6:.1f} MB) inputs={spec.shape}")
   return 0
 

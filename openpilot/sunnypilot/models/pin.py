@@ -12,6 +12,7 @@ modeld down.
 """
 
 import os
+from pathlib import Path
 
 from openpilot.sunnypilot.models.tinygrad_ref import get_tinygrad_ref
 
@@ -26,16 +27,16 @@ def device_tinygrad_ref() -> str | None:
     return None
 
 
-def read_pkl_pin(pkl_path: str) -> str | None:
+def read_pkl_pin(pkl_path: str | Path) -> str | None:
   """Pin recorded by the producer for this pkl. None when absent/unreadable."""
   try:
-    with open(pkl_path + PIN_SUFFIX) as f:
+    with open(str(pkl_path) + PIN_SUFFIX) as f:
       return f.read().strip() or None
   except OSError:
     return None
 
 
-def pkl_pin_compatible(pkl_path: str) -> bool | None:
+def pkl_pin_compatible(pkl_path: str | Path) -> bool | None:
   """True/False when a sidecar pin exists, None when unknown (no sidecar)."""
   pkl_pin = read_pkl_pin(pkl_path)
   device_ref = device_tinygrad_ref()
@@ -44,6 +45,6 @@ def pkl_pin_compatible(pkl_path: str) -> bool | None:
   return pkl_pin == device_ref
 
 
-def write_pkl_pin(pkl_path: str, tinygrad_ref: str) -> None:
-  with open(pkl_path + PIN_SUFFIX, "w") as f:
+def write_pkl_pin(pkl_path: str | Path, tinygrad_ref: str) -> None:
+  with open(str(pkl_path) + PIN_SUFFIX, "w") as f:
     f.write(tinygrad_ref)
