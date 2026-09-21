@@ -4,7 +4,7 @@ launch_chffrplus.sh runs build.py only when `prebuilt` is absent, so that
 marker is an instruction ("do not rebuild"), not a record ("build finished").
 Writing it while the tree holds missing or cross-built native artifacts pins
 the device to exactly that state: nothing rebuilds them, and
-harvest_device_prebuilt.sh would copy them back into the next release.
+stale artifacts would stay pinned until a source-only release rebuilds them.
 
 A container-built pandad reached a car this way. common/hardware/hw.h selects
 paths at compile time and SConstruct defines __COMMA_HARDWARE__ only when the

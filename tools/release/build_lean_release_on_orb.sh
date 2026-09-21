@@ -15,8 +15,9 @@
 # 2) 驾驶模型 driving_tinygrad.pkl：内含 tinygrad 编译后的 JIT 内核。
 #    SConscript 按 arch 选后端——设备是 DEV=QCOM，容器/mac 是 DEV=CPU，
 #    因此容器编出来的 pkl 在设备上用不了。这也是保留 SKIP_TINYGRAD_COMPILE=1 的原因。
-# 两类都经 harvest_device_prebuilt.sh 从设备取回，写入 release/prebuilt/arm64
-# 并由 release_lib.py 校验（ELF 查架构，pkl 查 sha256）后 overlay。
+# 两类产物从设备构建后写入 release/prebuilt/arm64（存量存货，不再有抓取脚本），
+# 由 release_lib.py 校验（ELF 查架构，pkl 查 sha256）后 overlay。
+# native 输入变化导致存货过期时，release 自动降级 source-only，设备首启自愈。
 #
 # 可以交叉编译的：纯 Python、capnp 生成物、panda 固件（裸 .bin，不依赖 ABI）。
 #
@@ -35,8 +36,8 @@
 # 标记【永远不随 release 发布】。设备运行时挣得：launch_chffrplus.sh 在
 # 首启跑 build.py，编译成功才 touch prebuilt → 之后开机零编译。
 # 全新安装/factory reset 必然重编一次 → fresh install 永不砖。
-# harvest_device_prebuilt.sh 因此从"康复必需"降级为"可选优化"：仅在 native
-# 输入变化后刷新 release/prebuilt 产物，让后续全新安装也享受快启。
+# 存货过期后不再有抓取脚本刷新：此后全新安装将保持全量编译（30-60 分钟），
+# 设备自打标记后日常使用不受影响。
 #
 # 用法（mac 上跑）:
 #   ./tools/release/build_lean_release_on_orb.sh
@@ -65,7 +66,7 @@ if [ -f "$manifest" ]; then
     echo "⚠️  NATIVE INPUTS CHANGED（自上次 prebuilt 收割后）" >&2
     echo "⚠️  本轮 release 将 SOURCE-ONLY：设备首启 scons 全量编译" >&2
     echo "⚠️  30–60 分钟黑屏/风扇狂转，切勿断电（编译成功后设备自打 prebuilt 标记，之后恢复正常快启）" >&2
-    echo "⚠️  可选优化：设备编译完成 → \`./tools/release/harvest_device_prebuilt.sh\` 刷新产物 → 重建 release 让后续全新安装也快启" >&2
+    echo "⚠️  后续全新安装将同样全量编译（无刷新机制，属接受的成本）" >&2
     echo "--------------------------------------------------------------------" >&2
     sleep 3
   fi
@@ -209,8 +210,8 @@ echo "[clean] build artifacts removed"
 # 屏幕停在 "sunnypilot unavailable, waiting to start"。
 #
 # 所以容器只构建不依赖 ABI 的东西：capnp 代码生成（纯 Python 导入需要）。
-# 全部 native ELF/.so 与模型 pkl 由设备构建，经 harvest_device_prebuilt.sh
-# 取回、release_lib.py 校验（含 PC 路径守卫）后 overlay。
+# 全部 native ELF/.so 与模型 pkl 来自 release/prebuilt 存货（设备构建），
+# 经 release_lib.py 校验（含 PC 路径守卫）后 overlay。
 echo "[-] scons build (cross-safe targets only) T=$SECONDS"
 $SSH '
 set -e
@@ -290,7 +291,7 @@ if python3 \$HOME/opilot/tools/release/release_lib.py overlay /tmp/opilot-releas
 else
   echo \"[release] ⚠️⚠️⚠️ SOURCE-ONLY RELEASE: 设备首启将 scons 全量编译 30–60 分钟（黑屏/风扇狂转，切勿断电）\" >&2
   echo \"[release] ⚠️ 设备编译成功后自打 prebuilt 标记恢复正常快启（runtime-earned,无需干预）\" >&2
-  echo \"[release] ⚠️ 可选优化：设备编译完成后跑 \`./tools/release/harvest_device_prebuilt.sh\` 刷新产物，再重建 release 让后续全新安装也快启\" >&2
+  echo \"[release] ⚠️ 后续全新安装将同样全量编译（无刷新机制，属接受的成本）\" >&2
   echo \"[release] WARN: prebuilt validation failed, shipping source-only release\" >&2
   touch /tmp/opilot-no-prebuilt
   rm -rf /tmp/opilot-release/release/prebuilt
@@ -348,24 +349,16 @@ else
   fi
 fi
 
-# --- 7. 结尾汇总：prebuilt 校验失败时，醒目提醒 harvest 流程 ---
+# --- 7. 结尾汇总：prebuilt 校验失败时，说明后果 ---
 if $SSH 'test -f /tmp/opilot-no-prebuilt' 2>/dev/null; then
   cat <<'BANNER'
 
 ********************************************************************************
 *  ⚠️  本次 release 未包含 prebuilt（native 产物校验失败或源码已变化）
 *
-*  后果：设备更新后首次开机，build.py 会原生重建全部 native 产物（慢一次）。
-*  恢复快速启动，设备首启完成后执行：
-*
-*    1. ./tools/release/harvest_device_prebuilt.sh
-*    2. git add release/prebuilt
-*       git add -f release/prebuilt/arm64/openpilot/common/libparams_c.so
-*       git commit -m "release: refresh device prebuilts"
-*       git push fork lean-master
-*    3. ./tools/release/build_lean_release_on_orb.sh     # 重建，恢复 prebuilt
-*
-*  （不改 native 代码的日常构建不受影响）
+*  后果：设备更新后首次开机，build.py 会原生重建全部 native 产物（30-60 分钟，
+*  慢一次），成功后自打 prebuilt 标记恢复正常快启，无需任何手动干预。
+*  此后所有全新安装同样全量编译（无存货刷新机制，属接受的成本）。
 ********************************************************************************
 BANNER
 fi

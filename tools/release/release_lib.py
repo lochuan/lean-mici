@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared helpers for building, harvesting, and validating lean releases.
+"""Shared helpers for building and validating lean releases.
 
 This module owns the release artifact model. The shell scripts in this
 directory orchestrate Git, SSH, SCons, and OrbStack; this module decides
@@ -202,7 +202,7 @@ def read_manifest(path: Path) -> dict[str, str]:
 
 
 def validate_artifact(path: Path, expected_sha256: str | None = None, require_elf: bool = True) -> tuple[bool, str]:
-  """Validate one harvested artifact.
+  """Validate one device-built artifact.
 
   ``require_elf`` is False for data artifacts (e.g. the model pkl chunks),
   which are checksum-verified but are not ELF files.
@@ -258,8 +258,7 @@ def overlay_prebuilt(repo_root: Path, worktree: Path) -> tuple[bool, str]:
   # fallback and a device with no downloaded model cannot start at all.
   if not any("driving_tinygrad.pkl" in f for f in data_files):
     return False, (
-      "manifest has no driving model pkl; re-run "
-      + "tools/release/harvest_device_prebuilt.sh after building it on the device"
+      "manifest has no driving model pkl; refresh release/prebuilt from a device build"
     )
 
   staged: list[tuple[Path, Path]] = []

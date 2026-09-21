@@ -127,7 +127,7 @@ class TestConstants(unittest.TestCase):
     """A stale pkl must never ship: its build inputs must invalidate native_hash.
 
     The pkl embeds tinygrad kernels compiled from driving_supercombo.onnx, so a
-    change to the model, the compiler, or tinygrad has to force a re-harvest.
+    change to the model, the compiler, or tinygrad has to force a source-only release.
     """
     for rel in (
       "openpilot/selfdrive/modeld/models/driving_supercombo.onnx",
