@@ -44,6 +44,7 @@ class ModelManagerSP:
     self._chunk_size = 128 * 1000  # 128 KB chunks
     self._download_start_times: dict[str, float] = {}  # Track start time per model
     self._download_ref: bytes | str | None = None
+    self._pin_mismatch_warned: set[str] = set()  # log each mismatched source once, not every tick
 
   def _download_interrupted(self) -> bool:
     # only removal cancels: a different ref is a queued selection that
@@ -337,8 +338,10 @@ class ModelManagerSP:
       fetcher = getattr(self, "model_fetcher", None)
       catalog_ref = fetcher.get_catalog_tinygrad_ref(source) if fetcher else None
       if not catalog_ref or catalog_ref == device_ref:
+        self._pin_mismatch_warned.discard(source)
         continue
-      if bundles:
+      if source not in self._pin_mismatch_warned:
+        self._pin_mismatch_warned.add(source)
         cloudlog.error(
           f"model catalog for {source} was built with tinygrad {catalog_ref[:7]}, "
           f"this tree runs {device_ref[:7]}; hiding {len(bundles)} incompatible bundles"
