@@ -39,7 +39,7 @@ def bundle(ref, name, folder="", index=0, gen=1):
   # 之前这里写成 [{key,value}] 列表，把 _folder 的解析 bug 给掩盖住了。
   return {"ref": ref, "display_name": name, "short_name": name.lower().replace(" ", "_"),
           "index": index, "generation": gen, "environment": "release",
-          "runner": "snpe", "is_20hz": False, "minimum_selector_version": 19,
+          "runner": "snpe", "is_20hz": False, "minimum_selector_version": 29,
           "overrides": ({"folder": folder, "lat": ".0", "long": ".3"} if folder else {})}
 
 
@@ -56,7 +56,7 @@ def cache_param(*bundles):
 
 def active_bundle(ref="ref-a", name="Model A"):
   return {"ref": ref, "displayName": name, "internalName": name.lower().replace(" ", "_"),
-          "runner": "snpe", "minimumSelectorVersion": 19}
+          "runner": "snpe", "minimumSelectorVersion": 29}
 
 
 class TestModelsState:
@@ -75,7 +75,7 @@ class TestModelsState:
       bundle("ref-a", "Model A", folder="2026 World", index=1),
       bundle("ref-c", "Model C", folder="", index=0),
       bundle("ref-old", "Old", index=9))
-    raw["bundles"][3]["minimum_selector_version"] = 18  # version 不匹配 → 过滤
+    raw["bundles"][3]["minimum_selector_version"] = 28  # version 不匹配 → 过滤
     p = FakeParams(data={"ModelManager_ModelsCache": raw})
     st = models_api.models_state(p, None, "/nonexistent")
     assert [b["ref"] for b in st["bundles"]] == ["ref-b", "ref-a", "ref-c"]
@@ -110,7 +110,7 @@ class TestModelsState:
   def test_string_version_fields_from_manifest(self):
     # 设备实测：manifest 的 minimum_selector_version/generation 是字符串
     raw = cache_param(bundle("ref-a", "Model A"))
-    raw["bundles"][0]["minimum_selector_version"] = "19"
+    raw["bundles"][0]["minimum_selector_version"] = "29"
     raw["bundles"][0]["generation"] = "4"
     p = FakeParams(data={"ModelManager_ModelsCache": raw})
     st = models_api.models_state(p, None, "/nonexistent")
