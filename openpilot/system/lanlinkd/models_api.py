@@ -22,19 +22,20 @@ FAVS_KEY = "ModelManager_Favs"                # STRING，";" 分隔 ref
 
 def _device_tinygrad_ref() -> str | None:
   """本机树 tinygrad_repo 的 HEAD。文件级读取（规则复制自
-  sunnypilot/models/tinygrad_ref.py），不走 sunnypilot.models import——
-  那条链会拉 common.params（libparams_c），web 层在 PC/测试环境会 OSError。"""
-  repo = os.path.join(os.path.dirname(__file__), "..", "..", "..", "tinygrad_repo")
-  git_path = os.path.normpath(repo + "/.git")
+  sunnypilot/models/tinygrad_ref.py——含 submodule .git 是 gitdir 指针文件的
+  情形），不走 sunnypilot.models import——那条链会拉 common.params
+  （libparams_c），web 层在 PC/测试环境会 OSError。"""
+  repo = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "tinygrad_repo"))
+  git_path = os.path.join(repo, ".git")
   try:
     if os.path.isdir(git_path):
-      head = os.path.join(git_path, "HEAD")
+      git_dir = git_path
     else:
       with open(git_path) as f:
-        head = os.path.join(repo, f.read().strip()[8:])
-    ref = open(os.path.join(head)).read().strip() if os.path.isfile(head) else ""
+        git_dir = os.path.join(repo, f.read().strip()[8:])
+    ref = open(os.path.join(git_dir, "HEAD")).read().strip()
     if ref.startswith("ref:"):
-      ref = open(os.path.normpath(os.path.join(git_path, ref.split(" ", 1)[1]))).read().strip()
+      ref = open(os.path.normpath(os.path.join(git_dir, ref.split(" ", 1)[1]))).read().strip()
     return ref or None
   except OSError:
     return None
