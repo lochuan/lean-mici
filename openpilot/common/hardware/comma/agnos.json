@@ -67,17 +67,17 @@
   },
   {
     "name": "system",
-    "url": "http://10.0.0.5:8077/system-e294c8aecd14bf5f780907bcaf731ddabacd3e3c3b5d405b15d27a25e41ecaf6.img.xz",
-    "hash": "8753281d849bb373a72209ef70340368571ec0b707833500a1a61b31cde75e18",
-    "hash_raw": "e294c8aecd14bf5f780907bcaf731ddabacd3e3c3b5d405b15d27a25e41ecaf6",
+    "url": "http://10.0.0.5:8077/system-e02b9de7a44003bdba7857c114a87b23e1b91bd2e1574f57a67182ea05358eaf.img.xz",
+    "hash": "ed76b19a44b7869dee365fac090fa73b7fa483e7a9f6ffa319013059a3ff6a7e",
+    "hash_raw": "e02b9de7a44003bdba7857c114a87b23e1b91bd2e1574f57a67182ea05358eaf",
     "size": 4718592000,
     "sparse": true,
     "full_check": false,
     "has_ab": true,
-    "ondevice_hash": "c5ae7736284b3376a2d6884f46e2bd650589a451772ec6245cae4241c99b25fc",
+    "ondevice_hash": "dcbf8d1914f16f7a9865e76c8298049bacce7e12bc5b72cbadc701e5c8fb27e1",
     "alt": {
-      "hash": "e294c8aecd14bf5f780907bcaf731ddabacd3e3c3b5d405b15d27a25e41ecaf6",
-      "url": "http://10.0.0.5:8077/system-e294c8aecd14bf5f780907bcaf731ddabacd3e3c3b5d405b15d27a25e41ecaf6.img",
+      "hash": "e02b9de7a44003bdba7857c114a87b23e1b91bd2e1574f57a67182ea05358eaf",
+      "url": "http://10.0.0.5:8077/system-e02b9de7a44003bdba7857c114a87b23e1b91bd2e1574f57a67182ea05358eaf.img",
       "size": 4718592000
     }
   }
