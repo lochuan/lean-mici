@@ -1,5 +1,6 @@
 import json
 import os
+from unittest import mock
 
 from openpilot.system.lanlinkd import models_api
 
@@ -170,6 +171,55 @@ class TestSelect:
     assert code == 204
     assert p.removes == ["ModelManager_ActiveBundle"]
     assert all(k != "ModelManager_DownloadRef" for k, _ in p.puts)
+
+
+class TestPinGate:
+  """目录 tinygrad_ref vs 本机树的门控：三态 + select 拒绝。"""
+
+  CATALOG = "e837e367aac9e1a66e689f4f32ce20ca9367df13"
+  DEVICE = "9cd40014f651ac2472b3b5fc3b12178ab4bb1c66"
+
+  def test_mismatch_marks_bundles_and_detail(self):
+    raw = cache_param(bundle("ref-a", "Model A"), bundle("ref-b", "Model B"))
+    raw["tinygrad_ref"] = self.CATALOG
+    p = FakeParams(data={"ModelManager_ModelsCache": raw})
+    with mock.patch.object(models_api, "_device_tinygrad_ref", return_value=self.DEVICE):
+      st = models_api.models_state(p, None, "/nonexistent")
+    assert st["pin_mismatch_detail"] and "e837e367" in st["pin_mismatch_detail"] and "9cd40014" in st["pin_mismatch_detail"]
+    assert all(b["pinCompatible"] is False for b in st["bundles"])
+
+  def test_match_is_compatible_and_no_detail(self):
+    raw = cache_param(bundle("ref-a", "Model A"))
+    raw["tinygrad_ref"] = self.DEVICE
+    p = FakeParams(data={"ModelManager_ModelsCache": raw})
+    with mock.patch.object(models_api, "_device_tinygrad_ref", return_value=self.DEVICE):
+      st = models_api.models_state(p, None, "/nonexistent")
+    assert st["pin_mismatch_detail"] is None
+    assert all(b["pinCompatible"] is True for b in st["bundles"])
+
+  def test_unknown_pin_passes_through(self):
+    # 旧 manifest 无 tinygrad_ref（或设备 pin 取不到）：旧行为放行，不标不拦
+    raw = cache_param(bundle("ref-a", "Model A"))
+    p = FakeParams(data={"ModelManager_ModelsCache": raw})
+    st = models_api.models_state(p, None, "/nonexistent")
+    assert st["pin_mismatch_detail"] is None
+    assert all(b["pinCompatible"] is None for b in st["bundles"])
+
+  def test_select_refuses_incompatible_with_reason(self):
+    raw = cache_param(bundle("ref-a", "Model A"))
+    raw["tinygrad_ref"] = self.CATALOG
+    p = FakeParams(data={"ModelManager_ModelsCache": raw})
+    with mock.patch.object(models_api, "_device_tinygrad_ref", return_value=self.DEVICE):
+      code, msg = models_api.select(p, "ref-a")
+    assert code == 409
+    assert "e837e367" in msg and "9cd40014" in msg and "不兼容" in msg
+    assert all(k != "ModelManager_DownloadRef" for k, _ in p.puts)  # 不入队
+
+  def test_select_unknown_pin_queues_normally(self):
+    p = FakeParams(data={"ModelManager_ModelsCache": cache_param(bundle("ref-a", "A"))})
+    code, _ = models_api.select(p, "ref-a")
+    assert code == 204
+    assert ("ModelManager_DownloadRef", "ref-a") in p.puts
 
 
 class TestActions:
