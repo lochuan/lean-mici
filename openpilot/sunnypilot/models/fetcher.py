@@ -202,6 +202,17 @@ class ModelFetcher:
     bundles = cached_data.get("bundles", [])
     return not any(bundle.get("is_big") is True for bundle in bundles)
 
+  def get_catalog_tinygrad_ref(self, source: str) -> str | None:
+    """The tinygrad revision the catalog's artifacts were compiled with, from
+    the same cached manifest get_bundles_for_source reads. None when the
+    manifest predates the field or the source is unknown."""
+    if source not in self.MODEL_SOURCES:
+      return None
+    cached_data, _ = self.model_caches[source].get()
+    if not cached_data:
+      return None
+    return cached_data.get("tinygrad_ref") or None
+
   def get_bundles_for_source(self, source: str) -> list[custom.ModelManagerSP.ModelBundle]:
     if source not in self.MODEL_SOURCES:
       cloudlog.warning(f"Unknown model source: {source}")

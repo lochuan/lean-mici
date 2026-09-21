@@ -35,6 +35,7 @@ from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 
 from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.models.helpers import get_active_bundle
+from openpilot.sunnypilot.models.pin import pkl_pin_compatible
 from openpilot.sunnypilot.selfdrive.controls.lib.relc import RoadEdgeLaneChangeController
 
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
@@ -91,7 +92,14 @@ def _find_driving_pkl(bundle):
     from openpilot.common.hardware.hw import Paths
     pkl_path = os.path.join(Paths.model_root(), bundle.models[0].artifact.fileName)
     if _pkl_exists(pkl_path):
-      return pkl_path, bundle
+      pin = pkl_pin_compatible(pkl_path)
+      if pin is False:
+        cloudlog.error(
+          f"selected model pkl was compiled with a different tinygrad revision, "
+          f"falling back to built-in: {pkl_path}"
+        )
+      else:
+        return pkl_path, bundle
     cloudlog.warning(f"selected model pkl missing, falling back to built-in: {pkl_path}")
 
   builtin = str(modeld_pkl_path())

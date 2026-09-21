@@ -19,6 +19,7 @@ from openpilot.cereal import messaging, custom
 from openpilot.sunnypilot.models.fetcher import ModelFetcher
 from openpilot.sunnypilot.models.helpers import (ACTIVE_BUNDLE_KEYS, get_active_bundle, get_selected_bundle,
                                                   resolve_bundle_by_ref, validate_active_bundles, verify_file)
+from openpilot.sunnypilot.models.pin import PIN_SUFFIX, device_tinygrad_ref, write_pkl_pin
 
 # (connect, read) seconds. read is per-request inactivity, not a total cap
 DOWNLOAD_TIMEOUT = (30, 30)
@@ -278,6 +279,15 @@ class ModelManagerSP:
       if self._download_interrupted():
         raise DownloadCancelled("Download cancelled")
       self.selected_bundle.status = custom.ModelManagerSP.DownloadStatus.downloaded
+      # record the catalog's tinygrad_ref so the runtime can verify the pkl was
+      # compiled for this tree's revision before loading it
+      fetcher = getattr(self, "model_fetcher", None)
+      catalog_ref = fetcher.get_catalog_tinygrad_ref(source) if fetcher else None
+      if catalog_ref:
+        for model in self.selected_bundle.models:
+          filename = model.artifact.fileName
+          if filename:
+            write_pkl_pin(os.path.join(destination_path, filename), catalog_ref)
       self.params.put(ACTIVE_BUNDLE_KEYS[source], model_bundle.to_dict(), block=True)
       self.active_bundle = get_active_bundle(self.params)
 
@@ -314,6 +324,27 @@ class ModelManagerSP:
         self._release_download_ref()
         self.selected_bundle = None
 
+  def _filter_incompatible_catalogs(self) -> None:
+    """Drop every bundle from a catalog whose tinygrad_ref differs from this
+    tree's revision: such pkls embed JIT kernels modeld cannot load. Filtering
+    at the source keeps them out of the selector, the download queue and
+    active-bundle resolution in one place. Unknown pins (older manifests) are
+    left untouched."""
+    device_ref = device_tinygrad_ref()
+    if not device_ref:
+      return
+    for source, bundles in self.source_models.items():
+      fetcher = getattr(self, "model_fetcher", None)
+      catalog_ref = fetcher.get_catalog_tinygrad_ref(source) if fetcher else None
+      if not catalog_ref or catalog_ref == device_ref:
+        continue
+      if bundles:
+        cloudlog.error(
+          f"model catalog for {source} was built with tinygrad {catalog_ref[:7]}, "
+          f"this tree runs {device_ref[:7]}; hiding {len(bundles)} incompatible bundles"
+        )
+      self.source_models[source] = []
+
   def main_thread(self) -> None:
     """Main thread for model management"""
     rk = Ratekeeper(1, print_delay_threshold=None)
@@ -322,6 +353,7 @@ class ModelManagerSP:
       try:
         self.sm.update(0)
         self.source_models = {source: self.model_fetcher.get_bundles_for_source(source) for source in ModelFetcher.MODEL_SOURCES}
+        self._filter_incompatible_catalogs()
         self.available_models = self.source_models[ModelFetcher.active_source()]
         validate_active_bundles(self.params, self.source_models)
         self.active_bundle = get_active_bundle(self.params)
