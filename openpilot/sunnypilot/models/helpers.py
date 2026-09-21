@@ -15,7 +15,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.hardware.hw import Paths
 
 # SET ME TO THE EXACT JSON VERSION WE SET IN SUNNYPILOT_MODELS REPO
-REQUIRED_JSON_VERSION = 19
+REQUIRED_JSON_VERSION = 29  # sunnypilot-models driving_models_v23（tinygrad 9cd40014f 时代）；与 MODEL_URL + tinygrad pin 同步 bump
 
 CUSTOM_MODEL_PATH = Paths.model_root()
 ModelManager = custom.ModelManagerSP

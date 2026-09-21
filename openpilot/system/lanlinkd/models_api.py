@@ -10,7 +10,7 @@
 import os
 
 DEFAULT_MODEL = "CD210"  # 复制自 sunnypilot/models/model_name.py:1
-REQUIRED_JSON_VERSION = 19  # 复制自 sunnypilot/models/helpers.py:18
+REQUIRED_JSON_VERSION = 29  # 复制自 sunnypilot/models/helpers.py（v23 目录 / tinygrad 9cd 时代），两处同步 bump
 
 ACTIVE_KEY = "ModelManager_ActiveBundle"    # JSON camelCase ModelBundle
 CACHE_KEY = "ModelManager_ModelsCache"      # JSON {"tinygrad_ref": ..., "bundles": [snake_case...]}
