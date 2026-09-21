@@ -180,6 +180,10 @@ onUnmounted(() => {
         <span class="text-[12px] text-sl-text-3">{{ state?.bundles?.length ?? 0 }} 个模型</span>
       </div>
 
+      <p v-if="state?.pin_mismatch_detail" class="mb-2 rounded-lg bg-sl-warn/10 px-3 py-2 text-[12px] leading-snug text-sl-warn ring-1 ring-inset ring-sl-warn/30">
+        ⚠️ {{ state.pin_mismatch_detail }}
+      </p>
+
       <input
         v-model="query"
         type="text"
@@ -228,8 +232,15 @@ onUnmounted(() => {
               <button
                 type="button"
                 class="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
+                :class="cn(b.pinCompatible === false && 'opacity-50')"
                 :disabled="b.active || Boolean(busy)"
-                :title="b.active ? '当前已在使用' : `切换到「${b.displayName}」`"
+                :title="
+                  b.pinCompatible === false
+                    ? '基于与本机不同的 tinygrad 版本编译，不可下载'
+                    : b.active
+                      ? '当前已在使用'
+                      : `切换到「${b.displayName}」`
+                "
                 @click="select(b)"
               >
                 <Loader2 v-if="busy === b.ref" class="size-3.5 shrink-0 animate-spin text-sl-accent" />
@@ -242,6 +253,7 @@ onUnmounted(() => {
                   </span>
                 </span>
                 <Badge v-if="b.active" kind="accent">使用中</Badge>
+                <Badge v-else-if="b.pinCompatible === false" kind="muted">不兼容</Badge>
               </button>
 
               <button

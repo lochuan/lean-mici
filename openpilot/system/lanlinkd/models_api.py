@@ -13,11 +13,42 @@ DEFAULT_MODEL = "CD210"  # 复制自 sunnypilot/models/model_name.py:1
 REQUIRED_JSON_VERSION = 19  # 复制自 sunnypilot/models/helpers.py:18
 
 ACTIVE_KEY = "ModelManager_ActiveBundle"    # JSON camelCase ModelBundle
-CACHE_KEY = "ModelManager_ModelsCache"      # JSON {"bundles": [snake_case...]}
+CACHE_KEY = "ModelManager_ModelsCache"      # JSON {"tinygrad_ref": ..., "bundles": [snake_case...]}
 DOWNLOAD_REF_KEY = "ModelManager_DownloadRef"  # STRING ref
 LAST_SYNC_KEY = "ModelManager_LastSyncTime"   # INT monotonic ns；0 = 立即过期重抓
 CLEAR_CACHE_KEY = "ModelManager_ClearCache"   # BOOL
 FAVS_KEY = "ModelManager_Favs"                # STRING，";" 分隔 ref
+
+
+def _device_tinygrad_ref() -> str | None:
+  """本机树 tinygrad_repo 的 HEAD。文件级读取（规则复制自
+  sunnypilot/models/tinygrad_ref.py），不走 sunnypilot.models import——
+  那条链会拉 common.params（libparams_c），web 层在 PC/测试环境会 OSError。"""
+  repo = os.path.join(os.path.dirname(__file__), "..", "..", "..", "tinygrad_repo")
+  git_path = os.path.normpath(repo + "/.git")
+  try:
+    if os.path.isdir(git_path):
+      head = os.path.join(git_path, "HEAD")
+    else:
+      with open(git_path) as f:
+        head = os.path.join(repo, f.read().strip()[8:])
+    ref = open(os.path.join(head)).read().strip() if os.path.isfile(head) else ""
+    if ref.startswith("ref:"):
+      ref = open(os.path.normpath(os.path.join(git_path, ref.split(" ", 1)[1]))).read().strip()
+    return ref or None
+  except OSError:
+    return None
+
+
+def _catalog_tinygrad_ref(cache) -> str | None:
+  return (cache.get("tinygrad_ref") or None) if isinstance(cache, dict) else None
+
+
+def _pin_verdict(catalog_ref: str | None, device_ref: str | None) -> bool | None:
+  """True/False = 可判定；None = 任一侧未知（旧 manifest / 取不到 pin），放行旧行为。"""
+  if not catalog_ref or not device_ref:
+    return None
+  return catalog_ref == device_ref
 
 
 def _bump(store) -> None:
@@ -73,6 +104,15 @@ def models_state(store, download: dict | None, model_root: str) -> dict:
   active = store.get(ACTIVE_KEY)
   active = active if isinstance(active, dict) and active else None
   active_ref = (active or {}).get("ref") or ""
+  catalog_ref = _catalog_tinygrad_ref(cache)
+  device_ref = _device_tinygrad_ref()
+  verdict = _pin_verdict(catalog_ref, device_ref)
+  pin_mismatch_detail = None
+  if verdict is False:
+    pin_mismatch_detail = (
+      f"模型目录基于 tinygrad {catalog_ref[:8]} 编译，本机为 {device_ref[:8]}，"
+      f"目录里的模型不可下载；请升级系统使 tinygrad 对齐后刷新列表"
+    )
   entries = []
   for b in _bundles_from_cache(cache):
     ref = b.get("ref") or ""
@@ -88,6 +128,7 @@ def models_state(store, download: dict | None, model_root: str) -> dict:
       "folder": _folder(b),
       "fav": ref in favs,
       "active": bool(ref and ref == active_ref),
+      "pinCompatible": verdict,
     })
   # 组排序：max(index) 倒序（对齐车内 UI models.py:133）；组内 index 倒序（models.py:162）
   entries.sort(key=lambda b: b["index"], reverse=True)
@@ -101,6 +142,7 @@ def models_state(store, download: dict | None, model_root: str) -> dict:
     "bundles": entries,
     "download": download,
     "cache_size_mb": _cache_size_mb(model_root),
+    "pin_mismatch_detail": pin_mismatch_detail,
   }
 
 
@@ -112,9 +154,19 @@ def select(store, ref: str) -> tuple[int, str]:
     _bump(store)
     return 204, ""
   cache = store.get(CACHE_KEY)
-  refs = {b.get("ref") for b in _bundles_from_cache(cache)}
+  bundles = _bundles_from_cache(cache)
+  refs = {b.get("ref") for b in bundles}
   if ref not in refs:
     return 404, "unknown model ref"
+  # pin 门控：目录与本机 tinygrad 不一致时点下载必然产出 modeld 崩溃的 pkl
+  # （位置 pickle 契约），在这里直接拒绝并给出原因，而不是排队后静默无操作。
+  verdict = _pin_verdict(_catalog_tinygrad_ref(cache), _device_tinygrad_ref())
+  if verdict is False:
+    return 409, (
+      f"「{next(b.get('display_name', ref) for b in bundles if b.get('ref') == ref)}」"
+      f"基于 tinygrad {_catalog_tinygrad_ref(cache)[:8]} 编译，本机为 {_device_tinygrad_ref()[:8]}，"
+      f"不兼容不可下载；请升级系统对齐后再试"
+    )
   store.put(DOWNLOAD_REF_KEY, ref, block=True)
   _bump(store)
   return 204, ""

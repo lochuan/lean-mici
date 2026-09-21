@@ -259,6 +259,8 @@ export interface ModelBundle {
   folder?: string;
   fav?: boolean;
   active?: boolean;
+  /** 产物编译时的 tinygrad ref 与本机是否一致（null = 目录未带 tinygrad_ref，未知） */
+  pinCompatible?: boolean | null;
 }
 
 /** 车辆指纹状态（GET /api/vehicle，见 vehicle_api.vehicle_state） */
@@ -307,6 +309,8 @@ export interface ModelsState {
   } | null;
   /** 已下载模型占用空间（MB），用于 Clear Cache 按钮旁提示 */
   cache_size_mb?: number;
+  /** 目录 tinygrad_ref 与本机不一致时的原因文案；不可下载的 bundle 由 pinCompatible=false 标出 */
+  pin_mismatch_detail?: string | null;
 }
 
 /** /api/bluetooth：BluetoothStatus 的序列化形（见 bluetooth_api.status_payload）。
