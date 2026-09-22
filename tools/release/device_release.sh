@@ -28,11 +28,8 @@ sudo systemctl is-active --quiet comma || { echo "comma 未运行（产物必须
 
 echo "[-] 同步 lean-master 源内容到设备树（结构性防漂移：发布树 ≡ lean-master + 产物）"
 git fetch origin lean-master:refs/remotes/origin/lean-master
-git checkout origin/lean-master -- .
-# 同步后仍有新增/修改 = lean-master 的源内容没同步干净，拒绝发布；
-# 白名单：运行时产物（构建输出，lean-master 不跟踪）是扁平模型的预期内容，放行。
-# 校验基准 = 产物路径（ARTIFACT_PATHS + data globs 的实际文件），相对 origin/lean-master 的
-# 「删除」同样放行（产物在 HEAD 里 tracked、lean-master 没有）。
+# 白名单 = 产物路径（ARTIFACT_PATHS + data globs 的实际文件）——设备树有、lean-master
+# 没有的运行时产物是扁平模型的预期内容。
 # ls 失败（glob 无匹配，如消费态树没有 yolo pkl）必须吞掉——否则 for 循环 rc≠0，
 # 命令替换在 set -e 下静默杀死整个发布。
 ART_EXPECT=$(
@@ -40,6 +37,15 @@ ART_EXPECT=$(
   python3 tools/release/release_lib.py flat-tree-entries
   for pat in $(python3 tools/release/release_lib.py data-artifact-globs); do ls "$pat" 2>/dev/null || true; done
 )
+git checkout origin/lean-master -- .
+# 镜像 lean-master 的删除：源里删掉的文件（功能移除）从设备树一并移除，
+# 否则发布树继续携带死代码。白名单（构建产物）不删——产物在 HEAD 里 tracked、
+# lean-master 没有，属于扁平模型的预期内容。
+comm -23 \
+  <(git ls-files | sort) \
+  <(git ls-tree -r --name-only origin/lean-master | sort) \
+  | grep -vxF -f <(echo "$ART_EXPECT" | sort -u) \
+  | xargs -r rm -f
 AM_BAD=$(git diff --name-only --diff-filter=AM origin/lean-master | grep -vxF -f <(echo "$ART_EXPECT" | sort -u) || true)
 if [ -n "$AM_BAD" ]; then
   echo "$AM_BAD" | head -20 >&2
@@ -69,6 +75,38 @@ else
   ) || { echo "yolo pkl 编译失败，拒绝发布" >&2; exit 1; }
   echo "[ok] yolo pkl 编译完成 T=$SECONDS"
 fi
+
+echo "[-] 重编译内置 driving 模型（tinygrad 钉 master，每次发布对齐树 pin）T=$SECONDS"
+MODEL_DIR="$SRC/openpilot/selfdrive/modeld"
+DRIVE_PKL="$MODEL_DIR/models/driving_tinygrad.pkl"
+for n in 4 5 6 7; do
+  [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
+done
+(
+  cd "$SRC"
+  DEV=QCOM IMAGE=1 FLOAT16=1 NOLOCALS=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 \
+  PYTHONPATH="$SRC/tinygrad_repo" \
+  taskset -c 4 /usr/local/venv/bin/python "$MODEL_DIR/compile_modeld.py" \
+    --model-size 512x256 \
+    --camera-resolutions 1344x760 \
+    --onnx "$MODEL_DIR/models/driving_supercombo.onnx" \
+    --output "$DRIVE_PKL" \
+    --frame-skip 4
+) || { echo "内置 driving 模型编译失败，拒绝发布" >&2; exit 1; }
+# 按 SConscript 的估算切块（pkl 超过单文件上限）
+(
+  cd "$SRC"
+  PYTHONPATH="$SRC/openpilot" /usr/local/venv/bin/python - "$DRIVE_PKL" <<'PYEOF'
+import os, sys
+from openpilot.common.file_chunker import chunk_file, get_chunk_targets
+pkl = sys.argv[1]
+onnx = pkl.replace("driving_tinygrad.pkl", "driving_supercombo.onnx")
+targets = get_chunk_targets(pkl, 2.0 * os.path.getsize(onnx) + 10 * 1024 * 1024)
+chunk_file(pkl, targets)
+print("chunked:", [os.path.basename(t) for t in targets])
+PYEOF
+) || { echo "driving pkl 切块失败，拒绝发布" >&2; exit 1; }
+echo "[ok] 内置 driving 模型重编译完成 T=$SECONDS"
 
 echo "[-] 60s 冒烟（确定设备正常运行）T=$SECONDS"
 sudo systemctl stop comma
