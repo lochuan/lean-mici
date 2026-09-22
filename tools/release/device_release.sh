@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
 #
-# device_release.sh — 在 comma 设备上发布 lean-release（设备 = 唯一构建机）。
+# device_release.sh — 在 comma 设备上发布 lean-release（扁平树，上游 sunnypilot 模型）。
 #
-# 设计口径（2026-09-22 定稿，参考上游 sunnypilot-build-prebuilt.yaml 的
-# "comma 设备即构建机" 模型 + release/ci/publish.sh 的溯源格式）：
-#   * lean-release 必须出自"已经在设备上正常运行"的构建：发布前先跑 60s 冒烟，
-#     PASS 才继续。
-#   * release commit 携带全部预编译产物（19 个运行时 ELF + driving pkl 分块 +
-#     yolo pkl 及其 pin 侧车），经 release_lib.py 三重校验
-#     （ELF 架构 / PC 路径守卫 / sha256 / native_hash）。
-#   * Mac 上不编译。设备无 GitHub 推送凭据，推送由 Mac 中继
-#     （见 publish_release_from_device.sh）。
+# 发布树 = 本设备的构建树剥离后的运行时快照：
+#   * 产物在运行时路径（消费设备 git reset 即用，无需 overlay/编译）
+#   * 完整性由构建过程结构性保证（剥离只去掉构建输入与中间产物，不靠人工清单）
+#   * `prebuilt` 标记随树发布：由发布机的"冒烟验证过的运行中构建"挣得
+#   * 单孤儿 commit（每次发布全新 git init，上游 publish.sh 模式）
+#   * 发布前 60s 冒烟：PASS 才准发布；EXIT trap 保证任何失败都恢复 comma 运行
 #
-# 用法（设备上，cwd=/data/openpilot）:  bash tools/release/device_release.sh
-# 产出: 本地 lean-release 前进一个 release commit（线性历史），由 Mac 侧取走推送。
+# 用法（设备上）:  bash tools/release/device_release.sh
+# 产出: /data/relstage（扁平树 git 仓库，分支 lean-release），由 Mac 侧取走推送。
 set -euo pipefail
 
+STAGE=/data/relstage
+SRC=/data/openpilot
 
 cleanup() {
   # 冒烟停掉了 openpilot：无论成败，收尾必须恢复运行（幂等）
@@ -33,53 +32,80 @@ PYTHONPATH=/data/openpilot:/data/openpilot/openpilot \
   /usr/local/venv/bin/python tools/release/smoke_onroad_device.py 60
 echo "[ok] smoke PASS"
 
-echo "[-] 拉取 lean-master 对象"
-git fetch origin lean-master:refs/remotes/origin/lean-master
+echo "[-] 组装扁平树 stage"
+sudo rm -rf "$STAGE"
+mkdir -p "$STAGE"
+rsync -a "$SRC/" "$STAGE/" \
+  --exclude=.git \
+  --exclude=.sconsign.dblite \
+  --exclude=.github \
+  --exclude=.claude \
+  --exclude=__pycache__ \
+  --exclude='*.pyc' \
+  --exclude='*.o' \
+  --exclude='*.a' \
+  --exclude='*.os' \
+  --exclude=SConstruct \
+  --exclude=SConscript \
+  --exclude=site_scons \
+  --exclude='tools/release' \
+  --exclude='release/' \
+  --exclude='*.onnx' \
+  --exclude='*.onnx.data' \
+  --exclude=node_modules \
+  --exclude='openpilot/selfdrive/modeld/models/*.onnx*'
 
-# 原生输入一致性：设备的产物是本树现编的，而 release commit 的原生内容必须
-# 与 lean-master tip 相同（release/prebuilt 不在 NATIVE_INPUT_PATHS，parity 不受
-# 产物影响）。不一致 = lean-master 已前进，先更新设备到最新 lean-release 再发布。
-HASH_MASTER=$(python3 tools/release/release_lib.py hash origin/lean-master)
-HASH_DEVICE=$(python3 tools/release/release_lib.py hash HEAD)
-if [ "$HASH_MASTER" != "$HASH_DEVICE" ]; then
-  echo "设备产物基于的原生输入与 lean-master 不一致（device=$HASH_DEVICE master=$HASH_MASTER）；先更新设备到最新 lean-release 再发布" >&2
-  exit 1
-fi
+cd "$STAGE"
 
-echo "[-] 收集产物到 release/prebuilt/arm64（设备树内，不建 worktree）"
-PRE="release/prebuilt/arm64"
-mkdir -p "$PRE"
-for rel in $(python3 tools/release/release_lib.py artifact-paths); do
-  [ -f "$rel" ] || { echo "设备缺少产物: $rel（先让它编译出来）" >&2; exit 1; }
-  mkdir -p "$PRE/$(dirname "$rel")"
-  cp "$rel" "$PRE/$rel"
-done
-python3 tools/release/release_lib.py data-artifact-globs | while read -r pat; do
-  for f in $pat; do
-    [ -f "$f" ] || continue
-    mkdir -p "$PRE/$(dirname "$f")"
-    cp "$f" "$PRE/$f"
-  done
-done
+# rsync exclude 覆盖不了的收尾剥离
+find . -name '.git' -exec rm -rf {} + 2>/dev/null || true        # submodule 指针文件
+find . -name '*.onnx*' -delete 2>/dev/null || true
+rm -rf tinygrad_repo/examples tinygrad_repo/tests tinygrad_repo/docs \
+       tinygrad_repo/scripts tinygrad_repo/.github
+rm -rf .sconsign.dblite
+find openpilot/third_party \( -iname '*x86*' -o -iname '*darwin*' \) -exec rm -rf {} + 2>/dev/null || true
 
-echo "[-] 写 MANIFEST + 三重校验"
-NATIVE_HASH=$(python3 tools/release/release_lib.py hash HEAD)
-SRC_COMMIT=$(git rev-parse origin/lean-master)
-python3 tools/release/release_lib.py write-manifest "$SRC_COMMIT" "$NATIVE_HASH"
-python3 tools/release/release_lib.py validate-artifacts
+# PC 路径守卫全量扫描：扁平树里所有 ELF 都不得含 /.comma 标记
+# （09-11 交叉构建事故的防线；设备本树构建的结构性产物，此处为回归防线）
+python3 - <<'PYEOF'
+import os, sys
+sys.path.insert(0, "/data/openpilot/tools/release")
+import release_lib
+
+bad = []
+for root, _, files in os.walk("."):
+    for fn in files:
+        p = os.path.join(root, fn)
+        try:
+            with open(p, "rb") as f:
+                if f.read(4) != b"\x7fELF":
+                    continue
+        except OSError:
+            continue
+        if release_lib.has_pc_paths(p):
+            bad.append(p)
+if bad:
+    print("PC-built ELF in release tree:", *bad[:10], sep="\n  ", file=sys.stderr)
+    sys.exit(1)
+print(f"PC-path guard: all ELFs clean")
+PYEOF
+
+echo "[-] touch prebuilt（发布机构建已通过冒烟验证）"
+touch prebuilt
 
 VERSION=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' openpilot/sunnypilot/common/version.h | head -1)
-echo "[-] 组 release commit: openpilot v$VERSION lean release (device-built)"
-# LFS 指针扫描（上游 publish.sh 的 submodule/LFS 防线等价物；本仓库已全 blob 化，
-# 这里是回归防线：任何指针假文件混进产物直接 FATAL）
-python3 tools/release/release_lib.py sweep-lfs-pointers .
-# 溯源写入 commit message（上游 publish.sh 模式）：version / date / master commit
+echo "[-] 组发布 commit: openpilot v$VERSION lean release (device-built, flat)"
 DATETIME=$(date '+%Y-%m-%dT%H:%M:%S')
-git add -f "$PRE"
-git -c user.name=lochuan -c user.email=lochuan@users.noreply.github.com \
-   -c core.compression=0 -c gc.auto=0 commit -m "openpilot v$VERSION lean release (device-built)
+MASTER_SHA=$(git -C "$SRC" rev-parse HEAD)
+git init -q -b lean-release
+git config user.name lochuan
+git config user.email lochuan@users.noreply.github.com
+git add -f .
+git -c core.compression=0 -c gc.auto=0 commit -m "openpilot v$VERSION lean release (device-built, flat)
 
 date: $DATETIME
-master commit: $SRC_COMMIT
+master commit: $MASTER_SHA
 built on: comma device (smoke-verified before publish)"
-echo "[ok] 本地 lean-release = $(git rev-parse HEAD)（线性 release 历史），等 Mac 侧中继推送"
+
+echo "[ok] 扁平树 stage 就绪: $STAGE（分支 lean-release, 单 commit），等 Mac 侧取走推送"
+echo "    树大小: $(du -sh "$STAGE" | cut -f1)"
