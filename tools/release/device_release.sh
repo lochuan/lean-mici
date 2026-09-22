@@ -30,12 +30,20 @@ echo "[-] 同步 lean-master 源内容到设备树（结构性防漂移：发布
 git fetch origin lean-master:refs/remotes/origin/lean-master
 git checkout origin/lean-master -- .
 # 同步后仍有新增/修改 = lean-master 的源内容没同步干净，拒绝发布；
-# 删除类（运行时产物：lean-master 不跟踪构建输出）是扁平模型的预期内容，放行
-if [ -n "$(git diff --name-only --diff-filter=AM origin/lean-master)" ]; then
-  git diff --name-only --diff-filter=AM origin/lean-master | head -20 >&2
-  echo "设备树同步 lean-master 后仍有新增/修改，拒绝发布（排查 .gitignore/权限）" >&2
+# 白名单：运行时产物（构建输出，lean-master 不跟踪）是扁平模型的预期内容，放行。
+# 校验基准 = 产物路径（ARTIFACT_PATHS + data globs 的实际文件），相对 origin/lean-master 的
+# 「删除」同样放行（产物在 HEAD 里 tracked、lean-master 没有）。
+ART_EXPECT=$(
+  python3 tools/release/release_lib.py artifact-paths
+  for pat in $(python3 tools/release/release_lib.py data-artifact-globs); do ls "$pat" 2>/dev/null; done
+)
+AM_BAD=$(git diff --name-only --diff-filter=AM origin/lean-master | grep -vxF -f <(echo "$ART_EXPECT" | sort -u) || true)
+if [ -n "$AM_BAD" ]; then
+  echo "$AM_BAD" | head -20 >&2
+  echo "设备树同步 lean-master 后仍有非产物的新增/修改，拒绝发布（排查 .gitignore/权限）" >&2
   exit 1
 fi
+echo "[ok] 设备树源内容 ≡ origin/lean-master（+ 运行时产物）"
 echo "[ok] 设备树 ≡ origin/lean-master（源内容）"
 
 echo "[-] 60s 冒烟（确定设备正常运行）T=$SECONDS"
