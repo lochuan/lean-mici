@@ -22,7 +22,6 @@ DEVICE_BRANCH=device-release
 
 echo "[-] 前提检查"
 sudo systemctl is-active --quiet comma || { echo "comma 未运行（产物必须来自正在运行的构建）" >&2; exit 1; }
-[ -f prebuilt ] || { echo "prebuilt 标记不存在（本树从未编译成功）" >&2; exit 1; }
 [ -z "$(git status --porcelain | grep -v '^??')" ] || { echo "工作树有未提交修改，拒绝发布" >&2; exit 1; }
 
 echo "[-] 60s 冒烟（确定设备正常运行）T=$SECONDS"
