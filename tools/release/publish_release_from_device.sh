@@ -41,3 +41,7 @@ fi
 
 echo "[ok] lean-release = ${RELEASE_SHA}（设备构建、设备验证运行后发布）"
 echo "    冒烟门禁: EXPECT_COMMIT=$RELEASE_SHA ./tools/release/smoke_gate.sh"
+
+echo "[-] 设备消费本次发布（fetch + reset --hard）——否则设备树带着 lean-master 同步的
+    索引漂移，下一次发布会被前提检查（树必须干净）卡死"
+ssh "$DEVICE" 'cd /data/openpilot && git fetch -q origin lean-release && git reset -q --hard FETCH_HEAD && git log --oneline -1'

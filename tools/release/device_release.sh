@@ -35,6 +35,7 @@ git checkout origin/lean-master -- .
 # 「删除」同样放行（产物在 HEAD 里 tracked、lean-master 没有）。
 ART_EXPECT=$(
   python3 tools/release/release_lib.py artifact-paths
+  python3 tools/release/release_lib.py flat-tree-entries
   for pat in $(python3 tools/release/release_lib.py data-artifact-globs); do ls "$pat" 2>/dev/null; done
 )
 AM_BAD=$(git diff --name-only --diff-filter=AM origin/lean-master | grep -vxF -f <(echo "$ART_EXPECT" | sort -u) || true)
@@ -88,13 +89,15 @@ find openpilot/third_party \( -iname '*x86*' -o -iname '*darwin*' \) -exec rm -r
 # PC 路径守卫全量扫描：扁平树里所有 ELF 都不得含 /.comma 标记
 # （09-11 交叉构建事故的防线；设备本树构建的结构性产物，此处为回归防线）
 echo "[-] stamp tinygrad pin（发布树剥了 .git，这是选择器门控唯一可读的树 pin）"
-python3 - "$SRC/tinygrad_repo" "$STAGE" <<'PYEOF'
+# pin 取自 lean-master 的 gitlink（ls-tree）——设备树可能是扁平消费者，
+# tinygrad_repo 无 .git，rev-parse 会穿透父仓库返回 release commit（垃圾 pin）
+python3 - "$SRC" "$STAGE" "refs/remotes/origin/lean-master" <<'PYEOF'
 import sys
 from pathlib import Path
 sys.path.insert(0, "/tmp/relhelper")
 import release_lib
 
-sha = release_lib.stamp_tinygrad_pin(Path(sys.argv[2]), Path(sys.argv[1]))
+sha = release_lib.stamp_tinygrad_pin(Path(sys.argv[2]), Path(sys.argv[1]), treeish=sys.argv[3])
 print(f"[ok] tinygrad pin stamped: {sha[:7]}")
 PYEOF
 

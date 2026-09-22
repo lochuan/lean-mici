@@ -554,39 +554,45 @@ def _git_commit(repo: Path) -> str:
                         capture_output=True, text=True).stdout.strip()
 
 
+def _git_parent_with_gitlink(parent: Path, sha: str) -> str:
+  """Parent repo (lean-master shape) tracking tinygrad_repo as a gitlink."""
+  for cmd in (
+    ["git", "init", "-q", "-b", "main"],
+    ["git", "config", "user.email", "t@example.com"],
+    ["git", "config", "user.name", "t"],
+    ["git", "commit", "--allow-empty", "-m", "init"],
+    ["git", "update-index", "--add", "--cacheinfo", f"160000,{sha},tinygrad_repo"],
+    ["git", "commit", "-m", "gitlink"],
+  ):
+    subprocess.run(cmd, cwd=parent, check=True, capture_output=True)
+  return subprocess.run(["git", "rev-parse", "HEAD"], cwd=parent, check=True,
+                        capture_output=True, text=True).stdout.strip()
+
+
 class TestTinygradPinStage(unittest.TestCase):
   """扁平树剥离 tinygrad_repo/.git：发布时必须 stamp pin，且 stage 能自行解析
-  （模型选择器四层门控的输入，device_release.sh 的发布门禁依赖此函数）。"""
+  （模型选择器四层门控的输入，device_release.sh 的发布门禁依赖此函数）。
 
-  def test_stamp_writes_pin_from_source_repo(self):
-    with tempfile.TemporaryDirectory() as td:
-      src = Path(td) / "src"
-      src.mkdir()
-      sha = _git_commit(src)
-      stage = Path(td) / "stage" / "tinygrad_repo"
-      stage.mkdir(parents=True)
-      stamped = release_lib.stamp_tinygrad_pin(Path(td) / "stage", src)
-      self.assertEqual(stamped, sha)
-      self.assertEqual(
-        (stage / release_lib.TINYGRAD_PIN_FILE).read_text().strip(), sha)
+  pin 来源 = lean-master 的 gitlink（`ls-tree`），不是 tinygrad_repo 自身的
+  rev-parse：设备树可能已是扁平消费者（tinygrad_repo 无 .git，rev-parse
+  会穿透到父仓库返回 release commit，是垃圾 pin）。"""
 
-  def test_stamp_missing_git_raises(self):
-    with tempfile.TemporaryDirectory() as td:
-      src = Path(td) / "src"
-      src.mkdir()
-      stage = Path(td) / "stage"
-      with self.assertRaises(subprocess.CalledProcessError):
-        release_lib.stamp_tinygrad_pin(stage, src)
+  def _stage_from_gitlink(self, td: str) -> tuple[Path, str]:
+    tiny_src = Path(td) / "tiny_src"
+    tiny_src.mkdir()
+    tiny_commit = _git_commit(tiny_src)
+    parent = Path(td) / "parent"
+    parent.mkdir()
+    _git_parent_with_gitlink(parent, tiny_commit)
+    stage = Path(td) / "stage"
+    (stage / "tinygrad_repo").mkdir(parents=True)
+    stamped = release_lib.stamp_tinygrad_pin(stage, parent, treeish="HEAD")
+    return stage, stamped
 
   def test_stage_pin_roundtrip(self):
     with tempfile.TemporaryDirectory() as td:
-      src = Path(td) / "src"
-      src.mkdir()
-      sha = _git_commit(src)
-      stage = Path(td) / "stage"
-      (stage / "tinygrad_repo").mkdir(parents=True)
-      release_lib.stamp_tinygrad_pin(stage, src)
-      self.assertEqual(release_lib.stage_tinygrad_pin(stage), sha)
+      stage, stamped = self._stage_from_gitlink(td)
+      self.assertEqual(release_lib.stage_tinygrad_pin(stage), stamped)
 
   def test_stage_pin_absent(self):
     with tempfile.TemporaryDirectory() as td:
@@ -606,15 +612,67 @@ class TestTinygradPinStage(unittest.TestCase):
     sys.path.insert(0, str(REPO_ROOT))
     from openpilot.sunnypilot.models import tinygrad_ref
     with tempfile.TemporaryDirectory() as td:
-      src = Path(td) / "src"
-      src.mkdir()
-      sha = _git_commit(src)
+      stage, stamped = self._stage_from_gitlink(td)
+      with mock.patch.object(tinygrad_ref, "BASEDIR", str(stage)):
+        self.assertEqual(tinygrad_ref.get_tinygrad_ref(), stamped)
+      self.assertEqual(release_lib.stage_tinygrad_pin(stage), stamped)
+
+
+class TestGitlinkPinStamp(unittest.TestCase):
+  """扁平消费者设备上 tinygrad_repo 没有 .git：pin 必须取自 lean-master
+  的 gitlink（ls-tree），绝不能用 rev-parse 穿透到父仓库。"""
+
+  def test_stamp_from_gitlink(self):
+    with tempfile.TemporaryDirectory() as td:
+      tiny_src = Path(td) / "tiny_src"
+      tiny_src.mkdir()
+      tiny_commit = _git_commit(tiny_src)
+      parent = Path(td) / "parent"
+      parent.mkdir()
+      _git_parent_with_gitlink(parent, tiny_commit)
       stage = Path(td) / "stage"
       (stage / "tinygrad_repo").mkdir(parents=True)
-      release_lib.stamp_tinygrad_pin(stage, src)
-      with mock.patch.object(tinygrad_ref, "BASEDIR", str(stage)):
-        self.assertEqual(tinygrad_ref.get_tinygrad_ref(), sha)
-      self.assertEqual(release_lib.stage_tinygrad_pin(stage), sha)
+      stamped = release_lib.stamp_tinygrad_pin(
+        stage, parent, treeish="HEAD")
+      self.assertEqual(stamped, tiny_commit)
+      self.assertEqual(release_lib.stage_tinygrad_pin(stage), tiny_commit)
+
+  def test_stamp_from_named_ref(self):
+    with tempfile.TemporaryDirectory() as td:
+      tiny_src = Path(td) / "t"
+      tiny_src.mkdir()
+      tiny_commit = _git_commit(tiny_src)
+      parent = Path(td) / "parent"
+      parent.mkdir()
+      _git_parent_with_gitlink(parent, tiny_commit)
+      subprocess.run(["git", "update-ref", "refs/remotes/origin/lean-master", "HEAD"],
+                     cwd=parent, check=True, capture_output=True)
+      stage = Path(td) / "stage"
+      (stage / "tinygrad_repo").mkdir(parents=True)
+      stamped = release_lib.stamp_tinygrad_pin(
+        stage, parent, treeish="refs/remotes/origin/lean-master")
+      self.assertEqual(stamped, tiny_commit)
+
+  def test_stamp_parent_without_gitlink_raises(self):
+    with tempfile.TemporaryDirectory() as td:
+      parent = Path(td) / "parent"
+      parent.mkdir()
+      _git_commit(parent)
+      with self.assertRaises(ValueError):
+        release_lib.stamp_tinygrad_pin(Path(td) / "stage", parent, treeish="HEAD")
+
+
+class TestFlatTreeEntries(unittest.TestCase):
+  """扁平树运行时必需、lean-master 不跟踪的结构性条目：同步门禁（AM 白名单）
+  必须放行它们，否则消费态设备发布会被自己的门禁卡死。"""
+
+  def test_entries_present(self):
+    self.assertIn("msgq", release_lib.FLAT_TREE_ENTRIES)
+    self.assertIn("opendbc", release_lib.FLAT_TREE_ENTRIES)
+    self.assertIn("rednose", release_lib.FLAT_TREE_ENTRIES)
+    self.assertIn("tinygrad", release_lib.FLAT_TREE_ENTRIES)  # 运行时 import 的 symlink
+    self.assertIn("prebuilt", release_lib.FLAT_TREE_ENTRIES)  # 发布标记
+    self.assertIn(".overlay_init", release_lib.FLAT_TREE_ENTRIES)
 
 
 if __name__ == "__main__":

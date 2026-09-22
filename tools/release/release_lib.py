@@ -83,6 +83,15 @@ NATIVE_INPUT_PATHS: tuple[str, ...] = (
 PREBUILT_DIR = Path("release/prebuilt/arm64")
 MANIFEST_NAME = "MANIFEST"
 
+# Flat-tree runtime entries lean-master does not track (its *_repo paths are
+# gitlinks): the runtime import symlinks, the earned prebuilt marker and the
+# retired-overlay marker that still ships. The device-tree sync gate
+# (device_release.sh AM whitelist) must pass these, or a flat-consumer device
+# cannot publish at all.
+FLAT_TREE_ENTRIES: tuple[str, ...] = (
+  "msgq", "opendbc", "rednose", "tinygrad", "prebuilt", ".overlay_init",
+)
+
 
 def _run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
   return subprocess.run(
@@ -393,15 +402,26 @@ TINYGRAD_PIN_FILE = "TINYGRAD_PIN"
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
-def stamp_tinygrad_pin(stage: Path, source_repo: Path) -> str:
-  """Record the build tree's tinygrad_repo revision into the staged flat tree.
+def stamp_tinygrad_pin(stage: Path, source_repo: Path, treeish: str = "HEAD") -> str:
+  """Record the tinygrad_repo revision pinned by ``treeish`` into the staged
+  flat tree.
+
+  The pin is read from the gitlink (``git ls-tree``), never from a rev-parse
+  inside tinygrad_repo: the device tree may be a flat consumer without
+  tinygrad_repo/.git, where rev-parse falls through to the parent repo and
+  yields the release commit — a garbage pin that would break the selector's
+  four-layer gating.
 
   The published flat tree strips tinygrad_repo/.git (the runtime pin gating of
   the model selector reads that path), so the release process stamps the pin
   here — it is the gating's structural input and must ship with the tree.
   """
-  result = _run(["git", "-C", str(source_repo), "rev-parse", "HEAD"])
-  sha = result.stdout.strip()
+  result = _run(["git", "-C", str(source_repo), "ls-tree", treeish, "tinygrad_repo"])
+  fields = result.stdout.split()
+  if len(fields) < 3 or fields[0] != "160000" or fields[1] != "commit":
+    raise ValueError(
+      f"tinygrad_repo is not a gitlink in {source_repo} ({treeish}): {result.stdout.strip()!r}")
+  sha = fields[2]
   dest = stage / "tinygrad_repo" / TINYGRAD_PIN_FILE
   dest.parent.mkdir(parents=True, exist_ok=True)
   dest.write_text(sha + "\n")
@@ -428,6 +448,7 @@ def main() -> int:
 
   sub.add_parser("artifact-paths", help="print native artifact paths")
   sub.add_parser("data-artifact-globs", help="print non-ELF data artifact globs")
+  sub.add_parser("flat-tree-entries", help="print flat-tree structural entries lean-master does not track")
   sub.add_parser("validate-artifacts", help="validate staged prebuilt artifacts")
   sweep_parser = sub.add_parser(
     "sweep-lfs-pointers",
@@ -463,6 +484,11 @@ def main() -> int:
   if args.command == "data-artifact-globs":
     for pattern in DATA_ARTIFACT_GLOBS:
       print(pattern)
+    return 0
+
+  if args.command == "flat-tree-entries":
+    for entry in FLAT_TREE_ENTRIES:
+      print(entry)
     return 0
 
   if args.command == "validate-artifacts":
