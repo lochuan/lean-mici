@@ -28,13 +28,18 @@ sudo systemctl is-active --quiet comma || { echo "comma 未运行（产物必须
 [ -z "$(git status --porcelain -- . ':!tinygrad_repo' ':!msgq_repo' ':!opendbc_repo' ':!rednose_repo' ':!panda' | grep -v '^??')" ] || { echo "工作树有未提交修改，拒绝发布" >&2; exit 1; }
 
 echo "[-] 同步 lean-master 源内容到设备树（结构性防漂移：发布树 ≡ lean-master + 产物）"
-# fetch 尽力而为：发布编排器已通过 LAN 把 lean-master 直推进
-# refs/remotes/origin/lean-master（见 publish_release_from_device.sh），
-# GitHub 抖动只降级为告警；remote ref 缺失才致命。
-if ! git fetch origin lean-master:refs/remotes/origin/lean-master; then
-  echo "[warn] origin fetch 失败（GitHub 网络）——使用 LAN 预推的 remote ref" >&2
-  git rev-parse -q --verify refs/remotes/origin/lean-master >/dev/null \
-    || { echo "refs/remotes/origin/lean-master 不存在，无从同步" >&2; exit 1; }
+# 同步来源优先级：origin fetch（权威）→ LAN 预推分支 lan-sync（编排器直推，
+# 见 publish_release_from_device.sh）→ 既有 remote ref（过期保底）。git 不允许推送
+# refs/remotes/*，LAN 载体是普通分支，落位用 update-ref。
+if git fetch origin lean-master:refs/remotes/origin/lean-master; then
+  :
+elif git rev-parse -q --verify refs/heads/lan-sync >/dev/null 2>&1; then
+  git update-ref refs/remotes/origin/lean-master "$(git rev-parse refs/heads/lan-sync)"
+  echo "[warn] origin fetch 失败（GitHub 网络）——用 LAN 预推分支同步: $(git rev-parse --short refs/heads/lan-sync)" >&2
+elif git rev-parse -q --verify refs/remotes/origin/lean-master >/dev/null 2>&1; then
+  echo "[warn] origin fetch 失败且无 LAN 分支——用既有 remote ref（可能过期）: $(git rev-parse --short refs/remotes/origin/lean-master)" >&2
+else
+  echo "origin fetch 失败，且无 LAN 分支、无既有 remote ref：无从同步" >&2; exit 1
 fi
 echo "[ok] 同步目标: $(git rev-parse --short refs/remotes/origin/lean-master)"
 # 白名单 = 产物路径（ARTIFACT_PATHS + data globs 的实际文件）——设备树有、lean-master
@@ -230,7 +235,10 @@ MASTER_SHA=$(git -C "$SRC" rev-parse origin/lean-master)
 git init -q -b lean-release
 git config user.name lochuan
 git config user.email lochuan@users.noreply.github.com
-git add -f .
+# .overlay_init 是 updater 的运行时 overlay 标记（updated.py 管理、随更新周期
+# 创建/删除）——track 进 release commit 会让运行时删除变成"树脏"，每次重启后
+# 的发布都卡在前提检查。结构白名单仍保留该条目（防镜像删除误伤），但 git 不跟踪。
+git add -f . ':(exclude).overlay_init'
 git -c core.compression=0 -c gc.auto=0 commit -m "openpilot v$VERSION lean release (device-built, flat)
 
 date: $DATETIME
