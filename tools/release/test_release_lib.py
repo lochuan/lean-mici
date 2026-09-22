@@ -78,7 +78,10 @@ def git(repo: Path, *args: str) -> str:
 class TestConstants(unittest.TestCase):
   def test_artifact_paths_are_complete(self):
     expected = {
+      "msgq_repo/msgq/ipc_pyx.so",
+      "msgq_repo/msgq/visionipc/visionipc_pyx.so",
       "openpilot/common/libparams_c.so",
+      "openpilot/cereal/messaging/bridge",
       "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so",
       "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libacados.so",
       "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libacados_ocp_solver_long.so",
@@ -91,7 +94,9 @@ class TestConstants(unittest.TestCase):
       "openpilot/sunnypilot/selfdrive/locationd/locationd",
       "openpilot/sunnypilot/selfdrive/locationd/models/generated/liblive.so",
       "openpilot/system/camerad/camerad",
+      "openpilot/system/loggerd/bootlog",
       "openpilot/system/loggerd/loggerd",
+      "rednose_repo/rednose/helpers/ekf_sym_pyx.so",
     }
     self.assertEqual(set(ARTIFACT_PATHS), expected)
     self.assertEqual(len(ARTIFACT_PATHS), len(expected))
