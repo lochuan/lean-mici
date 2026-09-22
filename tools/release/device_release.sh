@@ -124,6 +124,9 @@ PYEOF
 ) || { echo "driving pkl 切块失败，拒绝发布" >&2; exit 1; }
 echo "[ok] 内置 driving 模型重编译完成 T=$SECONDS"
 
+echo "[-] 等 GPU 从编译负载回落（EGL 需要干净的显示/DRM 状态）T=$SECONDS"
+sleep 15
+
 echo "[-] 60s 冒烟（确定设备正常运行）T=$SECONDS"
 sudo systemctl stop comma
 PYTHONPATH=/data/openpilot:/data/openpilot/openpilot \
