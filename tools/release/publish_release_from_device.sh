@@ -14,6 +14,10 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 DEVICE="${DEVICE:-comma@10.0.0.27}"
 DEVICE_REPO="ssh://$DEVICE/data/relstage"
 
+echo "[-] 推送发布辅助文件（扁平树不含 tools/release）"
+ssh "$DEVICE" 'mkdir -p /tmp/relhelper'
+scp -q "$DIR/smoke_onroad_device.py" "$DIR/release_lib.py" "$DEVICE:/tmp/relhelper/"
+
 echo "[-] 设备端构建与本地发布（含 60s 冒烟，设备会短暂停 openpilot）"
 ssh "$DEVICE" 'cd /data/openpilot && bash -s' < "$DIR/device_release.sh"
 

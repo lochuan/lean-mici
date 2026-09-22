@@ -29,7 +29,7 @@ sudo systemctl is-active --quiet comma || { echo "comma 未运行（产物必须
 echo "[-] 60s 冒烟（确定设备正常运行）T=$SECONDS"
 sudo systemctl stop comma
 PYTHONPATH=/data/openpilot:/data/openpilot/openpilot \
-  /usr/local/venv/bin/python tools/release/smoke_onroad_device.py 60
+  /usr/local/venv/bin/python /tmp/relhelper/smoke_onroad_device.py 60
 echo "[ok] smoke PASS"
 
 echo "[-] 组装扁平树 stage"
@@ -70,7 +70,7 @@ find openpilot/third_party \( -iname '*x86*' -o -iname '*darwin*' \) -exec rm -r
 python3 - <<'PYEOF'
 import os, sys
 from pathlib import Path
-sys.path.insert(0, "/data/openpilot/tools/release")
+sys.path.insert(0, "/tmp/relhelper")
 import release_lib
 
 bad = []
