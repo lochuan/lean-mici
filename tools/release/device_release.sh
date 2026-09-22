@@ -3,22 +3,26 @@
 # device_release.sh — 在 comma 设备上发布 lean-release（设备 = 唯一构建机）。
 #
 # 设计口径（2026-09-22 定稿，参考上游 sunnypilot-build-prebuilt.yaml 的
-# "comma 设备即构建机" 模型 + build_stripped.sh 的提交形状）：
+# "comma 设备即构建机" 模型 + release/ci/publish.sh 的溯源格式）：
 #   * lean-release 必须出自"已经在设备上正常运行"的构建：发布前先跑 60s 冒烟，
 #     PASS 才继续。
-#   * release commit 携带全部预编译产物（14 个 native ELF + driving pkl 分块 +
+#   * release commit 携带全部预编译产物（19 个运行时 ELF + driving pkl 分块 +
 #     yolo pkl 及其 pin 侧车），经 release_lib.py 三重校验
 #     （ELF 架构 / PC 路径守卫 / sha256 / native_hash）。
-#   * Mac 侧容器交叉编译已移除（2026-09-22）。设备无 GitHub 推送凭据，
-#     推送由 Mac 中继（见 publish_release_from_device.sh）。
+#   * Mac 上不编译。设备无 GitHub 推送凭据，推送由 Mac 中继
+#     （见 publish_release_from_device.sh）。
 #
 # 用法（设备上，cwd=/data/openpilot）:  bash tools/release/device_release.sh
-# 产出: 本地分支 device-release（= origin/lean-master + 产物 overlay），由 Mac 侧取走推送。
+# 产出: 本地 lean-release 前进一个 release commit（线性历史），由 Mac 侧取走推送。
 set -euo pipefail
 
-BRANCH_TIP_REF="origin/lean-master"
-RELWT=/data/relwt
-DEVICE_BRANCH=device-release
+RELWT=""
+
+cleanup() {
+  # 冒烟停掉了 openpilot：无论成败，收尾必须恢复运行（幂等）
+  sudo systemctl start comma
+}
+trap cleanup EXIT
 
 echo "[-] 前提检查"
 sudo systemctl is-active --quiet comma || { echo "comma 未运行（产物必须来自正在运行的构建）" >&2; exit 1; }
@@ -26,14 +30,8 @@ sudo systemctl is-active --quiet comma || { echo "comma 未运行（产物必须
 
 echo "[-] 60s 冒烟（确定设备正常运行）T=$SECONDS"
 sudo systemctl stop comma
-SMOKE_RC=0
 PYTHONPATH=/data/openpilot:/data/openpilot/openpilot \
-  /usr/local/venv/bin/python tools/release/smoke_onroad_device.py 60 || SMOKE_RC=$?
-if [ "$SMOKE_RC" -ne 0 ]; then
-  echo "smoke FAIL — 设备未正常运行，拒绝发布" >&2
-  sudo systemctl start comma
-  exit 1
-fi
+  /usr/local/venv/bin/python tools/release/smoke_onroad_device.py 60
 echo "[ok] smoke PASS"
 
 echo "[-] 拉取 lean-master 对象"
@@ -46,7 +44,6 @@ HASH_MASTER=$(python3 tools/release/release_lib.py hash origin/lean-master)
 HASH_DEVICE=$(python3 tools/release/release_lib.py hash HEAD)
 if [ "$HASH_MASTER" != "$HASH_DEVICE" ]; then
   echo "设备产物基于的原生输入与 lean-master 不一致（device=$HASH_DEVICE master=$HASH_MASTER）；先更新设备到最新 lean-release 再发布" >&2
-  sudo systemctl start comma
   exit 1
 fi
 
@@ -87,6 +84,3 @@ date: $DATETIME
 master commit: $SRC_COMMIT
 built on: comma device (smoke-verified before publish)"
 echo "[ok] 本地 lean-release = $(git rev-parse HEAD)（线性 release 历史），等 Mac 侧中继推送"
-
-echo "[-] 恢复设备运行"
-sudo systemctl start comma
