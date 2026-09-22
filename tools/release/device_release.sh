@@ -9,9 +9,8 @@
 #   * release commit 携带全部预编译产物（14 个 native ELF + driving pkl 分块 +
 #     yolo pkl 及其 pin 侧车），经 release_lib.py 三重校验
 #     （ELF 架构 / PC 路径守卫 / sha256 / native_hash）。
-#   * Mac 上不再编译、不再组 release commit（build_lean_release_on_orb.sh 降级
-#     为应急路径）。设备无 GitHub 推送凭据，推送由 Mac 中继
-#     （见 publish_release_from_device.sh）。
+#   * Mac 侧容器交叉编译已移除（2026-09-22）。设备无 GitHub 推送凭据，
+#     推送由 Mac 中继（见 publish_release_from_device.sh）。
 #
 # 用法（设备上，cwd=/data/openpilot）:  bash tools/release/device_release.sh
 # 产出: 本地分支 device-release（= origin/lean-master + 产物 overlay），由 Mac 侧取走推送。

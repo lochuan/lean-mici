@@ -7,7 +7,7 @@
 #     在本地组 release commit（分支 device-release）。见 device_release.sh。
 #   * 本脚本：ssh 触发设备流程 → 从设备 git 取 device-release → 中继推送到
 #     fork/lean-release（设备无 GitHub 推送凭据）→ 输出 release sha 供冒烟门禁。
-#   * build_lean_release_on_orb.sh（Mac 容器构建）降级为应急路径，日常不再使用。
+#   * Mac 侧容器交叉编译已移除（2026-09-22）：设备是唯一构建机。
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"

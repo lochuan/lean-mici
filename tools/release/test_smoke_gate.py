@@ -104,19 +104,5 @@ class TestPklCheck(unittest.TestCase):
     self.assertIn("chunkmanifest", self.src)
 
 
-class TestBuildScriptGuards(unittest.TestCase):
-  @classmethod
-  def setUpClass(cls):
-    cls.src = (Path(__file__).resolve().parent / "build_lean_release_on_orb.sh").read_text()
-
-  def test_refuses_to_build_an_unpushed_branch(self):
-    """The container resets --hard to origin, so unpushed work is not built."""
-    self.assertIn("未推送", self.src)
-    self.assertIn("refs/remotes", self.src)
-
-  def test_passes_the_release_commit_to_the_gate(self):
-    self.assertIn("EXPECT_COMMIT=", self.src)
-    self.assertIn("opilot-release-commit", self.src)
-
 if __name__ == "__main__":
   unittest.main()
