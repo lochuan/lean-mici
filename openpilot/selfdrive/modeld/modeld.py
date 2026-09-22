@@ -3,7 +3,6 @@ from collections.abc import Callable
 import os
 from pathlib import Path
 from tinygrad.device import Device
-from tinygrad.tensor import Tensor
 import time
 import numpy as np
 import openpilot.cereal.messaging as messaging
@@ -24,8 +23,7 @@ from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
-from openpilot.selfdrive.modeld.compile_modeld import (make_input_queues, make_split_input_queues, nv12_copy_size,
-                                                       derive_frame_skip, MODELD_INPUTS, WARP_INPUTS, POLICY_INPUTS)
+from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, nv12_copy_size, MODELD_INPUTS
 from openpilot.selfdrive.modeld.fill_model_msg import (fill_model_msg, fill_driving_model_data, fill_pose_msg,
                                                        PublishState, get_curvature_from_output)
 from openpilot.common.file_chunker import open_file_chunked, get_manifest_path, get_chunk_name
@@ -34,8 +32,6 @@ from openpilot.selfdrive.modeld.helpers import modeld_pkl_path, load_oob
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 
 from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
-from openpilot.sunnypilot.models.helpers import get_active_bundle
-from openpilot.sunnypilot.models.pin import pkl_pin_compatible
 from openpilot.sunnypilot.selfdrive.controls.lib.relc import RoadEdgeLaneChangeController
 
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
@@ -79,36 +75,16 @@ def _pkl_exists(path):
                                 for i in range(num_chunks))
 
 
-def _find_driving_pkl(bundle):
-  """Resolve the pkl to run: env override, then the selected bundle, then the built-in.
-
-  Returns (path, bundle). bundle is None when falling back to the built-in pkl,
-  so callers know not to apply bundle-specific overrides.
-  """
+def _find_driving_pkl():
+  """Resolve the pkl to run: env override, else the built-in."""
   if (override := os.environ.get('COMBINED_MODEL_PKL')) and _pkl_exists(override):
-    return override, None
-
-  if bundle is not None and bundle.models:
-    from openpilot.common.hardware.hw import Paths
-    pkl_path = os.path.join(Paths.model_root(), bundle.models[0].artifact.fileName)
-    if _pkl_exists(pkl_path):
-      pin = pkl_pin_compatible(pkl_path)
-      if pin is False:
-        cloudlog.error(
-          f"selected model pkl was compiled with a different tinygrad revision, "
-          f"falling back to built-in: {pkl_path}"
-        )
-      else:
-        return pkl_path, bundle
-    cloudlog.warning(f"selected model pkl missing, falling back to built-in: {pkl_path}")
+    return override
 
   builtin = str(modeld_pkl_path())
   if _pkl_exists(builtin):
-    return builtin, None
+    return builtin
 
-  raise ModelUnavailable(
-    f"no driving model available: built-in pkl missing at {builtin} and no downloaded model is usable"
-  )
+  raise ModelUnavailable(f"no driving model available: built-in pkl missing at {builtin}")
 
 
 class FrameMeta:
@@ -125,26 +101,13 @@ class ModelState:
   prev_desire: np.ndarray  # for tracking the rising edge of the pulse
 
   def __init__(self, cam_w: int, cam_h: int):
-    bundle = None
-    if not os.environ.get('COMBINED_MODEL_PKL'):
-      try:
-        bundle = get_active_bundle()
-      except Exception:
-        cloudlog.exception("failed to read active model bundle, falling back to built-in model")
-
-    pkl_path, bundle = _find_driving_pkl(bundle)
+    pkl_path = _find_driving_pkl()
     cloudlog.warning(f"loading model pkl: {pkl_path}")
     jits = load_oob(open_file_chunked(pkl_path))
 
-    self.generation = bundle.generation if bundle is not None else None
-    overrides = {o.key: o.value for o in bundle.overrides} if bundle is not None else {}
-    self.LAT_SMOOTH_SECONDS = float(overrides.get('lat', LAT_SMOOTH_SECONDS))
-    self.LONG_SMOOTH_SECONDS = float(overrides.get('long', LONG_SMOOTH_SECONDS))
-
     metadata = jits['metadata']
-    self.is_run_model = 'run_model' in jits
-    if not self.is_run_model and 'run_policy' not in jits:
-      raise ModelUnavailable(f"unsupported model pkl (no run_model/run_policy): {pkl_path}")
+    if 'run_model' not in jits:
+      raise ModelUnavailable(f"unsupported model pkl (no run_model): {pkl_path}")
 
     self.frame_copy_size = nv12_copy_size(*get_nv12_info(cam_w, cam_h)[:3])
     self.prev_desire = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
@@ -152,19 +115,11 @@ class ModelState:
     self.full_frames: dict = {}
     self._blob_cache: dict = {}
 
-    if self.is_run_model:
-      self._init_supercombo(jits, metadata, cam_w, cam_h)
-    else:
-      self._init_split(jits, metadata, cam_w, cam_h)
+    self._init_supercombo(jits, metadata, cam_w, cam_h)
 
     self.desire_key = next(k for k in self.npy if k.startswith('desire'))
     self.road_key = next(k for k in self.vision_input_names if 'big' not in k)
     self.wide_key = next(k for k in self.vision_input_names if 'big' in k)
-
-  @property
-  def mlsim(self) -> bool:
-    """Generation >= 11 models emit a desired_curvature head that isn't control-calibrated."""
-    return self.generation is not None and self.generation >= 11
 
   def _init_supercombo(self, jits, metadata, cam_w: int, cam_h: int) -> None:
     self.model_device = jits['input_devices']['model']
@@ -172,46 +127,11 @@ class ModelState:
     self.input_shapes = metadata['input_shapes']
     self.vision_input_names = [k for k in self.input_shapes if 'img' in k]
     self.output_slices = metadata['output_slices']
-    self.policy_output_slices = None
 
     self.frame_skip = ModelConstants.MODEL_RUN_FREQ // ModelConstants.MODEL_CONTEXT_FREQ
     self.input_queues, self.npy, self.frame_views = make_input_queues(
       self.input_shapes, self.frame_skip, device=self.model_device, frame_copy_size=self.frame_copy_size)
     self.run_model = jits['run_model'][(cam_w, cam_h)]
-    self.run_policy = None
-    self.warp = None
-
-  def _init_split(self, jits, metadata, cam_w: int, cam_h: int) -> None:
-    policy_keys = [k for k in metadata if k not in ('vision', 'warp_dev')]
-    if policy_keys != ['policy']:
-      raise ModelUnavailable(f"unsupported multi-policy model (policies={policy_keys}); this build only supports single-policy models")
-    if (cam_w, cam_h) not in jits:
-      raise ModelUnavailable(f"model has no warp JIT for camera resolution {cam_w}x{cam_h}")
-
-    vision_meta, policy_meta = metadata['vision'], metadata['policy']
-    self.model_device = Device.DEFAULT
-    self.warp_device = metadata.get('warp_dev') or Device.DEFAULT
-    self.input_shapes = {**vision_meta['input_shapes'], **policy_meta['input_shapes']}
-    self.vision_input_names = [k for k in vision_meta['input_shapes'] if 'img' in k]
-    self.output_slices = vision_meta['output_slices']
-    self.policy_output_slices = policy_meta['output_slices']
-
-    self.frame_skip = derive_frame_skip(vision_meta['input_shapes'], policy_meta['input_shapes'])
-    self.input_queues, self.npy = make_split_input_queues(
-      vision_meta['input_shapes'], policy_meta['input_shapes'], self.frame_skip, device=self.model_device)
-    self.frame_views = {}
-    self.run_model = None
-    self.run_policy = jits['run_policy']
-    self.warp = jits[(cam_w, cam_h)]
-
-    # Frames are fed as zero-copy blobs, so the warp JIT must be captured once up front.
-    self.frame_buf_size = get_nv12_info(cam_w, cam_h)[3]
-    self.full_frames = {k: Tensor(np.zeros(self.frame_buf_size, dtype=np.uint8),
-                                  device=self.warp_device).contiguous().realize() for k in self.vision_input_names}
-    road_key = next(k for k in self.vision_input_names if 'big' not in k)
-    wide_key = next(k for k in self.vision_input_names if 'big' in k)
-    self.warp(**{k: self.input_queues[k] for k in WARP_INPUTS},
-              frame=self.full_frames[road_key], big_frame=self.full_frames[wide_key])
 
   def get_action_from_model(self, model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                             lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
@@ -221,7 +141,7 @@ class ModelState:
                                           plan[:,Plan.ACCELERATION][:,0],
                                           ModelConstants.T_IDXS,
                                           action_t=long_action_t)
-      desired_curvature = get_curvature_from_output(model_output, plan, v_ego, lat_action_t, self.mlsim)
+      desired_curvature = get_curvature_from_output(model_output, plan, v_ego, lat_action_t, False)
     else:
       desired_accel = model_output['action'][0,1]
       desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
@@ -242,18 +162,8 @@ class ModelState:
 
   def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
           inputs: dict[str, np.ndarray], after_enqueue: Callable[[], None] | None = None) -> dict[str, np.ndarray]:
-    if self.is_run_model:
-      for key, buf in bufs.items():
-        np.copyto(self.frame_views[key], np.frombuffer(buf.data, dtype=np.uint8, count=self.frame_copy_size))
-    else:
-      # Split models warp full frames themselves; feed them zero-copy and cache
-      # the Tensor per buffer address, since visionipc cycles a fixed buffer set.
-      for key, buf in bufs.items():
-        ptr = np.frombuffer(buf.data, dtype=np.uint8).ctypes.data
-        cache_key = (key, ptr)
-        if cache_key not in self._blob_cache:
-          self._blob_cache[cache_key] = Tensor.from_blob(ptr, (self.frame_buf_size,), dtype='uint8', device=self.warp_device)
-        self.full_frames[key] = self._blob_cache[cache_key]
+    for key, buf in bufs.items():
+      np.copyto(self.frame_views[key], np.frombuffer(buf.data, dtype=np.uint8, count=self.frame_copy_size))
 
     # Model decides when action is completed, so desire input is just a pulse triggered on rising edge
     inputs['desire_pulse'][0] = 0
@@ -277,47 +187,17 @@ class ModelState:
         outputs_dict['raw_pred'] = model_output.copy()
       return outputs_dict
 
-    warped = self.warp(**{k: self.input_queues[k] for k in WARP_INPUTS},
-                       frame=self.full_frames[self.road_key], big_frame=self.full_frames[self.wide_key])
-    raw_outputs = self.run_policy(**{k: self.input_queues[k] for k in POLICY_INPUTS if k in self.input_queues},
-                                  warped=warped)
-    if after_enqueue is not None:
-      after_enqueue()
-
-    vision_output = raw_outputs[0].numpy().flatten()
-    outputs_dict = self.parser.parse_vision_outputs(self.slice_outputs(vision_output, self.output_slices))
-    policy_output = raw_outputs[1].numpy().flatten()
-    outputs_dict.update(self.parser.parse_policy_outputs(self.slice_outputs(policy_output, self.policy_output_slices)))
-
-    # Feed this frame's curvature back in as history for the next run.
-    if 'desired_curvature' in outputs_dict and 'prev_desired_curv' in self.npy:
-      buf = self.npy['prev_desired_curv']
-      buf[0, :-1] = buf[0, 1:]
-      buf[0, -1, :] = 0 if self.mlsim else outputs_dict['desired_curvature'][0, :]
-
-    if SEND_RAW_PRED:
-      outputs_dict['raw_pred'] = np.concatenate([vision_output, policy_output])
     return outputs_dict
 
   def warmup(self) -> None:
-    dims = {'desire_pulse': ModelConstants.DESIRE_LEN, 'traffic_convention': 2, 'action_t': 2,
-            'lateral_control_params': 2}
+    dims = {'desire_pulse': ModelConstants.DESIRE_LEN, 'traffic_convention': 2, 'action_t': 2}
     dummy_inputs = {k: np.zeros(v, dtype=np.float32) for k, v in dims.items()}
     eye = np.eye(3, dtype=np.float32)
 
-    if self.is_run_model:
-      dummy_frames = {k: np.zeros(self.frame_copy_size, dtype=np.uint8) for k in self.vision_input_names}
-      self.run(dummy_frames, dict.fromkeys(self.vision_input_names, eye), dummy_inputs)
-      self.input_queues, self.npy, self.frame_views = make_input_queues(
-        self.input_shapes, self.frame_skip, device=self.model_device, frame_copy_size=self.frame_copy_size)
-    else:
-      # full_frames already holds zeroed device tensors from __init__
-      self.run({}, dict.fromkeys(self.vision_input_names, eye), dummy_inputs)
-      for v in self.npy.values():
-        v[:] = 0
-      self.full_frames = {k: Tensor(np.zeros(self.frame_buf_size, dtype=np.uint8),
-                                    device=self.warp_device).contiguous().realize() for k in self.vision_input_names}
-      self._blob_cache.clear()
+    dummy_frames = {k: np.zeros(self.frame_copy_size, dtype=np.uint8) for k in self.vision_input_names}
+    self.run(dummy_frames, dict.fromkeys(self.vision_input_names, eye), dummy_inputs)
+    self.input_queues, self.npy, self.frame_views = make_input_queues(
+      self.input_shapes, self.frame_skip, device=self.model_device, frame_copy_size=self.frame_copy_size)
     self.prev_desire[:] = 0
 
 

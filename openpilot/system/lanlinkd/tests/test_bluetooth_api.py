@@ -10,7 +10,7 @@ FakeClient 记录收到的命令：run_operation 保证校验全过才碰 client
 from openpilot.sunnypilot.system.bluetooth import BluetoothDevice, BluetoothStatus
 from openpilot.system.lanlinkd import bluetooth_api
 
-from .test_models_api import FakeParams
+from .fake_params import FakeParams
 
 
 class FakeClient:

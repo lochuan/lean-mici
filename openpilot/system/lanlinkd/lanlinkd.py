@@ -27,7 +27,6 @@ from openpilot.common.hardware.hw import Paths
 from openpilot.sunnypilot.system.bluetooth import BluetoothClient
 from openpilot.system.lanlinkd import bluetooth_api
 from openpilot.system.lanlinkd import logs as logs_mod
-from openpilot.system.lanlinkd import models_api
 from openpilot.system.lanlinkd import params_api
 from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd import vehicle_api
@@ -102,31 +101,6 @@ class LanlinkApp:
   async def params_delete(self, request: Request, key: str) -> HTTPResponse:
     code, _ = params_api.delete_param(self.params, key)
     return empty(status=204) if code == 204 else _json_error(code, "denied")
-
-  # ---- models ----
-  async def models_get(self, request: Request) -> HTTPResponse:
-    return json_response(models_api.models_state(self.params, self.cache.download(), Paths.model_root()))
-
-  async def models_select(self, request: Request) -> HTTPResponse:
-    code, msg = models_api.select(self.params, str(self._body(request).get("ref", "")))
-    return empty(status=204) if code == 204 else _json_error(code, msg)
-
-  async def models_cancel(self, request: Request) -> HTTPResponse:
-    code, msg = models_api.cancel(self.params)
-    return empty(status=204) if code == 204 else _json_error(code, msg)
-
-  async def models_refresh(self, request: Request) -> HTTPResponse:
-    code, msg = models_api.refresh(self.params)
-    return empty(status=204) if code == 204 else _json_error(code, msg)
-
-  async def models_clear_cache(self, request: Request) -> HTTPResponse:
-    code, msg = models_api.clear_cache(self.params)
-    return empty(status=204) if code == 204 else _json_error(code, msg)
-
-  async def models_fav(self, request: Request) -> HTTPResponse:
-    body = self._body(request)
-    code, msg = models_api.set_fav(self.params, str(body.get("ref", "")), bool(body.get("on")))
-    return empty(status=204) if code == 204 else _json_error(code, msg)
 
   # ---- vehicle（指纹 / 平台选择）----
   async def vehicle_get(self, request: Request) -> HTTPResponse:
@@ -324,12 +298,6 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("GET", "/api/params/<key:str>", "params_get"),
   ("PUT", "/api/params/<key:str>", "params_put"),
   ("DELETE", "/api/params/<key:str>", "params_delete"),
-  ("GET", "/api/models", "models_get"),
-  ("POST", "/api/models/select", "models_select"),
-  ("POST", "/api/models/cancel", "models_cancel"),
-  ("POST", "/api/models/refresh", "models_refresh"),
-  ("POST", "/api/models/clear_cache", "models_clear_cache"),
-  ("POST", "/api/models/fav", "models_fav"),
   ("GET", "/api/vehicle", "vehicle_get"),
   ("POST", "/api/vehicle/select", "vehicle_select"),
   ("GET", "/api/bluetooth", "bluetooth_get"),

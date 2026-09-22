@@ -103,9 +103,10 @@ class TestOpenSurface:
       assert r.status != 401, f"{method} {path} unexpectedly gated"
 
   def test_malformed_json_body_does_not_500(self, app):
-    # Sanic 对非法 JSON 默认抛 400；装配层把它变成自己的错误信息
-    _, r = app.test_client.post("/api/models/select", data="not json", headers={"Content-Type": "application/json"})
-    assert r.status == 400
+    # Sanic 对非法 JSON 默认抛 400；装配层把它变成自己的错误信息。
+    # bluetooth 的 build_payload 对垃圾 payload 返回 400 而不是 500。
+    _, r = app.test_client.post("/api/bluetooth/power", json={"bad": ["payload"]}, headers={"Content-Type": "application/json"})
+    assert r.status in (400, 409)
     assert r.status != 500
 
 

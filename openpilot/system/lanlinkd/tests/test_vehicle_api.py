@@ -5,7 +5,7 @@
 """
 from openpilot.system.lanlinkd import vehicle_api
 
-from .test_models_api import FakeParams
+from .fake_params import FakeParams
 
 # car_list.json 的真实结构（取自设备上的 72 条里的两条）
 CAR_LIST = {

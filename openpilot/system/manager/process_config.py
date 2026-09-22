@@ -106,7 +106,6 @@ procs = [
   PythonProcess("statsd", "openpilot.sunnypilot.system.statsd", always_run),
 
   # Models
-  PythonProcess("models_manager", "openpilot.sunnypilot.models.manager", only_offroad),
 
   # locationd
   NativeProcess("locationd_llk", "openpilot/sunnypilot/selfdrive/locationd", ["./locationd"], only_onroad),
