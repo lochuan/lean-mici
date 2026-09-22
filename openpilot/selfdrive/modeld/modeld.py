@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from collections.abc import Callable
+import base64
 import os
+import pickle
 from pathlib import Path
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
@@ -111,6 +113,13 @@ def _find_driving_pkl(bundle):
   )
 
 
+def _named_output_slices(side_meta: dict) -> dict:
+  encoded = (side_meta.get('metadata_props') or {}).get('output_slices')
+  if encoded:
+    return pickle.loads(base64.b64decode(encoded))
+  return side_meta['output_slices']
+
+
 class FrameMeta:
   frame_id: int = 0
   timestamp_sof: int = 0
@@ -193,8 +202,8 @@ class ModelState:
     self.warp_device = metadata.get('warp_dev') or Device.DEFAULT
     self.input_shapes = {**vision_meta['input_shapes'], **policy_meta['input_shapes']}
     self.vision_input_names = [k for k in vision_meta['input_shapes'] if 'img' in k]
-    self.output_slices = vision_meta['output_slices']
-    self.policy_output_slices = policy_meta['output_slices']
+    self.output_slices = _named_output_slices(vision_meta)
+    self.policy_output_slices = _named_output_slices(policy_meta)
 
     self.frame_skip = derive_frame_skip(vision_meta['input_shapes'], policy_meta['input_shapes'])
     self.input_queues, self.npy = make_split_input_queues(
