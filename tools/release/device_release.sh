@@ -29,10 +29,11 @@ sudo systemctl is-active --quiet comma || { echo "comma 未运行（产物必须
 echo "[-] 同步 lean-master 源内容到设备树（结构性防漂移：发布树 ≡ lean-master + 产物）"
 git fetch origin lean-master:refs/remotes/origin/lean-master
 git checkout origin/lean-master -- .
-# 同步后整树 diff 必须为空——否则有 checkout 覆盖不了的差异（如 .gitignore 遮蔽），拒绝发布
-if [ -n "$(git diff --stat origin/lean-master | tail -1)" ]; then
-  git diff origin/lean-master --stat | head -20 >&2
-  echo "设备树同步 lean-master 后仍有差异，拒绝发布（排查 .gitignore/权限）" >&2
+# 同步后仍有新增/修改 = lean-master 的源内容没同步干净，拒绝发布；
+# 删除类（运行时产物：lean-master 不跟踪构建输出）是扁平模型的预期内容，放行
+if [ -n "$(git diff --name-only --diff-filter=AM origin/lean-master)" ]; then
+  git diff --name-only --diff-filter=AM origin/lean-master | head -20 >&2
+  echo "设备树同步 lean-master 后仍有新增/修改，拒绝发布（排查 .gitignore/权限）" >&2
   exit 1
 fi
 echo "[ok] 设备树 ≡ origin/lean-master（源内容）"
