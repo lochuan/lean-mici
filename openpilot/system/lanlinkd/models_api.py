@@ -19,13 +19,17 @@ LAST_SYNC_KEY = "ModelManager_LastSyncTime"   # INT monotonic ns；0 = 立即过
 CLEAR_CACHE_KEY = "ModelManager_ClearCache"   # BOOL
 FAVS_KEY = "ModelManager_Favs"                # STRING，";" 分隔 ref
 
+TINYGRAD_PIN_FILE = "TINYGRAD_PIN"  # 复制自 sunnypilot/models/tinygrad_ref.py（扁平树回退文件）
 
-def _device_tinygrad_ref() -> str | None:
+
+def _device_tinygrad_ref(repo=None) -> str | None:
   """本机树 tinygrad_repo 的 HEAD。文件级读取（规则复制自
   sunnypilot/models/tinygrad_ref.py——含 submodule .git 是 gitdir 指针文件的
   情形），不走 sunnypilot.models import——那条链会拉 common.params
-  （libparams_c），web 层在 PC/测试环境会 OSError。"""
-  repo = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "tinygrad_repo"))
+  （libparams_c），web 层在 PC/测试环境会 OSError。
+  扁平树发布剥离了 .git：回退读发布侧 stamp 的 TINYGRAD_PIN 文件。"""
+  if repo is None:
+    repo = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "tinygrad_repo"))
   git_path = os.path.join(repo, ".git")
   try:
     if os.path.isdir(git_path):
@@ -37,6 +41,11 @@ def _device_tinygrad_ref() -> str | None:
     if ref.startswith("ref:"):
       ref = open(os.path.normpath(os.path.join(git_dir, ref.split(" ", 1)[1]))).read().strip()
     return ref or None
+  except OSError:
+    pass
+  try:
+    with open(os.path.join(repo, TINYGRAD_PIN_FILE)) as f:
+      return f.read().strip() or None
   except OSError:
     return None
 

@@ -542,5 +542,80 @@ class TestOverlayPrebuilt(unittest.TestCase):
       self.assertFalse((worktree / "prebuilt").exists())
 
 
+def _git_commit(repo: Path) -> str:
+  for cmd in (
+    ["git", "init", "-q", "-b", "main"],
+    ["git", "config", "user.email", "t@example.com"],
+    ["git", "config", "user.name", "t"],
+    ["git", "commit", "--allow-empty", "-m", "init"],
+  ):
+    subprocess.run(cmd, cwd=repo, check=True, capture_output=True)
+  return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
+                        capture_output=True, text=True).stdout.strip()
+
+
+class TestTinygradPinStage(unittest.TestCase):
+  """扁平树剥离 tinygrad_repo/.git：发布时必须 stamp pin，且 stage 能自行解析
+  （模型选择器四层门控的输入，device_release.sh 的发布门禁依赖此函数）。"""
+
+  def test_stamp_writes_pin_from_source_repo(self):
+    with tempfile.TemporaryDirectory() as td:
+      src = Path(td) / "src"
+      src.mkdir()
+      sha = _git_commit(src)
+      stage = Path(td) / "stage" / "tinygrad_repo"
+      stage.mkdir(parents=True)
+      stamped = release_lib.stamp_tinygrad_pin(Path(td) / "stage", src)
+      self.assertEqual(stamped, sha)
+      self.assertEqual(
+        (stage / release_lib.TINYGRAD_PIN_FILE).read_text().strip(), sha)
+
+  def test_stamp_missing_git_raises(self):
+    with tempfile.TemporaryDirectory() as td:
+      src = Path(td) / "src"
+      src.mkdir()
+      stage = Path(td) / "stage"
+      with self.assertRaises(subprocess.CalledProcessError):
+        release_lib.stamp_tinygrad_pin(stage, src)
+
+  def test_stage_pin_roundtrip(self):
+    with tempfile.TemporaryDirectory() as td:
+      src = Path(td) / "src"
+      src.mkdir()
+      sha = _git_commit(src)
+      stage = Path(td) / "stage"
+      (stage / "tinygrad_repo").mkdir(parents=True)
+      release_lib.stamp_tinygrad_pin(stage, src)
+      self.assertEqual(release_lib.stage_tinygrad_pin(stage), sha)
+
+  def test_stage_pin_absent(self):
+    with tempfile.TemporaryDirectory() as td:
+      self.assertIsNone(release_lib.stage_tinygrad_pin(Path(td)))
+
+  def test_stage_pin_malformed(self):
+    with tempfile.TemporaryDirectory() as td:
+      stage = Path(td)
+      (stage / "tinygrad_repo").mkdir()
+      (stage / "tinygrad_repo" / release_lib.TINYGRAD_PIN_FILE).write_text("zzz")
+      self.assertIsNone(release_lib.stage_tinygrad_pin(stage))
+
+  def test_stage_pin_matches_runtime_resolution(self):
+    # 发布门禁的语义保证：release_lib 的解析必须与运行时 get_tinygrad_ref 一致
+    import sys
+    from unittest import mock
+    sys.path.insert(0, str(REPO_ROOT))
+    from openpilot.sunnypilot.models import tinygrad_ref
+    with tempfile.TemporaryDirectory() as td:
+      src = Path(td) / "src"
+      src.mkdir()
+      sha = _git_commit(src)
+      stage = Path(td) / "stage"
+      (stage / "tinygrad_repo").mkdir(parents=True)
+      release_lib.stamp_tinygrad_pin(stage, src)
+      with mock.patch.object(tinygrad_ref, "BASEDIR", str(stage)):
+        self.assertEqual(tinygrad_ref.get_tinygrad_ref(), sha)
+      self.assertEqual(release_lib.stage_tinygrad_pin(stage), sha)
+
+
 if __name__ == "__main__":
   unittest.main()

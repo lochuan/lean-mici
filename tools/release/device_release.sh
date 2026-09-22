@@ -87,6 +87,17 @@ find openpilot/third_party \( -iname '*x86*' -o -iname '*darwin*' \) -exec rm -r
 
 # PC 路径守卫全量扫描：扁平树里所有 ELF 都不得含 /.comma 标记
 # （09-11 交叉构建事故的防线；设备本树构建的结构性产物，此处为回归防线）
+echo "[-] stamp tinygrad pin（发布树剥了 .git，这是选择器门控唯一可读的树 pin）"
+python3 - "$SRC/tinygrad_repo" "$STAGE" <<'PYEOF'
+import sys
+from pathlib import Path
+sys.path.insert(0, "/tmp/relhelper")
+import release_lib
+
+sha = release_lib.stamp_tinygrad_pin(Path(sys.argv[2]), Path(sys.argv[1]))
+print(f"[ok] tinygrad pin stamped: {sha[:7]}")
+PYEOF
+
 python3 - <<'PYEOF'
 import os, sys
 from pathlib import Path
@@ -109,6 +120,13 @@ if bad:
     print("PC-built ELF in release tree:", *bad[:10], sep="\n  ", file=sys.stderr)
     sys.exit(1)
 print(f"PC-path guard: all ELFs clean")
+
+# 发布门禁：stage 树必须能自行解析 pin，否则选择器四层门控全失效（无 .git 扁平树）
+pin = release_lib.stage_tinygrad_pin(Path("."))
+if pin is None:
+    print("stage tree cannot resolve its tinygrad pin; refusing to publish", file=sys.stderr)
+    sys.exit(1)
+print(f"release gate: tinygrad pin {pin[:7]} resolvable in stage tree")
 PYEOF
 
 echo "[-] touch prebuilt（发布机构建已通过冒烟验证）"

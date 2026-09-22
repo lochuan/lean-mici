@@ -8,6 +8,7 @@ which files may ship, how they are hashed, and when ``prebuilt`` is valid.
 from __future__ import annotations
 
 import argparse
+import re
 import hashlib
 import shutil
 import struct
@@ -386,6 +387,36 @@ def find_lfs_pointers(tree: Path) -> list[str]:
 def _repo_root() -> Path:
   result = _run(["git", "rev-parse", "--show-toplevel"])
   return Path(result.stdout.strip())
+
+
+TINYGRAD_PIN_FILE = "TINYGRAD_PIN"
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def stamp_tinygrad_pin(stage: Path, source_repo: Path) -> str:
+  """Record the build tree's tinygrad_repo revision into the staged flat tree.
+
+  The published flat tree strips tinygrad_repo/.git (the runtime pin gating of
+  the model selector reads that path), so the release process stamps the pin
+  here — it is the gating's structural input and must ship with the tree.
+  """
+  result = _run(["git", "-C", str(source_repo), "rev-parse", "HEAD"])
+  sha = result.stdout.strip()
+  dest = stage / "tinygrad_repo" / TINYGRAD_PIN_FILE
+  dest.parent.mkdir(parents=True, exist_ok=True)
+  dest.write_text(sha + "\n")
+  return sha
+
+
+def stage_tinygrad_pin(stage: Path) -> str | None:
+  """Resolve the staged flat tree's tinygrad pin. None when absent/malformed
+  (the release gate treats None as fatal: an ungated selector must not ship)."""
+  try:
+    with open(stage / "tinygrad_repo" / TINYGRAD_PIN_FILE) as f:
+      sha = f.read().strip()
+    return sha if _SHA_RE.match(sha) else None
+  except OSError:
+    return None
 
 
 def main() -> int:

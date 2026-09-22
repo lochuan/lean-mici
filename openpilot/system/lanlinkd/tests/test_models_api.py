@@ -59,6 +59,38 @@ def active_bundle(ref="ref-a", name="Model A"):
           "runner": "snpe", "minimumSelectorVersion": 29}
 
 
+class TestDeviceTinygradRef:
+  """扁平树没有 tinygrad_repo/.git：pin 必须能从发布侧车的 TINYGRAD_PIN 读出。"""
+
+  SHA = "a" * 40
+  SHA2 = "b" * 40
+
+  def _repo(self, tmp_path):
+    repo = tmp_path / "tinygrad_repo"
+    repo.mkdir()
+    return repo
+
+  def test_flat_tree_pin_file(self, tmp_path):
+    repo = self._repo(tmp_path)
+    (repo / models_api.TINYGRAD_PIN_FILE).write_text(self.SHA + "\n")
+    assert models_api._device_tinygrad_ref(str(repo)) == self.SHA
+
+  def test_flat_tree_no_git_no_pin(self, tmp_path):
+    assert models_api._device_tinygrad_ref(str(self._repo(tmp_path))) is None
+
+  def test_broken_git_falls_back_to_pin(self, tmp_path):
+    repo = self._repo(tmp_path)
+    (repo / ".git").mkdir()
+    (repo / models_api.TINYGRAD_PIN_FILE).write_text(self.SHA2)
+    assert models_api._device_tinygrad_ref(str(repo)) == self.SHA2
+
+  def test_git_dir_head(self, tmp_path):
+    repo = self._repo(tmp_path)
+    (repo / ".git").mkdir()
+    (repo / ".git" / "HEAD").write_text(self.SHA)
+    assert models_api._device_tinygrad_ref(str(repo)) == self.SHA
+
+
 class TestModelsState:
   def test_empty_cache(self):
     p = FakeParams()
