@@ -69,15 +69,16 @@ find openpilot/third_party \( -iname '*x86*' -o -iname '*darwin*' \) -exec rm -r
 # （09-11 交叉构建事故的防线；设备本树构建的结构性产物，此处为回归防线）
 python3 - <<'PYEOF'
 import os, sys
+from pathlib import Path
 sys.path.insert(0, "/data/openpilot/tools/release")
 import release_lib
 
 bad = []
 for root, _, files in os.walk("."):
     for fn in files:
-        p = os.path.join(root, fn)
+        p = Path(os.path.join(root, fn))
         try:
-            with open(p, "rb") as f:
+            with p.open("rb") as f:
                 if f.read(4) != b"\x7fELF":
                     continue
         except OSError:
