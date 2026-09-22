@@ -33,8 +33,10 @@ from openpilot.selfdrive.ui.mici.widgets.button import BigButton, GreyBigButton
 NetworkType = log.DeviceState.NetworkType
 
 OPENPILOT_URL = "https://openpilot.comma.ai"
+# 连通性探测：国内直连地址（HTTP 免疫时钟错误导致的 TLS 失败，204 响应快）。
+# 不可用于下载——setup 下载 openpilot 本体仍走 OPENPILOT_URL。
+CONNECTIVITY_CHECK_URL = "http://wifi.vivo.com.cn/generate_204"
 USER_AGENT = f"AGNOSSetup-{HARDWARE.get_os_version()}"
-
 INSTALLER_DESTINATION_PATH = "/tmp/installer"
 INSTALLER_URL_PATH = "/tmp/installer_url"
 
@@ -73,7 +75,7 @@ class NetworkConnectivityMonitor:
     while not self._stop_event.is_set():
       if self._should_check():
         try:
-          request = urllib.request.Request(OPENPILOT_URL, method="HEAD")
+          request = urllib.request.Request(CONNECTIVITY_CHECK_URL, method="HEAD")
           urllib.request.urlopen(request, timeout=2.0)
 
           # Discard stale result if invalidated during request

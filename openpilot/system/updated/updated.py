@@ -7,6 +7,7 @@ import shutil
 import signal
 import fcntl
 import threading
+import urllib.request
 from collections import defaultdict
 from pathlib import Path
 
@@ -21,6 +22,10 @@ from openpilot.common.version import get_build_metadata, SP_BRANCH_MIGRATIONS
 
 LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
 STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
+
+# 连通性探测：国内直连地址（快、HTTP 免疫时钟错误导致的 TLS 失败）。
+# 只用于 has_internet 判定；更新本体仍走 git fetch（github）。
+CONNECTIVITY_CHECK_URL = "http://wifi.vivo.com.cn/generate_204"
 
 OVERLAY_UPPER = os.path.join(STAGING_ROOT, "upper")
 OVERLAY_METADATA = os.path.join(STAGING_ROOT, "metadata")
@@ -305,9 +310,10 @@ class Updater:
     excluded_branches = ('release2', 'release2-staging')
 
     try:
-      run(["git", "ls-remote", "origin", "HEAD"], OVERLAY_MERGED)
+      with urllib.request.urlopen(CONNECTIVITY_CHECK_URL, timeout=10):
+        pass
       self._has_internet = True
-    except subprocess.CalledProcessError:
+    except OSError:
       self._has_internet = False
 
     setup_git_options(OVERLAY_MERGED)
