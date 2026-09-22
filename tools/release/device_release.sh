@@ -34,9 +34,9 @@ git fetch origin lean-master:refs/remotes/origin/lean-master
 # ls 失败（glob 无匹配，如消费态树没有 yolo pkl）必须吞掉——否则 for 循环 rc≠0，
 # 命令替换在 set -e 下静默杀死整个发布。
 ART_EXPECT=$(
-  python3 tools/release/release_lib.py artifact-paths
-  python3 tools/release/release_lib.py flat-tree-entries
-  for pat in $(python3 tools/release/release_lib.py data-artifact-globs); do ls "$pat" 2>/dev/null || true; done
+  /usr/local/venv/bin/python /tmp/relhelper/release_lib.py artifact-paths
+  /usr/local/venv/bin/python /tmp/relhelper/release_lib.py flat-tree-entries
+  for pat in $(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py data-artifact-globs); do ls "$pat" 2>/dev/null || true; done
 )
 git checkout origin/lean-master -- .
 # 镜像 lean-master 的删除：源里删掉的文件（功能移除）从设备树一并移除，
@@ -101,7 +101,7 @@ done
 (
   cd "$SRC"
   DEV=QCOM IMAGE=1 FLOAT16=1 NOLOCALS=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 \
-  PYTHONPATH="$SRC/tinygrad_repo" \
+  PYTHONPATH="$SRC/tinygrad_repo:$SRC" \
   taskset -c 4 /usr/local/venv/bin/python "$MODEL_DIR/compile_modeld.py" \
     --model-size 512x256 \
     --camera-resolutions 1344x760 \
