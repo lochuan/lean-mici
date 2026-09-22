@@ -24,7 +24,8 @@ trap cleanup EXIT
 
 echo "[-] 前提检查"
 sudo systemctl is-active --quiet comma || { echo "comma 未运行（产物必须来自正在运行的构建）" >&2; exit 1; }
-[ -z "$(git status --porcelain | grep -v '^??')" ] || { echo "工作树有未提交修改，拒绝发布" >&2; exit 1; }
+# 子模块目录（*_repo/panda）由 gitlink 物化步管理，内容漂移不卡发布
+[ -z "$(git status --porcelain -- . ':!tinygrad_repo' ':!msgq_repo' ':!opendbc_repo' ':!rednose_repo' ':!panda' | grep -v '^??')" ] || { echo "工作树有未提交修改，拒绝发布" >&2; exit 1; }
 
 echo "[-] 同步 lean-master 源内容到设备树（结构性防漂移：发布树 ≡ lean-master + 产物）"
 git fetch origin lean-master:refs/remotes/origin/lean-master
@@ -54,6 +55,21 @@ if [ -n "$AM_BAD" ]; then
 fi
 echo "[ok] 设备树源内容 ≡ origin/lean-master（+ 运行时产物）"
 echo "[ok] 设备树 ≡ origin/lean-master（源内容）"
+
+echo "[-] Materialize tinygrad at the lean-master gitlink T=$SECONDS"
+TG_SHA=$(git rev-parse origin/lean-master:tinygrad_repo)
+CUR_PIN="$(cat "$SRC/tinygrad_repo/TINYGRAD_PIN" 2>/dev/null || true)"
+if [ "$CUR_PIN" = "$TG_SHA" ]; then
+  echo "[ok] tinygrad 已在 $TG_SHA"
+else
+  rm -rf /data/tg_materialize && git init -q /data/tg_materialize
+  git -C /data/tg_materialize remote add origin https://github.com/tinygrad/tinygrad.git
+  for i in 1 2 3; do git -C /data/tg_materialize fetch -q --depth=1 origin "$TG_SHA" && break || sleep 5; done
+  git -C /data/tg_materialize checkout -q FETCH_HEAD
+  rm -rf "$SRC/tinygrad_repo" && cp -a /data/tg_materialize "$SRC/tinygrad_repo" && rm -rf "$SRC/tinygrad_repo/.git"
+  echo "$TG_SHA" > "$SRC/tinygrad_repo/TINYGRAD_PIN"
+  echo "[ok] tinygrad materialized at $TG_SHA"
+fi
 
 echo "[-] 编译 avoidanced YOLO pkl（prebuilt 模式下 scons 不跑，SConscript 规则在此补偿）T=$SECONDS"
 YOLO_DIR="openpilot/selfdrive/avoidanced/models"
