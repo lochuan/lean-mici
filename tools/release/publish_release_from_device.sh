@@ -18,7 +18,7 @@ echo "[-] 设备端构建与本地发布（含 60s 冒烟，设备会短暂停 o
 ssh "$DEVICE" 'cd /data/openpilot && bash -s' < "$DIR/device_release.sh"
 
 echo "[-] 从设备取 device-release"
-git fetch "$DEVICE_REPO" device-release:refs/temp/device-release 2>&1 | tail -1
+git fetch "$DEVICE_REPO" +device-release:refs/temp/device-release 2>&1 | tail -1
 RELEASE_SHA=$(git rev-parse refs/temp/device-release)
 
 echo "[-] 中继推送到 fork/lean-release"
