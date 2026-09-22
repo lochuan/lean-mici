@@ -6,7 +6,7 @@
  *  - blocked param 返回 403 而非静默跳过（与上游不同，见 FRONTEND_SPEC.md §1）
  */
 import type {
-  AvoidanceSnapshot, BluetoothStatus, CalibrationStatus, Capabilities, ModelsState, ParamValues, SettingsSchema,
+  AvoidanceSnapshot, BluetoothStatus, CalibrationStatus, Capabilities, ParamValues, SettingsSchema,
   SoftwareStatus, StatusSnapshot, VehicleState, WifiStatus,
 } from "./schema";
 
@@ -56,14 +56,6 @@ export const api = {
       body: JSON.stringify({ value }),
     }),
   getParam: (key: string) => request<{ value: string }>(`/api/params/${encodeURIComponent(key)}`),
-
-  // ---- models ----
-  models: () => request<ModelsState>("/api/models"),
-  selectModel: (ref: string) => post<null>("/api/models/select", { ref }),
-  cancelModel: () => post<null>("/api/models/cancel"),
-  refreshModels: () => post<null>("/api/models/refresh"),
-  clearModelCache: () => post<null>("/api/models/clear_cache"),
-  favModel: (ref: string, on: boolean) => post<null>("/api/models/fav", { ref, on }),
 
   // ---- vehicle ----
   vehicle: () => request<VehicleState>("/api/vehicle"),

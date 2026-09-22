@@ -104,8 +104,6 @@ procs = [
   PythonProcess("updated", "openpilot.system.updated.updated", only_offroad, enabled=not PC),
   PythonProcess("statsd", "openpilot.sunnypilot.system.statsd", always_run),
 
-  # Models
-
   # locationd
   NativeProcess("locationd_llk", "openpilot/sunnypilot/selfdrive/locationd", ["./locationd"], only_onroad),
 ]
@@ -114,7 +112,6 @@ if os.path.exists("../../third_party/copyparty/copyparty-sfx.py"):
   sunnypilot_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
   copyparty_args = [f"-v{Paths.crash_log_root()}:/swaglogs:r"]
   copyparty_args += [f"-v{Paths.log_root()}:/routes:r"]
-  copyparty_args += [f"-v{Paths.model_root()}:/models:rw"]
   copyparty_args += [f"-v{sunnypilot_root}:/sunnypilot:rw"]
   copyparty_args += ["-p8080"]
   copyparty_args += ["-z"]

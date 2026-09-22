@@ -14,7 +14,6 @@ import type {
   Capabilities,
   CalState,
   Item,
-  ModelsState,
   Panel,
   ParamValues,
   SettingsSchema,
@@ -32,7 +31,6 @@ const state = reactive({
   caps: {} as Capabilities,
   params: {} as ParamValues,
   status: null as StatusSnapshot | null,
-  models: null as ModelsState | null,
 
   // 在线标定摘要：独立于 avoidanced 是否运行（lanlinkd 自己订阅
   // extrinsicsCalibration）。规则引擎用它在标定完成前挡住横向避让的启用。
@@ -223,10 +221,4 @@ function matches(item: Item, q: string): boolean {
     item.key?.toLowerCase().includes(q) ||
     (item.description?.toLowerCase().includes(q) ?? false)
   );
-}
-
-// ---- models ----
-
-export async function loadModels(): Promise<void> {
-  state.models = await api.models();
 }

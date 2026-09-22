@@ -49,7 +49,6 @@ SUNNYLINK
 DEVICE SETTINGS
   Device            /dashboard/settings/device
   Toggles           /dashboard/settings/toggles
-  Models            /dashboard/settings/models
   Steering          /dashboard/settings/steering
   Cruise            /dashboard/settings/cruise
   Visuals           /dashboard/settings/visuals
@@ -69,10 +68,6 @@ DEVICE SETTINGS
 - **Toggles**：核心开关（Enable sunnypilot [REBOOT TO APPLY]、Lane Departure
   Warnings、Always-On DM、Use Metric System）、Recording（Record Driver Camera
   [REBOOT]、Record Microphone Audio [REBOOT]）
-- **Models**：Model Behavior（Lane Turn Desires、Adjust Lane Turn Speed
-  [ADVANCED][滑块 0–20]）、Live Learning Steer Delay（+ Adjust Software Delay
-  [滑块 0.05–0.50]）、Lateral Control（NNLC）、Camera（Camera Offset
-  [滑块 -0.35–0.35]）
 - **Steering**：MADS（开关 + **MADS Settings 子页入口**）、Blinker Control
   （Pause Lateral with Blinker、Minimum Speed [滑块 0–255 km/h]、Post-Blinker
   Delay [滑块 0–10s]）、Torque Control（Enforce Torque + **Torque Settings 子页**）、

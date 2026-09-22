@@ -8,7 +8,6 @@ import { computed } from "vue";
 import {
   Activity,
   Bluetooth,
-  Boxes,
   Car,
   Code2,
   Cog,
@@ -38,7 +37,6 @@ const ICONS: Record<string, unknown> = {
   bluetooth: Bluetooth,
   software: Package,
   developer: Code2,
-  models: Boxes,
   vehicle: Car,
   status: Activity,
 };

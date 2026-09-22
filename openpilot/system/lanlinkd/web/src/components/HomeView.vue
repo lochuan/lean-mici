@@ -1,7 +1,6 @@
 <script setup lang="ts">
 /** 首页。复刻 sunnylink Home：设备卡片 + 面板磁贴网格（实测 248×248 三列）。 */
 import {
-  Boxes,
   Car,
   Code2,
   Cog,
@@ -27,7 +26,6 @@ const ICONS: Record<string, unknown> = {
   device: Cog,
   software: Package,
   developer: Code2,
-  models: Boxes,
 };
 
 const iconFor = (p: Panel) => ICONS[p.icon ?? ""] ?? Settings2;

@@ -6,7 +6,6 @@ import SettingRow from "./SettingRow.vue";
 import BluetoothPanel from "./BluetoothPanel.vue";
 import WifiPanel from "./WifiPanel.vue";
 import SoftwarePanel from "./SoftwarePanel.vue";
-import ModelsManager from "./ModelsManager.vue";
 import VehiclePanel from "./VehiclePanel.vue";
 import StatusPanel from "./StatusPanel.vue";
 import Badge from "./ui/Badge.vue";
@@ -42,9 +41,7 @@ const showBrand = computed(() => brandSettings.value && props.panel.id === "togg
       <p v-if="panel.description" class="text-[13px] text-sl-text-2">{{ panel.description }}</p>
     </header>
 
-    <!-- 模型页：设置项之前先放模型管理（与 sunnylink 的版面顺序一致） -->
-    <ModelsManager v-if="panel.id === 'models'" />
-    <VehiclePanel v-else-if="panel.id === 'vehicle'" />
+    <VehiclePanel v-if="panel.id === 'vehicle'" />
     <!-- 状态页：遥测 + 雷达点阵，整个面板都是自定义组件 -->
     <StatusPanel v-else-if="panel.id === 'status'" />
     <!-- 连接页：WiFi 在上、蓝牙在下，走各自 RPC 的自定义面板 -->

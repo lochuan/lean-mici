@@ -586,6 +586,110 @@
        "details": "BSM 对侧无车时的最大避让幅度（硬顶 0.35m）；BSM 对侧有车时自动压到 0.12m；BSM 同侧有车时禁止向该侧偏移。设为 0 即完全不产生偏移。默认 0.35m。"
       }
      ]
+    },
+    {
+     "id": "model_behavior",
+     "title": "模型行为",
+     "items": [
+      {
+       "key": "LaneTurnDesire",
+       "widget": "toggle",
+       "title": "使用转向意愿"
+      },
+      {
+       "key": "LaneTurnValue",
+       "widget": "option",
+       "title": "转向意愿速度",
+       "min": 0,
+       "max": 20,
+       "step": 1,
+       "unit": {
+        "metric": "km/h",
+        "imperial": "mph"
+       },
+       "enablement": [
+        {
+         "type": "param",
+         "key": "LaneTurnDesire",
+         "equals": true
+        },
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "LagdToggle",
+       "widget": "toggle",
+       "title": "在线学习转向延迟"
+      },
+      {
+       "key": "LagdToggleDelay",
+       "widget": "option",
+       "title": "软件延迟",
+       "min": 0.05,
+       "max": 0.5,
+       "step": 0.01,
+       "enablement": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "param",
+          "key": "LagdToggle",
+          "equals": true
+         }
+        },
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "lateral_control",
+     "title": "横向控制",
+     "items": [
+      {
+       "key": "NeuralNetworkLateralControl",
+       "widget": "toggle",
+       "title": "神经网络横向控制 (NNLC)",
+       "visibility": [
+        {
+         "type": "not",
+         "condition": {
+          "type": "capability",
+          "field": "steer_control_type",
+          "equals": "angle"
+         }
+        }
+       ],
+       "enablement": [
+        {
+         "type": "offroad_only"
+        },
+        {
+         "type": "capability",
+         "field": "torque_allowed",
+         "equals": true
+        },
+        {
+         "type": "param",
+         "key": "EnforceTorqueControl",
+         "equals": false
+        },
+        {
+         "type": "param",
+         "key": "LateralJerkTorqueController",
+         "equals": false
+        }
+       ]
+      }
+     ]
     }
    ]
   },
@@ -1552,6 +1656,28 @@
        "title": "特斯拉彩虹模式"
       }
      ]
+    },
+    {
+     "id": "camera",
+     "title": "相机",
+     "items": [
+      {
+       "key": "CameraOffset",
+       "widget": "option",
+       "title": "相机偏移",
+       "min": -0.35,
+       "max": 0.35,
+       "step": 0.01,
+       "unit": "meters",
+       "enablement": [
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
+      }
+     ]
     }
    ]
   },
@@ -1878,140 +2004,6 @@
          "key": "DisableUpdates",
          "equals": true
         },
-        {
-         "type": "param",
-         "key": "ShowAdvancedControls",
-         "equals": true
-        }
-       ]
-      }
-     ]
-    }
-   ]
-  },
-  {
-   "id": "models",
-    "label": "模型",
-    "icon": "models",
-    "order": 12,
-   "sections": [
-    {
-     "id": "model_behavior",
-     "title": "模型行为",
-     "items": [
-      {
-       "key": "LaneTurnDesire",
-       "widget": "toggle",
-       "title": "使用转向意愿"
-      },
-      {
-       "key": "LaneTurnValue",
-       "widget": "option",
-       "title": "转向意愿速度",
-       "min": 0,
-       "max": 20,
-       "step": 1,
-       "unit": {
-        "metric": "km/h",
-        "imperial": "mph"
-       },
-       "enablement": [
-        {
-         "type": "param",
-         "key": "LaneTurnDesire",
-         "equals": true
-        },
-        {
-         "type": "param",
-         "key": "ShowAdvancedControls",
-         "equals": true
-        }
-       ]
-      },
-      {
-       "key": "LagdToggle",
-       "widget": "toggle",
-       "title": "在线学习转向延迟"
-      },
-      {
-       "key": "LagdToggleDelay",
-       "widget": "option",
-       "title": "软件延迟",
-       "min": 0.05,
-       "max": 0.5,
-       "step": 0.01,
-       "enablement": [
-        {
-         "type": "not",
-         "condition": {
-          "type": "param",
-          "key": "LagdToggle",
-          "equals": true
-         }
-        },
-        {
-         "type": "param",
-         "key": "ShowAdvancedControls",
-         "equals": true
-        }
-       ]
-      }
-     ]
-    },
-    {
-     "id": "lateral_control",
-     "title": "横向控制",
-     "items": [
-      {
-       "key": "NeuralNetworkLateralControl",
-       "widget": "toggle",
-       "title": "神经网络横向控制 (NNLC)",
-       "visibility": [
-        {
-         "type": "not",
-         "condition": {
-          "type": "capability",
-          "field": "steer_control_type",
-          "equals": "angle"
-         }
-        }
-       ],
-       "enablement": [
-        {
-         "type": "offroad_only"
-        },
-        {
-         "type": "capability",
-         "field": "torque_allowed",
-         "equals": true
-        },
-        {
-         "type": "param",
-         "key": "EnforceTorqueControl",
-         "equals": false
-        },
-        {
-         "type": "param",
-         "key": "LateralJerkTorqueController",
-         "equals": false
-        }
-       ]
-      }
-     ]
-    },
-    {
-     "id": "camera",
-     "title": "相机",
-     "items": [
-      {
-       "key": "CameraOffset",
-       "widget": "option",
-       "title": "相机偏移",
-       "min": -0.35,
-       "max": 0.35,
-       "step": 0.01,
-       "unit": "meters",
-       "enablement": [
         {
          "type": "param",
          "key": "ShowAdvancedControls",
