@@ -18,6 +18,9 @@ echo "[-] 推送发布辅助文件（扁平树不含 tools/release）"
 ssh "$DEVICE" 'mkdir -p /tmp/relhelper'
 scp -q "$DIR/smoke_onroad_device.py" "$DIR/release_lib.py" "$DEVICE:/tmp/relhelper/"
 
+echo "[-] LAN 预推 lean-master 到设备库（设备 fetch origin 降级为尽力而为，GitHub 抖动不再阻断发布）"
+git push "$DEVICE_REPO" lean-master:refs/remotes/origin/lean-master 2>&1 | tail -1
+
 echo "[-] 设备端构建与本地发布（含 60s 冒烟，设备会短暂停 openpilot）"
 ssh "$DEVICE" 'cd /data/openpilot && bash -s' < "$DIR/device_release.sh"
 
@@ -42,6 +45,7 @@ fi
 echo "[ok] lean-release = ${RELEASE_SHA}（设备构建、设备验证运行后发布）"
 echo "    冒烟门禁: EXPECT_COMMIT=$RELEASE_SHA ./tools/release/smoke_gate.sh"
 
-echo "[-] 设备消费本次发布（fetch + reset --hard）——否则设备树带着 lean-master 同步的
-    索引漂移，下一次发布会被前提检查（树必须干净）卡死"
-ssh "$DEVICE" 'cd /data/openpilot && git fetch -q origin lean-release && git reset -q --hard FETCH_HEAD && git log --oneline -1'
+echo "[-] 设备消费本次发布（LAN 预推 release ref ——否则设备树带着 lean-master 同步的
+    索引漂移，下一次发布会被前提检查（树必须干净）卡死）"
+git push "$DEVICE_REPO" refs/temp/device-release:refs/remotes/origin/lean-release 2>&1 | tail -1
+ssh "$DEVICE" 'cd /data/openpilot && git fetch -q origin lean-release || true; git reset -q --hard refs/remotes/origin/lean-release && git log --oneline -1'
