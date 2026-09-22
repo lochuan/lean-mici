@@ -86,7 +86,7 @@ else
   (
     cd "$SRC"
     DEV=QCOM:IR3 IMAGE=1 FLOAT16=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 \
-    PYTHONPATH="$SRC/tinygrad_repo" \
+    PYTHONPATH="$SRC/tinygrad_repo:$SRC" \
     /usr/local/venv/bin/python "$SRC/$YOLO_DIR/compile_yolo_onnx.py" "$YOLO_ONNX" "$YOLO_PKL"
   ) || { echo "yolo pkl 编译失败，拒绝发布" >&2; exit 1; }
   echo "[ok] yolo pkl 编译完成 T=$SECONDS"
