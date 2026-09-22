@@ -100,6 +100,9 @@ ssh -o BatchMode=yes "$DEVICE" \
 rc=${PIPESTATUS[0]}
 set -e
 
+# 冒烟停掉了 openpilot：无论门禁成败，收尾必须恢复运行（幂等）
+ssh -o BatchMode=yes "$DEVICE" 'sudo systemctl start comma' 2>/dev/null || true
+
 if [ "$rc" -ne 0 ] || ! grep -q "SMOKE: PASS" /tmp/smoke_gate.log; then
   cat >&2 <<'BANNER'
 
