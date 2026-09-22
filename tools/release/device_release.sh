@@ -16,7 +16,6 @@
 # 产出: 本地 lean-release 前进一个 release commit（线性历史），由 Mac 侧取走推送。
 set -euo pipefail
 
-RELWT=""
 
 cleanup() {
   # 冒烟停掉了 openpilot：无论成败，收尾必须恢复运行（幂等）
