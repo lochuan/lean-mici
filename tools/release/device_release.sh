@@ -33,10 +33,12 @@ git checkout origin/lean-master -- .
 # 白名单：运行时产物（构建输出，lean-master 不跟踪）是扁平模型的预期内容，放行。
 # 校验基准 = 产物路径（ARTIFACT_PATHS + data globs 的实际文件），相对 origin/lean-master 的
 # 「删除」同样放行（产物在 HEAD 里 tracked、lean-master 没有）。
+# ls 失败（glob 无匹配，如消费态树没有 yolo pkl）必须吞掉——否则 for 循环 rc≠0，
+# 命令替换在 set -e 下静默杀死整个发布。
 ART_EXPECT=$(
   python3 tools/release/release_lib.py artifact-paths
   python3 tools/release/release_lib.py flat-tree-entries
-  for pat in $(python3 tools/release/release_lib.py data-artifact-globs); do ls "$pat" 2>/dev/null; done
+  for pat in $(python3 tools/release/release_lib.py data-artifact-globs); do ls "$pat" 2>/dev/null || true; done
 )
 AM_BAD=$(git diff --name-only --diff-filter=AM origin/lean-master | grep -vxF -f <(echo "$ART_EXPECT" | sort -u) || true)
 if [ -n "$AM_BAD" ]; then
