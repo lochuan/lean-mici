@@ -75,12 +75,25 @@ def main():
                          cwd='/data/openpilot/openpilot/system/manager', env=env)
 
   sm = messaging.SubMaster(['selfdriveState', 'managerState', 'deviceState', 'pandaStates'])
+  # Warm-up: the first ui launch races the DRM-master handoff with magic.py
+  # (eglGetDisplay returns NULL while master is held) and dies once; the
+  # manager relaunch succeeds after magic.py yields. Absorb that known
+  # transient in a warm-up window, zero the crash counters, then measure.
+  warmup_end = time.monotonic() + 20
+  warmup = time.monotonic()
+  while time.monotonic() < warmup_end:
+    sm.update(1000)
+    if sm.updated['managerState']:
+      alive = {p.name: p.running for p in sm['managerState'].processes}
+      if all(alive.get(n, False) for n in ('ui', 'modeld', 'camerad')):
+        break
+  crashes = {}
+  print(f"warm-up done at t={time.monotonic() - warmup:.0f}s (ui/modeld/camerad alive)", flush=True)
   start = time.monotonic()
   last_ss = None
   max_gap = 0.0
   ss_count = 0
   ps_count = 0
-  crashes = {}
   saw_manager_state = False
   try:
     while time.monotonic() - start < duration:
