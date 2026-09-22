@@ -112,8 +112,21 @@ function launch {
   #   then the marker makes every later boot skip the build entirely.
   #   Factory reset wipes /data, so fresh installs always rebuild safely.
   #   If the build fails, no marker is written and the next boot retries.
+  #
+  # EXCEPTION: a release published by the device flow carries its artifacts
+  # (release/prebuilt/arm64, validated by release_lib at publish time).
+  # Overlay them onto their runtime paths and skip the build entirely —
+  # updates land without compiling.
+  if [ -f "$DIR/release/prebuilt/arm64/MANIFEST" ]; then
+    for top in openpilot msgq_repo rednose_repo; do
+      if [ -d "$DIR/release/prebuilt/arm64/$top" ]; then
+        cp -R "$DIR/release/prebuilt/arm64/$top/." "$DIR/$top/"
+      fi
+    done
+    echo "release ships prebuilt artifacts, overlay applied"
+  fi
   cd openpilot/system/manager
-  if [ ! -f $DIR/prebuilt ]; then
+  if [ ! -f $DIR/prebuilt ] && [ ! -f "$DIR/release/prebuilt/arm64/MANIFEST" ]; then
     ./build.py && touch $DIR/prebuilt
   fi
   ./manager.py
