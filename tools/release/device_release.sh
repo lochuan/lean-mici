@@ -26,6 +26,17 @@ echo "[-] 前提检查"
 sudo systemctl is-active --quiet comma || { echo "comma 未运行（产物必须来自正在运行的构建）" >&2; exit 1; }
 [ -z "$(git status --porcelain | grep -v '^??')" ] || { echo "工作树有未提交修改，拒绝发布" >&2; exit 1; }
 
+echo "[-] 同步 lean-master 源内容到设备树（结构性防漂移：发布树 ≡ lean-master + 产物）"
+git fetch origin lean-master:refs/remotes/origin/lean-master
+git checkout origin/lean-master -- .
+# 同步后整树 diff 必须为空——否则有 checkout 覆盖不了的差异（如 .gitignore 遮蔽），拒绝发布
+if [ -n "$(git diff --stat origin/lean-master | tail -1)" ]; then
+  git diff origin/lean-master --stat | head -20 >&2
+  echo "设备树同步 lean-master 后仍有差异，拒绝发布（排查 .gitignore/权限）" >&2
+  exit 1
+fi
+echo "[ok] 设备树 ≡ origin/lean-master（源内容）"
+
 echo "[-] 60s 冒烟（确定设备正常运行）T=$SECONDS"
 sudo systemctl stop comma
 PYTHONPATH=/data/openpilot:/data/openpilot/openpilot \
@@ -97,7 +108,7 @@ touch prebuilt
 VERSION=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' openpilot/sunnypilot/common/version.h | head -1)
 echo "[-] 组发布 commit: openpilot v$VERSION lean release (device-built, flat)"
 DATETIME=$(date '+%Y-%m-%dT%H:%M:%S')
-MASTER_SHA=$(git -C "$SRC" rev-parse HEAD)
+MASTER_SHA=$(git -C "$SRC" rev-parse origin/lean-master)
 git init -q -b lean-release
 git config user.name lochuan
 git config user.email lochuan@users.noreply.github.com
