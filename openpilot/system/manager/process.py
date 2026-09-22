@@ -147,8 +147,11 @@ class NativeProcess(ManagerProcess):
     if self.shutting_down:
       self.stop()
 
-    if self.proc is not None:
+    if self.proc is not None and self.proc.is_alive():
       return
+    if self.proc is not None:
+      self.proc.join()
+      self.proc = None
 
     cwd = os.path.join(BASEDIR, self.cwd)
     cloudlog.info(f"starting process {self.name}")
@@ -171,8 +174,11 @@ class PythonProcess(ManagerProcess):
     if self.shutting_down:
       self.stop()
 
-    if self.proc is not None:
+    if self.proc is not None and self.proc.is_alive():
       return
+    if self.proc is not None:
+      self.proc.join()
+      self.proc = None
 
     cloudlog.info(f"starting python {self.module}")
     self.proc = Process(name=self.name, target=self.launcher, args=(self.module, self.name))
