@@ -49,6 +49,27 @@ fi
 echo "[ok] 设备树源内容 ≡ origin/lean-master（+ 运行时产物）"
 echo "[ok] 设备树 ≡ origin/lean-master（源内容）"
 
+echo "[-] 编译 avoidanced YOLO pkl（prebuilt 模式下 scons 不跑，SConscript 规则在此补偿）T=$SECONDS"
+YOLO_DIR="openpilot/selfdrive/avoidanced/models"
+YOLO_PKL="$SRC/$YOLO_DIR/yolo_tinygrad.pkl"
+YOLO_ONNX="$SRC/$YOLO_DIR/yolo26n-bdd7-fp32-384x640.onnx"
+DEVICE_PIN="$(cat "$SRC/tinygrad_repo/TINYGRAD_PIN" 2>/dev/null || true)"
+PKL_PIN="$(cat "$YOLO_PKL.tinygrad_pin" 2>/dev/null || true)"
+if [ -f "$YOLO_PKL" ] && [ -n "$DEVICE_PIN" ] && [ "$PKL_PIN" = "$DEVICE_PIN" ]; then
+  echo "[ok] yolo pkl 已匹配本树 pin（$DEVICE_PIN），跳过重编译"
+else
+  for n in 4 5 6 7; do
+    [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
+  done
+  (
+    cd "$SRC"
+    DEV=QCOM:IR3 IMAGE=1 FLOAT16=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 \
+    PYTHONPATH="$SRC/tinygrad_repo" \
+    /usr/local/venv/bin/python "$SRC/$YOLO_DIR/compile_yolo_onnx.py" "$YOLO_ONNX" "$YOLO_PKL"
+  ) || { echo "yolo pkl 编译失败，拒绝发布" >&2; exit 1; }
+  echo "[ok] yolo pkl 编译完成 T=$SECONDS"
+fi
+
 echo "[-] 60s 冒烟（确定设备正常运行）T=$SECONDS"
 sudo systemctl stop comma
 PYTHONPATH=/data/openpilot:/data/openpilot/openpilot \
