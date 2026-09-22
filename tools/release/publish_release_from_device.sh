@@ -4,8 +4,8 @@
 #
 # 分工（2026-09-22 定稿）：
 #   * 设备 = 唯一构建机：冒烟验证运行正常 → 收集产物 → release_lib 三重校验 →
-#     在本地组 release commit（分支 device-release）。见 device_release.sh。
-#   * 本脚本：ssh 触发设备流程 → 从设备 git 取 device-release → 中继推送到
+#     直接提交到本地 lean-release（线性 release 历史）。见 device_release.sh。
+#   * 本脚本：ssh 触发设备流程 → 从设备 git 取本地 lean-release → 中继推送到
 #     fork/lean-release（设备无 GitHub 推送凭据）→ 输出 release sha 供冒烟门禁。
 #   * Mac 侧容器交叉编译已移除（2026-09-22）：设备是唯一构建机。
 set -euo pipefail
@@ -17,8 +17,8 @@ DEVICE_REPO="ssh://$DEVICE/data/openpilot"
 echo "[-] 设备端构建与本地发布（含 60s 冒烟，设备会短暂停 openpilot）"
 ssh "$DEVICE" 'cd /data/openpilot && bash -s' < "$DIR/device_release.sh"
 
-echo "[-] 从设备取 device-release"
-git fetch "$DEVICE_REPO" +device-release:refs/temp/device-release 2>&1 | tail -1
+echo "[-] 从设备取 lean-release"
+git fetch "$DEVICE_REPO" +lean-release:refs/temp/device-release 2>&1 | tail -1
 RELEASE_SHA=$(git rev-parse refs/temp/device-release)
 
 echo "[-] 中继推送到 fork/lean-release"

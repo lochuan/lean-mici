@@ -37,25 +37,22 @@ if [ "$SMOKE_RC" -ne 0 ]; then
 fi
 echo "[ok] smoke PASS"
 
-echo "[-] 拉取 lean-master 对象并建发布 worktree"
+echo "[-] 拉取 lean-master 对象"
 git fetch origin lean-master:refs/remotes/origin/lean-master
-git worktree remove --force "$RELWT" 2>/dev/null || true
-git worktree prune
-git worktree add --detach "$RELWT" origin/lean-master
 
 # 原生输入一致性：设备的产物是本树现编的，而 release commit 的原生内容必须
-# 与 lean-master tip 相同（release commit 只差 release/prebuilt 与元数据）。
+# 与 lean-master tip 相同（release/prebuilt 不在 NATIVE_INPUT_PATHS，parity 不受
+# 产物影响）。不一致 = lean-master 已前进，先更新设备到最新 lean-release 再发布。
 HASH_MASTER=$(python3 tools/release/release_lib.py hash origin/lean-master)
 HASH_DEVICE=$(python3 tools/release/release_lib.py hash HEAD)
 if [ "$HASH_MASTER" != "$HASH_DEVICE" ]; then
   echo "设备产物基于的原生输入与 lean-master 不一致（device=$HASH_DEVICE master=$HASH_MASTER）；先更新设备到最新 lean-release 再发布" >&2
-  git worktree remove --force "$RELWT" || true
   sudo systemctl start comma
   exit 1
 fi
 
-echo "[-] 收集产物到 release/prebuilt/arm64"
-PRE="$RELWT/release/prebuilt/arm64"
+echo "[-] 收集产物到 release/prebuilt/arm64（设备树内，不建 worktree）"
+PRE="release/prebuilt/arm64"
 mkdir -p "$PRE"
 for rel in $(python3 tools/release/release_lib.py artifact-paths); do
   [ -f "$rel" ] || { echo "设备缺少产物: $rel（先让它编译出来）" >&2; exit 1; }
@@ -71,7 +68,6 @@ python3 tools/release/release_lib.py data-artifact-globs | while read -r pat; do
 done
 
 echo "[-] 写 MANIFEST + 三重校验"
-cd "$RELWT"
 NATIVE_HASH=$(python3 tools/release/release_lib.py hash HEAD)
 SRC_COMMIT=$(git rev-parse origin/lean-master)
 python3 tools/release/release_lib.py write-manifest "$SRC_COMMIT" "$NATIVE_HASH"
@@ -84,18 +80,14 @@ echo "[-] 组 release commit: openpilot v$VERSION lean release (device-built)"
 python3 tools/release/release_lib.py sweep-lfs-pointers .
 # 溯源写入 commit message（上游 publish.sh 模式）：version / date / master commit
 DATETIME=$(date '+%Y-%m-%dT%H:%M:%S')
+git add -f "$PRE"
 git -c user.name=lochuan -c user.email=lochuan@users.noreply.github.com \
-   -c core.compression=0 -c gc.auto=0 commit -a -m "openpilot v$VERSION lean release (device-built)
+   -c core.compression=0 -c gc.auto=0 commit -m "openpilot v$VERSION lean release (device-built)
 
 date: $DATETIME
 master commit: $SRC_COMMIT
 built on: comma device (smoke-verified before publish)"
-git branch -f "$DEVICE_BRANCH" HEAD
-cd /data/openpilot
-git worktree remove --force "$RELWT" 2>/dev/null || true
-git worktree prune
+echo "[ok] 本地 lean-release = $(git rev-parse HEAD)（线性 release 历史），等 Mac 侧中继推送"
 
 echo "[-] 恢复设备运行"
 sudo systemctl start comma
-
-echo "[ok] 本地分支 $DEVICE_BRANCH 已就绪（$(git rev-parse "$DEVICE_BRANCH")），等 Mac 侧中继推送"
