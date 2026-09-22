@@ -22,7 +22,6 @@ ARTIFACT_PATHS: tuple[str, ...] = (
   "msgq_repo/msgq/ipc_pyx.so",
   "msgq_repo/msgq/visionipc/visionipc_pyx.so",
   "openpilot/common/libparams_c.so",
-  "openpilot/cereal/messaging/bridge",
   "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so",
   "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libacados.so",
   "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libacados_ocp_solver_long.so",
