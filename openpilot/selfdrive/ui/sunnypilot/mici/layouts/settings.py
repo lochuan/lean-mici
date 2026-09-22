@@ -52,7 +52,6 @@ class SettingsLayoutSP(OP.SettingsLayout):
 
     items = self._scroller._items.copy()
 
-    items.insert(1, models_btn)
     items.insert(5, lanlink_btn)
 
     # front slots (only one ever visible at a time): exit-always-offroad, then enable-onroad
