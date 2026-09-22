@@ -15,7 +15,7 @@ DEVICE="${DEVICE:-comma@10.0.0.27}"
 DEVICE_REPO="ssh://$DEVICE/data/relstage"
 
 echo "[-] 设备端构建与本地发布（含 60s 冒烟，设备会短暂停 openpilot）"
-ssh "$DEVICE" 'bash -s' < "$DIR/device_release.sh"
+ssh "$DEVICE" 'cd /data/openpilot && bash -s' < "$DIR/device_release.sh"
 
 echo "[-] 从设备取 lean-release"
 git fetch "$DEVICE_REPO" +lean-release:refs/temp/device-release 2>&1 | tail -1
