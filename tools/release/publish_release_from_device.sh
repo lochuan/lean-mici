@@ -35,5 +35,5 @@ if [ "$PUSHED" -ne 1 ]; then
   exit 1
 fi
 
-echo "[ok] lean-release = $RELEASE_SHA（设备构建、设备验证运行后发布）"
+echo "[ok] lean-release = ${RELEASE_SHA}（设备构建、设备验证运行后发布）"
 echo "    冒烟门禁: EXPECT_COMMIT=$RELEASE_SHA ./tools/release/smoke_gate.sh"
