@@ -71,30 +71,30 @@ else
   echo "[ok] tinygrad materialized at $TG_SHA"
 fi
 
-echo "[-] 编译 avoidanced YOLO pkl（prebuilt 模式下 scons 不跑，SConscript 规则在此补偿）T=$SECONDS"
+echo "[-] 重编译 avoidanced YOLO pkl（与内置 driving 模型同一管线：每次发布重编译对齐树 pin）T=$SECONDS"
 YOLO_DIR="openpilot/selfdrive/avoidanced/models"
 YOLO_PKL="$SRC/$YOLO_DIR/yolo_tinygrad.pkl"
 YOLO_ONNX="$SRC/$YOLO_DIR/yolo26n-bdd7-fp32-384x640.onnx"
-DEVICE_PIN="$(cat "$SRC/tinygrad_repo/TINYGRAD_PIN" 2>/dev/null || true)"
-PKL_PIN="$(cat "$YOLO_PKL.tinygrad_pin" 2>/dev/null || true)"
-if [ -f "$YOLO_PKL" ] && [ -n "$DEVICE_PIN" ] && [ "$PKL_PIN" = "$DEVICE_PIN" ]; then
-  echo "[ok] yolo pkl 已匹配本树 pin（$DEVICE_PIN），跳过重编译"
-else
-  for n in 4 5 6 7; do
-    [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
-  done
-  (
-    cd "$SRC"
-    DEV=QCOM:IR3 IMAGE=1 FLOAT16=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 \
-    PYTHONPATH="$SRC/tinygrad_repo:$SRC" \
-    /usr/local/venv/bin/python "$SRC/$YOLO_DIR/compile_yolo_onnx.py" "$YOLO_ONNX" "$YOLO_PKL"
-  ) || { echo "yolo pkl 编译失败，拒绝发布" >&2; exit 1; }
-  echo "[ok] yolo pkl 编译完成 T=$SECONDS"
-fi
+[ -f "$YOLO_ONNX" ] || { echo "yolo onnx 缺失：$YOLO_ONNX —— lean-master 应 tracked 此文件，前置同步步应已落盘" >&2; exit 1; }
+for n in 4 5 6 7; do
+  [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
+done
+(
+  cd "$SRC"
+  DEV=QCOM:IR3 IMAGE=1 FLOAT16=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 \
+  PYTHONPATH="$SRC/tinygrad_repo:$SRC" \
+  /usr/local/venv/bin/python "$SRC/$YOLO_DIR/compile_yolo_onnx.py" "$YOLO_ONNX" "$YOLO_PKL"
+) || { echo "yolo pkl 编译失败，拒绝发布" >&2; exit 1; }
+# 不按 driving 的 get_chunk_targets 切块：yolo pkl ~13MB 远低于按 onnx 估算的
+# 切块上限（2*onnx+10MB ≈ 29MB），且运行时 TinygradRunner 按单文件直读，
+# 切块反而会破坏加载。模型长大越过上限时需连同运行时加载器一起改造。
+echo "[ok] yolo pkl 重编译完成 T=$SECONDS"
 
 echo "[-] 重编译内置 driving 模型（tinygrad 钉 master，每次发布对齐树 pin）T=$SECONDS"
 MODEL_DIR="$SRC/openpilot/selfdrive/modeld"
 DRIVE_PKL="$MODEL_DIR/models/driving_tinygrad.pkl"
+DRIVE_ONNX="$MODEL_DIR/models/driving_supercombo.onnx"
+[ -f "$DRIVE_ONNX" ] || { echo "driving onnx 缺失：$DRIVE_ONNX —— lean-master 应 tracked 此文件，前置同步步应已落盘" >&2; exit 1; }
 for n in 4 5 6 7; do
   [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
 done
@@ -105,7 +105,7 @@ done
   taskset -c 4 /usr/local/venv/bin/python "$MODEL_DIR/compile_modeld.py" \
     --model-size 512x256 \
     --camera-resolutions 1344x760 \
-    --onnx "$MODEL_DIR/models/driving_supercombo.onnx" \
+    --onnx "$DRIVE_ONNX" \
     --output "$DRIVE_PKL" \
     --frame-skip 4
 ) || { echo "内置 driving 模型编译失败，拒绝发布" >&2; exit 1; }
