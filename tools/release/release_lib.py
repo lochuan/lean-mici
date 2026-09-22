@@ -36,7 +36,6 @@ ARTIFACT_PATHS: tuple[str, ...] = (
   "openpilot/sunnypilot/selfdrive/locationd/models/generated/liblive.so",
   "openpilot/system/camerad/camerad",
   "openpilot/system/loggerd/bootlog",
-  "openpilot/system/loggerd/encoderd",
   "openpilot/system/loggerd/loggerd",
   "rednose_repo/rednose/helpers/ekf_sym_pyx.so",
 )

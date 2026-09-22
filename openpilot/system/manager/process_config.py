@@ -67,7 +67,6 @@ def and_(*fns):
 
 procs = [
   NativeProcess("loggerd", "openpilot/system/loggerd", ["./loggerd"], logging),
-  NativeProcess("encoderd", "openpilot/system/loggerd", ["./encoderd"], only_onroad),
   PythonProcess("logmessaged", "openpilot.system.logmessaged", always_run),
   PythonProcess("lanlinkd", "openpilot.system.lanlinkd.lanlinkd", lanlink_run),
 
