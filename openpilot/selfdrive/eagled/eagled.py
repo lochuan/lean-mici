@@ -43,7 +43,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner
 from openpilot.selfdrive.eagled.camera_stream import CameraStream
-from openpilot.selfdrive.eagled.perception import PerceptionCore, PerceptionFrame, _in_gate, radar_point_key
+from openpilot.selfdrive.eagled.perception import PerceptionCore, PerceptionFrame, gate_target, radar_point_key
 
 PARAMS_REFRESH_PERIOD = 1.0  # s
 
@@ -146,37 +146,43 @@ class EagleDaemon:
     """One row per radar point and per detection: (in_gate, serialized fields).
 
     Shared by both publishers so eagleState and eagleDebug can never disagree
-    about what was seen. Association pairs reference this frame's
-    radar/detection objects, so match them back by identity to stamp the shared
-    pairId on both sides. Radar identity must go through radar_point_key: this
-    list is a fresh capnp re-iteration, so id() would never match the pairs'
-    objects (vision dicts are plain Python objects, id() is stable for them).
+    about what was seen. The in/out verdict goes through the SAME
+    ``gate_target`` that fed fuse_targets this frame — telemetry that
+    re-derives its own gate would silently disagree with lane-relative mode.
+    Association pairs reference this frame's radar/detection objects, so match
+    them back by identity to stamp the shared pairId on both sides. Radar
+    identity must go through radar_point_key: this list is a fresh capnp
+    re-iteration, so id() would never match the pairs' objects (vision dicts
+    are plain Python objects, id() is stable for them).
     """
     radar_pair_ids = {radar_point_key(p[0]): p[2] for p in frame.pairs}
     vision_pair_ids = {id(p[1]): p[2] for p in frame.pairs}
     rows: list[tuple[bool, dict]] = []
     for point in frame.radar_points:
-      in_gate = _in_gate(float(point.dRel), float(point.yRel))
       key = radar_point_key(point)
       # Same weight the planner used: a vision-confirmed radar point takes the
       # vision class weight (fuse_targets), not the vehicle default.
       cls = frame.vision_cls_by_key.get(key)
+      in_gate, lane = gate_target(float(point.dRel), float(point.yRel), cls, frame.lane_geo)
       rows.append((in_gate, {
         "dRel": float(point.dRel), "yRel": float(point.yRel), "vRel": float(point.vRel),
         "cls": cls or "", "conf": 0.0,
         "weight": C.class_weight(cls),
         "matched": key in radar_pair_ids, "inGate": in_gate, "vision": False,
         "pairId": radar_pair_ids.get(key, 0),
+        "lane": lane,
       }))
     for det in frame.detections:
-      in_gate = _in_gate(float(det["dRel"]), float(det["yRel"]))
-      weight = C.class_weight(det.get("cls"))
+      cls = det.get("cls")
+      in_gate, lane = gate_target(float(det["dRel"]), float(det["yRel"]), cls, frame.lane_geo)
+      weight = C.class_weight(cls)
       rows.append((in_gate, {
         "dRel": float(det["dRel"]), "yRel": float(det["yRel"]), "vRel": 0.0,
-        "cls": det.get("cls", ""), "conf": float(det.get("conf", 1.0)),
+        "cls": cls or "", "conf": float(det.get("conf", 1.0)),
         "weight": weight,
         "matched": id(det) in vision_pair_ids, "inGate": in_gate, "vision": True,
         "pairId": vision_pair_ids.get(id(det), 0),
+        "lane": lane,
       }))
     return rows
 
@@ -206,6 +212,9 @@ class EagleDaemon:
     dbg.edgeClearance = min(float(last.get("edgeClearance", float("inf"))), 999.0)
     dbg.canError = bool(radar_errors.canError) if radar_errors is not None else False
     dbg.radarUnavailable = bool(radar_errors.radarUnavailableTemporary) if radar_errors is not None else False
+    geo = frame.lane_geo
+    dbg.laneLeftValid = bool(geo.left_valid) if geo is not None else False
+    dbg.laneRightValid = bool(geo.right_valid) if geo is not None else False
     rows = self._target_rows(frame)
     tgts = dbg.init('targets', len(rows))
     for i, (in_gate, t) in enumerate(rows):
@@ -219,6 +228,7 @@ class EagleDaemon:
       tgts[i].inGate = in_gate
       tgts[i].vision = t["vision"]
       tgts[i].pairId = t["pairId"]
+      tgts[i].lane = t["lane"]
     msg.valid = True
     self.pm.send('eagleDebug', msg)
 
@@ -243,6 +253,9 @@ class EagleDaemon:
     st.nAssociated = int(frame.n_associated)
     st.canError = bool(radar_errors.canError) if radar_errors is not None else False
     st.radarUnavailable = bool(radar_errors.radarUnavailableTemporary) if radar_errors is not None else False
+    geo = frame.lane_geo
+    st.laneLeftValid = bool(geo.left_valid) if geo is not None else False
+    st.laneRightValid = bool(geo.right_valid) if geo is not None else False
     rows = [t for in_gate, t in self._target_rows(frame) if in_gate]
     tgts = st.init('targets', len(rows))
     for i, t in enumerate(rows):
@@ -256,6 +269,7 @@ class EagleDaemon:
       tgts[i].inGate = True
       tgts[i].vision = t["vision"]
       tgts[i].pairId = t["pairId"]
+      tgts[i].lane = t["lane"]
     msg.valid = True
     self.pm.send('eagleState', msg)
 

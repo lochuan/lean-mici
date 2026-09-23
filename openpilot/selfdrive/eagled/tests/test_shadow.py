@@ -394,7 +394,8 @@ def test_summarize_execution_closure_no_segments():
 def test_evaluator_fills_execution_closure_fields():
   # One in-gate target on the right + a road edge on the avoidance (left) side:
   # the record must carry the planner decision state and nearest target yRel.
-  edge = SimpleNamespace(x=[5.0, 30.0], y=[1.8, 1.8])  # left edge at 1.8 m
+  # modelV2 y 右正:左路沿是负 y(ldw.py/relc.py 三源验证)。
+  edge = SimpleNamespace(x=[5.0, 30.0], y=[-1.8, -1.8])  # left edge at 1.8 m
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0))
   evaluator.step(_frame(0.0, radar=[(20.0, -1.8, 0.0)], curvature=0.01, road_edges=[edge]))
   evaluator.step(_frame(C.ENTER_HOLD_S + 0.01, radar=[(20.0, -1.8, 0.0)], curvature=0.01, road_edges=[edge]))

@@ -1233,6 +1233,7 @@ struct EagleTarget {
   inGate @7 :Bool;       # planner 门内（dRel≤40, |yRel|≤2.5）
   vision @8 :Bool;       # true=YOLO 投影目标；false=雷达点
   pairId @9 :UInt16;     # 0=未配对；配对双方共享同 id（递增分配）
+  lane @10 :Int8;        # C2 车道归属：-1 左邻 / 0 本道或重叠 / +1 右邻（分类未参与时 0）
 }
 
 struct EagleDebug {
@@ -1252,6 +1253,8 @@ struct EagleDebug {
   targets @13 :List(EagleTarget);
   canError @14 :Bool;         # radarTracks.errors.canError
   radarUnavailable @15 :Bool; # radarTracks.errors.radarUnavailableTemporary
+  laneLeftValid @16 :Bool;    # C7：本道左边界线置信（probs/stds 过门）
+  laneRightValid @17 :Bool;   # C7：本道右边界线置信
 }
 
 struct EagleState {
@@ -1270,6 +1273,8 @@ struct EagleState {
   nAssociated @7 :UInt16;
   canError @8 :Bool;              # radarTracks.errors.canError
   radarUnavailable @9 :Bool;      # radarTracks.errors.radarUnavailableTemporary
+  laneLeftValid @10 :Bool;        # C7：本道左边界线置信（tier 1 可用性）
+  laneRightValid @11 :Bool;       # C7：本道右边界线置信
 }
 
 struct LongitudinalPlan @0xe00b5b3eba12876c {

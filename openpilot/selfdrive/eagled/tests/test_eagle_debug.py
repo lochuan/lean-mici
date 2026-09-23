@@ -4,7 +4,10 @@ import pytest
 
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.selfdrive.eagled import constants as C
-from openpilot.selfdrive.eagled.tests.test_daemon_fusion import ROI, _FakeCamera, _FakeDetector, _box_at, _daemon
+from openpilot.selfdrive.eagled.eagled import EagleDaemon
+from openpilot.selfdrive.eagled.tests.test_daemon_fusion import (MODEL_CURVATURE, ROI, _FakeCamera, _FakeDetector,
+                                                                 _FakeParams, _FakePubMaster, _FakeSubMaster, _NS,
+                                                                 _box_at, _daemon)
 
 MODEL_CURVATURE = 0.012
 
@@ -187,3 +190,53 @@ def test_state_carries_bsm_and_radar_health():
   st = _state_msgs(pm)[-1].eagleState
   assert st.bsmLeft is False and st.bsmRight is True
   assert st.canError is True and st.radarUnavailable is False
+
+
+# --- C2/C7: lane geometry flags + lane labels -------------------------------------
+
+
+def _lane_aware_model_v2():
+  """带车道几何的 modelV2 桩:标准 3.5m 车道,双侧边界置信达标。"""
+  x = [5.0, 20.0, 40.0]
+  return _NS(
+    action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[], meta=_NS(laneChangeState="off"),
+    laneLines=[_NS(x=x, y=[-1.75] * 3), _NS(x=x, y=[-1.75] * 3),
+               _NS(x=x, y=[1.75] * 3), _NS(x=x, y=[1.75] * 3)],
+    laneLineProbs=[0.5, 0.9, 0.9, 0.5],
+    laneLineStds=[0.5, 0.1, 0.1, 0.5],
+    position=_NS(x=x, y=[0.0] * 3, yStd=[0.1] * 3),
+  )
+
+
+def test_streams_publish_lane_geometry_flags_and_lane_labels():
+  # 邻道压线车（yRel=2.6,固定带上界 2.5 外）:tier 1 按车道线判进,lane=-1,
+  # 双侧置信标志透传到两条流。
+  model_v2 = _lane_aware_model_v2()
+  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
+  radar = _NS(points=[_NS(dRel=20.0, yRel=2.6, vRel=0.0)],
+              errors=_NS(canError=False, radarUnavailableTemporary=False))
+  pm = _FakePubMaster()
+  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=True),
+                       camera=_FakeCamera(frames=[ROI]),
+                       detector=_FakeDetector(detections=[_box_at(20.0, 2.6, cls="car")]))
+  daemon.update(0.0)
+  st = _state_msgs(pm)[-1].eagleState
+  dbg = _debug_msgs(pm)[-1].eagleDebug
+  assert st.laneLeftValid is True and st.laneRightValid is True
+  assert dbg.laneLeftValid is True and dbg.laneRightValid is True
+  assert len(st.targets) == 2                      # 雷达行 + 视觉行,都已 tier 1 判进
+  assert st.targets[0].lane == -1 and st.targets[1].lane == -1
+  # 遥测与行动同源:这个固定带外的目标真的进了计划（tier 1 侵入语义生效）
+  assert dbg.targets[0].inGate is True and dbg.targets[0].lane == -1
+
+
+def test_streams_publish_false_flags_when_geometry_unavailable():
+  # daemon 测试桩形态的 modelV2（无车道线字段）:geo=None,双侧 False,lane 走
+  # 固定带符号。
+  daemon, pm = _daemon(radar_points=[(20.0, -1.8)])
+  daemon.update(0.0)
+  st = _state_msgs(pm)[-1].eagleState
+  dbg = _debug_msgs(pm)[-1].eagleDebug
+  assert st.laneLeftValid is False and st.laneRightValid is False
+  assert dbg.laneLeftValid is False and dbg.laneRightValid is False
+  assert st.targets[0].lane == 1                   # 固定带:右侧目标 lane=+1

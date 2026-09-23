@@ -59,6 +59,40 @@ def class_weight(cls) -> float:
   return VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT
 
 
+# --- C2: 车道相对分类 -----------------------------------------------------------
+# modelV2 约定(三源验证: ldw.py / relc.py / radard.py): y 右正,雷达 yRel 左正;
+# laneLines[1]=本道左边界, [2]=本道右边界; roadEdges[0]=左沿, [1]=右沿。
+LANE_IDX_LEFT = 1    # laneLines 索引: 本道左边界
+LANE_IDX_RIGHT = 2  # laneLines 索引: 本道右边界
+
+# 类别半宽(m): 侵入判据用车身边缘,不是中心 —— "车屁股侵入车道"的语义来源。
+CLASS_HALF_WIDTHS_M = {
+  "person": 0.30, "rider": 0.30, "bicycle": 0.30, "motorcycle": 0.30,
+  "tricycle": 0.60, "car": 0.90, "bus": 1.30, "truck": 1.30,
+}
+DEFAULT_HALF_WIDTH_M = 0.50   # 无类别(纯雷达未关联)目标的保守半宽
+
+
+def class_half_width(cls) -> float:
+  """类别 -> 车身半宽(m),未知/缺失按 DEFAULT_HALF_WIDTH_M。与 class_weight 同理:
+  唯一实现,分类、debug 遥测都走这里。"""
+  return CLASS_HALF_WIDTHS_M.get(cls, DEFAULT_HALF_WIDTH_M)
+
+
+# --- C7: 感知置信门控 -------------------------------------------------------------
+# StarPilot lane_centering.py 同款参考值;每个依赖模型几何的门控同时检查该几何的
+# 不确定度 —— 数据不确定就回退/禁止,而不是全信。
+
+# lane-relative 分类置信: 本道两侧边界线都要概率够高、方差够低才可信。
+LANE_PROB_MIN = 0.6    # laneLineProbs 门槛(StarPilot _MIN_LANE_PROB)
+LANE_STD_MAX = 0.3     # laneLineStds 上限(StarPilot _MAX_LANE_STD)
+# path-relative 回退置信: position.yStd 在目标前视点的插值上限
+# (StarPilot _E2E_MAX_PATH_STD)。
+PATH_STD_MAX = 0.35
+# 路沿门控置信: roadEdgeStds 超过此值的边不参与净空判断(该侧视为无净空)。
+EDGE_STD_MAX = 0.35
+
+
 # Camera -> car-frame projection (spec §4). Initial mount values; the P0
 # calibration (shadow harness, spec §4) refines them.
 CAMERA_HEIGHT = 1.2    # m, wide camera above the ground (windshield mount)

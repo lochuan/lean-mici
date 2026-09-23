@@ -7,9 +7,10 @@ consumer (``eagled``) republishes ``model + bias`` every frame and clears the
 envelope ``valid`` flag when the plan is invalid, so control falls back to the
 raw model curvature.
 
-Fusion primitives (``RadarPoint``/``Target``/``_sign``/``_in_gate``/
-``radar_point_key``/``fuse_targets``) live in ``perception`` — the perception
-core of the eagle; they are re-exported here for import compatibility.
+Fusion primitives (``RadarPoint``/``Target``/``_sign``/``_in_gate``/``radar_point_key``/
+``fuse_targets``/``lane_geometry``/``gate_target``) live in ``perception`` —
+the perception core of the eagle; they are re-exported here for import
+compatibility.
 
 Sign convention: ``yRel`` is left-positive (car frame), so a target on the left
 produces a negative ``y_des`` (avoid right) and vice-versa.
@@ -40,12 +41,16 @@ def _best_target(targets: Iterable[Target], max_offset: float) -> tuple[Target, 
   selected target -- hence the avoidance side -- can flip. update() derives the
   BSM gates from the uncapped direction, so a flip there commands a bias toward
   a side whose blind spot was never checked.
+
+  The in/out decision is ``target.in_gate`` — gate_target's three-tier verdict
+  already applied by fuse_targets; re-deriving a geometry gate here would use
+  the fixed band and silently disagree with lane-relative mode.
   """
   if max_offset <= 0.0:
     return None
   best: tuple[Target, float] | None = None
   for target in targets:
-    if not _in_gate(target.dRel, target.yRel):
+    if not target.in_gate:
       continue
     proximity = max(0.0, 1.0 - target.dRel / D_MAX)
     desire = K_GAIN * target.w * proximity

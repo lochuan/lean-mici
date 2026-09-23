@@ -74,7 +74,11 @@ def test_proximity_ramp_prefers_near_target():
 
 
 def test_lateral_gate_drops_out_of_lane_target():
-  assert plan(targets=[Target(side=1, dRel=5.0, yRel=C.Y_GATE + 0.5, w=C.VRU_WEIGHT, conf=1.0)]) == 0.0
+  # 门控判决随目标走（gate_target 三级裁决,fuse_targets 打 in_gate）:
+  # planner 信任该判决,不再重算几何门 —— 否则会用固定带和 lane-relative
+  # 模式悄悄打架。带外目标由 in_gate=False 表达。
+  assert plan(targets=[Target(side=1, dRel=5.0, yRel=C.Y_GATE + 0.5, w=C.VRU_WEIGHT, conf=1.0,
+                             in_gate=False)]) == 0.0
 
 
 def test_vru_weight_exceeds_vehicle_weight():
