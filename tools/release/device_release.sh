@@ -42,10 +42,12 @@ git checkout origin/lean-master -- .
 # 镜像 lean-master 的删除：源里删掉的文件（功能移除）从设备树一并移除，
 # 否则发布树继续携带死代码。白名单（构建产物）不删——产物在 HEAD 里 tracked、
 # lean-master 没有，属于扁平模型的预期内容。
+# grep -v 在"零行需要删除"时退出 1（本版本与上一版无删除差异时必然发生），
+# pipefail+set -e 会无声杀死整个发布。与 ls glob 空匹配同类坑，|| true 兜底。
 comm -23 \
   <(git ls-files | sort) \
   <(git ls-tree -r --name-only origin/lean-master | sort) \
-  | grep -vxF -f <(echo "$ART_EXPECT" | sort -u) \
+  | { grep -vxF -f <(echo "$ART_EXPECT" | sort -u) || true; } \
   | xargs -r rm -f
 AM_BAD=$(git diff --name-only --diff-filter=AM origin/lean-master | grep -vxF -f <(echo "$ART_EXPECT" | sort -u) || true)
 if [ -n "$AM_BAD" ]; then
