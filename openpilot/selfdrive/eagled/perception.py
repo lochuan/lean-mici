@@ -56,7 +56,8 @@ class Target:
   lane: int = 0     # -1 左邻 / 0 本道或重叠 / +1 右邻（分类未参与时 0）
   in_gate: bool = True  # fuse_objects 已按三级门控裁决；planner 不再重算几何门
   cls: str | None = None  # 视觉类别（car/person/...；纯雷达未关联为 None）—— 半宽折算用
-  vRel: float = 0.0       # 纵向相对速度 m/s（雷达点真实值；视觉目标 0）—— 侧车态势/未来变道消费用
+  vRel: float | None = None  # 纵向相对速度 m/s（雷达实测;视觉独有目标速度未知 = None,
+                             # 变道时间投影对 None 不放宽）
 
 
 @dataclass(frozen=True)
@@ -210,7 +211,7 @@ def fuse_objects(radar_points: Iterable[RadarPoint], detections: Iterable[dict] 
     in_gate, lane = gate_target(dRel, yRel, cls, lane_geo)
     objects.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=C.class_weight(cls), conf=1.0,
                           lane=lane, in_gate=in_gate, cls=cls,
-                          vRel=0.0 if v_rel is None else float(v_rel)))
+                          vRel=float(v_rel) if v_rel is not None else None))
   for det in detections or []:
     try:
       dRel, yRel = float(det["dRel"]), float(det["yRel"])
@@ -218,8 +219,10 @@ def fuse_objects(radar_points: Iterable[RadarPoint], detections: Iterable[dict] 
       continue
     cls = det.get("cls")
     in_gate, lane = gate_target(dRel, yRel, cls, lane_geo)
+    # 视觉独有目标(雷达没关联上)没有纵向速度:None,变道投影不放宽
     objects.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=C.class_weight(cls),
-                          conf=float(det.get("conf", 1.0)), lane=lane, in_gate=in_gate, cls=cls))
+                          conf=float(det.get("conf", 1.0)), lane=lane, in_gate=in_gate,
+                          cls=cls, vRel=None))
   return objects
 
 
@@ -239,25 +242,42 @@ def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] 
 
 @dataclass(frozen=True)
 class SidePicture:
-  """C9:一侧的横向态势 —— 预算 + 最紧约束目标。
+  """C9:一侧的横向态势 —— 预算 + 最紧约束目标 + 变道清空。
 
   ``budget`` 是连续量(m):BSM 报警 -> 0;侧向目标存在 -> 按最紧目标的
   近缘间隙折算;无约束 -> BUDGET_UNCONSTRAINED。``lead`` 是折算出该预算的
   目标(BSM 强制 0 时为 None —— 布尔报警没有可指向的目标)。
+  ``change_clear`` 是变道门语义(desire_helper 消费):该侧目标道窗内全部
+  目标过近区/速度/时间投影三关 + BSM 静默。远而快的侧车放行。
   """
   budget: float
   lead: Target | None
+  change_clear: bool = True
 
 
-def side_pictures(objects: Iterable[Target], bsm_left: bool, bsm_right: bool) -> tuple[SidePicture, SidePicture]:
-  """每侧横向预算(左,右)。单一事实来源:planner 的偏置上限和 eagleState 的
-  发布值同源,shadow 复放与在线行为不可能不一致。
+def side_pictures(objects: Iterable[Target], bsm_left: bool, bsm_right: bool,
+                  v_ego: float = 0.0) -> tuple[SidePicture, SidePicture]:
+  """每侧横向态势(左,右):预算 + 最紧约束目标 + 变道清空判定。单一事实来源:
+  planner 的偏置上限、eagleState 的发布值、desire_helper 的变道门同源,
+  shadow 复放与在线行为不可能不一致。
 
-  物理模型:偏置 b 向某侧后,要求与该侧最近目标的**车身间隙**仍 ≥ SIDE_MARGIN:
+  **预算**(避让消费):偏置 b 向该侧后,要求与该侧最近目标的**车身间隙**
+  仍 ≥ SIDE_MARGIN:
     gap = (|yRel| - 目标半宽) - EGO_HALF_WIDTH;  budget = gap - SIDE_MARGIN
   取该侧全部满足纵向窗口/横向范围目标的最小值。窗外(|yRel| > SIDE_MAX_Y 或
   dRel > SIDE_WINDOW_D)的物体两个车道开外,不参与。
+
+  **变道清空**(desire_helper 消费,carrotpilot 时间投影语义):目标道窗内
+  目标全部满足才清空。目标不清空当且仅当:
+    - 近区硬拦: dRel ≤ LANE_CHANGE_NEAR_D(贴身车,BSM 覆盖不到的前角);
+    - 速度未知: vRel is None(视觉独有目标,雷达没测到速度,不放宽);
+    - 时间投影: 侧车 LANE_CHANGE_LEAD_TIME_S 秒后位置 ≤ 我们
+      LANE_CHANGE_EGO_TIME_S 秒后位置(对方少跑 1 秒的裕量,同 carrotpilot
+      4s/3s)。"远而快"的侧车因此放行;对向车(vLead < 0)投影急剧收缩,
+      天然被拦 —— C4 对向场景的伏笔。
+  BSM 报警侧直接不清空(后侧盲区由它守)。
   """
+  side_objs: dict[int, list[Target]] = {1: [], -1: []}
   best: dict[int, tuple[float, Target]] = {}
   for obj in objects:
     if not (0.0 < obj.dRel <= C.SIDE_WINDOW_D) or abs(obj.yRel) > C.SIDE_MAX_Y:
@@ -265,14 +285,28 @@ def side_pictures(objects: Iterable[Target], bsm_left: bool, bsm_right: bool) ->
     edge_dist = abs(obj.yRel) - C.class_half_width(obj.cls)
     budget = edge_dist - C.EGO_HALF_WIDTH - C.SIDE_MARGIN
     side = 1 if obj.yRel > 0.0 else -1
+    side_objs[side].append(obj)
     if side not in best or budget < best[side][0]:
       best[side] = (budget, obj)
-  left = SidePicture(budget=0.0, lead=None) if bsm_left else \
-         SidePicture(budget=max(0.0, best[1][0]), lead=best[1][1]) if 1 in best else \
-         SidePicture(budget=C.BUDGET_UNCONSTRAINED, lead=None)
-  right = SidePicture(budget=0.0, lead=None) if bsm_right else \
-          SidePicture(budget=max(0.0, best[-1][0]), lead=best[-1][1]) if -1 in best else \
-          SidePicture(budget=C.BUDGET_UNCONSTRAINED, lead=None)
+
+  def _picture(bsm: bool, side: int, objs: list[Target]) -> SidePicture:
+    if bsm:
+      return SidePicture(budget=0.0, lead=None, change_clear=False)
+    budget, lead = (max(0.0, best[side][0]), best[side][1]) if side in best \
+      else (C.BUDGET_UNCONSTRAINED, None)
+    clear = True
+    for obj in objs:
+      if obj.dRel <= C.LANE_CHANGE_NEAR_D or obj.vRel is None:
+        clear = False
+        break
+      v_lead = obj.vRel + v_ego
+      if obj.dRel + v_lead * C.LANE_CHANGE_LEAD_TIME_S <= v_ego * C.LANE_CHANGE_EGO_TIME_S:
+        clear = False
+        break
+    return SidePicture(budget=budget, lead=lead, change_clear=clear)
+
+  left = _picture(bsm_left, 1, side_objs[1])
+  right = _picture(bsm_right, -1, side_objs[-1])
   return left, right
 
 
@@ -378,7 +412,8 @@ class PerceptionCore:
                           lane_geo=lane_geo)
     # C9: 预算从全量 objects 折算（邻道正常车流在威胁门之外,恰是约束横向移动的东西）。
     car_state = sm['carState']
-    left, right = side_pictures(objects, bool(car_state.leftBlindspot), bool(car_state.rightBlindspot))
+    left, right = side_pictures(objects, bool(car_state.leftBlindspot), bool(car_state.rightBlindspot),
+                                v_ego=float(car_state.vEgo))
     return PerceptionFrame(radar_points=list(radar.points), detections=detections,
                            n_associated=n_associated, pairs=pairs,
                            confirmed_keys=confirmed_keys,

@@ -1257,6 +1257,8 @@ struct EagleDebug {
   laneRightValid @17 :Bool;   # C7：本道右边界线置信
   budgetLeft @18 :Float32;     # C9：左侧横向预算 m；999.0 = 无侧向约束
   budgetRight @19 :Float32;    # C9：右侧横向预算 m；999.0 = 无侧向约束
+  changeClearLeft @20 :Bool;   # C9+：目标道（左）变道清空（时间投影放行远快侧车）
+  changeClearRight @21 :Bool;  # C9+：目标道（右）变道清空
 }
 
 struct EagleState {
@@ -1281,6 +1283,8 @@ struct EagleState {
   sideLeadRight @13 :EagleSideLead;  # C9：右侧最紧约束目标
   budgetLeft @14 :Float32;        # C9：左侧横向预算 m；999.0 = 无侧向约束
   budgetRight @15 :Float32;       # C9：右侧横向预算 m；999.0 = 无侧向约束
+  changeClearLeft @16 :Bool;      # C9+：目标道（左）变道清空（时间投影放行远快侧车）
+  changeClearRight @17 :Bool;     # C9+：目标道（右）变道清空
 }
 
 struct EagleSideLead {

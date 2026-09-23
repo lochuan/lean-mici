@@ -33,6 +33,13 @@ SIDE_MAX_Y = 4.5               # 参与侧向约束的最大 |yRel| m(一个邻�
 SIDE_WINDOW_D = 60.0           # 参与侧向约束的纵向窗口 m(威胁交互 ≤40m + 余量)
 BUDGET_UNCONSTRAINED = 999.0   # 与 edgeClearance 的 inf→999.0 哨兵同风格
 
+# 变道放行的时间投影(carrotpilot 语义):侧车 LEAD_TIME 秒后位置 vs 我们
+# EGO_TIME 秒后位置,对方多跑 1 秒是安全裕量。"远而快"的侧车因此放行;
+# 速度未知(视觉独有)与近区目标不放宽。
+LANE_CHANGE_LEAD_TIME_S = 4.0
+LANE_CHANGE_EGO_TIME_S = 3.0
+LANE_CHANGE_NEAR_D = 6.0       # 近区硬拦 m:贴身目标无论投影如何都不清空
+
 # Target weighting: y_des = -sign(yRel) * min(max_offset, K * w_cls * proximity)
 K_GAIN = 0.5
 VRU_WEIGHT = 1.0      # person / rider / bicycle / motorcycle / tricycle

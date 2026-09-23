@@ -383,14 +383,14 @@ def main(demo=False):
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
       mdv2sp_send = messaging.new_message('modelDataV2SP')
       left_edge, right_edge = RELC.update_and_fill(modelv2_send.modelV2, mdv2sp_send.modelDataV2SP, v_ego)
-      # C9 变道预算门:eagleState 是 5Hz 观测流,1.0s 内不新鲜(从未收到/无效)
-      # -> 预算传 None,desire_helper 回退纯 BSM+relc 门控,绝不因感知缺失锁死变道。
+      # C9 变道清空门:eagleState 是 5Hz 观测流,1.0s 内不新鲜(从未收到/无效)
+      # -> 清空标志传 None,desire_helper 回退纯 BSM+relc 门控,绝不因感知缺失锁死变道。
       eagle_fresh = (sm.seen['eagleState'] and sm.valid['eagleState']
                     and (time.monotonic() - sm.recv_time['eagleState']) < 1.0)
       eagle_state = sm['eagleState']
       DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, left_edge, right_edge,
-                budget_left=eagle_state.budgetLeft if eagle_fresh else None,
-                budget_right=eagle_state.budgetRight if eagle_fresh else None)
+                change_clear_left=eagle_state.changeClearLeft if eagle_fresh else None,
+                change_clear_right=eagle_state.changeClearRight if eagle_fresh else None)
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction

@@ -218,6 +218,8 @@ class EagleDaemon:
     dbg.laneRightValid = bool(geo.right_valid) if geo is not None else False
     dbg.budgetLeft = float(last.get("budgetLeft", C.BUDGET_UNCONSTRAINED))
     dbg.budgetRight = float(last.get("budgetRight", C.BUDGET_UNCONSTRAINED))
+    dbg.changeClearLeft = bool(frame.left.change_clear)
+    dbg.changeClearRight = bool(frame.right.change_clear)
     rows = self._target_rows(frame)
     tgts = dbg.init('targets', len(rows))
     for i, (in_gate, t) in enumerate(rows):
@@ -261,13 +263,15 @@ class EagleDaemon:
     st.laneRightValid = bool(geo.right_valid) if geo is not None else False
     st.budgetLeft = frame.left.budget
     st.budgetRight = frame.right.budget
+    st.changeClearLeft = bool(frame.left.change_clear)
+    st.changeClearRight = bool(frame.right.change_clear)
     for field, picture in ((st.sideLeadLeft, frame.left), (st.sideLeadRight, frame.right)):
       lead = picture.lead
       field.valid = lead is not None
       if lead is not None:
         field.dRel = lead.dRel
         field.yRel = lead.yRel
-        field.vRel = lead.vRel
+        field.vRel = lead.vRel if lead.vRel is not None else 0.0
         field.edgeDist = abs(lead.yRel) - C.class_half_width(lead.cls)
         field.cls = lead.cls or ""
     rows = [t for in_gate, t in self._target_rows(frame) if in_gate]

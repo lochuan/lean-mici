@@ -265,6 +265,9 @@ def test_budgets_published_and_flow_into_the_plan():
   # 右侧威胁(|yRel|=1.8,默认半宽 0.5)也约束右侧预算: 1.8-0.5-0.9-0.3 = 0.1
   assert st.budgetRight == pytest.approx(0.1)
   assert dbg.budgetLeft == pytest.approx(0.9) and dbg.budgetRight == pytest.approx(0.1)
+  # 变道清空:两个目标都是同速远车(≥18m,vLead=vEgo),时间投影都放行
+  assert st.changeClearLeft is True and st.changeClearRight is True
+  assert dbg.changeClearLeft is True and dbg.changeClearRight is True
   assert st.sideLeadLeft.valid is True and st.sideLeadLeft.cls == ""    # 无视觉类别 -> 默认半宽
   assert st.sideLeadLeft.edgeDist == pytest.approx(2.6 - 0.5)
   assert st.sideLeadLeft.vRel == pytest.approx(0.0)
@@ -279,7 +282,7 @@ def test_budgets_published_and_flow_into_the_plan():
 
 
 def test_bsm_maps_to_zero_budget_without_a_lead():
-  # BSM 左 -> budget_left 0,lead 无可指;右侧威胁的计划仍 valid 但偏置 0
+  # BSM 左 -> budget_left 0 + 不清空,lead 无可指;右侧威胁的计划仍 valid 但偏置 0
   model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
                  meta=_NS(laneChangeState="off"))
   car_state = _NS(vEgo=20.0, leftBlindspot=True, rightBlindspot=False, steeringPressed=False)
@@ -291,6 +294,8 @@ def test_bsm_maps_to_zero_budget_without_a_lead():
   daemon.update(C.ENTER_HOLD_S + 0.01)
   st = _state_msgs(pm)[-1].eagleState
   assert st.budgetLeft == 0.0 and st.sideLeadLeft.valid is False
+  assert st.changeClearLeft is False          # BSM 侧不清空(变道门消费)
+  assert st.changeClearRight is True          # 右侧同速远车投影放行
   plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
   assert plans[-1].valid is True   # 滞回按目标存在性,预算 0 只消偏置
   assert plans[-1].lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)

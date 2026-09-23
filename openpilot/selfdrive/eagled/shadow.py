@@ -216,7 +216,7 @@ class ShadowEvaluator:
 
     t0 = self._clock()
     # C9: daemon 对等 —— 预算从全量 objects 折算,再喂 planner
-    left_pic, right_pic = side_pictures(objects, frame.bsm_left, frame.bsm_right)
+    left_pic, right_pic = side_pictures(objects, frame.bsm_left, frame.bsm_right, v_ego=frame.v_ego)
     curvature, valid = self.planner.update(
       model_curvature=frame.model_curvature,
       targets=targets,

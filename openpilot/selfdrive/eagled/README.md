@@ -74,9 +74,19 @@ of the side it biases TOWARD into the offset cap; moving away from an
 occupied side is physically safe and no longer capped (the old discrete
 bsm_opposite 0.12 cap is superseded). Hysteresis tracks target presence,
 not the budget-capped response, so a BSM flicker only zeroes the bias for
-its duration instead of resetting the state machine. Budgets and the
-constraining side leads publish on `eagleState` — the planned lane-change
-consumer (desire_helper) reads exactly these.
+its duration instead of resetting the state machine.
+
+**Lane-change clearance (C9+)**: `side_pictures` also emits
+`changeClearLeft/Right` — the lane-change consumer's gate (desire_helper in
+modeld), computed over the same per-side object window with carrotpilot's
+time projection: a side car clears unless it is in the near zone
+(`dRel <= LANE_CHANGE_NEAR_D`), has unknown speed (vision-only objects —
+vRel None; radar-missed bicycles must not relax the gate), or projects to
+conflict (side car's `LANE_CHANGE_LEAD_TIME_S` position <= ego's
+`LANE_CHANGE_EGO_TIME_S` position — the 4s/3s asymmetry gives the other car
+one extra second of margin). Far-and-fast side cars clear; oncoming traffic
+collapses the projection and never clears. BSM keeps the rear quarter. Both
+budgets and clearance flags publish on `eagleState`.
 
 ## P0 shadow (record only, never publish)
 

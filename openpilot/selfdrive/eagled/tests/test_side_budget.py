@@ -96,3 +96,82 @@ class TestFuseObjects:
     objs = fuse_objects(pts, v_ego=20.0, confirmed_keys=(7,), vision_cls_by_key={7: "person"})
     assert objs[0].cls == "person" and objs[0].vRel == -3.5
     assert objs[0].w == C.VRU_WEIGHT
+
+  def test_vision_only_object_is_unknown_speed(self):
+    # 视觉独有目标(雷达没关联上)速度未知 -> None。
+    # 注:缺 vRel 属性的雷达点走更早的一道门 —— "vRel 缺失保守按静止",
+    # 未确认即被丢弃,根本进不了对象列表;所以速度未知只可能来自视觉。
+    objs = fuse_objects([], detections=[{"dRel": 20.0, "yRel": 3.0, "cls": "car", "conf": 0.9}], v_ego=20.0)
+    assert len(objs) == 1
+    assert objs[0].vRel is None and objs[0].cls == "car"
+
+
+class TestChangeClear:
+  """变道清空判定:carrotpilot 4s/3s 时间投影 + 近区硬拦 + 速度未知不放宽。"""
+
+  V_EGO = 20.0
+
+  def _left(self, objects, bsm=False):
+    left, _ = side_pictures(objects, bsm, False, v_ego=self.V_EGO)
+    return left
+
+  def test_far_and_fast_side_car_is_cleared(self):
+    # 用户点名场景:邻道远而快的车放行 —— vRel=+5(比我们快),30m 外
+    obj = _obj(3.0, dRel=30.0, cls="car", vRel=5.0)
+    left = self._left([obj])
+    assert left.change_clear is True
+    assert left.budget < C.BUDGET_UNCONSTRAINED   # 预算仍被压(避让消费),但变道放行
+
+  def test_same_speed_far_object_is_cleared(self):
+    # 同速远车(30m):4s 后它 30+80=110 > 我们 60,放行
+    obj = _obj(3.0, dRel=30.0, cls="car", vRel=0.0)
+    assert self._left([obj]).change_clear is True
+
+  def test_slow_close_object_blocks(self):
+    # 慢车(vLead=5,合速差 15m/s)20m 外:20+20=40 < 60,拦
+    obj = _obj(3.0, dRel=20.0, cls="car", vRel=-15.0)
+    assert self._left([obj]).change_clear is False
+
+  def test_near_zone_blocks_regardless_of_speed(self):
+    # 近区硬拦:贴身快车(6m 内)即使投影放行也拦 —— BSM 覆盖不到的前角
+    obj = _obj(3.0, dRel=C.LANE_CHANGE_NEAR_D, cls="car", vRel=5.0)
+    assert self._left([obj]).change_clear is False
+
+  def test_unknown_speed_never_relaxes(self):
+    # 速度未知(视觉独有/雷达缺字段):无论多远多"快"都不放宽 ——
+    # 雷达没测到速度的自行车按同速放行是危险方向
+    obj = _obj(3.0, dRel=50.0, cls="bicycle", vRel=None)
+    assert self._left([obj]).change_clear is False
+
+  def test_bsm_side_is_not_clear(self):
+    obj = _obj(3.0, dRel=30.0, cls="car", vRel=5.0)
+    assert self._left([obj], bsm=True).change_clear is False
+
+  def test_empty_side_is_clear(self):
+    assert self._left([]).change_clear is True
+
+  def test_oncoming_collapses_the_projection(self):
+    # 对向车(vLead=-20)投影急剧收缩:50m 外也被拦 —— C4 对向场景的伏笔
+    obj = _obj(3.0, dRel=50.0, cls="car", vRel=-40.0)
+    assert self._left([obj]).change_clear is False
+
+  def test_projection_boundary_equality_blocks(self):
+    # carrotpilot 严格比较:侧车 4s 位置 == 我们 3s 位置 -> 拦(对方须多跑 1s)
+    # vLead=5(vRel=-15), vEgo=20: dRel + 20 vs 60;dRel=40 -> 相等 -> 拦
+    obj = _obj(3.0, dRel=40.0, cls="car", vRel=-15.0)
+    assert self._left([obj]).change_clear is False
+    obj = _obj(3.0, dRel=41.0, cls="car", vRel=-15.0)
+    assert self._left([obj]).change_clear is True
+
+  def test_one_conflicting_object_blocks_the_side(self):
+    # 清空是"全部满足":一个投影冲突的目标就拦整侧
+    far_fast = _obj(3.0, dRel=50.0, cls="car", vRel=5.0)
+    slow_close = _obj(3.0, dRel=15.0, cls="car", vRel=-15.0)
+    assert self._left([far_fast, slow_close]).change_clear is False
+
+  def test_sides_are_independent_for_clear(self):
+    obj = _obj(-3.0, dRel=15.0, cls="car", vRel=-15.0)   # 右侧慢车
+    _, right = side_pictures([obj], False, False, v_ego=self.V_EGO)
+    left, _ = side_pictures([obj], False, False, v_ego=self.V_EGO)
+    assert right.change_clear is False
+    assert left.change_clear is True   # 左侧无目标,清空
