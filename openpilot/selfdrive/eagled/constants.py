@@ -16,9 +16,22 @@ D_GATE = 40.0        # m, near-trigger distance (spec §3)
 OWN_LANE_HALF_WIDTH = 1.2
 
 # Offset limits (m)
-MAX_OFFSET_FREE = 0.35  # no adjacent vehicle
-MAX_OFFSET_BSM = 0.12   # vehicle on the opposite blind spot
+MAX_OFFSET_FREE = 0.35  # no adjacent-vehicle constraint
 EDGE_CLEAR_MIN = 0.6    # m, minimum road-edge clearance
+
+# --- C9: 每侧横向预算 -------------------------------------------------------------
+# budget = 该侧可用的横向偏置量(m)。连续量,替代旧的 bsm_same(禁止)/
+# bsm_opposite(限幅 0.12) 三档离散门控:
+#   BSM 报警      -> 0(布尔量无距离,保守禁止)
+#   侧向目标存在  -> min over objects (|yRel| - 该目标半宽) - EGO_HALF_WIDTH - SIDE_MARGIN
+#   否则          -> BUDGET_UNCONSTRAINED(该侧无侧向约束)
+# 消费端:避让 bias ≤ 偏置侧 budget;变道(未来 desire_helper)starting 需
+# budget ≥ 整车道宽。路沿约束走独立的 EDGE_CLEAR_MIN 门,不混进预算。
+EGO_HALF_WIDTH = 0.9          # 自车半宽 m(Toyota B 级 SUV 量级)
+SIDE_MARGIN = 0.3              # 偏置后要求保留的最小侧向间隙 m
+SIDE_MAX_Y = 4.5               # 参与侧向约束的最大 |yRel| m(一个邻道全覆盖)
+SIDE_WINDOW_D = 60.0           # 参与侧向约束的纵向窗口 m(威胁交互 ≤40m + 余量)
+BUDGET_UNCONSTRAINED = 999.0   # 与 edgeClearance 的 inf→999.0 哨兵同风格
 
 # Target weighting: y_des = -sign(yRel) * min(max_offset, K * w_cls * proximity)
 K_GAIN = 0.5

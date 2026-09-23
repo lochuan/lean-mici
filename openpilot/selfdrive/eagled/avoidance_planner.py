@@ -26,9 +26,10 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.eagled.perception import (  # noqa: F401  (compat re-export)
   RadarPoint, Target, _in_gate, _sign, fuse_targets, radar_point_key,
 )
-from openpilot.selfdrive.eagled.constants import (D_MAX, DT_5HZ, EDGE_CLEAR_MIN, EDGE_STD_MAX, ENTER_HOLD_S,
-                                                  EXIT_HOLD_S, K_GAIN, L_LOOKAHEAD, LOWPASS_TAU_S,
-                                                  MAX_OFFSET_BSM, MAX_OFFSET_FREE, V_EGO_MAX, V_EGO_MIN)
+from openpilot.selfdrive.eagled.constants import (BUDGET_UNCONSTRAINED, D_MAX, DT_5HZ, EDGE_CLEAR_MIN,
+                                                  EDGE_STD_MAX, ENTER_HOLD_S, EXIT_HOLD_S, K_GAIN,
+                                                  L_LOOKAHEAD, LOWPASS_TAU_S, MAX_OFFSET_FREE,
+                                                  V_EGO_MAX, V_EGO_MIN)
 
 
 def _best_target(targets: Iterable[Target], max_offset: float) -> tuple[Target, float] | None:
@@ -66,18 +67,16 @@ def _avoid_direction(targets: Iterable[Target], max_offset: float = MAX_OFFSET_F
   return 0 if best is None else -_sign(best[0].yRel)
 
 
-def plan(targets: Iterable[Target], max_offset: float = MAX_OFFSET_FREE,
-         bsm_opposite: bool = False, bsm_same: bool = False) -> float:
+def plan(targets: Iterable[Target], max_offset: float = MAX_OFFSET_FREE) -> float:
   """Desired lateral offset (m) for the nearest in-gate target, signed.
 
-  ``bsm_same`` (blind-spot vehicle on the side the bias would move toward)
-  forbids the bias; ``bsm_opposite`` caps it at ``MAX_OFFSET_BSM``.
+  ``max_offset`` must already carry the C9 budget verdict — update() folds
+  ``budget_<bias side>`` into it before calling. plan() itself is budget-blind:
+  it only ranks threats and caps by the offset it was given.
   """
   targets = tuple(targets)
-  if not targets or bsm_same:
+  if not targets:
     return 0.0
-  if bsm_opposite:
-    max_offset = min(max_offset, MAX_OFFSET_BSM)
   best = _best_target(targets, max_offset)
   if best is None:
     return 0.0
@@ -125,7 +124,7 @@ class AvoidancePlanner:
     self.last_state: dict = {}
 
   def update(self, model_curvature: float, targets: Iterable[Target], v_ego: float,
-             bsm_left: bool = False, bsm_right: bool = False, road_edges: Iterable = (),
+             budget_left: float = None, budget_right: float = None, road_edges: Iterable = (),
              enabled: bool = True, lat_active: bool = True, steering_pressed: bool = False,
              lane_change_active: bool = False,
              max_offset: float = MAX_OFFSET_FREE, now: float | None = None,
@@ -135,6 +134,15 @@ class AvoidancePlanner:
     ``valid=False`` means the caller must not trust the plan (publish the frame
     with the envelope ``valid`` flag cleared and the model curvature).
 
+    C9 budgets: ``budget_left``/``budget_right`` are the per-side lateral
+    budgets computed by ``perception.side_pictures`` (BSM -> 0, side-object
+    gap physics otherwise, BUDGET_UNCONSTRAINED when nothing constrains).
+    ``None`` keeps the pre-C9 behavior of an unconstrained budget for tests
+    and the shadow harness. The bias folds the budget of the side it moves
+    TOWARD into max_offset; moving away from an occupied side is safe and no
+    longer capped (the old discrete bsm_opposite 0.12 cap is superseded by the
+    physics: gap to what we approach is what matters).
+
     The bias is suppressed while ``lane_change_active``: the model curvature is
     already executing a large lateral manoeuvre and the target's relative
     bearing is changing fast, so a bias derived from "target is on the
@@ -142,6 +150,8 @@ class AvoidancePlanner:
     """
     now = self._clock() if now is None else now
     targets = tuple(targets)
+    budget_left = BUDGET_UNCONSTRAINED if budget_left is None else budget_left
+    budget_right = BUDGET_UNCONSTRAINED if budget_right is None else budget_right
 
     direction = _avoid_direction(targets, max_offset)
     # Direction-aware road-edge gate: only the edge on the side the bias would
@@ -153,15 +163,18 @@ class AvoidancePlanner:
       edge_std = float(road_edge_stds[0 if direction > 0 else 1])   # roadEdges[0]=左,[1]=右
       if edge_std > EDGE_STD_MAX:
         clearance = 0.0
-    bsm_same = (direction > 0 and bsm_left) or (direction < 0 and bsm_right)
-    bsm_opposite = (direction > 0 and bsm_right) or (direction < 0 and bsm_left)
-    # Effective offset cap this frame: BSM on the opposite side caps it (the
-    # same limit plan() applies internally).
-    if bsm_opposite:
-      max_offset = min(max_offset, MAX_OFFSET_BSM)
-    y_des = plan(targets, max_offset=max_offset, bsm_opposite=bsm_opposite, bsm_same=bsm_same)
+    # C9:偏置侧预算折进本帧生效上限（bsm_same 的禁止语义 = 该侧预算 0,自然覆盖）。
+    eff_offset = max_offset
+    if direction > 0:
+      eff_offset = min(eff_offset, budget_left)
+    elif direction < 0:
+      eff_offset = min(eff_offset, budget_right)
+    y_des = plan(targets, max_offset=eff_offset)
 
-    # Hysteresis tracks target presence, not the (possibly BSM-suppressed) bias.
+    # Hysteresis tracks target presence, NOT the budget-capped response: with
+    # presence keyed to the unbudgeted offset, a BSM flicker only zeroes the
+    # bias for its duration instead of resetting the state machine (exit 1.0s
+    # + re-enter 0.5s of dead window after every alert would be far worse).
     has_target = _best_target(targets, max_offset) is not None
     if has_target:
       if self._enter_since is None:
@@ -182,15 +195,15 @@ class AvoidancePlanner:
       bias = float(self._bias.update(0.0))
       self.last_state = {
         "active": self._active, "direction": direction, "yDes": 0.0, "bias": bias,
-        "maxOffset": max_offset, "edgeClearance": clearance,
-        "bsmLeft": bsm_left, "bsmRight": bsm_right, "vEgo": v_ego,
+        "maxOffset": eff_offset, "edgeClearance": clearance,
+        "budgetLeft": budget_left, "budgetRight": budget_right, "vEgo": v_ego,
       }
       return float(model_curvature), False
 
     bias = self._bias.update(y_des)
     self.last_state = {
       "active": self._active, "direction": direction, "yDes": y_des, "bias": bias,
-      "maxOffset": max_offset, "edgeClearance": clearance,
-      "bsmLeft": bsm_left, "bsmRight": bsm_right, "vEgo": v_ego,
+      "maxOffset": eff_offset, "edgeClearance": clearance,
+      "budgetLeft": budget_left, "budgetRight": budget_right, "vEgo": v_ego,
     }
     return float(model_curvature) + 2.0 * bias / L_LOOKAHEAD ** 2, True

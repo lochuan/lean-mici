@@ -54,7 +54,9 @@ class Target:
   w: float     # class weight (VRU > vehicle)
   conf: float  # detector confidence [0, 1]
   lane: int = 0     # -1 左邻 / 0 本道或重叠 / +1 右邻（分类未参与时 0）
-  in_gate: bool = True  # fuse_targets 已按三级门控裁决；planner 不再重算几何门
+  in_gate: bool = True  # fuse_objects 已按三级门控裁决；planner 不再重算几何门
+  cls: str | None = None  # 视觉类别（car/person/...；纯雷达未关联为 None）—— 半宽折算用
+  vRel: float = 0.0       # 纵向相对速度 m/s（雷达点真实值；视觉目标 0）—— 侧车态势/未来变道消费用
 
 
 @dataclass(frozen=True)
@@ -179,32 +181,23 @@ def radar_point_key(point) -> int:
   return id(point) if track_id is None else int(track_id)
 
 
-def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] | None = None,
+def fuse_objects(radar_points: Iterable[RadarPoint], detections: Iterable[dict] | None = None,
                  v_ego: float = 0.0, confirmed_keys: Iterable[int] = (),
                  vision_cls_by_key: dict[int, str] | None = None,
                  lane_geo: LaneGeometry | None = None) -> list[Target]:
-  """Build planner targets from radar points plus unmatched vision detections.
+  """ALL fused objects (in-gate or not), each carrying its gate_target verdict.
 
-  ``confirmed_keys`` holds the :func:`radar_point_key` of the radar points that
-  a vision detection confirmed, and ``vision_cls_by_key`` maps those keys to the
-  vision class. Keys are ``trackId`` (stable across capnp re-iteration),
-  never ``id()`` -- see :func:`radar_point_key`. Three things depend on them:
-
-  * A radar point whose ground speed is near zero is kept ONLY when vision
-    confirms it. Guardrails and bridge pillars sit at zero ground speed -- but
-    so does a broken-down car, so a plain speed gate would discard a real
-    hazard. Vision separates them: it reports a stopped car as ``car`` and does
-    not report a guardrail as ``car``/``person``.
-  * A confirmed radar point takes the vision class weight. Otherwise a
-    radar-visible motorcycle is weighted 0.6 while one the radar missed is
-    weighted 1.0 -- the better-perceived target counting for less.
-  * ``lane_geo`` (C2) routes the in/out decision through :func:`gate_target`'s
-    three tiers; ``None`` keeps the historical fixed-band behavior (tests,
-    shadow proxy path).
+  Same validity rules as the historical fuse_targets: static radar points
+  without vision confirmation are dropped entirely (a phantom guardrail must
+  not constrain the budget either), confirmed points take the vision class
+  weight. ``Target.in_gate`` carries the threat verdict; ``Target.lane`` the
+  lane label. The side-budget pass (C9) consumes this full list — adjacent-lane
+  traffic is by definition OUT of the threat gate, yet it is exactly what
+  constrains lateral movement.
   """
   confirmed = set(confirmed_keys)
   cls_by_key = vision_cls_by_key or {}
-  targets: list[Target] = []
+  objects: list[Target] = []
   for point in radar_points:
     dRel, yRel = float(point.dRel), float(point.yRel)
     key = radar_point_key(point)
@@ -215,11 +208,9 @@ def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] 
       continue
     cls = cls_by_key.get(key)
     in_gate, lane = gate_target(dRel, yRel, cls, lane_geo)
-    if not in_gate:
-      continue
-    weight = C.class_weight(cls)
-    targets.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=weight, conf=1.0,
-                           lane=lane, in_gate=True))
+    objects.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=C.class_weight(cls), conf=1.0,
+                          lane=lane, in_gate=in_gate, cls=cls,
+                          vRel=0.0 if v_rel is None else float(v_rel)))
   for det in detections or []:
     try:
       dRel, yRel = float(det["dRel"]), float(det["yRel"])
@@ -227,12 +218,62 @@ def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] 
       continue
     cls = det.get("cls")
     in_gate, lane = gate_target(dRel, yRel, cls, lane_geo)
-    if not in_gate:
+    objects.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=C.class_weight(cls),
+                          conf=float(det.get("conf", 1.0)), lane=lane, in_gate=in_gate, cls=cls))
+  return objects
+
+
+def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] | None = None,
+                 v_ego: float = 0.0, confirmed_keys: Iterable[int] = (),
+                 vision_cls_by_key: dict[int, str] | None = None,
+                 lane_geo: LaneGeometry | None = None) -> list[Target]:
+  """Build planner targets: the in-gate threats, exactly as before.
+
+  Thin filter over :func:`fuse_objects`' full object list (backward-compatible
+  facade): ``confirmed_keys``/``vision_cls_by_key`` semantics, static-confirmation
+  gate and vision class weights are documented there.
+  """
+  return [t for t in fuse_objects(radar_points, detections, v_ego, confirmed_keys,
+                                  vision_cls_by_key, lane_geo) if t.in_gate]
+
+
+@dataclass(frozen=True)
+class SidePicture:
+  """C9:一侧的横向态势 —— 预算 + 最紧约束目标。
+
+  ``budget`` 是连续量(m):BSM 报警 -> 0;侧向目标存在 -> 按最紧目标的
+  近缘间隙折算;无约束 -> BUDGET_UNCONSTRAINED。``lead`` 是折算出该预算的
+  目标(BSM 强制 0 时为 None —— 布尔报警没有可指向的目标)。
+  """
+  budget: float
+  lead: Target | None
+
+
+def side_pictures(objects: Iterable[Target], bsm_left: bool, bsm_right: bool) -> tuple[SidePicture, SidePicture]:
+  """每侧横向预算(左,右)。单一事实来源:planner 的偏置上限和 eagleState 的
+  发布值同源,shadow 复放与在线行为不可能不一致。
+
+  物理模型:偏置 b 向某侧后,要求与该侧最近目标的**车身间隙**仍 ≥ SIDE_MARGIN:
+    gap = (|yRel| - 目标半宽) - EGO_HALF_WIDTH;  budget = gap - SIDE_MARGIN
+  取该侧全部满足纵向窗口/横向范围目标的最小值。窗外(|yRel| > SIDE_MAX_Y 或
+  dRel > SIDE_WINDOW_D)的物体两个车道开外,不参与。
+  """
+  best: dict[int, tuple[float, Target]] = {}
+  for obj in objects:
+    if not (0.0 < obj.dRel <= C.SIDE_WINDOW_D) or abs(obj.yRel) > C.SIDE_MAX_Y:
       continue
-    weight = C.class_weight(cls)
-    targets.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=weight,
-                          conf=float(det.get("conf", 1.0)), lane=lane, in_gate=True))
-  return targets
+    edge_dist = abs(obj.yRel) - C.class_half_width(obj.cls)
+    budget = edge_dist - C.EGO_HALF_WIDTH - C.SIDE_MARGIN
+    side = 1 if obj.yRel > 0.0 else -1
+    if side not in best or budget < best[side][0]:
+      best[side] = (budget, obj)
+  left = SidePicture(budget=0.0, lead=None) if bsm_left else \
+         SidePicture(budget=max(0.0, best[1][0]), lead=best[1][1]) if 1 in best else \
+         SidePicture(budget=C.BUDGET_UNCONSTRAINED, lead=None)
+  right = SidePicture(budget=0.0, lead=None) if bsm_right else \
+          SidePicture(budget=max(0.0, best[-1][0]), lead=best[-1][1]) if -1 in best else \
+          SidePicture(budget=C.BUDGET_UNCONSTRAINED, lead=None)
+  return left, right
 
 
 @dataclass
@@ -244,8 +285,15 @@ class PerceptionFrame:
   pairs: list                 # (radar_point, det, pair_id, cls) from associate()
   confirmed_keys: tuple
   vision_cls_by_key: dict
-  targets: list[Target]       # planner-ready fused targets
+  targets: list[Target]       # planner-ready in-gate threats
+  objects: list[Target] = None  # full fused object list, in-gate or not (C9 预算输入)
   lane_geo: LaneGeometry | None = None  # C2/C7 geometry + quality flags (None = 模型几何不可用)
+  left: SidePicture = None    # C9: 左侧预算 + 最紧约束目标
+  right: SidePicture = None   # C9: 右侧预算 + 最紧约束目标
+
+  def __post_init__(self):
+    if self.objects is None:
+      self.objects = []
 
 
 class PerceptionCore:
@@ -324,12 +372,16 @@ class PerceptionCore:
     vision_cls_by_key = {radar_point_key(p[0]): p[3] for p in pairs}
     # C2/C7: 车道几何一次提取,本帧所有目标判定共用（含遥测侧的 _target_rows）。
     lane_geo = lane_geometry(model_v2)
-    targets = fuse_targets(radar.points, fused, v_ego=v_ego,
-                           confirmed_keys=confirmed_keys,
-                           vision_cls_by_key=vision_cls_by_key,
-                           lane_geo=lane_geo)
+    objects = fuse_objects(radar.points, fused, v_ego=v_ego,
+                          confirmed_keys=confirmed_keys,
+                          vision_cls_by_key=vision_cls_by_key,
+                          lane_geo=lane_geo)
+    # C9: 预算从全量 objects 折算（邻道正常车流在威胁门之外,恰是约束横向移动的东西）。
+    car_state = sm['carState']
+    left, right = side_pictures(objects, bool(car_state.leftBlindspot), bool(car_state.rightBlindspot))
     return PerceptionFrame(radar_points=list(radar.points), detections=detections,
                            n_associated=n_associated, pairs=pairs,
                            confirmed_keys=confirmed_keys,
-                           vision_cls_by_key=vision_cls_by_key, targets=targets,
-                           lane_geo=lane_geo)
+                           vision_cls_by_key=vision_cls_by_key,
+                           targets=[t for t in objects if t.in_gate],
+                           objects=objects, lane_geo=lane_geo, left=left, right=right)

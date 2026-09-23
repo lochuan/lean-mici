@@ -9,7 +9,6 @@ from openpilot.selfdrive.eagled.tests.test_daemon_fusion import (MODEL_CURVATURE
                                                                  _FakeParams, _FakePubMaster, _FakeSubMaster, _NS,
                                                                  _box_at, _daemon)
 
-MODEL_CURVATURE = 0.012
 
 
 def _debug_msgs(pm):
@@ -240,3 +239,58 @@ def test_streams_publish_false_flags_when_geometry_unavailable():
   assert st.laneLeftValid is False and st.laneRightValid is False
   assert dbg.laneLeftValid is False and dbg.laneRightValid is False
   assert st.targets[0].lane == 1                   # 固定带:右侧目标 lane=+1
+
+
+# --- C9: budget + sideLead publication --------------------------------------------
+
+
+def test_budgets_published_and_flow_into_the_plan():
+  # 左侧邻道目标(|yRel|=2.6,无视觉类别 -> 默认半宽 0.5)
+  # -> budget_left = 2.6-0.5-0.9-0.3 = 0.9 > 0.35,本帧不压偏置;
+  # 右侧威胁(yRel=-1.8,vehicle 权重)desire = 0.5*0.6*(1-20/50) = 0.18 全额放行。
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
+                 meta=_NS(laneChangeState="off"))
+  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
+  radar = _NS(points=[_NS(dRel=20.0, yRel=-1.8, vRel=0.0),      # 右侧威胁(带内)
+                      _NS(dRel=18.0, yRel=2.6, vRel=0.0)],       # 左侧邻道目标(带外,进预算)
+              errors=_NS(canError=False, radarUnavailableTemporary=False))
+  pm = _FakePubMaster()
+  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=True))
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+
+  st = _state_msgs(pm)[-1].eagleState
+  dbg = _debug_msgs(pm)[-1].eagleDebug
+  assert st.budgetLeft == pytest.approx(0.9)
+  # 右侧威胁(|yRel|=1.8,默认半宽 0.5)也约束右侧预算: 1.8-0.5-0.9-0.3 = 0.1
+  assert st.budgetRight == pytest.approx(0.1)
+  assert dbg.budgetLeft == pytest.approx(0.9) and dbg.budgetRight == pytest.approx(0.1)
+  assert st.sideLeadLeft.valid is True and st.sideLeadLeft.cls == ""    # 无视觉类别 -> 默认半宽
+  assert st.sideLeadLeft.edgeDist == pytest.approx(2.6 - 0.5)
+  assert st.sideLeadLeft.vRel == pytest.approx(0.0)
+  # 右侧约束 lead 就是那个威胁本身
+  assert st.sideLeadRight.valid is True and st.sideLeadRight.edgeDist == pytest.approx(1.3)
+  # 预算 0.9 > desire 0.18:向左偏置全额放行(右预算 0.1 管的是向右偏,不参与)。
+  # 首帧低通 alpha = 0.2/0.7
+  alpha = C.DT_5HZ / (C.LOWPASS_TAU_S + C.DT_5HZ)
+  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
+  assert plans[-1].lateralManeuverPlan.desiredCurvature == pytest.approx(
+    MODEL_CURVATURE + 2.0 * alpha * 0.18 / C.L_LOOKAHEAD ** 2)
+
+
+def test_bsm_maps_to_zero_budget_without_a_lead():
+  # BSM 左 -> budget_left 0,lead 无可指;右侧威胁的计划仍 valid 但偏置 0
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
+                 meta=_NS(laneChangeState="off"))
+  car_state = _NS(vEgo=20.0, leftBlindspot=True, rightBlindspot=False, steeringPressed=False)
+  radar = _NS(points=[_NS(dRel=20.0, yRel=-1.8, vRel=0.0)],
+              errors=_NS(canError=False, radarUnavailableTemporary=False))
+  pm = _FakePubMaster()
+  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=True))
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  st = _state_msgs(pm)[-1].eagleState
+  assert st.budgetLeft == 0.0 and st.sideLeadLeft.valid is False
+  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
+  assert plans[-1].valid is True   # 滞回按目标存在性,预算 0 只消偏置
+  assert plans[-1].lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)

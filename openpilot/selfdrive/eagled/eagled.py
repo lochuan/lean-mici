@@ -113,8 +113,8 @@ class EagleDaemon:
       model_curvature=model_v2.action.desiredCurvature,
       targets=frame.targets,
       v_ego=car_state.vEgo,
-      bsm_left=car_state.leftBlindspot,
-      bsm_right=car_state.rightBlindspot,
+      budget_left=frame.left.budget,
+      budget_right=frame.right.budget,
       road_edges=model_v2.roadEdges,
       enabled=self.enabled,
       steering_pressed=car_state.steeringPressed,
@@ -216,6 +216,8 @@ class EagleDaemon:
     geo = frame.lane_geo
     dbg.laneLeftValid = bool(geo.left_valid) if geo is not None else False
     dbg.laneRightValid = bool(geo.right_valid) if geo is not None else False
+    dbg.budgetLeft = float(last.get("budgetLeft", C.BUDGET_UNCONSTRAINED))
+    dbg.budgetRight = float(last.get("budgetRight", C.BUDGET_UNCONSTRAINED))
     rows = self._target_rows(frame)
     tgts = dbg.init('targets', len(rows))
     for i, (in_gate, t) in enumerate(rows):
@@ -257,6 +259,17 @@ class EagleDaemon:
     geo = frame.lane_geo
     st.laneLeftValid = bool(geo.left_valid) if geo is not None else False
     st.laneRightValid = bool(geo.right_valid) if geo is not None else False
+    st.budgetLeft = frame.left.budget
+    st.budgetRight = frame.right.budget
+    for field, picture in ((st.sideLeadLeft, frame.left), (st.sideLeadRight, frame.right)):
+      lead = picture.lead
+      field.valid = lead is not None
+      if lead is not None:
+        field.dRel = lead.dRel
+        field.yRel = lead.yRel
+        field.vRel = lead.vRel
+        field.edgeDist = abs(lead.yRel) - C.class_half_width(lead.cls)
+        field.cls = lead.cls or ""
     rows = [t for in_gate, t in self._target_rows(frame) if in_gate]
     tgts = st.init('targets', len(rows))
     for i, t in enumerate(rows):

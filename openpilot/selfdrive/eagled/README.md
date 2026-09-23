@@ -2,8 +2,9 @@
 
 5Hz lateral-situation perception layer, plus its first consumer: lateral
 avoidance. The perception core fuses radar tracks with a YOLO VRU detector
-into the per-frame target picture; the avoidance planner gates that picture
-(BSM / road-edge / speed / lane-change) and produces a small curvature bias
+into the per-frame target picture, computes continuous per-side lateral
+budgets from it (C9), and the avoidance planner gates that picture
+(budget / road-edge / speed / lane-change) to produce a small curvature bias
 added on top of the model curvature, published on the existing
 `lateralManeuverPlan` hook. controlsd only consumes it when
 `AvoidanceEnabled` is on and the message envelope `valid` flag is set;
@@ -25,8 +26,8 @@ process — turning avoidance off never turns the eagle's eyes off.
 | piece | file |
 |---|---|
 | 5Hz process, three-stream publish + `valid` flag | `eagled.py` |
-| perception core: fusion chain, lazy camera/YOLO lifecycle, radar-only degrade; fusion primitives (`Target`/`_in_gate`/`fuse_targets`/`radar_point_key`) | `perception.py` |
-| planner: gates, BSM, low-pass, hysteresis (decision layer) | `avoidance_planner.py` |
+| perception core: fusion chain, lazy camera/YOLO lifecycle, radar-only degrade; fusion primitives + three-tier gate + side budgets (`Target`/`gate_target`/`fuse_objects`/`side_pictures`) | `perception.py` |
+| planner: gates, budget folding, low-pass, hysteresis (decision layer) | `avoidance_planner.py` |
 | camera feed: visionipc -> NV12 -> RGB -> bottom ROI 640x384 | `camera_stream.py` |
 | box bottom-centre -> car-frame ground point + ROI inverse mapping | `projection.py` |
 | radar<->vision nearest-neighbour association (shared with shadow) | `association.py` |
@@ -62,6 +63,20 @@ All tiers additionally require `|yRel| >= OWN_LANE_HALF_WIDTH` — a centered
 lead is a longitudinal problem, left to the driver. The road-edge gate also
 honors `roadEdgeStds`: an uncertain edge on the bias side counts as zero
 clearance (C7, conservative direction).
+
+**Per-side lateral budget (C9)**: `side_pictures` folds every fused object
+(in-gate threats AND adjacent-lane traffic — the latter is by definition out
+of the threat gate, yet exactly what constrains lateral movement) into
+`budget_left/right`: BSM alert -> 0; otherwise the minimum over side objects
+of `( |yRel| - class half-width ) - EGO_HALF_WIDTH - SIDE_MARGIN`; no
+constraint -> `BUDGET_UNCONSTRAINED` (999.0). The planner folds the budget
+of the side it biases TOWARD into the offset cap; moving away from an
+occupied side is physically safe and no longer capped (the old discrete
+bsm_opposite 0.12 cap is superseded). Hysteresis tracks target presence,
+not the budget-capped response, so a BSM flicker only zeroes the bias for
+its duration instead of resetting the state machine. Budgets and the
+constraining side leads publish on `eagleState` — the planned lane-change
+consumer (desire_helper) reads exactly these.
 
 ## P0 shadow (record only, never publish)
 

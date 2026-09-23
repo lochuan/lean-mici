@@ -1255,6 +1255,8 @@ struct EagleDebug {
   radarUnavailable @15 :Bool; # radarTracks.errors.radarUnavailableTemporary
   laneLeftValid @16 :Bool;    # C7：本道左边界线置信（probs/stds 过门）
   laneRightValid @17 :Bool;   # C7：本道右边界线置信
+  budgetLeft @18 :Float32;     # C9：左侧横向预算 m；999.0 = 无侧向约束
+  budgetRight @19 :Float32;    # C9：右侧横向预算 m；999.0 = 无侧向约束
 }
 
 struct EagleState {
@@ -1275,6 +1277,20 @@ struct EagleState {
   radarUnavailable @9 :Bool;      # radarTracks.errors.radarUnavailableTemporary
   laneLeftValid @10 :Bool;        # C7：本道左边界线置信（tier 1 可用性）
   laneRightValid @11 :Bool;       # C7：本道右边界线置信
+  sideLeadLeft @12 :EagleSideLead;   # C9：左侧最紧约束目标（valid=false 即无）
+  sideLeadRight @13 :EagleSideLead;  # C9：右侧最紧约束目标
+  budgetLeft @14 :Float32;        # C9：左侧横向预算 m；999.0 = 无侧向约束
+  budgetRight @15 :Float32;       # C9：右侧横向预算 m；999.0 = 无侧向约束
+}
+
+struct EagleSideLead {
+  # C9：折算出该侧预算的最紧约束目标。BSM 强制预算 0 时无目标可指（布尔报警）。
+  valid @0 :Bool;
+  dRel @1 :Float32;     # m
+  yRel @2 :Float32;     # m，左正带符号
+  vRel @3 :Float32;     # m/s（视觉目标 0）
+  edgeDist @4 :Float32; # 近缘横向距离 m = |yRel| - 类别半宽
+  cls @5 :Text;         # 视觉类别；纯雷达未关联为 ""
 }
 
 struct LongitudinalPlan @0xe00b5b3eba12876c {

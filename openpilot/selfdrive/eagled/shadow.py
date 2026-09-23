@@ -52,7 +52,8 @@ from typing import TYPE_CHECKING
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.association import associate as associate_daemon
 from openpilot.selfdrive.eagled.association import nearest_pairs_by_bearing
-from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets, radar_point_key
+from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner, _in_gate, radar_point_key
+from openpilot.selfdrive.eagled.perception import fuse_objects, side_pictures
 from openpilot.selfdrive.eagled.projection import RoiMeta, project_detections
 
 if TYPE_CHECKING:
@@ -192,12 +193,12 @@ class ShadowEvaluator:
     if projected is not None:
       # Fused path (daemon parity): association decides which detections the
       # radar points absorb; the rest stay independent planner targets. The
-      # pairs also feed fuse_targets: confirmed points survive the static-speed
+      # pairs also feed fuse_objects: confirmed points survive the static-speed
       # gate and take the vision class weight, exactly like the daemon.
       _, fused, pairs = associate_daemon(frame.radar_points, projected, fy=fy)
       confirmed_keys = tuple(radar_point_key(p[0]) for p in pairs)
       vision_cls_by_key = {radar_point_key(p[0]): p[3] for p in pairs}
-      targets = fuse_targets(frame.radar_points, fused, v_ego=frame.v_ego,
+      objects = fuse_objects(frame.radar_points, fused, v_ego=frame.v_ego,
                              confirmed_keys=confirmed_keys,
                              vision_cls_by_key=vision_cls_by_key)
       vision_objects = [VisionObject(x=float(d["dRel"]), y=float(d["yRel"])) for d in projected]
@@ -208,17 +209,20 @@ class ShadowEvaluator:
       # Proxy path has no vision confirmation available (leadsV3 is metrics
       # only), so it degrades like the daemon's radar-only fallback: static
       # radar points are dropped, movers still drive the plan.
-      targets = fuse_targets(frame.radar_points, v_ego=frame.v_ego)
+      objects = fuse_objects(frame.radar_points, v_ego=frame.v_ego)
       vision_objects = frame.vision_objects
-      metric_radar = targets
+      metric_radar = [t for t in objects if t.in_gate]
+    targets = [t for t in objects if t.in_gate]
 
     t0 = self._clock()
+    # C9: daemon 对等 —— 预算从全量 objects 折算,再喂 planner
+    left_pic, right_pic = side_pictures(objects, frame.bsm_left, frame.bsm_right)
     curvature, valid = self.planner.update(
       model_curvature=frame.model_curvature,
       targets=targets,
       v_ego=frame.v_ego,
-      bsm_left=frame.bsm_left,
-      bsm_right=frame.bsm_right,
+      budget_left=left_pic.budget,
+      budget_right=right_pic.budget,
       road_edges=frame.road_edges,
       lane_change_active=frame.lane_change_active,
       max_offset=self.max_offset,
