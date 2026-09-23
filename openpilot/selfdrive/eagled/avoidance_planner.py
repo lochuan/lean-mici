@@ -36,12 +36,13 @@ def _best_target(targets: Iterable[Target], max_offset: float) -> tuple[Target, 
   """Highest-desire in-gate target, and its magnitude capped to ``max_offset``.
 
   Ranking uses the UNCAPPED desire on purpose. Ranking by the capped magnitude
-  makes target selection depend on ``max_offset``: once BSM squeezes the cap to
-  MAX_OFFSET_BSM most in-gate targets saturate at exactly that value, the strict
-  ``>`` tie-break then keeps whichever came first in iteration order, and the
-  selected target -- hence the avoidance side -- can flip. update() derives the
-  BSM gates from the uncapped direction, so a flip there commands a bias toward
-  a side whose blind spot was never checked.
+  makes target selection depend on ``max_offset``: once a squeezed cap (budget
+  folding or a small param) saturates most in-gate targets at exactly that
+  value, the strict ``>`` tie-break then keeps whichever came first in
+  iteration order, and the selected target -- hence the avoidance side --
+  can flip. update() derives the direction from the uncapped ranking, so a
+  flip there would command a bias toward a side whose budget was never
+  checked.
 
   The in/out decision is ``target.in_gate`` — gate_target's three-tier verdict
   already applied by fuse_targets; re-deriving a geometry gate here would use
