@@ -57,7 +57,9 @@ def lanlink_run(started: bool, params: Params, CP: car.CarParams) -> bool:
   return params.get_bool("LanLinkEnabled")
 
 def eagle_run(started: bool, params: Params, CP: car.CarParams) -> bool:
-  return and_(only_onroad, iscar)(started, params, CP) and params.get_bool("AvoidanceEnabled")
+  # 感知层默认开启（onroad + iscar 即跑）；避让执行由进程内 AvoidanceEnabled
+  # 单独门控（eagled._refresh_params）——关避让不关态势
+  return and_(only_onroad, iscar)(started, params, CP)
 
 def or_(*fns):
   return lambda *args: operator.or_(*(fn(*args) for fn in fns))

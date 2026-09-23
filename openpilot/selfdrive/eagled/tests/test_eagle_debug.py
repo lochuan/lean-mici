@@ -130,3 +130,60 @@ def test_debug_carries_radar_error_flags():
   daemon.update(0.0)
   dbg = _debug_msgs(pm)[-1].eagleDebug
   assert dbg.canError is True and dbg.radarUnavailable is True
+
+
+# --- eagleState: the formal perception picture -------------------------------------
+
+
+def _state_msgs(pm):
+  return [msg for service, msg in pm.sent if service == 'eagleState']
+
+
+def test_state_service_is_5hz_and_not_logged():
+  svc = SERVICE_LIST["eagleState"]
+  assert svc.frequency == 5.
+  assert svc.should_log is False
+
+
+def test_state_published_every_frame_with_ingate_targets_only():
+  # One in-gate radar+vision pair and one out-of-gate far car: eagleState
+  # carries the in-gate row(s) only — the picture, not the raw telemetry.
+  person = _box_at(20.0, -1.8, cls="person", conf=0.8)
+  far_car = _box_at(60.0, 0.0, cls="car", conf=0.9)  # outside the planner gate
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
+                       detector=_FakeDetector(detections=[person, far_car]),
+                       radar_points=[(20.0, -1.8)])
+  daemon.update(0.0)
+  daemon.update(C.DT_5HZ)
+  states = _state_msgs(pm)
+  assert len(states) == 2                       # every frame, perception always on
+  assert all(m.valid is True for m in states)   # observation, never a plan
+  st = states[-1].eagleState
+  assert st.nRadar == 1 and st.nVision == 2 and st.nAssociated == 1
+  assert st.vEgo == pytest.approx(20.0)
+  assert all(t.inGate for t in st.targets)      # out-of-gate far car filtered out
+  assert len(st.targets) == 2                   # the radar point + its matched vision row
+  assert st.targets[0].vision is False and st.targets[1].vision is True
+
+
+def test_state_publishes_even_when_avoidance_disabled():
+  # AvoidanceEnabled gates the lateralManeuverPlan actuation only: with the
+  # param off the perception streams keep flowing.
+  daemon, pm = _daemon(enabled=False, radar_points=[(8.0, -1.8)])
+  daemon.update(0.0)
+  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
+  assert plans[-1].valid is False
+  assert len(_state_msgs(pm)) == 1
+  assert len(_debug_msgs(pm)) == 1
+
+
+def test_state_carries_bsm_and_radar_health():
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI]),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0, cls="person")]),
+                       radar_points=[])
+  daemon.sm._data["carState"].rightBlindspot = True
+  daemon.sm._data["radarTracks"].errors.canError = True
+  daemon.update(0.0)
+  st = _state_msgs(pm)[-1].eagleState
+  assert st.bsmLeft is False and st.bsmRight is True
+  assert st.canError is True and st.radarUnavailable is False

@@ -7,6 +7,10 @@ consumer (``eagled``) republishes ``model + bias`` every frame and clears the
 envelope ``valid`` flag when the plan is invalid, so control falls back to the
 raw model curvature.
 
+Fusion primitives (``RadarPoint``/``Target``/``_sign``/``_in_gate``/
+``radar_point_key``/``fuse_targets``) live in ``perception`` — the perception
+core of the eagle; they are re-exported here for import compatibility.
+
 Sign convention: ``yRel`` is left-positive (car frame), so a target on the left
 produces a negative ``y_des`` (avoid right) and vice-versa.
 """
@@ -15,53 +19,15 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass
-from typing import Protocol
 
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.selfdrive.eagled.constants import (D_GATE, D_MAX, DT_5HZ, EDGE_CLEAR_MIN, ENTER_HOLD_S, EXIT_HOLD_S,
-                                                      K_GAIN, L_LOOKAHEAD, LOWPASS_TAU_S, MAX_OFFSET_BSM,
-                                                      MAX_OFFSET_FREE, OWN_LANE_HALF_WIDTH, STATIC_SPEED_THRESH,
-                                                      V_EGO_MAX, V_EGO_MIN, class_weight,
-                                                      Y_GATE)
 
-
-class RadarPoint(Protocol):
-  dRel: float
-  yRel: float
-  vRel: float
-
-
-@dataclass(frozen=True)
-class Target:
-  side: int    # -1 = right of ego (yRel < 0), +1 = left
-  dRel: float  # m, longitudinal distance
-  yRel: float  # m, lateral position, left positive
-  w: float     # class weight (VRU > vehicle)
-  conf: float  # detector confidence [0, 1]
-
-
-def _sign(value: float) -> int:
-  return 1 if value >= 0.0 else -1
-
-
-def _in_gate(dRel: float, yRel: float) -> bool:
-  return 0.0 < dRel <= D_GATE and OWN_LANE_HALF_WIDTH <= abs(yRel) <= Y_GATE
-
-
-def radar_point_key(point) -> int:
-  """Stable identity key for a radar point across re-iteration.
-
-  pycapnp constructs a fresh wrapper object on every access to
-  ``radarTracks.points``, so ``id()`` differs between the pass that built the
-  association pairs and any later pass over the same message -- on device an
-  ``id()`` key never matches. ``trackId`` is the identity-stable key (required
-  UInt64, no reuse, per car.capnp); ``id()`` remains only as the fallback for
-  duck-typed fixtures that carry no ``trackId``. All confirmation-key building
-  (fuse_targets and every call site) goes through this helper.
-  """
-  track_id = getattr(point, "trackId", None)
-  return id(point) if track_id is None else int(track_id)
+from openpilot.selfdrive.eagled.perception import (  # noqa: F401  (compat re-export)
+  RadarPoint, Target, _in_gate, _sign, fuse_targets, radar_point_key,
+)
+from openpilot.selfdrive.eagled.constants import (D_MAX, DT_5HZ, EDGE_CLEAR_MIN, ENTER_HOLD_S, EXIT_HOLD_S,
+                                                  K_GAIN, L_LOOKAHEAD, LOWPASS_TAU_S, MAX_OFFSET_BSM,
+                                                  MAX_OFFSET_FREE, V_EGO_MAX, V_EGO_MIN)
 
 
 def _best_target(targets: Iterable[Target], max_offset: float) -> tuple[Target, float] | None:
@@ -111,54 +77,6 @@ def plan(targets: Iterable[Target], max_offset: float = MAX_OFFSET_FREE,
   if best is None:
     return 0.0
   return -_sign(best[0].yRel) * best[1]
-
-
-def fuse_targets(radar_points: Iterable[RadarPoint], detections: Iterable[dict] | None = None,
-                 v_ego: float = 0.0, confirmed_keys: Iterable[int] = (),
-                 vision_cls_by_key: dict[int, str] | None = None) -> list[Target]:
-  """Build planner targets from radar points plus unmatched vision detections.
-
-  ``confirmed_keys`` holds the :func:`radar_point_key` of the radar points that
-  a vision detection confirmed, and ``vision_cls_by_key`` maps those keys to
-  the vision class. Keys are ``trackId`` (stable across capnp re-iteration),
-  never ``id()`` -- see :func:`radar_point_key`. Two things depend on them:
-
-  * A radar point whose ground speed is near zero is kept ONLY when vision
-    confirms it. Guardrails and bridge pillars sit at zero ground speed -- but
-    so does a broken-down car, so a plain speed gate would discard a real
-    hazard. Vision separates them: it reports a stopped car as ``car`` and does
-    not report a guardrail as ``car``/``person``.
-  * A confirmed radar point takes the vision class weight. Otherwise a
-    radar-visible motorcycle is weighted 0.6 while one the radar missed is
-    weighted 1.0 -- the better-perceived target counting for less.
-  """
-  confirmed = set(confirmed_keys)
-  cls_by_key = vision_cls_by_key or {}
-  targets: list[Target] = []
-  for point in radar_points:
-    dRel, yRel = float(point.dRel), float(point.yRel)
-    if not _in_gate(dRel, yRel):
-      continue
-    key = radar_point_key(point)
-    # vRel 缺失时保守按静止处理
-    v_rel = getattr(point, "vRel", None)
-    ground_speed = None if v_rel is None else abs(float(v_rel) + v_ego)
-    if (ground_speed is None or ground_speed < STATIC_SPEED_THRESH) and key not in confirmed:
-      continue
-    cls = cls_by_key.get(key)
-    weight = class_weight(cls)
-    targets.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=weight, conf=1.0))
-  for det in detections or []:
-    try:
-      dRel, yRel = float(det["dRel"]), float(det["yRel"])
-    except (KeyError, TypeError, ValueError):
-      continue
-    if not _in_gate(dRel, yRel):
-      continue
-    weight = class_weight(det.get("cls"))
-    targets.append(Target(side=_sign(yRel), dRel=dRel, yRel=yRel, w=weight,
-                          conf=float(det.get("conf", 1.0))))
-  return targets
 
 
 def edge_clearance(road_edges: Iterable, side: int = 0) -> float:

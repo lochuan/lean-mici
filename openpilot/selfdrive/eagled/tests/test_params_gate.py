@@ -16,15 +16,6 @@ def _param_attrs(key: str) -> list[str]:
   return [part.strip() for part in m.group(1).split(",")]
 
 
-class _FakeParams:
-  def __init__(self, enabled: bool):
-    self._enabled = enabled
-
-  def get_bool(self, key: str) -> bool:
-    assert key == "AvoidanceEnabled"
-    return self._enabled
-
-
 def test_avoidance_params_registered():
   keys = (OPENPILOT / "common/params_keys.h").read_text()
   assert '"AvoidanceEnabled"' in keys
@@ -60,9 +51,10 @@ def test_eagled_process_registered_with_gate():
   assert proc.should_run is pc.eagle_run
 
 
-def test_eagle_run_requires_onroad_car_and_enabled():
+def test_eagle_run_requires_onroad_car_only():
+  """感知层默认开启：AvoidanceEnabled 不再门控进程，只门控进程内的避让执行。"""
   cp = SimpleNamespace(notCar=False)
-  assert pc.eagle_run(True, _FakeParams(True), cp) is True
-  assert pc.eagle_run(True, _FakeParams(False), cp) is False
-  assert pc.eagle_run(False, _FakeParams(True), cp) is False
-  assert pc.eagle_run(True, _FakeParams(True), SimpleNamespace(notCar=True)) is False
+  params = object()  # eagle_run 不读 params；感知永远随 onroad+car 走
+  assert pc.eagle_run(True, params, cp) is True
+  assert pc.eagle_run(False, params, cp) is False
+  assert pc.eagle_run(True, params, SimpleNamespace(notCar=True)) is False

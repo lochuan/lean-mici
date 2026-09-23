@@ -381,14 +381,13 @@ def test_daemon_sends_valid_flag_every_frame():
   daemon.update(0.0)                    # enter hysteresis not yet satisfied -> invalid
   daemon.update(C.ENTER_HOLD_S + 0.01)  # active -> valid
 
-  assert len(pm.sent) == 4  # eagleDebug (2) + lateralManeuverPlan (2), one debug per frame
-  service0, msg0 = pm.sent[1]
-  service1, msg1 = pm.sent[3]
-  assert service0 == service1 == "lateralManeuverPlan"
-  assert msg0.valid is False
-  assert msg0.lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
-  assert msg1.valid is True
-  assert msg1.lateralManeuverPlan.desiredCurvature > MODEL_CURVATURE
+  assert len(pm.sent) == 6  # eagleDebug (2) + eagleState (2) + lateralManeuverPlan (2)
+  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
+  assert len(plans) == 2
+  assert plans[0].valid is False
+  assert plans[0].lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
+  assert plans[1].valid is True
+  assert plans[1].lateralManeuverPlan.desiredCurvature > MODEL_CURVATURE
 
 
 def test_daemon_invalid_frame_carries_model_curvature():
@@ -396,8 +395,9 @@ def test_daemon_invalid_frame_carries_model_curvature():
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
 
-  assert len(pm.sent) == 4  # eagleDebug (2) + lateralManeuverPlan (2)
-  for _, msg in pm.sent[1::2]:
+  assert len(pm.sent) == 6  # eagleDebug (2) + eagleState (2) + lateralManeuverPlan (2)
+  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
+  for msg in plans:
     assert msg.valid is False
     assert msg.lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
 

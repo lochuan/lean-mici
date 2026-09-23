@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
-"""eagled: 5Hz camera+radar fused lateral avoidance bias on top of model curvature.
+"""eagled: 5Hz lateral-situation perception layer + the avoidance consumer.
 
-Per tick the full fusion chain runs: wide-road camera frame -> YOLO ROI
-inference -> ground-plane projection into the car frame -> radar association ->
-``fuse_targets`` -> planner. Publishes ``lateralManeuverPlan`` **every frame**
-with the message envelope ``valid`` flag set from the planner. An invalid frame
-(no target, gated, takeover, disabled) still carries the raw model curvature, so
-controlsd falls back cleanly; nothing depends on the message going stale.
+The perception core (``perception.PerceptionCore``) fuses radar tracks with
+wide-camera YOLO detections into the per-frame target picture, published as
+``eagleState`` (the formal stream for consumers — desire_helper in modeld is
+the planned second one) alongside ``eagleDebug`` (raw detection/association
+telemetry for the lanlink UI and calibration — never a control input).
 
-When the camera stream or the YOLO weights are unavailable the daemon degrades
-to radar-only: it logs the reason once and keeps publishing radar-fused plans.
+The avoidance planner (``avoidance_planner.AvoidancePlanner``) is the first
+in-process consumer: it gates the fused targets (BSM / road-edge / speed /
+lane-change) and produces a small curvature bias, published as
+``lateralManeuverPlan`` **every frame** with the envelope ``valid`` flag set
+from the planner. An invalid frame (no target, gated, takeover, disabled)
+still carries the raw model curvature, so controlsd falls back cleanly;
+nothing depends on the message going stale.
+
+Perception runs whenever the device is onroad in a car; avoidance actuation
+is gated separately by the ``AvoidanceEnabled`` param — turning avoidance
+off never turns the eagle's eyes off. When the camera stream, calibration
+or the YOLO weights are unavailable the core degrades to radar-only: the
+reason is logged once and radar-fused frames keep publishing.
 """
 
 import os
-from pathlib import Path
 
 from openpilot.common.hardware import COMMA_HARDWARE
 
@@ -32,37 +41,51 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import Priority, Ratekeeper, config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.eagled import constants as C
-from openpilot.selfdrive.eagled.association import associate
-from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets, radar_point_key
+from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner
 from openpilot.selfdrive.eagled.camera_stream import CameraStream
-from openpilot.selfdrive.eagled.projection import geometry_from_calibration, horizon_row_for, project_detections
-from openpilot.selfdrive.eagled.yolo_detector import YoloDetector
+from openpilot.selfdrive.eagled.perception import PerceptionCore, PerceptionFrame, _in_gate, radar_point_key
 
 PARAMS_REFRESH_PERIOD = 1.0  # s
-YOLO_PKL_PATH = Path(__file__).parent / "models" / "yolo_tinygrad.pkl"
 
 
 class EagleDaemon:
-  def __init__(self, sm=None, pm=None, params=None, planner=None, camera=None, detector=None,
-               camera_factory=CameraStream):
+  def __init__(self, sm=None, pm=None, params=None, planner=None, perception=None,
+               camera=None, detector=None, camera_factory=CameraStream):
     self.params = params if params is not None else Params()
     self.sm = sm if sm is not None else messaging.SubMaster(
       ['modelV2', 'carState', 'radarTracks', 'extrinsicsCalibration'])
-    self.pm = pm if pm is not None else messaging.PubMaster(['lateralManeuverPlan', 'eagleDebug'])
+    self.pm = pm if pm is not None else messaging.PubMaster(['eagleDebug', 'eagleState', 'lateralManeuverPlan'])
     self.planner = planner if planner is not None else AvoidancePlanner()
-    self.camera = camera                  # lazy: created via camera_factory on first use
-    self.camera_factory = camera_factory
-    self.detector = detector              # lazy: YoloDetector on first use
-    self.detector_dead = False            # YOLO failed hard -> stop retrying
-    self.degraded: set[str] = set()       # radar-only fallback reasons, logged once each
+    self.perception = perception if perception is not None else PerceptionCore(
+      camera=camera, detector=detector, camera_factory=camera_factory)
     self.max_offset = C.MAX_OFFSET_FREE
     self.enabled = False
     self._last_params_t = -PARAMS_REFRESH_PERIOD
+
+  # The camera/YOLO lifecycle lives on the perception core; these read-only
+  # views keep the historical daemon surface (tests, shadow tooling) working.
+  @property
+  def camera(self):
+    return self.perception.camera
+
+  @property
+  def detector(self):
+    return self.perception.detector
+
+  @property
+  def detector_dead(self) -> bool:
+    return self.perception.detector_dead
+
+  @property
+  def degraded(self) -> set[str]:
+    return self.perception.degraded
 
   def _refresh_params(self, now: float) -> None:
     if now - self._last_params_t < PARAMS_REFRESH_PERIOD:
       return
     self._last_params_t = now
+    # AvoidanceEnabled gates only the lateralManeuverPlan actuation, never the
+    # eagleState/eagleDebug perception streams.
     self.enabled = self.params.get_bool("AvoidanceEnabled")
     try:
       value = self.params.get("AvoidanceMaxLateralOffset")
@@ -70,55 +93,6 @@ class EagleDaemon:
       value = None
     if value is not None:
       self.max_offset = float(np.clip(float(value), 0.0, C.MAX_OFFSET_FREE))
-
-  def _degrade(self, reason: str) -> None:
-    """Log a radar-only fallback reason once (never spam)."""
-    if reason not in self.degraded:
-      self.degraded.add(reason)
-      cloudlog.warning(f"eagled: {reason} unavailable, radar-only fallback")
-
-  def _detect(self, now: float) -> list[dict]:
-    """Camera -> YOLO -> car-frame projections; ``[]`` keeps the frame radar-only."""
-    geom = geometry_from_calibration(self.sm['extrinsicsCalibration'],
-                                     self.sm.valid['extrinsicsCalibration'])
-    if not geom.valid:
-      # 0.5deg pitch error = 41% distance error at 40m. Running the vision path
-      # on an uncalibrated camera is exactly how spurious biases get produced,
-      # so fall back to radar-only until openpilot's calibration converges.
-      self._degrade("calibration")
-      return []
-    if self.camera is None:
-      self.camera = self.camera_factory()
-    # Intrinsics are only known after the first successful connect; until then
-    # the ROI falls back to the frame centre (horizon_row=None).
-    intrinsics = self.camera.intrinsics
-    horizon_row = horizon_row_for(intrinsics[3], intrinsics[1], geom) if intrinsics is not None else None
-    frame = self.camera.frame(horizon_row=horizon_row)
-    if frame is None:
-      # No camerad stream (PC) or no fresh frame this tick; connect keeps
-      # retrying inside CameraStream, the reason is only logged once.
-      self._degrade("camera")
-      return []
-    roi, roi_meta = frame
-    if self.detector is None:
-      self.detector = YoloDetector(YOLO_PKL_PATH)
-    if self.detector_dead:
-      return []
-    try:
-      detections = self.detector.infer(roi, now=now)
-    except Exception:
-      # Missing pkl (weights are not in the repo) or a hard inference failure:
-      # radar-only from here on, logged once, never crash the daemon.
-      self.detector_dead = True
-      self._degrade("yolo")
-      cloudlog.exception("eagled: YOLO inference failed")
-      return []
-    fx, fy, cx, cy = self.camera.intrinsics
-    return project_detections(detections, fx=fx, fy=fy, cx=cx, cy=cy,
-                              height=C.CAMERA_HEIGHT, pitch=geom.pitch,
-                              yaw=geom.yaw, roll=geom.roll,
-                              camera_to_front=C.CAMERA_TO_FRONT, roi_meta=roi_meta,
-                              frame_height=self.camera.frame_size[1] if self.camera.frame_size else None)
 
   def update(self, now: float) -> None:
     self._refresh_params(now)
@@ -128,21 +102,7 @@ class EagleDaemon:
     car_state = self.sm['carState']
     radar = self.sm['radarTracks']
 
-    detections = self._detect(now)
-    # associate needs fy for the box-height fallback on unmatched detections.
-    # Intrinsics live on the camera (None until the first successful connect),
-    # and with no detections associate never reads fy, so 0.0 is a safe fallback.
-    fy = self.camera.intrinsics[1] if self.camera is not None and self.camera.intrinsics else 0.0
-    n_associated, fused, pairs = associate(radar.points, detections, fy=fy)
-    # Confirmation keys are trackId-based (radar_point_key): pycapnp hands out a
-    # fresh wrapper object on every access to radar.points, so id() keys built
-    # from associate's materialized points would never match the points
-    # fuse_targets iterates here.
-    confirmed_keys = tuple(radar_point_key(p[0]) for p in pairs)
-    vision_cls_by_key = {radar_point_key(p[0]): p[3] for p in pairs}
-    targets = fuse_targets(radar.points, fused, v_ego=car_state.vEgo,
-                           confirmed_keys=confirmed_keys,
-                           vision_cls_by_key=vision_cls_by_key)
+    frame = self.perception.process(self.sm, now, car_state.vEgo)
     # Suppress the bias during lane changes: the model curvature is already
     # executing a large lateral manoeuvre and the target's relative bearing is
     # changing fast, so a bias derived from "target is on the left/right" on
@@ -151,7 +111,7 @@ class EagleDaemon:
     lane_change_active = str(model_v2.meta.laneChangeState) != "off"
     curvature, valid = self.planner.update(
       model_curvature=model_v2.action.desiredCurvature,
-      targets=targets,
+      targets=frame.targets,
       v_ego=car_state.vEgo,
       bsm_left=car_state.leftBlindspot,
       bsm_right=car_state.rightBlindspot,
@@ -163,71 +123,71 @@ class EagleDaemon:
       now=now,
     )
 
-    # Publish every frame. ``valid`` is the message envelope flag controlsd reads
-    # via ``sm.valid['lateralManeuverPlan']``; an invalid plan still carries the
+    # Publish order per frame: eagleDebug (raw telemetry) -> eagleState (the
+    # picture) -> lateralManeuverPlan (the plan) LAST so the every-frame
+    # freshness invariant tests reading pm.sent[-1] keep holding. ``valid`` on
+    # the plan is the envelope flag controlsd reads via
+    # ``sm.valid['lateralManeuverPlan']``; an invalid plan still carries the
     # model curvature so a fresh-but-invalid frame falls back cleanly.
-    # Defensive gate: if this frame's modelV2 failed validation its curvature is
-    # suspect, so the plan is never published as valid. We keep sending (instead
-    # of skipping the frame) to preserve the every-frame freshness invariant in
-    # controlsd; the invalid envelope makes controlsd ignore the curvature.
-    # Debug snapshot first so the plan message remains the frame's last publish
-    # (the every-frame freshness invariant tests read pm.sent[-1]).
-    self._publish_debug(radar.points, detections, n_associated, pairs, car_state,
-                        valid=bool(valid), radar_errors=radar.errors,
-                        vision_cls_by_key=vision_cls_by_key)
+    # Defensive gate: if this frame's modelV2 failed validation its curvature
+    # is suspect, so the plan is never published as valid. We keep sending
+    # (instead of skipping the frame) to preserve the every-frame freshness
+    # invariant in controlsd; the invalid envelope makes controlsd ignore the
+    # curvature.
+    self._publish_debug(frame, car_state, valid=bool(valid), radar_errors=radar.errors)
+    self._publish_state(frame, car_state, radar_errors=radar.errors)
 
     msg = messaging.new_message('lateralManeuverPlan')
     msg.lateralManeuverPlan.desiredCurvature = float(curvature)
     msg.valid = bool(valid) and bool(self.sm.valid['modelV2'])
     self.pm.send('lateralManeuverPlan', msg)
 
-  def _publish_debug(self, radar_points, detections, n_associated, pairs, car_state,
-                     valid: bool, radar_errors=None, vision_cls_by_key=None) -> None:
-    """Build and publish the fused eagleDebug snapshot for this frame.
+  def _target_rows(self, frame: PerceptionFrame) -> list[tuple[bool, dict]]:
+    """One row per radar point and per detection: (in_gate, serialized fields).
 
-    Sent every frame regardless of planner validity: the message envelope
-    ``valid`` flag is always true (this is a live observation, not a plan), and
-    the planner's own validity lives in the struct's ``valid`` field. Consumers
-    are lanlink's bird's-eye view and the P0 calibration tool — never controlsd.
-
-    ``vision_cls_by_key`` is the same map the planner consumed this frame
-    (radar_point_key -> vision class): a vision-confirmed radar point is
-    planned with the vision class weight, so the debug row must report that
-    weight — telemetry that disagrees with the action hides faults.
+    Shared by both publishers so eagleState and eagleDebug can never disagree
+    about what was seen. Association pairs reference this frame's
+    radar/detection objects, so match them back by identity to stamp the shared
+    pairId on both sides. Radar identity must go through radar_point_key: this
+    list is a fresh capnp re-iteration, so id() would never match the pairs'
+    objects (vision dicts are plain Python objects, id() is stable for them).
     """
-    radar_points = list(radar_points)
-    # Association pairs reference this frame's radar/detection objects, so match
-    # them back by identity to stamp the shared pairId on both sides. Radar
-    # identity must go through radar_point_key: this list is a fresh capnp
-    # re-iteration, so id() would never match the pairs' objects (vision dicts
-    # are plain Python objects, id() is stable for them).
-    radar_pair_ids = {radar_point_key(p[0]): p[2] for p in pairs}
-    vision_pair_ids = {id(p[1]): p[2] for p in pairs}
-    targets: list[tuple] = []
-    for point in radar_points:
+    radar_pair_ids = {radar_point_key(p[0]): p[2] for p in frame.pairs}
+    vision_pair_ids = {id(p[1]): p[2] for p in frame.pairs}
+    rows: list[tuple[bool, dict]] = []
+    for point in frame.radar_points:
       in_gate = _in_gate(float(point.dRel), float(point.yRel))
       key = radar_point_key(point)
       # Same weight the planner used: a vision-confirmed radar point takes the
       # vision class weight (fuse_targets), not the vehicle default.
-      cls = (vision_cls_by_key or {}).get(key)
-      targets.append((in_gate, {
+      cls = frame.vision_cls_by_key.get(key)
+      rows.append((in_gate, {
         "dRel": float(point.dRel), "yRel": float(point.yRel), "vRel": float(point.vRel),
         "cls": cls or "", "conf": 0.0,
         "weight": C.class_weight(cls),
         "matched": key in radar_pair_ids, "inGate": in_gate, "vision": False,
         "pairId": radar_pair_ids.get(key, 0),
       }))
-    for det in detections:
+    for det in frame.detections:
       in_gate = _in_gate(float(det["dRel"]), float(det["yRel"]))
       weight = C.class_weight(det.get("cls"))
-      targets.append((in_gate, {
+      rows.append((in_gate, {
         "dRel": float(det["dRel"]), "yRel": float(det["yRel"]), "vRel": 0.0,
         "cls": det.get("cls", ""), "conf": float(det.get("conf", 1.0)),
         "weight": weight,
         "matched": id(det) in vision_pair_ids, "inGate": in_gate, "vision": True,
         "pairId": vision_pair_ids.get(id(det), 0),
       }))
+    return rows
 
+  def _publish_debug(self, frame: PerceptionFrame, car_state, valid: bool, radar_errors=None) -> None:
+    """Build and publish the fused eagleDebug snapshot for this frame.
+
+    Sent every frame regardless of planner validity: the message envelope
+    ``valid`` flag is always true (this is a live observation, not a plan), and
+    the planner's own validity lives in the struct's ``valid`` field. Consumers
+    are lanlink's bird's-eye view and the calibration tool — never controlsd.
+    """
     msg = messaging.new_message('eagleDebug')
     dbg = msg.eagleDebug
     last = self.planner.last_state
@@ -240,14 +200,15 @@ class EagleDaemon:
     dbg.bsmLeft = bool(car_state.leftBlindspot)
     dbg.bsmRight = bool(car_state.rightBlindspot)
     dbg.vEgo = float(car_state.vEgo)
-    dbg.nRadar = len(radar_points)
-    dbg.nVision = len(detections)
-    dbg.nAssociated = int(n_associated)
+    dbg.nRadar = len(frame.radar_points)
+    dbg.nVision = len(frame.detections)
+    dbg.nAssociated = int(frame.n_associated)
     dbg.edgeClearance = min(float(last.get("edgeClearance", float("inf"))), 999.0)
     dbg.canError = bool(radar_errors.canError) if radar_errors is not None else False
     dbg.radarUnavailable = bool(radar_errors.radarUnavailableTemporary) if radar_errors is not None else False
-    tgts = dbg.init('targets', len(targets))
-    for i, (in_gate, t) in enumerate(targets):
+    rows = self._target_rows(frame)
+    tgts = dbg.init('targets', len(rows))
+    for i, (in_gate, t) in enumerate(rows):
       tgts[i].dRel = t["dRel"]
       tgts[i].yRel = t["yRel"]
       tgts[i].vRel = t["vRel"]
@@ -260,6 +221,43 @@ class EagleDaemon:
       tgts[i].pairId = t["pairId"]
     msg.valid = True
     self.pm.send('eagleDebug', msg)
+
+  def _publish_state(self, frame: PerceptionFrame, car_state, radar_errors=None) -> None:
+    """Publish eagleState: the formal per-frame perception picture.
+
+    Same data as eagleDebug minus the debug-only noise (decision snapshot,
+    pair ids, out-of-gate rows): in-gate fused targets, side inputs (BSM),
+    geometry and sensor health. This is the stream future consumers
+    (desire_helper in modeld) subscribe to; the envelope ``valid`` is always
+    true — the picture is an observation, planner validity lives in the plan.
+    """
+    msg = messaging.new_message('eagleState')
+    st = msg.eagleState
+    last = self.planner.last_state
+    st.bsmLeft = bool(car_state.leftBlindspot)
+    st.bsmRight = bool(car_state.rightBlindspot)
+    st.vEgo = float(car_state.vEgo)
+    st.edgeClearance = min(float(last.get("edgeClearance", float("inf"))), 999.0)
+    st.nRadar = len(frame.radar_points)
+    st.nVision = len(frame.detections)
+    st.nAssociated = int(frame.n_associated)
+    st.canError = bool(radar_errors.canError) if radar_errors is not None else False
+    st.radarUnavailable = bool(radar_errors.radarUnavailableTemporary) if radar_errors is not None else False
+    rows = [t for in_gate, t in self._target_rows(frame) if in_gate]
+    tgts = st.init('targets', len(rows))
+    for i, t in enumerate(rows):
+      tgts[i].dRel = t["dRel"]
+      tgts[i].yRel = t["yRel"]
+      tgts[i].vRel = t["vRel"]
+      tgts[i].cls = t["cls"]
+      tgts[i].conf = t["conf"]
+      tgts[i].weight = t["weight"]
+      tgts[i].matched = t["matched"]
+      tgts[i].inGate = True
+      tgts[i].vision = t["vision"]
+      tgts[i].pairId = t["pairId"]
+    msg.valid = True
+    self.pm.send('eagleState', msg)
 
 
 def main() -> None:

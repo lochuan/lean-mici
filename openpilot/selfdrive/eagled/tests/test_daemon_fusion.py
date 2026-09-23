@@ -304,7 +304,7 @@ def test_daemon_gates_valid_on_modelv2_validity():
                        model_valid=False)
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
-  assert len(pm.sent) == 4                    # every-frame publish invariant holds (debug+plan)
+  assert len(pm.sent) == 6                    # 3 streams x 2 frames, every-frame invariant holds
   assert pm.sent[-1][1].valid is False        # controlsd falls back to its own modelV2
 
 
@@ -313,14 +313,14 @@ def test_vision_is_gated_off_when_uncalibrated():
   daemon, pm = _daemon()           # 沿用本文件现有 helper
   daemon.sm.valid["extrinsicsCalibration"] = True
   daemon.sm["extrinsicsCalibration"].calStatus = "uncalibrated"
-  dets = daemon._detect(0.0)
+  dets = daemon.perception.detect(daemon.sm['extrinsicsCalibration'], True, 0.0)
   assert dets == []
   assert daemon.degraded == {"calibration"}
 
 
 def test_daemon_passes_frame_height_to_projection(monkeypatch):
-  """截断框丢弃要在生产路径生效,daemon 必须把非 None 的 frame_height 传下去。"""
-  import openpilot.selfdrive.eagled.eagled as mod
+  """截断框丢弃要在生产路径生效,perception core 必须把非 None 的 frame_height 传下去。"""
+  import openpilot.selfdrive.eagled.perception as mod
   seen = []
   real = mod.project_detections
 
@@ -331,5 +331,5 @@ def test_daemon_passes_frame_height_to_projection(monkeypatch):
   monkeypatch.setattr(mod, "project_detections", spy)
   daemon, _ = _daemon(camera=_FakeCamera(frames=[ROI]),
                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0)]))
-  daemon._detect(0.0)
+  daemon.perception.detect(daemon.sm['extrinsicsCalibration'], True, 0.0)
   assert seen == [760]              # 1344x760 帧高,非 None
