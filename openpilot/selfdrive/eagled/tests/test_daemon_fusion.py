@@ -308,6 +308,49 @@ def test_daemon_gates_valid_on_modelv2_validity():
   assert pm.sent[-1][1].valid is False        # controlsd falls back to its own modelV2
 
 
+def _edge_std_daemon(road_edge_stds):
+  """右侧目标 + 左沿净空 1.0m（够）,仅路沿方差可变 —— 验证 daemon 把
+  modelV2.roadEdgeStds 接进 planner 的 C7 置信门。"""
+  edge = _NS(x=[10.0], y=[-1.0])   # 左沿净空 1.0 >= 0.6,本该放行
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[edge],
+                 meta=_NS(laneChangeState="off"), roadEdgeStds=road_edge_stds)
+  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
+  radar = _NS(points=[_NS(dRel=8.0, yRel=-1.8, vRel=0.0)],
+              errors=_NS(canError=False, radarUnavailableTemporary=False))
+  pm = _FakePubMaster()
+  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams())
+  return daemon, pm
+
+
+def test_daemon_wires_edge_stds_into_planner_gate():
+  # 左沿方差超标 -> 向左偏置被拦（valid=False,携带原始模型曲率）
+  daemon, pm = _edge_std_daemon([0.9, 0.1])
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  assert pm.sent[-1][1].valid is False
+
+  # 方差达标（左沿可信）-> 放行
+  daemon, pm = _edge_std_daemon([0.1, 0.9])
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  assert pm.sent[-1][1].valid is True
+
+
+def test_daemon_without_edge_stds_attribute_keeps_running():
+  # 旧桩形态的 modelV2（无 roadEdgeStds 字段）:getattr 回退 None,行为不变
+  edge = _NS(x=[10.0], y=[-1.0])
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[edge],
+                 meta=_NS(laneChangeState="off"))
+  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
+  radar = _NS(points=[_NS(dRel=8.0, yRel=-1.8, vRel=0.0)],
+              errors=_NS(canError=False, radarUnavailableTemporary=False))
+  pm = _FakePubMaster()
+  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams())
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  assert pm.sent[-1][1].valid is True
+
+
 def test_vision_is_gated_off_when_uncalibrated():
   """未标定时不得产生任何视觉目标,雷达路径不受影响。"""
   daemon, pm = _daemon()           # 沿用本文件现有 helper

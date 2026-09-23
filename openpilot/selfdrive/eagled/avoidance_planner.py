@@ -26,9 +26,9 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.eagled.perception import (  # noqa: F401  (compat re-export)
   RadarPoint, Target, _in_gate, _sign, fuse_targets, radar_point_key,
 )
-from openpilot.selfdrive.eagled.constants import (D_MAX, DT_5HZ, EDGE_CLEAR_MIN, ENTER_HOLD_S, EXIT_HOLD_S,
-                                                  K_GAIN, L_LOOKAHEAD, LOWPASS_TAU_S, MAX_OFFSET_BSM,
-                                                  MAX_OFFSET_FREE, V_EGO_MAX, V_EGO_MIN)
+from openpilot.selfdrive.eagled.constants import (D_MAX, DT_5HZ, EDGE_CLEAR_MIN, EDGE_STD_MAX, ENTER_HOLD_S,
+                                                  EXIT_HOLD_S, K_GAIN, L_LOOKAHEAD, LOWPASS_TAU_S,
+                                                  MAX_OFFSET_BSM, MAX_OFFSET_FREE, V_EGO_MAX, V_EGO_MIN)
 
 
 def _best_target(targets: Iterable[Target], max_offset: float) -> tuple[Target, float] | None:
@@ -128,7 +128,8 @@ class AvoidancePlanner:
              bsm_left: bool = False, bsm_right: bool = False, road_edges: Iterable = (),
              enabled: bool = True, lat_active: bool = True, steering_pressed: bool = False,
              lane_change_active: bool = False,
-             max_offset: float = MAX_OFFSET_FREE, now: float | None = None) -> tuple[float, bool]:
+             max_offset: float = MAX_OFFSET_FREE, now: float | None = None,
+             road_edge_stds=None) -> tuple[float, bool]:
     """Return ``(desired_curvature, valid)`` for one 5Hz frame.
 
     ``valid=False`` means the caller must not trust the plan (publish the frame
@@ -146,6 +147,12 @@ class AvoidancePlanner:
     # Direction-aware road-edge gate: only the edge on the side the bias would
     # move toward can block the manoeuvre (spec §3 roadEdge clearance).
     clearance = edge_clearance(road_edges, side=direction)
+    # C7 置信门:偏置侧路沿方差超标 -> 该侧视为无净空。保守方向:宁可错过
+    # 避让,不可把车往看不清的边沿外推（净空被高估是危险失效方向）。
+    if direction != 0 and road_edge_stds is not None and len(road_edge_stds) > 1:
+      edge_std = float(road_edge_stds[0 if direction > 0 else 1])   # roadEdges[0]=左,[1]=右
+      if edge_std > EDGE_STD_MAX:
+        clearance = 0.0
     bsm_same = (direction > 0 and bsm_left) or (direction < 0 and bsm_right)
     bsm_opposite = (direction > 0 and bsm_right) or (direction < 0 and bsm_left)
     # Effective offset cap this frame: BSM on the opposite side caps it (the

@@ -121,6 +121,7 @@ class EagleDaemon:
       lane_change_active=lane_change_active,
       max_offset=self.max_offset,
       now=now,
+      road_edge_stds=getattr(model_v2, "roadEdgeStds", None),
     )
 
     # Publish order per frame: eagleDebug (raw telemetry) -> eagleState (the

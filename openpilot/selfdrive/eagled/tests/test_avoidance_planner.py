@@ -245,6 +245,48 @@ def test_planner_edge_clearance_gate():
   assert not valid
 
 
+def test_planner_edge_std_gate_blocks_uncertain_avoidance_side():
+  """C7:净空够但偏置侧路沿方差超标 -> 视为无净空,拦下。"""
+  p = _planner()
+  _step(p, 0.0, [_right_target()])
+  # 左沿净空 1.8m >= EDGE_CLEAR_MIN,本该放行;roadEdgeStds[0]=0.9 超标 -> 拦下
+  _, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
+                      road_edges=[_Edge(-1.8)], road_edge_stds=[0.9, 0.1],
+                      now=C.ENTER_HOLD_S + 0.01)
+  assert not valid
+
+
+def test_planner_edge_std_gate_ignores_non_avoidance_side_std():
+  # 向左避让,超标的方差在右沿（非偏置侧）-> 不影响放行
+  p = _planner()
+  _step(p, 0.0, [_right_target()])
+  curv, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
+                         road_edges=[_Edge(-1.8)], road_edge_stds=[0.1, 0.9],
+                         now=C.ENTER_HOLD_S + 0.01)
+  assert valid
+  assert curv > 0.01
+
+
+def test_planner_edge_std_gate_mirrored():
+  # 左侧目标 -> 向右避让 -> 检查 roadEdgeStds[1]（右沿）
+  p = _planner()
+  _step(p, 0.0, [_left_target()])
+  _, valid = p.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0,
+                      road_edges=[_Edge(1.8)], road_edge_stds=[0.1, 0.9],
+                      now=C.ENTER_HOLD_S + 0.01)
+  assert not valid
+
+
+def test_planner_edge_std_gate_none_keeps_historical_behavior():
+  # 旧调用形态（无 stds,全部既有测试/shadow 走的路径）行为不变
+  p = _planner()
+  _step(p, 0.0, [_right_target()])
+  curv, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
+                         road_edges=[_Edge(-1.8)], now=C.ENTER_HOLD_S + 0.01)
+  assert valid
+  assert curv > 0.01
+
+
 def test_planner_clearance_is_direction_aware():
   # A close edge on the NON-avoidance side must not block the manoeuvre.
   p = _planner()
