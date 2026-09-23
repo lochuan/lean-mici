@@ -71,8 +71,8 @@ else
   echo "[ok] tinygrad materialized at $TG_SHA"
 fi
 
-echo "[-] 重编译 avoidanced YOLO pkl（与内置 driving 模型同一管线：每次发布重编译对齐树 pin）T=$SECONDS"
-YOLO_DIR="openpilot/selfdrive/avoidanced/models"
+echo "[-] 重编译 eagled YOLO pkl（与内置 driving 模型同一管线：每次发布重编译对齐树 pin）T=$SECONDS"
+YOLO_DIR="openpilot/selfdrive/eagled/models"
 YOLO_PKL="$SRC/$YOLO_DIR/yolo_tinygrad.pkl"
 YOLO_ONNX="$SRC/$YOLO_DIR/yolo26n-bdd7-fp32-384x640.onnx"
 [ -f "$YOLO_ONNX" ] || { echo "yolo onnx 缺失：$YOLO_ONNX —— lean-master 应 tracked 此文件，前置同步步应已落盘" >&2; exit 1; }

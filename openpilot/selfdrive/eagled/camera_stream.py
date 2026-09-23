@@ -1,4 +1,4 @@
-"""Wide-road camera feed for avoidanced.
+"""Wide-road camera feed for eagled.
 
 Connects to camerad's ``VISION_STREAM_WIDE_ROAD`` over visionipc, converts the
 NV12 buffer to RGB (same path as ``system/camerad/snapshot.py``), crops the
@@ -16,9 +16,9 @@ import numpy as np
 from msgq.visionipc import VisionIpcClient
 from openpilot.cereal.visionipc import VisionStreamType
 from openpilot.common.transformations.camera import DEVICE_CAMERAS
-from openpilot.selfdrive.avoidanced.constants import ROI_MODE, ROI_MODE_NATIVE
-from openpilot.selfdrive.avoidanced.projection import RoiMeta, roi_meta_for
-from openpilot.selfdrive.avoidanced.yolo_detector import INPUT_H, INPUT_W
+from openpilot.selfdrive.eagled.constants import ROI_MODE, ROI_MODE_NATIVE
+from openpilot.selfdrive.eagled.projection import RoiMeta, roi_meta_for
+from openpilot.selfdrive.eagled.yolo_detector import INPUT_H, INPUT_W
 
 CAMERAD_NAME = "camerad"
 CONNECT_RETRY_S = 1.0

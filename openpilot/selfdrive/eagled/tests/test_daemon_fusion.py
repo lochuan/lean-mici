@@ -1,11 +1,11 @@
-"""Daemon-level fusion tests: stub camera + detector wired into AvoidanceDaemon."""
+"""Daemon-level fusion tests: stub camera + detector wired into EagleDaemon."""
 
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.avoidanced import AvoidanceDaemon
-from openpilot.selfdrive.avoidanced.projection import RoiMeta
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.eagled import EagleDaemon
+from openpilot.selfdrive.eagled.projection import RoiMeta
 
 MODEL_CURVATURE = 0.012
 
@@ -116,7 +116,7 @@ def _daemon(*, camera=None, detector=None, camera_factory=None, radar_points=(),
   pm = _FakePubMaster()
   sm = _FakeSubMaster(model_v2, car_state, radar,
                       valid={"modelV2": model_valid, "carState": True, "radarTracks": True})
-  daemon = AvoidanceDaemon(sm=sm, pm=pm, params=_FakeParams(enabled=enabled), **kwargs)
+  daemon = EagleDaemon(sm=sm, pm=pm, params=_FakeParams(enabled=enabled), **kwargs)
   return daemon, pm
 
 
@@ -304,8 +304,51 @@ def test_daemon_gates_valid_on_modelv2_validity():
                        model_valid=False)
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
-  assert len(pm.sent) == 4                    # every-frame publish invariant holds (debug+plan)
+  assert len(pm.sent) == 6                    # 3 streams x 2 frames, every-frame invariant holds
   assert pm.sent[-1][1].valid is False        # controlsd falls back to its own modelV2
+
+
+def _edge_std_daemon(road_edge_stds):
+  """右侧目标 + 左沿净空 1.0m（够）,仅路沿方差可变 —— 验证 daemon 把
+  modelV2.roadEdgeStds 接进 planner 的 C7 置信门。"""
+  edge = _NS(x=[10.0], y=[-1.0])   # 左沿净空 1.0 >= 0.6,本该放行
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[edge],
+                 meta=_NS(laneChangeState="off"), roadEdgeStds=road_edge_stds)
+  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
+  radar = _NS(points=[_NS(dRel=8.0, yRel=-1.8, vRel=0.0)],
+              errors=_NS(canError=False, radarUnavailableTemporary=False))
+  pm = _FakePubMaster()
+  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams())
+  return daemon, pm
+
+
+def test_daemon_wires_edge_stds_into_planner_gate():
+  # 左沿方差超标 -> 向左偏置被拦（valid=False,携带原始模型曲率）
+  daemon, pm = _edge_std_daemon([0.9, 0.1])
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  assert pm.sent[-1][1].valid is False
+
+  # 方差达标（左沿可信）-> 放行
+  daemon, pm = _edge_std_daemon([0.1, 0.9])
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  assert pm.sent[-1][1].valid is True
+
+
+def test_daemon_without_edge_stds_attribute_keeps_running():
+  # 旧桩形态的 modelV2（无 roadEdgeStds 字段）:getattr 回退 None,行为不变
+  edge = _NS(x=[10.0], y=[-1.0])
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[edge],
+                 meta=_NS(laneChangeState="off"))
+  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
+  radar = _NS(points=[_NS(dRel=8.0, yRel=-1.8, vRel=0.0)],
+              errors=_NS(canError=False, radarUnavailableTemporary=False))
+  pm = _FakePubMaster()
+  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams())
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  assert pm.sent[-1][1].valid is True
 
 
 def test_vision_is_gated_off_when_uncalibrated():
@@ -313,14 +356,14 @@ def test_vision_is_gated_off_when_uncalibrated():
   daemon, pm = _daemon()           # 沿用本文件现有 helper
   daemon.sm.valid["extrinsicsCalibration"] = True
   daemon.sm["extrinsicsCalibration"].calStatus = "uncalibrated"
-  dets = daemon._detect(0.0)
+  dets = daemon.perception.detect(daemon.sm['extrinsicsCalibration'], True, 0.0)
   assert dets == []
   assert daemon.degraded == {"calibration"}
 
 
 def test_daemon_passes_frame_height_to_projection(monkeypatch):
-  """截断框丢弃要在生产路径生效,daemon 必须把非 None 的 frame_height 传下去。"""
-  import openpilot.selfdrive.avoidanced.avoidanced as mod
+  """截断框丢弃要在生产路径生效,perception core 必须把非 None 的 frame_height 传下去。"""
+  import openpilot.selfdrive.eagled.perception as mod
   seen = []
   real = mod.project_detections
 
@@ -331,5 +374,5 @@ def test_daemon_passes_frame_height_to_projection(monkeypatch):
   monkeypatch.setattr(mod, "project_detections", spy)
   daemon, _ = _daemon(camera=_FakeCamera(frames=[ROI]),
                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0)]))
-  daemon._detect(0.0)
+  daemon.perception.detect(daemon.sm['extrinsicsCalibration'], True, 0.0)
   assert seen == [760]              # 1344x760 帧高,非 None

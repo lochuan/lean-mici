@@ -13,11 +13,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.calibrate import (BANDS, BEARING_PASS_DEG, CalibPair, MIN_FIT_PAIRS,
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.calibrate import (BANDS, BEARING_PASS_DEG, CalibPair, MIN_FIT_PAIRS,
                                                       banded_residuals, extract_pairs,
                                                       fit_calibrated_offsets, format_constants_block, main)
-from openpilot.selfdrive.avoidanced.projection import project_box_to_vehicle
+from openpilot.selfdrive.eagled.projection import project_box_to_vehicle
 
 # Synthetic wide-camera intrinsics (full frame 1344x760, focal 425.25), same as
 # the shadow/daemon fusion tests.
@@ -252,7 +252,7 @@ def test_extract_pairs_ignores_unpaired_and_degenerate_groups():
 # --- CLI semantics ----------------------------------------------------------------
 
 class _FakeSM:
-  """Yields one pre-built avoidanceDebug frame per update() call."""
+  """Yields one pre-built eagleDebug frame per update() call."""
 
   def __init__(self, frames):
     self._frames = list(frames)
@@ -261,7 +261,7 @@ class _FakeSM:
   def update(self, timeout):
     if self._frames:
       self._current = self._frames.pop(0)
-      self.updated = {"avoidanceDebug": True}
+      self.updated = {"eagleDebug": True}
     else:
       self.updated = {}
 

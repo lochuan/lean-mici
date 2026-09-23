@@ -1222,7 +1222,7 @@ struct LateralManeuverPlan {
   desiredCurvature @0 :Float32;  # 1/m
 }
 
-struct AvoidanceTarget {
+struct EagleTarget {
   dRel @0 :Float32;      # 车头原点
   yRel @1 :Float32;      # 左正右负，与雷达一致
   vRel @2 :Float32;      # 雷达点才有，视觉目标 0
@@ -1233,9 +1233,10 @@ struct AvoidanceTarget {
   inGate @7 :Bool;       # planner 门内（dRel≤40, |yRel|≤2.5）
   vision @8 :Bool;       # true=YOLO 投影目标；false=雷达点
   pairId @9 :UInt16;     # 0=未配对；配对双方共享同 id（递增分配）
+  lane @10 :Int8;        # C2 车道归属：-1 左邻 / 0 本道或重叠 / +1 右邻（分类未参与时 0）
 }
 
-struct AvoidanceDebug {
+struct EagleDebug {
   valid @0 :Bool;        # planner 本帧 valid
   active @1 :Bool;       # 迟滞后避让激活中
   direction @2 :Int8;    # -1 左 / 0 无 / 1 右
@@ -1249,9 +1250,51 @@ struct AvoidanceDebug {
   nVision @10 :UInt16;
   nAssociated @11 :UInt16;
   edgeClearance @12 :Float32;  # 避让侧路沿余量 m；inf 时发 999.0
-  targets @13 :List(AvoidanceTarget);
+  targets @13 :List(EagleTarget);
   canError @14 :Bool;         # radarTracks.errors.canError
   radarUnavailable @15 :Bool; # radarTracks.errors.radarUnavailableTemporary
+  laneLeftValid @16 :Bool;    # C7：本道左边界线置信（probs/stds 过门）
+  laneRightValid @17 :Bool;   # C7：本道右边界线置信
+  budgetLeft @18 :Float32;     # C9：左侧横向预算 m；999.0 = 无侧向约束
+  budgetRight @19 :Float32;    # C9：右侧横向预算 m；999.0 = 无侧向约束
+  changeClearLeft @20 :Bool;   # C9+：目标道（左）变道清空（时间投影放行远快侧车）
+  changeClearRight @21 :Bool;  # C9+：目标道（右）变道清空
+}
+
+struct EagleState {
+  # eagled 感知层态势骨架：本帧融合目标与侧向输入快照。骨架期与 EagleDebug
+  # 同源（复用 EagleTarget）；后续能力（车道归属 C2、每侧最近目标/预算 C3/C9、
+  # 对向检测 C4、vLat C5、几何质量 C7）只加字段——capnp 加字段向后兼容。
+  # 消费者：desire_helper(modeld, 变道门控)、lanlink UI；lateralManeuverPlan
+  # 仍是避让执行输出，与本消息分工：eagleState=看，lateralManeuverPlan=动。
+  targets @0 :List(EagleTarget);  # in-gate 融合目标
+  bsmLeft @1 :Bool;
+  bsmRight @2 :Bool;
+  vEgo @3 :Float32;
+  edgeClearance @4 :Float32;      # 避让侧路沿净空 m；inf 时发 999.0
+  nRadar @5 :UInt16;
+  nVision @6 :UInt16;
+  nAssociated @7 :UInt16;
+  canError @8 :Bool;              # radarTracks.errors.canError
+  radarUnavailable @9 :Bool;      # radarTracks.errors.radarUnavailableTemporary
+  laneLeftValid @10 :Bool;        # C7：本道左边界线置信（tier 1 可用性）
+  laneRightValid @11 :Bool;       # C7：本道右边界线置信
+  sideLeadLeft @12 :EagleSideLead;   # C9：左侧最紧约束目标（valid=false 即无）
+  sideLeadRight @13 :EagleSideLead;  # C9：右侧最紧约束目标
+  budgetLeft @14 :Float32;        # C9：左侧横向预算 m；999.0 = 无侧向约束
+  budgetRight @15 :Float32;       # C9：右侧横向预算 m；999.0 = 无侧向约束
+  changeClearLeft @16 :Bool;      # C9+：目标道（左）变道清空（时间投影放行远快侧车）
+  changeClearRight @17 :Bool;     # C9+：目标道（右）变道清空
+}
+
+struct EagleSideLead {
+  # C9：折算出该侧预算的最紧约束目标。BSM 强制预算 0 时无目标可指（布尔报警）。
+  valid @0 :Bool;
+  dRel @1 :Float32;     # m
+  yRel @2 :Float32;     # m，左正带符号
+  vRel @3 :Float32;     # m/s（视觉目标 0）
+  edgeDist @4 :Float32; # 近缘横向距离 m = |yRel| - 类别半宽
+  cls @5 :Text;         # 视觉类别；纯雷达未关联为 ""
 }
 
 struct LongitudinalPlan @0xe00b5b3eba12876c {
@@ -2640,7 +2683,8 @@ struct Event {
     bookmarkButton @148 :UserBookmark;
 
     lateralManeuverPlan @150 :LateralManeuverPlan;
-    avoidanceDebug @153 :AvoidanceDebug;
+    eagleDebug @153 :EagleDebug;
+    eagleState @154 :EagleState;
 
     # *********** debug ***********
     testJoystick @52 :Joystick;

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /** 避让监测鸟瞰图：单源轮询 /api/avoidance（500ms），雷达点与视觉目标
- *  都来自 avoidanceDebug targets（vision=false 是雷达点，vision=true 是
+ *  都来自 eagleDebug targets（vision=false 是雷达点，vision=true 是
  *  YOLO 投影目标），planner 叠加（yDes 箭头 + 幽影车道）。
  *
  * 方向语义（review 裁定）：yDes > 0 = 向左偏（与 yRel 左正同号），
  * 箭头按 yDes 符号画；direction = 障碍物侧（+1 = 障碍在右），只做侧别
  * 标识，不画箭头。
  *
- * 降级链：avoidance 快照 stale（avoidanced 未跑/未开）→ "等待数据"占位；
+ * 降级链：avoidance 快照 stale（eagled 未跑/未开）→ "等待数据"占位；
  * CAN 错误 / 雷达暂不可用徽章来自快照透传的 radarTracks.errors。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
@@ -17,7 +17,9 @@ import {
   CLS_FILL,
   CLS_LABEL,
   avoidanceStatus,
+  fmtBudget,
   fmtEdgeClearance,
+  laneLabel,
   obstacleSide,
   offsetArrow,
   pairMembers,
@@ -157,7 +159,7 @@ const counts = computed(() => ({
 }));
 
 // 视觉路径被标定门关掉时，V 会恒为 0。不解释的话这看起来像视觉坏了，而实际
-// 上是 avoidanced 有意关掉的：地平面投影的距离对 pitch 极度敏感（40m 处 0.5°
+// 上是 eagled 有意关掉的：地平面投影的距离对 pitch 极度敏感（40m 处 0.5°
 // 误差 = 41%），用未标定的 pitch 会直接生成虚假偏移。
 const visionGated = computed(() => Boolean(av.value?.visionGated) && !avStale.value);
 
@@ -189,6 +191,16 @@ const edgeClearance = computed(() => fmtEdgeClearance(planner.value?.edgeClearan
 
 const bsmLeft = computed(() => Boolean(planner.value?.bsmLeft));
 const bsmRight = computed(() => Boolean(planner.value?.bsmRight));
+
+// C2/C9 新字段:旧后端不发时 undefined,一律按"未知"降级显示
+const laneLeftValid = computed(() => !avStale.value && av.value?.laneLeftValid === true);
+const laneRightValid = computed(() => !avStale.value && av.value?.laneRightValid === true);
+
+const budgetLeft = computed(() => (avStale.value ? undefined : av.value?.budgetLeft));
+const budgetRight = computed(() => (avStale.value ? undefined : av.value?.budgetRight));
+
+const changeClearLeft = computed(() => (!avStale.value ? av.value?.changeClearLeft : undefined));
+const changeClearRight = computed(() => (!avStale.value ? av.value?.changeClearRight : undefined));
 
 const sideLabel = computed(() => obstacleSide(av.value?.direction));
 
@@ -292,7 +304,7 @@ const gridX = (y: number) => lateralX(y, VB);
           class="fill-sl-text-3 stroke-sl-bg"
           stroke-width="1.5"
         >
-          <title>雷达点  dRel {{ p.dRel.toFixed(1) }}m  yRel {{ p.yRel.toFixed(2) }}m  vRel {{ p.vRel.toFixed(2) }}m/s</title>
+          <title>雷达点  dRel {{ p.dRel.toFixed(1) }}m  yRel {{ p.yRel.toFixed(2) }}m  vRel {{ p.vRel.toFixed(2) }}m/s  {{ laneLabel(p.lane) }}</title>
         </circle>
       </g>
 
@@ -309,7 +321,7 @@ const gridX = (y: number) => lateralX(y, VB);
             :x="v.xy.x - 9" :y="v.xy.y - 9" width="18" height="18" rx="4"
             class="fill-none stroke-sl-text-1" stroke-width="1"
           />
-          <title>{{ CLS_LABEL[v.cls] }}  conf {{ (v.t.conf * 100).toFixed(0) }}%  dRel {{ v.t.dRel.toFixed(1) }}m  yRel {{ v.t.yRel.toFixed(2) }}m</title>
+          <title>{{ CLS_LABEL[v.cls] }}  conf {{ (v.t.conf * 100).toFixed(0) }}%  dRel {{ v.t.dRel.toFixed(1) }}m  yRel {{ v.t.yRel.toFixed(2) }}m  {{ laneLabel(v.t.lane) }}</title>
         </g>
       </g>
 
@@ -332,7 +344,7 @@ const gridX = (y: number) => lateralX(y, VB);
         </text>
       </g>
 
-      <!-- 无数据占位：avoidanced 未运行或未收到 avoidanceDebug -->
+      <!-- 无数据占位：eagled 未运行或未收到 eagleDebug -->
       <text
         v-if="avStale"
         :x="VB.width / 2"
@@ -341,7 +353,7 @@ const gridX = (y: number) => lateralX(y, VB);
         class="fill-sl-text-3"
         font-size="13"
       >
-        等待数据…（点火且 avoidanced 运行后会发布 avoidanceDebug）
+        等待数据…（点火且 eagled 运行后会发布 eagleDebug）
       </text>
     </svg>
 
@@ -359,6 +371,23 @@ const gridX = (y: number) => lateralX(y, VB);
       <Badge v-if="visionGated" kind="warn" :title="visionGatedWhy">视觉已关</Badge>
       <span>vEgo <span class="sl-tabular">{{ vEgoKmh }} km/h</span></span>
       <span>路沿余量 <span class="sl-tabular">{{ edgeClearance }}</span></span>
+      <span
+        class="text-sl-text-3"
+        title="本道边界线置信（laneLineProbs/Stds 过门）:该侧可信时目标按车道线相对判定,不可信时回退路径相对"
+      >
+        车道线
+        <Badge :kind="laneLeftValid ? 'accent' : 'muted'">L</Badge>
+        <Badge :kind="laneRightValid ? 'accent' : 'muted'">R</Badge>
+      </span>
+      <span
+        title="每侧横向预算:BSM 报警为 0,侧向目标按车身间隙折算;避让偏置 ≤ 偏置侧预算"
+      >预算 <span class="sl-tabular">L {{ fmtBudget(budgetLeft) }}</span> · <span class="sl-tabular">R {{ fmtBudget(budgetRight) }}</span></span>
+      <span
+        title="目标道变道清空（eagled 时间投影:近区/速度未知/投影冲突即拦,远而快的侧车放行）"
+      >变道
+        <Badge v-if="changeClearLeft !== undefined" :kind="changeClearLeft ? 'accent' : 'warn'">L {{ changeClearLeft ? "通" : "拦" }}</Badge>
+        <Badge v-if="changeClearRight !== undefined" :kind="changeClearRight ? 'accent' : 'warn'">R {{ changeClearRight ? "通" : "拦" }}</Badge>
+      </span>
     </div>
 
     <!-- 视觉被标定门关掉时解释 V=0：否则「视觉一直是 0」看起来像坏了 -->
@@ -372,7 +401,7 @@ const gridX = (y: number) => lateralX(y, VB);
     <!-- 标定/启用入口已移到 设置 → 转向 → 横向避让:未完成在线标定时开关
          在那里置灰,进度与原因同屏可见,不再两头找 -->
     <div v-if="avStale" class="mt-2 text-[12px] leading-relaxed text-sl-text-3">
-      avoidanced 未运行——先在 设置 → 转向 → 横向避让 完成相机在线标定并开启
+      eagled 未运行——先在 设置 → 转向 → 横向避让 完成相机在线标定并开启
       避让（行驶中自动收敛，无需手动操作），这里才有配对数据。
       标定进度与安装偏移精修也都在那一栏。
     </div>

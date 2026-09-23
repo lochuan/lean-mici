@@ -3,7 +3,7 @@
  *  供 AvoidanceView 复用——投影方向（左正右负、前方为正）和钳制行为是
  *  最容易错的地方，vitest 直接锁死。
  */
-import type { AvoidanceTarget } from "./schema";
+import type { EagleTarget } from "./schema";
 
 /** 鸟瞰图视口：车头朝上（屏幕上方），ego 位于底部中央 */
 export interface RadarViewBox {
@@ -28,7 +28,7 @@ export interface RadarViewBox {
  * 映射为屏幕左。绘图区左右各留 padX，圆点不会压在边框上。越界的点
  * 钳到量程边缘——比直接丢弃好，能看到量程外还有东西。
  */
-export function projectPoint(p: Pick<AvoidanceTarget, "dRel" | "yRel">, vb: RadarViewBox): { x: number; y: number } {
+export function projectPoint(p: Pick<EagleTarget, "dRel" | "yRel">, vb: RadarViewBox): { x: number; y: number } {
   const plotLeft = vb.padX;
   const plotRight = vb.width - vb.padX;
   const usableH = vb.height - vb.padTop - vb.padBottom;

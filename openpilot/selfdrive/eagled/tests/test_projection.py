@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.projection import (project_box_to_vehicle, project_detections,
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.projection import (project_box_to_vehicle, project_detections,
                                                        roi_meta_for, roi_to_full)
 
 # Synthetic intrinsics from the brief: fx=fy=1000, cx=320, cy=192, camera 1.2 m up, pitch 0.
@@ -150,8 +150,8 @@ def test_project_detections_empty():
 # --- ROI modes: native 1:1 window + RoiMeta.offset_u (task 1 brief) -------------
 
 import math
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.projection import (RoiMeta, project_box_to_vehicle,
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.projection import (RoiMeta, project_box_to_vehicle,
                                                        roi_meta_for, roi_to_full)
 
 W, H, FX, FY, CX, CY = 1344.0, 760.0, 425.25, 425.25, 672.0, 380.0
@@ -217,7 +217,7 @@ def test_geometry_closes_the_loop_in_both_roi_modes():
 
 # --- live extrinsics calibration (task 2 brief) ---------------------------------
 
-from openpilot.selfdrive.avoidanced.projection import (CalibratedGeometry,
+from openpilot.selfdrive.eagled.projection import (CalibratedGeometry,
                                                        geometry_from_calibration,
                                                        horizon_row_for)
 

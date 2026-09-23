@@ -3,7 +3,7 @@ import threading
 
 import pytest
 
-from openpilot.selfdrive.avoidanced.calibrate import CalibPair
+from openpilot.selfdrive.eagled.calibrate import CalibPair
 from openpilot.system.lanlinkd.calibration import CalibrationController
 
 

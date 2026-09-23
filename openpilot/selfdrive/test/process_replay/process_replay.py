@@ -482,7 +482,7 @@ CONFIGS = [
     should_recv_callback=MessageBasedRcvCallback("modelV2"),
   ),
   ProcessConfig(
-    proc_name="avoidanced",
+    proc_name="eagled",
     pubs=["modelV2", "carState", "radarTracks"],
     subs=["lateralManeuverPlan"],
     ignore=["logMonoTime"],

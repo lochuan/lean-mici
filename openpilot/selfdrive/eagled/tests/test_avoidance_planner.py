@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.avoidance_planner import (AvoidancePlanner, Target, edge_clearance,
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.avoidance_planner import (AvoidancePlanner, Target, edge_clearance,
                                                               fuse_targets, plan)
 
 
@@ -30,30 +30,61 @@ def _left_target(dRel=5.0, w=C.VRU_WEIGHT, conf=1.0):
 
 # --- brief Step 1 (verbatim) -------------------------------------------------
 
-def test_bsm_gates_offset():
-  assert plan(targets=[_right_target()], max_offset=0.35, bsm_opposite=True) <= 0.12 + 1e-6
-  assert plan(targets=[_right_target()], max_offset=0.35, bsm_opposite=False) <= 0.35 + 1e-6
+def test_budget_gates_offset():
+  # 右侧目标 -> 向左偏 -> 左预算生效;plan() 本身预算盲,门在 update()
+  p = _planner()
+  _step(p, 0.0, [_right_target()], budget_left=0.2)
+  curv, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()], budget_left=0.2)
+  assert valid
+  # 首帧低通缩放:alpha = dt/(tau+dt),偏置 = alpha * min(0.2, desire)
+  alpha = C.DT_5HZ / (C.LOWPASS_TAU_S + C.DT_5HZ)
+  assert curv == pytest.approx(0.01 + 2.0 * alpha * 0.2 / C.L_LOOKAHEAD ** 2)
 
 
 def test_no_target_no_bias():
   assert plan(targets=[]) == 0.0
 
 
-# --- BSM gating --------------------------------------------------------------
+# --- budget gating (C9: 取代旧 bsm_same/bsm_opposite 离散门) --------------------
 
-def test_bsm_gate_is_not_vacuous():
-  # Without the gate a close target saturates max_offset; the gate must cap it.
-  assert plan(targets=[_right_target()], max_offset=0.35, bsm_opposite=False) == pytest.approx(0.35)
-  assert plan(targets=[_right_target()], max_offset=0.35, bsm_opposite=True) == pytest.approx(C.MAX_OFFSET_BSM)
+def test_budget_zero_side_forbids_bias():
+  # 旧 bsm_same 语义:偏置侧预算 0 -> 禁止偏置(滞回仍追踪目标,valid 保持)
+  p = _planner()
+  _step(p, 0.0, [_right_target()], budget_left=0.0)
+  curv, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()], budget_left=0.0)
+  assert valid                      # 目标仍在,计划有效
+  assert curv == pytest.approx(0.01)  # 但偏置为 0:预算吃光了上限
 
 
-def test_bsm_same_side_forbids_bias():
-  assert plan(targets=[_right_target()], bsm_same=True) == 0.0
+def test_budget_zero_side_keeps_hysteresis_alive():
+  # 预算 0 不得重置滞回:BSM 闪烁只消掉偏置本身,清掉后立即恢复满幅,
+  # 不再经过 1.0s 退出 + 0.5s 进入的死窗。
+  p = _planner()
+  _step(p, 0.0, [_right_target()])
+  _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()])
+  for i in range(10):   # 预算 0 持续 2s(超过 EXIT_HOLD_S)
+    _step(p, C.ENTER_HOLD_S + 0.02 + i * C.DT_5HZ, [_right_target()], budget_left=0.0)
+  full = _step(p, 3.0, [_right_target()], budget_left=C.BUDGET_UNCONSTRAINED)
+  assert full[1] is True
+  assert full[0] > 0.01   # 没有滞回重置,偏置立即回来
 
 
-def test_bsm_both_sides_zero():
-  # Process maps "both BSM active" to bsm_same on whichever side it would avoid.
-  assert plan(targets=[_right_target()], bsm_same=True, bsm_opposite=True) == 0.0
+def test_budget_none_keeps_historical_behavior():
+  # 旧调用形态（不传预算,全部既有测试/shadow 代理路径）:不受约束
+  p = _planner()
+  _step(p, 0.0, [_right_target()])
+  curv, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()])
+  assert valid and curv > 0.01
+
+
+def test_budget_ignores_non_bias_side():
+  # 向左偏置只吃左预算;右预算 0 不影响（旧 bsm_opposite 0.12 限幅废除:
+  # 远离侧车是物理安全的,向其移动的间隙才是预算管的事）
+  p = _planner()
+  _step(p, 0.0, [_right_target()])
+  curv, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()], budget_right=0.0)
+  assert valid
+  assert curv > 0.01
 
 
 # --- sign / magnitude --------------------------------------------------------
@@ -74,7 +105,11 @@ def test_proximity_ramp_prefers_near_target():
 
 
 def test_lateral_gate_drops_out_of_lane_target():
-  assert plan(targets=[Target(side=1, dRel=5.0, yRel=C.Y_GATE + 0.5, w=C.VRU_WEIGHT, conf=1.0)]) == 0.0
+  # 门控判决随目标走（gate_target 三级裁决,fuse_targets 打 in_gate）:
+  # planner 信任该判决,不再重算几何门 —— 否则会用固定带和 lane-relative
+  # 模式悄悄打架。带外目标由 in_gate=False 表达。
+  assert plan(targets=[Target(side=1, dRel=5.0, yRel=C.Y_GATE + 0.5, w=C.VRU_WEIGHT, conf=1.0,
+                             in_gate=False)]) == 0.0
 
 
 def test_vru_weight_exceeds_vehicle_weight():
@@ -179,8 +214,9 @@ def test_edge_clearance_min_over_lookahead():
 
 
 def test_edge_clearance_side_filter():
-  assert edge_clearance([_Edge(1.8, -0.4)], side=1) == pytest.approx(1.8)   # left only
-  assert edge_clearance([_Edge(1.8, -0.4)], side=-1) == pytest.approx(0.4)  # right only
+  # modelV2 y is right-positive (ldw.py/relc.py 三源验证): 左边 = 负 y。
+  assert edge_clearance([_Edge(-1.8, 0.4)], side=1) == pytest.approx(1.8)   # bias 左 -> 只看左边缘
+  assert edge_clearance([_Edge(-1.8, 0.4)], side=-1) == pytest.approx(0.4)  # bias 右 -> 只看右边缘
 
 
 # --- AvoidancePlanner gating / temporal behaviour ----------------------------
@@ -234,29 +270,78 @@ def test_planner_high_speed_invalid():
 def test_planner_edge_clearance_gate():
   p = _planner()
   _step(p, 0.0, [_right_target()])
-  # right target -> avoid left; a close LEFT edge (the avoidance side) blocks the plan
+  # 右侧目标 -> 向左避让；贴近的左路沿（model 帧负 y, roadEdges[0]）必须拦下计划
   _, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
-                      road_edges=[_Edge(0.5)], now=C.ENTER_HOLD_S + 0.01)
+                      road_edges=[_Edge(-0.5)], now=C.ENTER_HOLD_S + 0.01)
   assert not valid
+
+
+def test_planner_edge_std_gate_blocks_uncertain_avoidance_side():
+  """C7:净空够但偏置侧路沿方差超标 -> 视为无净空,拦下。"""
+  p = _planner()
+  _step(p, 0.0, [_right_target()])
+  # 左沿净空 1.8m >= EDGE_CLEAR_MIN,本该放行;roadEdgeStds[0]=0.9 超标 -> 拦下
+  _, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
+                      road_edges=[_Edge(-1.8)], road_edge_stds=[0.9, 0.1],
+                      now=C.ENTER_HOLD_S + 0.01)
+  assert not valid
+
+
+def test_planner_edge_std_gate_ignores_non_avoidance_side_std():
+  # 向左避让,超标的方差在右沿（非偏置侧）-> 不影响放行
+  p = _planner()
+  _step(p, 0.0, [_right_target()])
+  curv, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
+                         road_edges=[_Edge(-1.8)], road_edge_stds=[0.1, 0.9],
+                         now=C.ENTER_HOLD_S + 0.01)
+  assert valid
+  assert curv > 0.01
+
+
+def test_planner_edge_std_gate_mirrored():
+  # 左侧目标 -> 向右避让 -> 检查 roadEdgeStds[1]（右沿）
+  p = _planner()
+  _step(p, 0.0, [_left_target()])
+  _, valid = p.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0,
+                      road_edges=[_Edge(1.8)], road_edge_stds=[0.1, 0.9],
+                      now=C.ENTER_HOLD_S + 0.01)
+  assert not valid
+
+
+def test_planner_edge_std_gate_none_keeps_historical_behavior():
+  # 旧调用形态（无 stds,全部既有测试/shadow 走的路径）行为不变
+  p = _planner()
+  _step(p, 0.0, [_right_target()])
+  curv, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
+                         road_edges=[_Edge(-1.8)], now=C.ENTER_HOLD_S + 0.01)
+  assert valid
+  assert curv > 0.01
 
 
 def test_planner_clearance_is_direction_aware():
   # A close edge on the NON-avoidance side must not block the manoeuvre.
   p = _planner()
-  _step(p, 0.0, [_right_target()])            # avoid left -> only left edges gate
+  _step(p, 0.0, [_right_target()])            # avoid left -> only left (y<0) edges gate
   curv, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
-                         road_edges=[_Edge(-0.5)], now=C.ENTER_HOLD_S + 0.01)
+                         road_edges=[_Edge(0.5)], now=C.ENTER_HOLD_S + 0.01)
   assert valid
   assert curv > 0.01
 
-  # mirrored: left target -> avoid right -> only right edges gate; the bias now
-  # pushes curvature below the model value (negative y_des).
+  # mirrored: left target -> avoid right -> only right (y>0) edges gate; the
+  # bias pushes curvature below the model value (negative y_des).
   q = _planner()
-  q.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0, road_edges=[_Edge(0.5)], now=0.0)
+  q.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0, road_edges=[_Edge(-0.5)], now=0.0)
   curv, valid = q.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0,
-                         road_edges=[_Edge(0.5)], now=C.ENTER_HOLD_S + 0.01)
+                         road_edges=[_Edge(-0.5)], now=C.ENTER_HOLD_S + 0.01)
   assert valid
   assert curv < 0.01
+
+  # and the mirror's blocking direction: close right edge (y>0) blocks.
+  r = _planner()
+  r.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0, road_edges=[_Edge(0.5)], now=0.0)
+  _, valid = r.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0,
+                       road_edges=[_Edge(0.5)], now=C.ENTER_HOLD_S + 0.01)
+  assert not valid
 
 
 def test_planner_takeover_invalid():
@@ -285,38 +370,39 @@ def test_planner_invalid_falls_back_to_model():
   assert curv == pytest.approx(0.01)
 
 
-def test_planner_bsm_same_side_forbids_bias():
-  # target on the right -> avoid left; a left BSM sits on the avoidance side.
+def test_planner_bias_side_budget_zero_forbids_bias():
+  # 右侧目标 -> 向左偏;左预算 0（BSM 报警映射为预算 0）= 偏置侧被禁止
   p = _planner()
-  _step(p, 0.0, [_right_target()], bsm_left=True)
-  curv, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()], bsm_left=True)
+  _step(p, 0.0, [_right_target()], budget_left=0.0)
+  curv, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()], budget_left=0.0)
   assert valid
   assert curv == pytest.approx(0.01)
 
 
-def test_planner_bsm_opposite_side_caps_bias():
-  # a right BSM is opposite the left avoidance -> bias capped at the BSM档.
+def test_planner_far_side_budget_does_not_cap():
+  # 右预算 0 不限制向左偏（远离侧）;物理:向其移动的间隙才是预算管的事
   p = _planner()
-  _step(p, 0.0, [_right_target()], bsm_right=True)
-  curv, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()], bsm_right=True)
+  _step(p, 0.0, [_right_target()], budget_right=0.0)
+  curv, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()], budget_right=0.0)
   assert valid
-  raw_bias = 2.0 * C.MAX_OFFSET_BSM / C.L_LOOKAHEAD ** 2
+  raw_bias = 2.0 * C.MAX_OFFSET_FREE / C.L_LOOKAHEAD ** 2
   assert 0.01 < curv < 0.01 + raw_bias
 
 
-def test_planner_both_bsm_sides_zero():
+def test_planner_both_budgets_zero_when_bias_wanted():
+  # 双侧预算 0:偏置侧的 0 生效 -> 无偏置（滞回按目标存在性,仍 valid）
   p = _planner()
-  _step(p, 0.0, [_right_target()], bsm_left=True, bsm_right=True)
-  curv, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()], bsm_left=True, bsm_right=True)
+  _step(p, 0.0, [_right_target()], budget_left=0.0, budget_right=0.0)
+  curv, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()], budget_left=0.0, budget_right=0.0)
   assert valid
   assert curv == pytest.approx(0.01)
 
 
-# --- avoidanced process module ----------------------------------------------
+# --- eagled process module ----------------------------------------------
 
-def test_avoidanced_module_imports():
-  from openpilot.selfdrive.avoidanced.avoidanced import AvoidanceDaemon
-  assert hasattr(AvoidanceDaemon, "update")
+def test_eagled_module_imports():
+  from openpilot.selfdrive.eagled.eagled import EagleDaemon
+  assert hasattr(EagleDaemon, "update")
 
 
 class _FakePubMaster:
@@ -364,7 +450,7 @@ MODEL_CURVATURE = 0.012
 
 
 def _make_daemon(enabled=True):
-  from openpilot.selfdrive.avoidanced.avoidanced import AvoidanceDaemon
+  from openpilot.selfdrive.eagled.eagled import EagleDaemon
   model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
                  meta=_NS(laneChangeState="off"))
   car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
@@ -372,7 +458,7 @@ def _make_daemon(enabled=True):
   # gate for the planner to activate.
   radar = _NS(points=[_RadarPoint(8.0, -1.8)], errors=_NS(canError=False, radarUnavailableTemporary=False))
   pm = _FakePubMaster()
-  daemon = AvoidanceDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=enabled))
+  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=enabled))
   return daemon, pm
 
 
@@ -381,14 +467,13 @@ def test_daemon_sends_valid_flag_every_frame():
   daemon.update(0.0)                    # enter hysteresis not yet satisfied -> invalid
   daemon.update(C.ENTER_HOLD_S + 0.01)  # active -> valid
 
-  assert len(pm.sent) == 4  # avoidanceDebug (2) + lateralManeuverPlan (2), one debug per frame
-  service0, msg0 = pm.sent[1]
-  service1, msg1 = pm.sent[3]
-  assert service0 == service1 == "lateralManeuverPlan"
-  assert msg0.valid is False
-  assert msg0.lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
-  assert msg1.valid is True
-  assert msg1.lateralManeuverPlan.desiredCurvature > MODEL_CURVATURE
+  assert len(pm.sent) == 6  # eagleDebug (2) + eagleState (2) + lateralManeuverPlan (2)
+  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
+  assert len(plans) == 2
+  assert plans[0].valid is False
+  assert plans[0].lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
+  assert plans[1].valid is True
+  assert plans[1].lateralManeuverPlan.desiredCurvature > MODEL_CURVATURE
 
 
 def test_daemon_invalid_frame_carries_model_curvature():
@@ -396,62 +481,63 @@ def test_daemon_invalid_frame_carries_model_curvature():
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
 
-  assert len(pm.sent) == 4  # avoidanceDebug (2) + lateralManeuverPlan (2)
-  for _, msg in pm.sent[1::2]:
+  assert len(pm.sent) == 6  # eagleDebug (2) + eagleState (2) + lateralManeuverPlan (2)
+  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
+  for msg in plans:
     assert msg.valid is False
     assert msg.lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
 
 
 # --- regression: BSM cap must not flip the avoidance side --------------------
 
-def test_bsm_cap_does_not_reselect_target_on_the_other_side():
+def test_cap_does_not_reselect_target_on_the_other_side():
   """Target ranking must not depend on max_offset.
 
-  Ranking by the capped magnitude let BSM's squeeze to MAX_OFFSET_BSM saturate
-  several in-gate targets at the same value; the strict `>` tie-break then kept
-  whichever came first and the chosen side could flip. update() derives the BSM
-  gates from the uncapped direction, so a flip commanded a bias toward a side
-  whose blind spot was never checked.
+  Ranking by the capped magnitude let a squeezed cap saturate several in-gate
+  targets at the same value; the strict `>` tie-break then kept whichever came
+  first and the chosen side could flip. update() derives the direction from
+  the uncapped ranking, so a flip would command a bias toward a side whose
+  budget was never checked.
   """
   veh_right = Target(side=-1, dRel=10.0, yRel=-2.0, w=C.VEHICLE_WEIGHT, conf=1.0)
   vru_left = Target(side=1, dRel=20.0, yRel=2.0, w=C.VRU_WEIGHT, conf=1.0)
-  targets = [veh_right, vru_left]  # fuse_targets emits radar points first
+  targets = [veh_right, vru_left]  # fuse_objects emits radar points first
 
   # both saturate once capped, so only the ranking key keeps the side stable
   uncapped = plan(targets, max_offset=C.MAX_OFFSET_FREE)
-  capped = plan(targets, max_offset=C.MAX_OFFSET_BSM)
+  capped = plan(targets, max_offset=0.1)
   assert uncapped < 0.0, "vru_left has the highest desire -> avoid right"
   assert capped < 0.0, "capping must not move the bias to the other side"
-  assert capped == pytest.approx(-C.MAX_OFFSET_BSM)
+  assert capped == pytest.approx(-0.1)
 
 
-def test_planner_never_biases_into_an_occupied_blind_spot():
-  veh_right = Target(side=-1, dRel=10.0, yRel=-2.0, w=C.VEHICLE_WEIGHT, conf=1.0)
-  vru_left = Target(side=1, dRel=20.0, yRel=2.0, w=C.VRU_WEIGHT, conf=1.0)
-  targets = [veh_right, vru_left]
+def test_planner_never_biases_into_a_zero_budget_side():
+  # 最优目标在右（VRU 近距）-> 向左偏;左预算 0（BSM 报警映射）:
+  # 绝不向预算 0 的一侧偏置
+  vru_right = Target(side=-1, dRel=10.0, yRel=-2.0, w=C.VRU_WEIGHT, conf=1.0)
+  veh_left = Target(side=1, dRel=20.0, yRel=2.0, w=C.VEHICLE_WEIGHT, conf=1.0)
+  targets = [vru_right, veh_left]
 
   p = _planner()
   for i in range(20):
-    _step(p, i * C.DT_5HZ, targets, v_ego=25.0, bsm_left=True)
+    _step(p, i * C.DT_5HZ, targets, v_ego=25.0, budget_left=0.0)
   st = p.last_state
-  # left blind spot is occupied -> the bias must not be positive (leftward)
-  assert st["bias"] <= 0.0, f"biased {st['bias']:+.3f}m into an occupied left blind spot"
-  # telemetry must agree with the action, otherwise shadow logs hide the fault
-  assert st["direction"] < 0 and st["yDes"] <= 0.0
+  assert st["bias"] <= 0.0, f"biased {st['bias']:+.3f}m into a zero-budget left side"
+  assert st["direction"] > 0 and st["yDes"] <= 0.0   # 想左偏但预算吃光 -> 0 偏置
 
 
 def test_reported_direction_matches_commanded_bias_sign():
-  """last_state['direction'] feeds avoidanceDebug; it must match the bias."""
-  for bsm in ({}, {"bsm_left": True}, {"bsm_right": True}):
+  """last_state['direction'] feeds eagleDebug; it must match the bias."""
+  for budgets in ({}, {"budget_left": 0.0}, {"budget_right": 0.0}):
     for targets in ([_right_target()], [_left_target()],
                     [Target(side=-1, dRel=10.0, yRel=-2.0, w=C.VEHICLE_WEIGHT, conf=1.0),
                      Target(side=1, dRel=20.0, yRel=2.0, w=C.VRU_WEIGHT, conf=1.0)]):
       p = _planner()
       for i in range(20):
-        _step(p, i * C.DT_5HZ, targets, v_ego=25.0, **bsm)
+        _step(p, i * C.DT_5HZ, targets, v_ego=25.0, **budgets)
       st = p.last_state
       if abs(st["yDes"]) > 1e-9:
-        assert st["direction"] * st["yDes"] > 0.0, f"direction/yDes disagree for {bsm} {targets}"
+        assert st["direction"] * st["yDes"] > 0.0, f"direction/yDes disagree for {budgets} {targets}"
 
 
 def test_zero_max_offset_produces_no_manoeuvre():

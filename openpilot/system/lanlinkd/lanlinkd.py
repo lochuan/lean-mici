@@ -239,7 +239,7 @@ class LanlinkApp:
   async def avoidance_get(self, request: Request) -> HTTPResponse:
     return json_response(self.avoidance.snapshot())
 
-  # ---- avoidance calibration session (collect/fit avoidanced projection constants) ----
+  # ---- avoidance calibration session (collect/fit eagled projection constants) ----
 
   async def calibration_start(self, request: Request) -> HTTPResponse:
     if not self.calibration.start():

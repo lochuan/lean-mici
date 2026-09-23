@@ -1,6 +1,6 @@
 import pytest
 
-from openpilot.selfdrive.avoidanced.avoidance_planner import plan
+from openpilot.selfdrive.eagled.avoidance_planner import plan
 from openpilot.selfdrive.controls.controlsd import fuse_curvature
 
 

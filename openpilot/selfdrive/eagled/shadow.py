@@ -1,4 +1,4 @@
-"""Offline P0 shadow evaluation for avoidanced.
+"""Offline P0 shadow evaluation for eagled.
 
 This harness replays the avoidance planner over a route log **without ever
 publishing** ``lateralManeuverPlan``: it is the "record only, don't send" step
@@ -28,13 +28,13 @@ What it records (per 5Hz frame, plus a summary):
   (low-pass lag); on device the same metric over telemetry curvature is the
   full vehicle closure. See the ``execution_closure`` summary field.
 
-The real P0 run is the avoidanced daemon on the device (real camera + YOLO pkl)
+The real P0 run is the eagled daemon on the device (real camera + YOLO pkl)
 with metrics collected over lanlink/CSV; this replay tool grades offline planner
 metrics on route logs.
 
 Usage::
 
-    python -m openpilot.selfdrive.avoidanced.shadow <route> --out /tmp/shadow
+    python -m openpilot.selfdrive.eagled.shadow <route> --out /tmp/shadow
 """
 
 from __future__ import annotations
@@ -49,11 +49,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.association import associate as associate_daemon
-from openpilot.selfdrive.avoidanced.association import nearest_pairs_by_bearing
-from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets, radar_point_key
-from openpilot.selfdrive.avoidanced.projection import RoiMeta, project_detections
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.common.params import Params
+from openpilot.selfdrive.eagled.association import associate as associate_daemon
+from openpilot.selfdrive.eagled.association import nearest_pairs_by_bearing
+from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner, _in_gate, radar_point_key
+from openpilot.selfdrive.eagled.perception import fuse_objects, side_pictures
+from openpilot.selfdrive.eagled.projection import RoiMeta, project_detections
 
 if TYPE_CHECKING:
   import numpy as np
@@ -192,12 +194,12 @@ class ShadowEvaluator:
     if projected is not None:
       # Fused path (daemon parity): association decides which detections the
       # radar points absorb; the rest stay independent planner targets. The
-      # pairs also feed fuse_targets: confirmed points survive the static-speed
+      # pairs also feed fuse_objects: confirmed points survive the static-speed
       # gate and take the vision class weight, exactly like the daemon.
       _, fused, pairs = associate_daemon(frame.radar_points, projected, fy=fy)
       confirmed_keys = tuple(radar_point_key(p[0]) for p in pairs)
       vision_cls_by_key = {radar_point_key(p[0]): p[3] for p in pairs}
-      targets = fuse_targets(frame.radar_points, fused, v_ego=frame.v_ego,
+      objects = fuse_objects(frame.radar_points, fused, v_ego=frame.v_ego,
                              confirmed_keys=confirmed_keys,
                              vision_cls_by_key=vision_cls_by_key)
       vision_objects = [VisionObject(x=float(d["dRel"]), y=float(d["yRel"])) for d in projected]
@@ -208,17 +210,20 @@ class ShadowEvaluator:
       # Proxy path has no vision confirmation available (leadsV3 is metrics
       # only), so it degrades like the daemon's radar-only fallback: static
       # radar points are dropped, movers still drive the plan.
-      targets = fuse_targets(frame.radar_points, v_ego=frame.v_ego)
+      objects = fuse_objects(frame.radar_points, v_ego=frame.v_ego)
       vision_objects = frame.vision_objects
-      metric_radar = targets
+      metric_radar = [t for t in objects if t.in_gate]
+    targets = [t for t in objects if t.in_gate]
 
     t0 = self._clock()
+    # C9: daemon 对等 —— 预算从全量 objects 折算,再喂 planner
+    left_pic, right_pic = side_pictures(objects, frame.bsm_left, frame.bsm_right, v_ego=frame.v_ego)
     curvature, valid = self.planner.update(
       model_curvature=frame.model_curvature,
       targets=targets,
       v_ego=frame.v_ego,
-      bsm_left=frame.bsm_left,
-      bsm_right=frame.bsm_right,
+      budget_left=left_pic.budget,
+      budget_right=right_pic.budget,
       road_edges=frame.road_edges,
       lane_change_active=frame.lane_change_active,
       max_offset=self.max_offset,
@@ -539,12 +544,16 @@ def print_execution_closure(summary: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-  parser = argparse.ArgumentParser(description="Offline P0 shadow evaluation for avoidanced (records, never publishes).")
+  parser = argparse.ArgumentParser(description="Offline P0 shadow evaluation for eagled (records, never publishes).")
   parser.add_argument("route", help="route or local log path accepted by LogReader")
   parser.add_argument("--out", default=None, help="directory for shadow.csv / shadow_summary.json")
   parser.add_argument("--max-offset", type=float, default=C.MAX_OFFSET_FREE, help="bias cap in metres")
   parser.add_argument("--limit", type=int, default=None, help="stop after N frames")
   args = parser.parse_args(argv)
+
+  # 设备对等:线上 daemon 会按 Params 覆盖可调常量,复放要吃同一份设置,
+  # 否则影子数据和在线行为标定的是两套物理。
+  C.apply_param_overrides(Params())
 
   summary = evaluate_log(args.route, out_dir=args.out, max_offset=args.max_offset, limit=args.limit)
   print(json.dumps(summary, indent=2))

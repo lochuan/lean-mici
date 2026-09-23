@@ -59,7 +59,7 @@ fi
 # --- every shipped pkl must be loadable by the tinygrad this commit pins ------
 # A pkl is only readable by the tinygrad revision that wrote it, and nothing
 # else in the pipeline checks that: native_hash only guards release/prebuilt,
-# and avoidanced's YOLO pkl is plain committed source that no manifest covers.
+# and eagled's YOLO pkl is plain committed source that no manifest covers.
 # Both have already shipped unreadable. Cheap to check, and a broken pkl makes
 # the onroad smoke fail in a much more confusing way.
 if [ "${SKIP_PKL_CHECK:-0}" = "1" ]; then
@@ -76,9 +76,9 @@ else
 *  ❌  SMOKE GATE FAILED — a shipped pkl cannot be read on the device.
 *
 *  The tinygrad revision this release pins does not match the one that compiled
-*  the artifact. modeld and/or avoidanced will fail at startup. Rebuild the pkl
+*  the artifact. modeld and/or eagled will fail at startup. Rebuild the pkl
 *  against the pinned tinygrad (scons for the driving model,
-*  selfdrive/avoidanced/models/compile_yolo_onnx.py for YOLO) and re-release.
+*  selfdrive/eagled/models/compile_yolo_onnx.py for YOLO) and re-release.
 ********************************************************************************
 BANNER
     exit 1

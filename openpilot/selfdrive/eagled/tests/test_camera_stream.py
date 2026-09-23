@@ -4,10 +4,10 @@ import numpy as np
 import pytest
 from openpilot.cereal.visionipc import VisionStreamType
 
-from openpilot.selfdrive.avoidanced import camera_stream as cs
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.camera_stream import CameraStream, resize_bilinear
-from openpilot.selfdrive.avoidanced.projection import roi_meta_for
+from openpilot.selfdrive.eagled import camera_stream as cs
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.camera_stream import CameraStream, resize_bilinear
+from openpilot.selfdrive.eagled.projection import roi_meta_for
 
 
 # --- bilinear resize ------------------------------------------------------------

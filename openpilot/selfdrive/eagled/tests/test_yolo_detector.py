@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from openpilot.common.hardware import PC
-from openpilot.selfdrive.avoidanced.yolo_detector import (
+from openpilot.selfdrive.eagled.yolo_detector import (
   CLASS_NAMES,
   YoloDetector,
   postprocess,
@@ -84,7 +84,7 @@ def test_runner_feeds_persistent_input(monkeypatch, tmp_path):
 
   fake = _FakeJit()
   import openpilot.selfdrive.modeld.helpers as modeld_helpers
-  from openpilot.selfdrive.avoidanced import yolo_detector as yd
+  from openpilot.selfdrive.eagled import yolo_detector as yd
 
   monkeypatch.setattr(modeld_helpers, "load_oob", lambda f: fake)
   pkl = tmp_path / "fake.pkl"
@@ -260,7 +260,7 @@ def test_detector_defaults_confidence_when_param_unset():
 
 def test_temporal_boosts_repeated_detection():
   """同一目标连续两帧检出 → conf 获得 +boost（跨过 0.15 阈值的关键机制）。"""
-  from openpilot.selfdrive.avoidanced.yolo_detector import TemporalFilter
+  from openpilot.selfdrive.eagled.yolo_detector import TemporalFilter
   tf = TemporalFilter()
   f1 = [{"x1": 100.0, "y1": 100.0, "x2": 150.0, "y2": 150.0, "cls": "person", "conf": 0.12}]
   out1 = tf(list(f1))
@@ -271,7 +271,7 @@ def test_temporal_boosts_repeated_detection():
 
 def test_temporal_carries_one_frame_dropout():
   """已确认目标漏检一帧 → carry-forward 重发（conf×0.8），第二帧漏检后消失。"""
-  from openpilot.selfdrive.avoidanced.yolo_detector import TemporalFilter
+  from openpilot.selfdrive.eagled.yolo_detector import TemporalFilter
   tf = TemporalFilter()
   tf([{"x1": 100.0, "y1": 100.0, "x2": 150.0, "y2": 150.0, "cls": "rider", "conf": 0.3}])
   carried = tf([])  # 本帧漏检 → carry
@@ -282,7 +282,7 @@ def test_temporal_carries_one_frame_dropout():
 
 
 def test_temporal_no_cross_class_match():
-  from openpilot.selfdrive.avoidanced.yolo_detector import TemporalFilter
+  from openpilot.selfdrive.eagled.yolo_detector import TemporalFilter
   tf = TemporalFilter()
   tf([{"x1": 100.0, "y1": 100.0, "x2": 150.0, "y2": 150.0, "cls": "person", "conf": 0.3}])
   out = tf([{"x1": 100.0, "y1": 100.0, "x2": 150.0, "y2": 150.0, "cls": "car", "conf": 0.3}])

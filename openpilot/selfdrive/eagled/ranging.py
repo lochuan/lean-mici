@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from openpilot.selfdrive.avoidanced.constants import CLASS_HEIGHTS_M, TRUNCATION_MARGIN_PX
+from openpilot.selfdrive.eagled.constants import CLASS_HEIGHTS_M, TRUNCATION_MARGIN_PX
 
 
 def range_from_box_height(h_px: float, fy: float, cls: str) -> float | None:

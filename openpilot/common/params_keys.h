@@ -18,6 +18,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AvoidanceEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"AvoidanceMaxLateralOffset", {PERSISTENT, FLOAT}},
     {"AvoidanceMinConfidence", {PERSISTENT, FLOAT}},
+    {"AvoidanceSideMargin", {PERSISTENT, FLOAT, "0.3"}},    // 避让侧向余量 m（eagled 预算折算）
+    {"AvoidanceEgoHalfWidth", {PERSISTENT, FLOAT, "0.9"}},  // 自车半宽 m（eagled 预算折算）
+    {"AvoidanceLaneProbMin", {PERSISTENT, FLOAT, "0.6"}},   // 车道线置信门下限
+    {"AvoidanceLaneStdMax", {PERSISTENT, FLOAT, "0.3"}},   // 车道线方差门上限
+    {"LaneChangeNearZone", {PERSISTENT, FLOAT, "6.0"}},    // 变道近区硬拦距离 m
     {"BluetoothAudioAddress", {PERSISTENT, STRING}},
     {"BluetoothAudioTestActive", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL}},
     {"BluetoothDisconnectControllersOffroad", {PERSISTENT, BOOL, "0"}},

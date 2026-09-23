@@ -47,11 +47,11 @@ ARTIFACT_PATHS: tuple[str, ...] = (
 DATA_ARTIFACT_GLOBS: tuple[str, ...] = (
   "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunkmanifest",
   "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk*",
-  # avoidanced's YOLO pkl is compiled on-device too (first boot, see
-  # selfdrive/avoidanced/SConscript); its .tinygrad_pin sidecar records the
+  # eagled's YOLO pkl is compiled on-device too (first boot, see
+  # selfdrive/eagled/SConscript); its .tinygrad_pin sidecar records the
   # tinygrad revision the kernels were built against and must ship with it.
-  "openpilot/selfdrive/avoidanced/models/yolo_tinygrad.pkl",
-  "openpilot/selfdrive/avoidanced/models/yolo_tinygrad.pkl.tinygrad_pin",
+  "openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl",
+  "openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl.tinygrad_pin",
 )
 
 # Build inputs that can invalidate the native artifact set.

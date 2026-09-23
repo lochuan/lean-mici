@@ -3,7 +3,9 @@ import {
   CLS_FILL,
   EDGE_CLEARANCE_INF,
   avoidanceStatus,
+  fmtBudget,
   fmtEdgeClearance,
+  laneLabel,
   obstacleSide,
   offsetArrow,
   pairMembers,
@@ -119,5 +121,23 @@ describe("fmtEdgeClearance", () => {
     expect(fmtEdgeClearance(1.25)).toBe("1.25 m");
     expect(fmtEdgeClearance(EDGE_CLEARANCE_INF)).toBe("—");
     expect(fmtEdgeClearance(undefined)).toBe("—");
+  });
+});
+
+describe("fmtBudget", () => {
+  it("formats meters and collapses the unconstrained sentinel", () => {
+    expect(fmtBudget(0.9)).toBe("0.90 m");
+    expect(fmtBudget(0)).toBe("0.00 m");
+    expect(fmtBudget(999.0)).toBe("\u221e"); // 无侧向约束
+    expect(fmtBudget(undefined)).toBe("\u2014");
+  });
+});
+
+describe("laneLabel", () => {
+  it("maps C2 lane codes to labels", () => {
+    expect(laneLabel(-1)).toBe("\u5de6\u90bb");
+    expect(laneLabel(0)).toBe("\u672c\u9053");
+    expect(laneLabel(1)).toBe("\u53f3\u90bb");
+    expect(laneLabel(undefined)).toBe("\u2014");
   });
 });

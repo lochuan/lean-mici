@@ -7,11 +7,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.association import associate as associate_daemon
-from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, fuse_targets
-from openpilot.selfdrive.avoidanced.projection import RoiMeta
-from openpilot.selfdrive.avoidanced.shadow import (ASSOC_MAX_DBEARING_SHADOW, ASSOC_MAX_DRANGE_SHADOW,
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.association import associate as associate_daemon
+from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner, fuse_targets
+from openpilot.selfdrive.eagled.projection import RoiMeta
+from openpilot.selfdrive.eagled.shadow import (ASSOC_MAX_DBEARING_SHADOW, ASSOC_MAX_DRANGE_SHADOW,
                                                    CALIB_MAX_RESIDUAL_M, MAX_LATERAL_JERK, RadarTarget,
                                                    ShadowEvaluator, ShadowFrame, VisionObject, associate,
                                                    evaluate_log, evaluate_records, iter_frames, summarize,
@@ -241,7 +241,7 @@ def test_detector_path_passes_frame_height_to_projection(monkeypatch):
   # behaviour. The synthetic camera is the mici wide camera (full frame
   # 1344x760 — same intrinsics and frame size as the daemon fusion tests'
   # _FakeCamera, whose frame_size[1] is what the daemon passes).
-  import openpilot.selfdrive.avoidanced.shadow as shadow_mod
+  import openpilot.selfdrive.eagled.shadow as shadow_mod
   seen = {}
   real = shadow_mod.project_detections
 
@@ -270,7 +270,7 @@ def test_detector_path_drops_truncated_boxes():
 # --- summary -----------------------------------------------------------------
 
 def _record(**kwargs):
-  from openpilot.selfdrive.avoidanced.shadow import ShadowRecord
+  from openpilot.selfdrive.eagled.shadow import ShadowRecord
   defaults = {"t": 0.0, "model_curvature": 0.0, "curvature": 0.0, "valid": False, "y_des": 0.0,
               "n_radar": 0, "n_vision": 0, "n_associated": 0, "lat_residual": None, "latency_ms": 1.0, "jerk": None}
   defaults.update(kwargs)
@@ -394,7 +394,8 @@ def test_summarize_execution_closure_no_segments():
 def test_evaluator_fills_execution_closure_fields():
   # One in-gate target on the right + a road edge on the avoidance (left) side:
   # the record must carry the planner decision state and nearest target yRel.
-  edge = SimpleNamespace(x=[5.0, 30.0], y=[1.8, 1.8])  # left edge at 1.8 m
+  # modelV2 y 右正:左路沿是负 y(ldw.py/relc.py 三源验证)。
+  edge = SimpleNamespace(x=[5.0, 30.0], y=[-1.8, -1.8])  # left edge at 1.8 m
   evaluator = ShadowEvaluator(planner=AvoidancePlanner(clock=lambda: 0.0))
   evaluator.step(_frame(0.0, radar=[(20.0, -1.8, 0.0)], curvature=0.01, road_edges=[edge]))
   evaluator.step(_frame(C.ENTER_HOLD_S + 0.01, radar=[(20.0, -1.8, 0.0)], curvature=0.01, road_edges=[edge]))
@@ -418,7 +419,7 @@ def test_evaluator_target_y_none_without_in_gate_target():
 
 def test_main_prints_execution_closure_block(capsys, tmp_path):
   """main() prints the per-segment closure block after the summary JSON."""
-  from openpilot.selfdrive.avoidanced.shadow import main
+  from openpilot.selfdrive.eagled.shadow import main
 
   import openpilot.cereal.messaging as messaging
 
@@ -551,7 +552,7 @@ def test_evaluate_records_runs_end_to_end():
 
 def test_synthetic_log_end_to_end(tmp_path):
   """Synthetic cereal log through evaluate_log + main(): proxy vision, pass=True, exit 0."""
-  from openpilot.selfdrive.avoidanced.shadow import main
+  from openpilot.selfdrive.eagled.shadow import main
 
   import openpilot.cereal.messaging as messaging
 

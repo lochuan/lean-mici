@@ -20,9 +20,9 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from openpilot.selfdrive.avoidanced.constants import CAMERA_PITCH, CAMERA_TO_FRONT, CAMERA_YAW, ROI_HORIZON_MARGIN, ROI_MODE, ROI_MODE_NATIVE, class_weight
-from openpilot.selfdrive.avoidanced.ranging import is_truncated
-from openpilot.selfdrive.avoidanced.yolo_detector import INPUT_H, INPUT_W
+from openpilot.selfdrive.eagled.constants import CAMERA_PITCH, CAMERA_TO_FRONT, CAMERA_YAW, ROI_HORIZON_MARGIN, ROI_MODE, ROI_MODE_NATIVE, class_weight
+from openpilot.selfdrive.eagled.ranging import is_truncated
+from openpilot.selfdrive.eagled.yolo_detector import INPUT_H, INPUT_W
 
 
 @dataclass(frozen=True)

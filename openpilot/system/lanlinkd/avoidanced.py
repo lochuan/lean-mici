@@ -1,19 +1,19 @@
 # system/lanlinkd/avoidanced.py
-"""avoidanceDebug 快照线程：缓存最新一帧避让监测数据，线程安全。
+"""eagleDebug 快照线程：缓存最新一帧避让监测数据，线程安全。
 
-独立线程跑 SubMaster，锁下缓存最新快照。avoidanceDebug 是 5Hz 在线观测
+独立线程跑 SubMaster，锁下缓存最新快照。eagleDebug 是 5Hz 在线观测
 流（不落盘），给 lanlink 鸟瞰图和标定工具看——每帧构建 targets 列表
 dict，序列化在收帧时一次完成。快照含雷达 CAN 错误标志（canError /
 radarUnavailable，来自 radarTracks.errors，随 debug 透传），所以前端
 不再需要独立的 /api/radar 端点。
 
 staleness 用本地接收时刻（time.monotonic）判断：
-avoidanceDebug 是 5Hz，STALE_AFTER_MS 取 1s（5 帧没新数据即视为停更）。
+eagleDebug 是 5Hz，STALE_AFTER_MS 取 1s（5 帧没新数据即视为停更）。
 
 标定状态单独订阅 extrinsicsCalibration 透传：avoidanced 在相机未标定时整体
 关掉视觉路径（地平面投影的 dRel 对 pitch 的敏感度在 40m 处是 0.5° → 41%，
 未标定的 pitch 会直接生成虚假偏移），前端否则只会看到 nVision 恒为 0 而没有
-任何解释。AvoidanceDebug 的 capnp 结构里没有降级原因字段，而 openpilot/cereal
+任何解释。EagleDebug 的 capnp 结构里没有降级原因字段，而 openpilot/cereal
 在 release_lib 的 NATIVE_INPUT_PATHS 里 —— 加一个字段就要设备全量重建 30-60
 分钟。lanlinkd 自己订阅是等价且免费的。
 """
@@ -38,6 +38,7 @@ def _target(t) -> dict:
     "inGate": bool(t.inGate),
     "vision": bool(t.vision),
     "pairId": int(t.pairId),
+    "lane": int(t.lane),
   }
 
 
@@ -65,13 +66,13 @@ class AvoidanceCache:
     self._lock = threading.Lock()
     self._snapshot: dict = {"stale": True}
     self._recv_ms: float = 0.0
-    # 标定状态与 avoidanceDebug 分开缓存：两者频率不同（100Hz vs 5Hz），
+    # 标定状态与 eagleDebug 分开缓存：两者频率不同（100Hz vs 5Hz），
     # 且标定即使停更也仍然是有效信息，不该被 debug 的 staleness 抹掉。
     self._cal: dict = {"calStatus": "unknown", "calPerc": 0, "calValid": False, "visionGated": True}
 
   def run(self, exit_event: threading.Event) -> None:
     try:
-      sm = messaging.SubMaster(['avoidanceDebug', 'extrinsicsCalibration'])
+      sm = messaging.SubMaster(['eagleDebug', 'extrinsicsCalibration'])
     except Exception:
       cloudlog.exception("lanlink avoidanced: SubMaster init failed")
       return
@@ -80,13 +81,13 @@ class AvoidanceCache:
       if sm.updated['extrinsicsCalibration']:
         with self._lock:
           self._cal = _calibration(sm['extrinsicsCalibration'], sm.valid['extrinsicsCalibration'])
-      if not sm.updated['avoidanceDebug']:
+      if not sm.updated['eagleDebug']:
         continue
-      dbg = sm['avoidanceDebug']
+      dbg = sm['eagleDebug']
       try:
         snap = {
           "stale": False,
-          "logMonoTime": int(sm.logMonoTime['avoidanceDebug']),
+          "logMonoTime": int(sm.logMonoTime['eagleDebug']),
           "valid": bool(dbg.valid),
           "active": bool(dbg.active),
           "direction": int(dbg.direction),
@@ -102,6 +103,12 @@ class AvoidanceCache:
           "edgeClearance": float(dbg.edgeClearance),
           "canError": bool(dbg.canError),
           "radarUnavailable": bool(dbg.radarUnavailable),
+          "laneLeftValid": bool(dbg.laneLeftValid),
+          "laneRightValid": bool(dbg.laneRightValid),
+          "budgetLeft": float(dbg.budgetLeft),
+          "budgetRight": float(dbg.budgetRight),
+          "changeClearLeft": bool(dbg.changeClearLeft),
+          "changeClearRight": bool(dbg.changeClearRight),
           "targets": [_target(t) for t in dbg.targets],
         }
       except Exception:
