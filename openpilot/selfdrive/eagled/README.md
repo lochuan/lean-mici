@@ -45,6 +45,24 @@ ones — typically VRUs the radar missed — stay independent) ->
 `fuse_targets(radar.points, fused)` -> planner. Without camerad or without the
 YOLO pkl the daemon logs the reason once and degrades to radar-only.
 
+Threat in/out decisions go through `gate_target`'s three tiers (C2+C7), the
+single source of truth shared by the planner input and the telemetry rows:
+
+1. **lane-relative** — trusted ego boundaries (`laneLineProbs >= 0.6`,
+   `laneLineStds <= 0.3`, per side): a target is a threat when its body edge
+   (center +/- class half-width) crosses the boundary interpolated at its
+   distance. The parked-car-intrusion semantics; curve-correct.
+2. **path-relative** — worn/missing lines on that side but `position.yStd`
+   `<= 0.35` at the target distance: the historical band applied relative to
+   the model path instead of the car frame.
+3. **fixed band** — no trusted model geometry: the historical
+   `|yRel| ∈ [1.2, 2.5]` band. Behavior-identical to the pre-C2 gate.
+
+All tiers additionally require `|yRel| >= OWN_LANE_HALF_WIDTH` — a centered
+lead is a longitudinal problem, left to the driver. The road-edge gate also
+honors `roadEdgeStds`: an uncertain edge on the bias side counts as zero
+clearance (C7, conservative direction).
+
 ## P0 shadow (record only, never publish)
 
 `AvoidanceEnabled` defaults to **off**. With it off, `shadow.py` replays the
