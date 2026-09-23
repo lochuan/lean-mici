@@ -1,16 +1,32 @@
 # eagled
 
-5Hz decision-level lateral avoidance: radar targets (optionally upgraded by a
-YOLO VRU detector) produce a small curvature bias that is added on top of the
-model curvature and published on the existing `lateralManeuverPlan` hook.
-controlsd only consumes it when `AvoidanceEnabled` is on and the message
-envelope `valid` flag is set; otherwise it falls back to the raw model
-curvature, which is also what an invalid frame carries.
+5Hz lateral-situation perception layer, plus its first consumer: lateral
+avoidance. The perception core fuses radar tracks with a YOLO VRU detector
+into the per-frame target picture; the avoidance planner gates that picture
+(BSM / road-edge / speed / lane-change) and produces a small curvature bias
+added on top of the model curvature, published on the existing
+`lateralManeuverPlan` hook. controlsd only consumes it when
+`AvoidanceEnabled` is on and the message envelope `valid` flag is set;
+otherwise it falls back to the raw model curvature, which is also what an
+invalid frame carries.
+
+Perception runs whenever the device is onroad in a car (`eagle_run` in
+process_config); `AvoidanceEnabled` gates only the avoidance actuation, in
+process — turning avoidance off never turns the eagle's eyes off.
+
+## Streams
+
+| stream | role |
+|---|---|
+| `eagleState` | formal perception picture (in-gate fused targets, side inputs, geometry, sensor health) — for consumers; desire_helper (modeld, lane-change gating) is the planned second one |
+| `eagleDebug` | raw detection/association telemetry + planner decision snapshot — lanlink UI and calibration only, never a control input |
+| `lateralManeuverPlan` | avoidance actuation (`model + 2·bias/L²`), upstream hook consumed by controlsd's `fuse_curvature` |
 
 | piece | file |
 |---|---|
-| 5Hz process, every-frame publish + `valid` flag | `eagled.py` |
-| planner: gates, BSM, low-pass, hysteresis | `avoidance_planner.py` |
+| 5Hz process, three-stream publish + `valid` flag | `eagled.py` |
+| perception core: fusion chain, lazy camera/YOLO lifecycle, radar-only degrade; fusion primitives (`Target`/`_in_gate`/`fuse_targets`/`radar_point_key`) | `perception.py` |
+| planner: gates, BSM, low-pass, hysteresis (decision layer) | `avoidance_planner.py` |
 | camera feed: visionipc -> NV12 -> RGB -> bottom ROI 640x384 | `camera_stream.py` |
 | box bottom-centre -> car-frame ground point + ROI inverse mapping | `projection.py` |
 | radar<->vision nearest-neighbour association (shared with shadow) | `association.py` |
