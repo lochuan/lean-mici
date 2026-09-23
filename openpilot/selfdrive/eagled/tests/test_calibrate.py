@@ -13,11 +13,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.calibrate import (BANDS, BEARING_PASS_DEG, CalibPair, MIN_FIT_PAIRS,
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.calibrate import (BANDS, BEARING_PASS_DEG, CalibPair, MIN_FIT_PAIRS,
                                                       banded_residuals, extract_pairs,
                                                       fit_calibrated_offsets, format_constants_block, main)
-from openpilot.selfdrive.avoidanced.projection import project_box_to_vehicle
+from openpilot.selfdrive.eagled.projection import project_box_to_vehicle
 
 # Synthetic wide-camera intrinsics (full frame 1344x760, focal 425.25), same as
 # the shadow/daemon fusion tests.

@@ -1,6 +1,6 @@
 """Tunable constants for the 5Hz lateral avoidance planner.
 
-Values mirror the design doc (``2026-09-18-yolo-avoidanced-design.md`` §3) and the
+Values mirror the design doc (``2026-09-18-yolo-eagled-design.md`` §3) and the
 Task 5 brief. Everything that shapes the bias lives here so Params can override
 the limits without touching planner logic.
 """

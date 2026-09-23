@@ -1,7 +1,7 @@
 # system/lanlinkd/calibration.py
 """在线标定会话控制：后台收集 avoidanceDebug 配对目标，停止时拟合。
 
-复用 avoidanced.calibrate 的纯函数层（extract_pairs / fit_calibrated_offsets /
+复用 eagled.calibrate 的纯函数层（extract_pairs / fit_calibrated_offsets /
 format_constants_block），本模块只负责会话生命周期：start 起线程订阅
 avoidanceDebug 持续收集配对，stop 停止并拟合，结果（含可粘贴常量块）存
 last_result 供前端展示。与 CLI 版（python -m ...calibrate --duration N）的
@@ -14,7 +14,7 @@ import threading
 import time
 
 from openpilot.common.swaglog import cloudlog
-from openpilot.selfdrive.avoidanced.calibrate import (
+from openpilot.selfdrive.eagled.calibrate import (
   MIN_FIT_PAIRS,
   CalibPair,
   extract_pairs,

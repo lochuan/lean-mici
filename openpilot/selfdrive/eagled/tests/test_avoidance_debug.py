@@ -3,8 +3,8 @@
 import pytest
 
 from openpilot.cereal.services import SERVICE_LIST
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.tests.test_daemon_fusion import ROI, _FakeCamera, _FakeDetector, _box_at, _daemon
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.tests.test_daemon_fusion import ROI, _FakeCamera, _FakeDetector, _box_at, _daemon
 
 MODEL_CURVATURE = 0.012
 

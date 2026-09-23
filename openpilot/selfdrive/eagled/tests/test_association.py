@@ -4,10 +4,10 @@ import math
 
 import pytest
 
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.association import associate, nearest_pairs_by_bearing
-from openpilot.selfdrive.avoidanced.avoidance_planner import _in_gate, fuse_targets
-from openpilot.selfdrive.avoidanced.projection import project_detections
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.association import associate, nearest_pairs_by_bearing
+from openpilot.selfdrive.eagled.avoidance_planner import _in_gate, fuse_targets
+from openpilot.selfdrive.eagled.projection import project_detections
 
 FY = 425.25
 FX, CX, CY = 425.25, 672.0, 380.0

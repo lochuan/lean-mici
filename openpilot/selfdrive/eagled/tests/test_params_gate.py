@@ -53,16 +53,16 @@ def test_lateral_maneuver_plan_service_is_5hz():
   assert SERVICE_LIST["lateralManeuverPlan"].frequency == 5.0
 
 
-def test_avoidanced_process_registered_with_gate():
-  assert "avoidanced" in pc.managed_processes
-  proc = pc.managed_processes["avoidanced"]
-  assert proc.module == "openpilot.selfdrive.avoidanced.avoidanced"
-  assert proc.should_run is pc.avoidance_run
+def test_eagled_process_registered_with_gate():
+  assert "eagled" in pc.managed_processes
+  proc = pc.managed_processes["eagled"]
+  assert proc.module == "openpilot.selfdrive.eagled.eagled"
+  assert proc.should_run is pc.eagle_run
 
 
-def test_avoidance_run_requires_onroad_car_and_enabled():
+def test_eagle_run_requires_onroad_car_and_enabled():
   cp = SimpleNamespace(notCar=False)
-  assert pc.avoidance_run(True, _FakeParams(True), cp) is True
-  assert pc.avoidance_run(True, _FakeParams(False), cp) is False
-  assert pc.avoidance_run(False, _FakeParams(True), cp) is False
-  assert pc.avoidance_run(True, _FakeParams(True), SimpleNamespace(notCar=True)) is False
+  assert pc.eagle_run(True, _FakeParams(True), cp) is True
+  assert pc.eagle_run(True, _FakeParams(False), cp) is False
+  assert pc.eagle_run(False, _FakeParams(True), cp) is False
+  assert pc.eagle_run(True, _FakeParams(True), SimpleNamespace(notCar=True)) is False

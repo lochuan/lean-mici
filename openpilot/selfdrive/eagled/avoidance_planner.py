@@ -3,7 +3,7 @@
 The planner consumes already-fused targets (radar points, optionally upgraded by
 YOLO VRU detections) plus vehicle state and produces a curvature bias that is
 added on top of the model curvature. It never commands a path of its own: the
-consumer (``avoidanced``) republishes ``model + bias`` every frame and clears the
+consumer (``eagled``) republishes ``model + bias`` every frame and clears the
 envelope ``valid`` flag when the plan is invalid, so control falls back to the
 raw model curvature.
 
@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.selfdrive.avoidanced.constants import (D_GATE, D_MAX, DT_5HZ, EDGE_CLEAR_MIN, ENTER_HOLD_S, EXIT_HOLD_S,
+from openpilot.selfdrive.eagled.constants import (D_GATE, D_MAX, DT_5HZ, EDGE_CLEAR_MIN, ENTER_HOLD_S, EXIT_HOLD_S,
                                                       K_GAIN, L_LOOKAHEAD, LOWPASS_TAU_S, MAX_OFFSET_BSM,
                                                       MAX_OFFSET_FREE, OWN_LANE_HALF_WIDTH, STATIC_SPEED_THRESH,
                                                       V_EGO_MAX, V_EGO_MIN, class_weight,
@@ -194,7 +194,7 @@ class AvoidancePlanner:
     self._active = False
     self._enter_since: float | None = None
     self._last_target_t: float | None = None
-    # Per-frame snapshot of the planner's decision state (avoidanced reads it to
+    # Per-frame snapshot of the planner's decision state (eagled reads it to
     # fill avoidanceDebug; every update() call refreshes it).
     self.last_state: dict = {}
 

@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.avoidance_planner import (AvoidancePlanner, Target, edge_clearance,
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.avoidance_planner import (AvoidancePlanner, Target, edge_clearance,
                                                               fuse_targets, plan)
 
 
@@ -312,11 +312,11 @@ def test_planner_both_bsm_sides_zero():
   assert curv == pytest.approx(0.01)
 
 
-# --- avoidanced process module ----------------------------------------------
+# --- eagled process module ----------------------------------------------
 
-def test_avoidanced_module_imports():
-  from openpilot.selfdrive.avoidanced.avoidanced import AvoidanceDaemon
-  assert hasattr(AvoidanceDaemon, "update")
+def test_eagled_module_imports():
+  from openpilot.selfdrive.eagled.eagled import EagleDaemon
+  assert hasattr(EagleDaemon, "update")
 
 
 class _FakePubMaster:
@@ -364,7 +364,7 @@ MODEL_CURVATURE = 0.012
 
 
 def _make_daemon(enabled=True):
-  from openpilot.selfdrive.avoidanced.avoidanced import AvoidanceDaemon
+  from openpilot.selfdrive.eagled.eagled import EagleDaemon
   model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
                  meta=_NS(laneChangeState="off"))
   car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
@@ -372,7 +372,7 @@ def _make_daemon(enabled=True):
   # gate for the planner to activate.
   radar = _NS(points=[_RadarPoint(8.0, -1.8)], errors=_NS(canError=False, radarUnavailableTemporary=False))
   pm = _FakePubMaster()
-  daemon = AvoidanceDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=enabled))
+  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=enabled))
   return daemon, pm
 
 

@@ -1,4 +1,4 @@
-# avoidanced
+# eagled
 
 5Hz decision-level lateral avoidance: radar targets (optionally upgraded by a
 YOLO VRU detector) produce a small curvature bias that is added on top of the
@@ -9,7 +9,7 @@ curvature, which is also what an invalid frame carries.
 
 | piece | file |
 |---|---|
-| 5Hz process, every-frame publish + `valid` flag | `avoidanced.py` |
+| 5Hz process, every-frame publish + `valid` flag | `eagled.py` |
 | planner: gates, BSM, low-pass, hysteresis | `avoidance_planner.py` |
 | camera feed: visionipc -> NV12 -> RGB -> bottom ROI 640x384 | `camera_stream.py` |
 | box bottom-centre -> car-frame ground point + ROI inverse mapping | `projection.py` |
@@ -37,7 +37,7 @@ anything — the "bias vs projection alignment" check from the design doc §4.
 Run it over 30 min of representative driving before enabling anything:
 
 ```bash
-python -m openpilot.selfdrive.avoidanced.shadow <route> --out /tmp/shadow
+python -m openpilot.selfdrive.eagled.shadow <route> --out /tmp/shadow
 # -> /tmp/shadow/shadow.csv        (per-frame bias / association / jerk / latency)
 # -> /tmp/shadow/shadow_summary.json
 ```
@@ -88,7 +88,7 @@ P0 不仅要证明"该避让时避让",还要证明"不该触发时不触发"。
 
 ### Vision metrics need calibration first
 
-未标定时视觉路径整体 gate off:`avoidanced._detect` 在 `extrinsicsCalibration`
+未标定时视觉路径整体 gate off:`eagled._detect` 在 `extrinsicsCalibration`
 未达 `calibrated` 时直接 `_degrade("calibration")` 并返回空,投影根本不运行。
 所以 P0 的视觉相关指标(关联率、距离/方位角残差、分档表)必须在
 `extrinsicsCalibration` 达到 `calibrated` 之后才开始采集;此前采集的帧只有
@@ -108,7 +108,7 @@ The shadow harness has two vision sides:
 
 - **Default — `modelV2.leadsV3` proxy.** Route logs carry no camera frames and
   no YOLO boxes, so a replay grades radar↔model-lead agreement. This is what
-  `python -m openpilot.selfdrive.avoidanced.shadow <route>` runs.
+  `python -m openpilot.selfdrive.eagled.shadow <route>` runs.
 - **Injected detector — real fused path.** `ShadowEvaluator(detector=...)`
   runs the daemon chain per frame: `detector.infer(roi)` →
   `project_detections()` (ground-plane projection, `CAMERA_TO_FRONT`-aligned)
@@ -117,7 +117,7 @@ The shadow harness has two vision sides:
   camera data (`roi_frame`/`roi_meta`/`intrinsics`) — tests only; route logs
   cannot produce them.
 
-The real P0 run is the **avoidanced daemon on the device** (real camera, real
+The real P0 run is the **eagled daemon on the device** (real camera, real
 YOLO pkl) with metrics collected over lanlink/CSV; the replay tool grades
 offline planner metrics (bias, jerk, latency) on route logs.
 
@@ -129,7 +129,7 @@ publishes until P1.
 1. **Compile the YOLO pkl on-device, on 12V.** Mici powers CPU 4-7 down unless
    12V is on, and the compile needs CPU 4:
    ```bash
-   openpilot/selfdrive/avoidanced/models/compile_yolo.sh   # -> models/yolo_tinygrad.pkl
+   openpilot/selfdrive/eagled/models/compile_yolo.sh   # -> models/yolo_tinygrad.pkl
    ```
 2. **YOLO inference + ROI latency < 120 ms.** Measure per `models/README.md` §4
    (`DEV=QCOM`, 20 runs, report min/median). Over budget: drop ROI
@@ -175,7 +175,7 @@ longitudinal camera→bumper mount offset, so that is all this tool fits.
 subscribes to `avoidanceDebug`). Run it **on the device** while driving:
 
 ```bash
-python -m openpilot.selfdrive.avoidanced.calibrate [--duration 120] [--min-pairs 30] [--max-pairs 500]
+python -m openpilot.selfdrive.eagled.calibrate [--duration 120] [--min-pairs 30] [--max-pairs 500]
 ```
 
 **lanlink 一键版（推荐）**：避让监测图状态条右侧的"开始标定/停止标定"按钮
@@ -186,7 +186,7 @@ python -m openpilot.selfdrive.avoidanced.calibrate [--duration 120] [--min-pairs
 
 Workflow:
 
-1. Turn `AvoidanceEnabled` on so the avoidanced process runs at all — the
+1. Turn `AvoidanceEnabled` on so the eagled process runs at all — the
    process itself is gated on the param (`avoidance_run` in
    `process_config.py`: onroad + car + param). Calibration does **not** require
    avoidance manoeuvres: `avoidanceDebug`, including the pairId-matched
@@ -273,7 +273,7 @@ activation segment it records:
   (actual displacement ≈ `max_offset` when avoidance activates).
 
 ```bash
-python -m openpilot.selfdrive.avoidanced.shadow <route> --out /tmp/shadow
+python -m openpilot.selfdrive.eagled.shadow <route> --out /tmp/shadow
 # summary JSON now carries "execution_closure"; main() also prints a
 # per-segment block to the terminal
 ```
@@ -336,14 +336,14 @@ item 5). Everything still passes through `clip_curvature`, so the jerk/accel
 limits hold by construction; the P1 run confirms it on the car.
 
 ```bash
-pytest openpilot/selfdrive/avoidanced/ openpilot/selfdrive/controls/tests/ -q
+pytest openpilot/selfdrive/eagled/ openpilot/selfdrive/controls/tests/ -q
 ```
 
 ## Replay
 
-`process_replay` has an `avoidanced` config (inputs `modelV2`, `carState`,
+`process_replay` has an `eagled` config (inputs `modelV2`, `carState`,
 `radarTracks`; output `lateralManeuverPlan` at 5Hz). It is in `EXCLUDED_PROCS`
-and **no reference log exists for it**, so `--whitelist-procs avoidanced`
+and **no reference log exists for it**, so `--whitelist-procs eagled`
 cannot produce a passing comparison today — there is nothing to diff against.
 The whitelist flag becomes useful only after a reference log is generated
 (ref-commit pipeline or a device run); until then the config is a structural

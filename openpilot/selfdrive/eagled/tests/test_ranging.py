@@ -1,5 +1,5 @@
 import pytest
-from openpilot.selfdrive.avoidanced.ranging import is_truncated, range_from_box_height
+from openpilot.selfdrive.eagled.ranging import is_truncated, range_from_box_height
 
 FY = 425.25
 

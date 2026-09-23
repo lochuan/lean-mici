@@ -1,9 +1,9 @@
-# avoidanced YOLO model
+# eagled YOLO model
 
 YOLO26n (8 classes: person / rider / car / bus / truck / bicycle / motorcycle /
 **tricycle**) runs on a 384x640 (HxW) ROI at 3Hz to classify VRUs and vehicles
 for lateral avoidance. It is separate from `modeld`'s supercombo (modeld's
-input contract is hard-bound to supercombo), so avoidanced ships its own pkl.
+input contract is hard-bound to supercombo), so eagled ships its own pkl.
 
 **The compiled pkl (`yolo_tinygrad.pkl`) is NOT committed** — it embeds tinygrad
 JIT kernels for one exact tinygrad revision (positional pickle contract), so it
@@ -11,7 +11,7 @@ goes stale on every tinygrad bump. It is compiled **on-device at first boot** by
 `../SConscript` from the committed ONNX; `tinygrad_repo/**` is an scons
 dependency, so any pin bump recompiles it automatically. The runtime
 (`yolo_detector.TinygradRunner`) refuses to load a pkl whose
-`<pkl>.tinygrad_pin` sidecar disagrees with the running tree; avoidanced then
+`<pkl>.tinygrad_pin` sidecar disagrees with the running tree; eagled then
 degrades to radar-only (logged once, never crashes the daemon).
 
 **The ONNX (`yolo26n-bdd7-fp32-384x640.onnx`) IS committed**: weights are
@@ -31,7 +31,7 @@ extra class is `tricycle` (head = 4 box + 8 cls = 12 channels).
     ↓ *.onnx          → commit to models/
 编译 (设备, 首启自动)   ../SConscript: ONNX → OnnxRunner → TinyJit(prune) → dump_oob
     ↓ yolo_tinygrad.pkl (+ .tinygrad_pin sidecar)   [our OOB format]
-运行 (avoidanced)      TinygradRunner: load_oob + persistent QCOM input buffer + assign per frame
+运行 (eagled)      TinygradRunner: load_oob + persistent QCOM input buffer + assign per frame
 ```
 
 ## Regenerating the pkl by hand (rarely needed; first boot does it)
@@ -48,9 +48,9 @@ cd /data/safe_staging/merged   # any cwd on /data that is NOT /data/openpilot
 PATH=/usr/local/venv/bin:$PATH PARALLEL=0 DEV=QCOM:IR3 IMAGE=1 FLOAT16=1 \
   JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 \
   PYTHONPATH=/data/openpilot:/data/openpilot/tinygrad_repo \
-  python3 /data/openpilot/openpilot/selfdrive/avoidanced/models/compile_yolo_onnx.py \
-  /data/openpilot/openpilot/selfdrive/avoidanced/models/yolo26n-bdd7-fp32-384x640.onnx \
-  /data/openpilot/openpilot/selfdrive/avoidanced/models/yolo_tinygrad.pkl
+  python3 /data/openpilot/openpilot/selfdrive/eagled/models/compile_yolo_onnx.py \
+  /data/openpilot/openpilot/selfdrive/eagled/models/yolo26n-bdd7-fp32-384x640.onnx \
+  /data/openpilot/openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl
 ```
 
 Why `QCOM:IR3` (mesa NIR -> freedreno ir3) instead of the default `QCOM:CL`:

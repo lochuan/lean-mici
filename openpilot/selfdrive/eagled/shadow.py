@@ -1,4 +1,4 @@
-"""Offline P0 shadow evaluation for avoidanced.
+"""Offline P0 shadow evaluation for eagled.
 
 This harness replays the avoidance planner over a route log **without ever
 publishing** ``lateralManeuverPlan``: it is the "record only, don't send" step
@@ -28,13 +28,13 @@ What it records (per 5Hz frame, plus a summary):
   (low-pass lag); on device the same metric over telemetry curvature is the
   full vehicle closure. See the ``execution_closure`` summary field.
 
-The real P0 run is the avoidanced daemon on the device (real camera + YOLO pkl)
+The real P0 run is the eagled daemon on the device (real camera + YOLO pkl)
 with metrics collected over lanlink/CSV; this replay tool grades offline planner
 metrics on route logs.
 
 Usage::
 
-    python -m openpilot.selfdrive.avoidanced.shadow <route> --out /tmp/shadow
+    python -m openpilot.selfdrive.eagled.shadow <route> --out /tmp/shadow
 """
 
 from __future__ import annotations
@@ -49,11 +49,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.association import associate as associate_daemon
-from openpilot.selfdrive.avoidanced.association import nearest_pairs_by_bearing
-from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets, radar_point_key
-from openpilot.selfdrive.avoidanced.projection import RoiMeta, project_detections
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.association import associate as associate_daemon
+from openpilot.selfdrive.eagled.association import nearest_pairs_by_bearing
+from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets, radar_point_key
+from openpilot.selfdrive.eagled.projection import RoiMeta, project_detections
 
 if TYPE_CHECKING:
   import numpy as np
@@ -539,7 +539,7 @@ def print_execution_closure(summary: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-  parser = argparse.ArgumentParser(description="Offline P0 shadow evaluation for avoidanced (records, never publishes).")
+  parser = argparse.ArgumentParser(description="Offline P0 shadow evaluation for eagled (records, never publishes).")
   parser.add_argument("route", help="route or local log path accepted by LogReader")
   parser.add_argument("--out", default=None, help="directory for shadow.csv / shadow_summary.json")
   parser.add_argument("--max-offset", type=float, default=C.MAX_OFFSET_FREE, help="bias cap in metres")

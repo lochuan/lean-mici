@@ -28,7 +28,7 @@ Everything else is DIAGNOSTIC, reported but never folded into a constant:
 
 Usage (on the device, with ``AvoidanceEnabled`` on and real traffic ahead)::
 
-    python -m openpilot.selfdrive.avoidanced.calibrate [--duration 120] [--min-pairs 30] [--max-pairs 500]
+    python -m openpilot.selfdrive.eagled.calibrate [--duration 120] [--min-pairs 30] [--max-pairs 500]
 
 Exit codes: 0 = banded residual verdict pass, 1 = insufficient pairs or a
 populated band out of tolerance.
@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from openpilot.selfdrive.avoidanced import constants as C
+from openpilot.selfdrive.eagled import constants as C
 
 if TYPE_CHECKING:
   import openpilot.cereal.messaging as messaging
@@ -309,7 +309,7 @@ def collect_pairs(sm: messaging.SubMaster, duration: float, max_pairs: int,
 
 def main(argv: list[str] | None = None, sm_factory: Any = None,
          clock=time.monotonic, sleep=time.sleep) -> int:
-  parser = argparse.ArgumentParser(description="Online calibration collector for avoidanced projection constants.")
+  parser = argparse.ArgumentParser(description="Online calibration collector for eagled projection constants.")
   parser.add_argument("--duration", type=float, default=120.0, help="collection window in seconds")
   parser.add_argument("--min-pairs", type=int, default=30, help="minimum pairs required to fit")
   parser.add_argument("--max-pairs", type=int, default=500, help="stop collecting after this many pairs")

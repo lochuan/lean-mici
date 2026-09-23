@@ -163,7 +163,7 @@ class TestAvoidanceRoute:
     assert r.json == fake
 
   def test_avoidance_stale_shape(self, app):
-    # 无数据时（熄火/avoidanced 未跑）必须返回 {"stale": true}
+    # 无数据时（熄火/eagled 未跑）必须返回 {"stale": true}
     app.ctx.state.avoidance.snapshot = lambda: {"stale": True}
     _, r = app.test_client.get("/api/avoidance")
     assert r.status == 200
@@ -193,7 +193,7 @@ class TestCalibrationRoutes:
     assert r.json["last_result"] is None
 
   def test_stop_returns_fit_result(self, app):
-    from openpilot.selfdrive.avoidanced.calibrate import CalibPair
+    from openpilot.selfdrive.eagled.calibrate import CalibPair
     ctl = app.ctx.state.calibration
     ctl._pairs = [CalibPair(d_radar=d, y_radar=-1.0, d_vision=d + 0.3, y_vision=-1.0, v_ego=20.0)
                   for d in (5, 10, 15, 20, 25, 30, 35, 40)]

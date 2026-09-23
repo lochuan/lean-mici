@@ -1,11 +1,11 @@
-"""Daemon-level fusion tests: stub camera + detector wired into AvoidanceDaemon."""
+"""Daemon-level fusion tests: stub camera + detector wired into EagleDaemon."""
 
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.avoidanced import AvoidanceDaemon
-from openpilot.selfdrive.avoidanced.projection import RoiMeta
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.eagled import EagleDaemon
+from openpilot.selfdrive.eagled.projection import RoiMeta
 
 MODEL_CURVATURE = 0.012
 
@@ -116,7 +116,7 @@ def _daemon(*, camera=None, detector=None, camera_factory=None, radar_points=(),
   pm = _FakePubMaster()
   sm = _FakeSubMaster(model_v2, car_state, radar,
                       valid={"modelV2": model_valid, "carState": True, "radarTracks": True})
-  daemon = AvoidanceDaemon(sm=sm, pm=pm, params=_FakeParams(enabled=enabled), **kwargs)
+  daemon = EagleDaemon(sm=sm, pm=pm, params=_FakeParams(enabled=enabled), **kwargs)
   return daemon, pm
 
 
@@ -320,7 +320,7 @@ def test_vision_is_gated_off_when_uncalibrated():
 
 def test_daemon_passes_frame_height_to_projection(monkeypatch):
   """截断框丢弃要在生产路径生效,daemon 必须把非 None 的 frame_height 传下去。"""
-  import openpilot.selfdrive.avoidanced.avoidanced as mod
+  import openpilot.selfdrive.eagled.eagled as mod
   seen = []
   real = mod.project_detections
 

@@ -15,8 +15,8 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 
-from openpilot.selfdrive.avoidanced.constants import ASSOC_MAX_DBEARING, ASSOC_MAX_DRANGE_M, CAMERA_TO_FRONT
-from openpilot.selfdrive.avoidanced.ranging import range_from_box_height
+from openpilot.selfdrive.eagled.constants import ASSOC_MAX_DBEARING, ASSOC_MAX_DRANGE_M, CAMERA_TO_FRONT
+from openpilot.selfdrive.eagled.ranging import range_from_box_height
 
 
 def _radar_bearing(point) -> float:

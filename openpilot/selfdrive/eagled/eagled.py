@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""avoidanced: 5Hz camera+radar fused lateral avoidance bias on top of model curvature.
+"""eagled: 5Hz camera+radar fused lateral avoidance bias on top of model curvature.
 
 Per tick the full fusion chain runs: wide-road camera frame -> YOLO ROI
 inference -> ground-plane projection into the car frame -> radar association ->
@@ -31,18 +31,18 @@ import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.common.realtime import Priority, Ratekeeper, config_realtime_process
 from openpilot.common.swaglog import cloudlog
-from openpilot.selfdrive.avoidanced import constants as C
-from openpilot.selfdrive.avoidanced.association import associate
-from openpilot.selfdrive.avoidanced.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets, radar_point_key
-from openpilot.selfdrive.avoidanced.camera_stream import CameraStream
-from openpilot.selfdrive.avoidanced.projection import geometry_from_calibration, horizon_row_for, project_detections
-from openpilot.selfdrive.avoidanced.yolo_detector import YoloDetector
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.association import associate
+from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner, _in_gate, fuse_targets, radar_point_key
+from openpilot.selfdrive.eagled.camera_stream import CameraStream
+from openpilot.selfdrive.eagled.projection import geometry_from_calibration, horizon_row_for, project_detections
+from openpilot.selfdrive.eagled.yolo_detector import YoloDetector
 
 PARAMS_REFRESH_PERIOD = 1.0  # s
 YOLO_PKL_PATH = Path(__file__).parent / "models" / "yolo_tinygrad.pkl"
 
 
-class AvoidanceDaemon:
+class EagleDaemon:
   def __init__(self, sm=None, pm=None, params=None, planner=None, camera=None, detector=None,
                camera_factory=CameraStream):
     self.params = params if params is not None else Params()
@@ -75,7 +75,7 @@ class AvoidanceDaemon:
     """Log a radar-only fallback reason once (never spam)."""
     if reason not in self.degraded:
       self.degraded.add(reason)
-      cloudlog.warning(f"avoidanced: {reason} unavailable, radar-only fallback")
+      cloudlog.warning(f"eagled: {reason} unavailable, radar-only fallback")
 
   def _detect(self, now: float) -> list[dict]:
     """Camera -> YOLO -> car-frame projections; ``[]`` keeps the frame radar-only."""
@@ -111,7 +111,7 @@ class AvoidanceDaemon:
       # radar-only from here on, logged once, never crash the daemon.
       self.detector_dead = True
       self._degrade("yolo")
-      cloudlog.exception("avoidanced: YOLO inference failed")
+      cloudlog.exception("eagled: YOLO inference failed")
       return []
     fx, fy, cx, cy = self.camera.intrinsics
     return project_detections(detections, fx=fx, fy=fy, cx=cx, cy=cy,
@@ -264,8 +264,8 @@ class AvoidanceDaemon:
 
 def main() -> None:
   config_realtime_process([0, 1, 2, 3], Priority.CTRL_LOW)
-  cloudlog.info("avoidanced starting")
-  daemon = AvoidanceDaemon()
+  cloudlog.info("eagled starting")
+  daemon = EagleDaemon()
   rk = Ratekeeper(5.0)
   while True:
     daemon.update(time.monotonic())

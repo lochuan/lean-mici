@@ -1,4 +1,4 @@
-"""3Hz YOLO26n ROI detector for avoidanced (8 classes, see CLASS_NAMES).
+"""3Hz YOLO26n ROI detector for eagled (8 classes, see CLASS_NAMES).
 
 Consumes a 640x384 uint8 ROI frame (the model's native input, zero resize) and
 produces a list of detections::
@@ -25,7 +25,7 @@ import numpy as np
 INPUT_H, INPUT_W = 384, 640
 DEFAULT_CONF_THRESHOLD = 0.15
 DEFAULT_IOU_THRESHOLD = 0.45
-# Capped by the avoidanced loop itself (Ratekeeper(5.0)), so 5Hz is the ceiling
+# Capped by the eagled loop itself (Ratekeeper(5.0)), so 5Hz is the ceiling
 # without also raising the daemon rate. Affordable since the IR3/IMAGE pkl runs
 # in 68ms on an idle GPU (85ms end-to-end incl. preprocess + NMS), i.e. ~34% GPU
 # duty at 5Hz. NOT yet validated against modeld at 20Hz on a moving car: in a
