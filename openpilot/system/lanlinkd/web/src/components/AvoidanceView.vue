@@ -17,7 +17,9 @@ import {
   CLS_FILL,
   CLS_LABEL,
   avoidanceStatus,
+  fmtBudget,
   fmtEdgeClearance,
+  laneLabel,
   obstacleSide,
   offsetArrow,
   pairMembers,
@@ -190,6 +192,16 @@ const edgeClearance = computed(() => fmtEdgeClearance(planner.value?.edgeClearan
 const bsmLeft = computed(() => Boolean(planner.value?.bsmLeft));
 const bsmRight = computed(() => Boolean(planner.value?.bsmRight));
 
+// C2/C9 新字段:旧后端不发时 undefined,一律按"未知"降级显示
+const laneLeftValid = computed(() => !avStale.value && av.value?.laneLeftValid === true);
+const laneRightValid = computed(() => !avStale.value && av.value?.laneRightValid === true);
+
+const budgetLeft = computed(() => (avStale.value ? undefined : av.value?.budgetLeft));
+const budgetRight = computed(() => (avStale.value ? undefined : av.value?.budgetRight));
+
+const changeClearLeft = computed(() => (!avStale.value ? av.value?.changeClearLeft : undefined));
+const changeClearRight = computed(() => (!avStale.value ? av.value?.changeClearRight : undefined));
+
 const sideLabel = computed(() => obstacleSide(av.value?.direction));
 
 const tickY = (d: number) => rangeY(d, VB);
@@ -292,7 +304,7 @@ const gridX = (y: number) => lateralX(y, VB);
           class="fill-sl-text-3 stroke-sl-bg"
           stroke-width="1.5"
         >
-          <title>雷达点  dRel {{ p.dRel.toFixed(1) }}m  yRel {{ p.yRel.toFixed(2) }}m  vRel {{ p.vRel.toFixed(2) }}m/s</title>
+          <title>雷达点  dRel {{ p.dRel.toFixed(1) }}m  yRel {{ p.yRel.toFixed(2) }}m  vRel {{ p.vRel.toFixed(2) }}m/s  {{ laneLabel(p.lane) }}</title>
         </circle>
       </g>
 
@@ -309,7 +321,7 @@ const gridX = (y: number) => lateralX(y, VB);
             :x="v.xy.x - 9" :y="v.xy.y - 9" width="18" height="18" rx="4"
             class="fill-none stroke-sl-text-1" stroke-width="1"
           />
-          <title>{{ CLS_LABEL[v.cls] }}  conf {{ (v.t.conf * 100).toFixed(0) }}%  dRel {{ v.t.dRel.toFixed(1) }}m  yRel {{ v.t.yRel.toFixed(2) }}m</title>
+          <title>{{ CLS_LABEL[v.cls] }}  conf {{ (v.t.conf * 100).toFixed(0) }}%  dRel {{ v.t.dRel.toFixed(1) }}m  yRel {{ v.t.yRel.toFixed(2) }}m  {{ laneLabel(v.t.lane) }}</title>
         </g>
       </g>
 
@@ -359,6 +371,23 @@ const gridX = (y: number) => lateralX(y, VB);
       <Badge v-if="visionGated" kind="warn" :title="visionGatedWhy">视觉已关</Badge>
       <span>vEgo <span class="sl-tabular">{{ vEgoKmh }} km/h</span></span>
       <span>路沿余量 <span class="sl-tabular">{{ edgeClearance }}</span></span>
+      <span
+        class="text-sl-text-3"
+        title="本道边界线置信（laneLineProbs/Stds 过门）:该侧可信时目标按车道线相对判定,不可信时回退路径相对"
+      >
+        车道线
+        <Badge :kind="laneLeftValid ? 'accent' : 'muted'">L</Badge>
+        <Badge :kind="laneRightValid ? 'accent' : 'muted'">R</Badge>
+      </span>
+      <span
+        title="每侧横向预算:BSM 报警为 0,侧向目标按车身间隙折算;避让偏置 ≤ 偏置侧预算"
+      >预算 <span class="sl-tabular">L {{ fmtBudget(budgetLeft) }}</span> · <span class="sl-tabular">R {{ fmtBudget(budgetRight) }}</span></span>
+      <span
+        title="目标道变道清空（eagled 时间投影:近区/速度未知/投影冲突即拦,远而快的侧车放行）"
+      >变道
+        <Badge v-if="changeClearLeft !== undefined" :kind="changeClearLeft ? 'accent' : 'warn'">L {{ changeClearLeft ? "通" : "拦" }}</Badge>
+        <Badge v-if="changeClearRight !== undefined" :kind="changeClearRight ? 'accent' : 'warn'">R {{ changeClearRight ? "通" : "拦" }}</Badge>
+      </span>
     </div>
 
     <!-- 视觉被标定门关掉时解释 V=0：否则「视觉一直是 0」看起来像坏了 -->

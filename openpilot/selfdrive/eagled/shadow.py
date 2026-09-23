@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from openpilot.selfdrive.eagled import constants as C
+from openpilot.common.params import Params
 from openpilot.selfdrive.eagled.association import associate as associate_daemon
 from openpilot.selfdrive.eagled.association import nearest_pairs_by_bearing
 from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner, _in_gate, radar_point_key
@@ -549,6 +550,10 @@ def main(argv: list[str] | None = None) -> int:
   parser.add_argument("--max-offset", type=float, default=C.MAX_OFFSET_FREE, help="bias cap in metres")
   parser.add_argument("--limit", type=int, default=None, help="stop after N frames")
   args = parser.parse_args(argv)
+
+  # 设备对等:线上 daemon 会按 Params 覆盖可调常量,复放要吃同一份设置,
+  # 否则影子数据和在线行为标定的是两套物理。
+  C.apply_param_overrides(Params())
 
   summary = evaluate_log(args.route, out_dir=args.out, max_offset=args.max_offset, limit=args.limit)
   print(json.dumps(summary, indent=2))

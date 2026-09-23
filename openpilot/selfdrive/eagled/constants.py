@@ -40,45 +40,6 @@ LANE_CHANGE_LEAD_TIME_S = 4.0
 LANE_CHANGE_EGO_TIME_S = 3.0
 LANE_CHANGE_NEAR_D = 6.0       # 近区硬拦 m:贴身目标无论投影如何都不清空
 
-# Target weighting: y_des = -sign(yRel) * min(max_offset, K * w_cls * proximity)
-K_GAIN = 0.5
-VRU_WEIGHT = 1.0      # person / rider / bicycle / motorcycle / tricycle
-VEHICLE_WEIGHT = 0.6  # car / bus / truck
-
-# 对地速度低于此值判为静止(m/s)。静止雷达目标必须有视觉关联确认才保留:
-# 护栏、桥墩的对地速度是 0,但抛锚车、路口停车也是 0。单纯的速度门会把静止
-# 车辆一并滤掉,而静止车辆是需要避让的真实障碍;视觉能区分二者(会把停着的
-# 车报成 car,不会把护栏报成 car/person)。
-STATIC_SPEED_THRESH = 1.0
-
-# Speed envelope (m/s) — spec §3 suggests 30-120 kph
-V_EGO_MIN = 8.0
-V_EGO_MAX = 33.0
-
-# Temporal filtering / hysteresis (s)
-DT_5HZ = 0.2
-LOWPASS_TAU_S = 0.5
-ENTER_HOLD_S = 0.5
-EXIT_HOLD_S = 1.0
-
-# Consumer-side freshness gate (s): lateralManeuverPlan older than this falls
-# back to the model curvature even if the message valid flag is sticky-true.
-AVOIDANCE_STALE_S = 1.0
-
-# YOLO classes treated as vulnerable road users (higher avoidance weight)
-VRU_CLASSES = frozenset({"person", "rider", "bicycle", "motorcycle", "tricycle"})
-
-
-def class_weight(cls) -> float:
-  """类别 -> 避让权重(VRU > vehicle),未知/缺失类别按 vehicle。
-
-  唯一实现,不许再内联 ``VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT``:
-  planner、projection 和 debug 遥测都必须走这里 —— 各写一份的拷贝曾让 debug
-  上报的权重和 planner 实际使用的不一致(本分支修掉过的遥测 bug)。
-  """
-  return VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT
-
-
 # --- C2: 车道相对分类 -----------------------------------------------------------
 # modelV2 约定(三源验证: ldw.py / relc.py / radard.py): y 右正,雷达 yRel 左正;
 # laneLines[1]=本道左边界, [2]=本道右边界; roadEdges[0]=左沿, [1]=右沿。
@@ -158,3 +119,70 @@ ASSOC_MAX_DBEARING = 0.035
 # 二级校验:方位角相同但距离差极大的两个目标不应配上。用框高测距的距离(已换算
 # 到保险杠系)与雷达 dRel 的差值做门限 —— 这是距离差,不是横向差。
 ASSOC_MAX_DRANGE_M = 2.0
+
+
+# --- Params 可覆盖的调参表 ---------------------------------------------------------
+# (param 键 -> (常量名, 编译期默认, 钳制范围))。eagled 1Hz 刷新时按 Params
+# 重绑本模块属性:键缺失/空值恢复编译期默认。gate_target/side_pictures 等
+# 纯函数通过 ``C.*`` 在调用时取值,零签名改动即可吃到覆盖。lanlink 设置面板
+# 里这些键的 stepper 直接驱动本机制。
+_PARAM_OVERRIDABLE: dict[str, tuple[str, float, float, float]] = {
+  "AvoidanceSideMargin":    ("SIDE_MARGIN", SIDE_MARGIN, 0.05, 1.0),
+  "AvoidanceEgoHalfWidth":  ("EGO_HALF_WIDTH", EGO_HALF_WIDTH, 0.5, 1.5),
+  "AvoidanceLaneProbMin":   ("LANE_PROB_MIN", LANE_PROB_MIN, 0.3, 0.95),
+  "AvoidanceLaneStdMax":    ("LANE_STD_MAX", LANE_STD_MAX, 0.05, 1.0),
+  "LaneChangeNearZone":     ("LANE_CHANGE_NEAR_D", LANE_CHANGE_NEAR_D, 0.0, 20.0),
+}
+
+
+def apply_param_overrides(params) -> None:
+  """按 Params 重绑可覆盖常量(缺键恢复默认,带钳制)。
+
+  测试安全:注入的 _FakeParams.get 返回 None -> 全部恢复编译期默认,
+  单测的确定性不受 Params 环境影响。
+  """
+  for key, (name, default, lo, hi) in _PARAM_OVERRIDABLE.items():
+    try:
+      raw = params.get(key)
+    except Exception:
+      raw = None
+    value = default if raw in (None, b"", "") else float(raw)
+    globals()[name] = min(max(value, lo), hi)
+
+# Target weighting: y_des = -sign(yRel) * min(max_offset, K * w_cls * proximity)
+K_GAIN = 0.5
+VRU_WEIGHT = 1.0      # person / rider / bicycle / motorcycle / tricycle
+VEHICLE_WEIGHT = 0.6  # car / bus / truck
+
+# 对地速度低于此值判为静止(m/s)。静止雷达目标必须有视觉关联确认才保留:
+# 护栏、桥墩的对地速度是 0,但抛锚车、路口停车也是 0。单纯的速度门会把静止
+# 车辆一并滤掉,而静止车辆是需要避让的真实障碍;视觉能区分二者(会把停着的
+# 车报成 car,不会把护栏报成 car/person)。
+STATIC_SPEED_THRESH = 1.0
+
+# Speed envelope (m/s) — spec §3 suggests 30-120 kph
+V_EGO_MIN = 8.0
+V_EGO_MAX = 33.0
+
+# Temporal filtering / hysteresis (s)
+DT_5HZ = 0.2
+LOWPASS_TAU_S = 0.5
+ENTER_HOLD_S = 0.5
+EXIT_HOLD_S = 1.0
+
+# Consumer-side freshness gate (s): lateralManeuverPlan older than this falls
+# back to the model curvature even if the message valid flag is sticky-true.
+AVOIDANCE_STALE_S = 1.0
+
+# YOLO classes treated as vulnerable road users (higher avoidance weight)
+VRU_CLASSES = frozenset({"person", "rider", "bicycle", "motorcycle", "tricycle"})
+
+
+def class_weight(cls) -> float:
+  """类别 -> 避让权重(VRU > vehicle),未知/缺失类别按 vehicle。
+
+  唯一实现,不许再内联 ``VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT``:
+  planner、projection 和 debug 遥测都必须走这里 —— 各写一份的拷贝曾让 debug
+  上报的权重和 planner 实际使用的不一致(本分支修掉过的遥测 bug)。
+  """
+  return VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT

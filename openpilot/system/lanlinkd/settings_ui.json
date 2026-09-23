@@ -547,6 +547,16 @@
          "value": 0
         }
        ]
+      },
+      {
+       "key": "LaneChangeNearZone",
+       "widget": "option",
+       "title": "变道近区距离",
+       "min": 0,
+       "max": 20,
+       "step": 1,
+       "unit": "m",
+       "details": "目标道内比这更近的车无条件拦截变道（远而快的侧车按时间投影放行）。"
       }
      ]
     },
@@ -583,7 +593,83 @@
        "max": 0.35,
        "step": 0.05,
        "unit": "m",
-       "details": "BSM 对侧无车时的最大避让幅度（硬顶 0.35m）；BSM 对侧有车时自动压到 0.12m；BSM 同侧有车时禁止向该侧偏移。设为 0 即完全不产生偏移。默认 0.35m。"
+       "details": "最大横向避让偏移（硬顶 0.35m）。实际幅度还会被该侧横向预算动态压缩：侧向目标越近预算越小，BSM 同侧报警时预算为 0 完全禁止向该侧偏移；远离占用侧则不受限。设为 0 即完全不产生偏移。默认 0.35m。"
+      },
+      {
+       "key": "AvoidanceSideMargin",
+       "widget": "option",
+       "title": "避让侧向余量",
+       "min": 0.05,
+       "max": 1.0,
+       "step": 0.05,
+       "unit": "m",
+       "details": "避让偏置后要求与侧向目标保留的最小车身间隙。调小更敢让,调大更保守。",
+       "enablement": [
+        {
+         "type": "param",
+         "key": "AvoidanceEnabled",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "AvoidanceEgoHalfWidth",
+       "widget": "option",
+       "title": "自车半宽（预算折算）",
+       "min": 0.5,
+       "max": 1.5,
+       "step": 0.05,
+       "unit": "m",
+       "details": "用于横向预算的车身半宽。按实车宽度设置（含后视镜外缘的一半略小）。",
+       "enablement": [
+        {
+         "type": "param",
+         "key": "AvoidanceEnabled",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "AvoidanceLaneProbMin",
+       "widget": "option",
+       "title": "车道线置信下限",
+       "min": 0.3,
+       "max": 0.95,
+       "step": 0.05,
+       "details": "本道边界线概率低于此值时该侧回退路径相对判定。",
+       "enablement": [
+        {
+         "type": "param",
+         "key": "AvoidanceEnabled",
+         "equals": true
+        },
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
+      },
+      {
+       "key": "AvoidanceLaneStdMax",
+       "widget": "option",
+       "title": "车道线方差上限",
+       "min": 0.05,
+       "max": 1.0,
+       "step": 0.05,
+       "details": "本道边界线方差高于此值时该侧回退路径相对判定。",
+       "enablement": [
+        {
+         "type": "param",
+         "key": "AvoidanceEnabled",
+         "equals": true
+        },
+        {
+         "type": "param",
+         "key": "ShowAdvancedControls",
+         "equals": true
+        }
+       ]
       }
      ]
     },
@@ -1846,9 +1932,9 @@
   },
   {
    "id": "vehicle",
-    "label": "车辆",
-    "icon": "vehicle",
-    "order": 10,
+   "label": "车辆",
+   "icon": "vehicle",
+   "order": 10,
    "sections": [
     {
      "title": "车辆",
@@ -1858,9 +1944,9 @@
   },
   {
    "id": "developer",
-    "label": "开发者",
-    "icon": "developer",
-    "order": 11,
+   "label": "开发者",
+   "icon": "developer",
+   "order": 11,
    "sections": [
     {
      "id": "connectivity",

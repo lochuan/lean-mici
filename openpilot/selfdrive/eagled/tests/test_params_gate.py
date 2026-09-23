@@ -2,6 +2,8 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.system.manager import process_config as pc
 
@@ -21,6 +23,36 @@ def test_avoidance_params_registered():
   assert '"AvoidanceEnabled"' in keys
   assert '"AvoidanceMinConfidence"' in keys
   assert '"AvoidanceMaxLateralOffset"' in keys
+  # C9+ 可调参（lanlink stepper 驱动 constants.apply_param_overrides）
+  for key in ("AvoidanceSideMargin", "AvoidanceEgoHalfWidth", "AvoidanceLaneProbMin",
+              "AvoidanceLaneStdMax", "LaneChangeNearZone"):
+    assert f'"{key}"' in keys, key
+
+
+def test_param_overrides_apply_and_restore():
+  """constants.apply_param_overrides:覆盖生效、缺键恢复默认、钳制起作用。"""
+  from openpilot.selfdrive.eagled import constants as C
+
+  class _Params:
+    def __init__(self, values: dict):
+      self._values = values
+
+    def get(self, key, block=False, return_default=False):
+      return self._values.get(key)
+
+  defaults = {name: getattr(C, name) for _, (name, _, _, _) in C._PARAM_OVERRIDABLE.items()}
+  try:
+    C.apply_param_overrides(_Params({"AvoidanceSideMargin": "0.8", "LaneChangeNearZone": "99"}))
+    assert C.SIDE_MARGIN == pytest.approx(0.8)
+    assert C.LANE_CHANGE_NEAR_D == pytest.approx(20.0)   # 钳到 hi=20
+    # 其余无键项恢复编译期默认
+    assert C.EGO_HALF_WIDTH == pytest.approx(defaults["EGO_HALF_WIDTH"])
+    # 全空 -> 全部恢复
+    C.apply_param_overrides(_Params({}))
+    for name, value in defaults.items():
+      assert getattr(C, name) == pytest.approx(value), name
+  finally:
+    C.apply_param_overrides(_Params({}))   # 不污染其他测试
 
 
 def test_avoidance_enabled_defaults_explicitly_off():

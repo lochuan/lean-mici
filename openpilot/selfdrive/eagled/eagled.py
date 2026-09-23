@@ -87,6 +87,8 @@ class EagleDaemon:
     # AvoidanceEnabled gates only the lateralManeuverPlan actuation, never the
     # eagleState/eagleDebug perception streams.
     self.enabled = self.params.get_bool("AvoidanceEnabled")
+    # C9+ 可调参:按 Params 重绑 constants 的可覆盖常量(缺键恢复默认)。
+    C.apply_param_overrides(self.params)
     try:
       value = self.params.get("AvoidanceMaxLateralOffset")
     except Exception:

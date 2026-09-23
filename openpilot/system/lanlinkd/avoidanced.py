@@ -38,6 +38,7 @@ def _target(t) -> dict:
     "inGate": bool(t.inGate),
     "vision": bool(t.vision),
     "pairId": int(t.pairId),
+    "lane": int(t.lane),
   }
 
 
@@ -102,6 +103,12 @@ class AvoidanceCache:
           "edgeClearance": float(dbg.edgeClearance),
           "canError": bool(dbg.canError),
           "radarUnavailable": bool(dbg.radarUnavailable),
+          "laneLeftValid": bool(dbg.laneLeftValid),
+          "laneRightValid": bool(dbg.laneRightValid),
+          "budgetLeft": float(dbg.budgetLeft),
+          "budgetRight": float(dbg.budgetRight),
+          "changeClearLeft": bool(dbg.changeClearLeft),
+          "changeClearRight": bool(dbg.changeClearRight),
           "targets": [_target(t) for t in dbg.targets],
         }
       except Exception:

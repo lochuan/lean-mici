@@ -125,3 +125,18 @@ export function fmtEdgeClearance(v: number | undefined): string {
   if (v === undefined || !Number.isFinite(v) || v >= EDGE_CLEARANCE_INF) return "—";
   return `${v.toFixed(2)} m`;
 }
+
+/** 预算哨兵同款（999 = 该侧无侧向约束） */
+export function fmtBudget(v: number | undefined): string {
+  if (v === undefined || !Number.isFinite(v)) return "—";
+  if (v >= EDGE_CLEARANCE_INF) return "∞";
+  return `${v.toFixed(2)} m`;
+}
+
+/** C2 车道归属：-1 左邻 / 0 本道或重叠 / +1 右邻。用于目标悬浮与状态条。 */
+export function laneLabel(lane: number | undefined): string {
+  if (lane === undefined) return "—";
+  if (lane < 0) return "左邻";
+  if (lane > 0) return "右邻";
+  return "本道";
+}
