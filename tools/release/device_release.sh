@@ -28,20 +28,7 @@ sudo systemctl is-active --quiet comma || { echo "comma 未运行（产物必须
 [ -z "$(git status --porcelain -- . ':!tinygrad_repo' ':!msgq_repo' ':!opendbc_repo' ':!rednose_repo' ':!panda' | grep -v '^??')" ] || { echo "工作树有未提交修改，拒绝发布" >&2; exit 1; }
 
 echo "[-] 同步 lean-master 源内容到设备树（结构性防漂移：发布树 ≡ lean-master + 产物）"
-# 同步来源优先级：origin fetch（权威）→ LAN 预推分支 lan-sync（编排器直推，
-# 见 publish_release_from_device.sh）→ 既有 remote ref（过期保底）。git 不允许推送
-# refs/remotes/*，LAN 载体是普通分支，落位用 update-ref。
-if git fetch origin lean-master:refs/remotes/origin/lean-master; then
-  :
-elif git rev-parse -q --verify refs/heads/lan-sync >/dev/null 2>&1; then
-  git update-ref refs/remotes/origin/lean-master "$(git rev-parse refs/heads/lan-sync)"
-  echo "[warn] origin fetch 失败（GitHub 网络）——用 LAN 预推分支同步: $(git rev-parse --short refs/heads/lan-sync)" >&2
-elif git rev-parse -q --verify refs/remotes/origin/lean-master >/dev/null 2>&1; then
-  echo "[warn] origin fetch 失败且无 LAN 分支——用既有 remote ref（可能过期）: $(git rev-parse --short refs/remotes/origin/lean-master)" >&2
-else
-  echo "origin fetch 失败，且无 LAN 分支、无既有 remote ref：无从同步" >&2; exit 1
-fi
-echo "[ok] 同步目标: $(git rev-parse --short refs/remotes/origin/lean-master)"
+git fetch origin lean-master:refs/remotes/origin/lean-master
 # 白名单 = 产物路径（ARTIFACT_PATHS + data globs 的实际文件）——设备树有、lean-master
 # 没有的运行时产物是扁平模型的预期内容。
 # ls 失败（glob 无匹配，如消费态树没有 yolo pkl）必须吞掉——否则 for 循环 rc≠0，
