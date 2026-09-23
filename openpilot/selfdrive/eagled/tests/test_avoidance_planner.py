@@ -179,8 +179,9 @@ def test_edge_clearance_min_over_lookahead():
 
 
 def test_edge_clearance_side_filter():
-  assert edge_clearance([_Edge(1.8, -0.4)], side=1) == pytest.approx(1.8)   # left only
-  assert edge_clearance([_Edge(1.8, -0.4)], side=-1) == pytest.approx(0.4)  # right only
+  # modelV2 y is right-positive (ldw.py/relc.py 三源验证): 左边 = 负 y。
+  assert edge_clearance([_Edge(-1.8, 0.4)], side=1) == pytest.approx(1.8)   # bias 左 -> 只看左边缘
+  assert edge_clearance([_Edge(-1.8, 0.4)], side=-1) == pytest.approx(0.4)  # bias 右 -> 只看右边缘
 
 
 # --- AvoidancePlanner gating / temporal behaviour ----------------------------
@@ -234,29 +235,36 @@ def test_planner_high_speed_invalid():
 def test_planner_edge_clearance_gate():
   p = _planner()
   _step(p, 0.0, [_right_target()])
-  # right target -> avoid left; a close LEFT edge (the avoidance side) blocks the plan
+  # 右侧目标 -> 向左避让；贴近的左路沿（model 帧负 y, roadEdges[0]）必须拦下计划
   _, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
-                      road_edges=[_Edge(0.5)], now=C.ENTER_HOLD_S + 0.01)
+                      road_edges=[_Edge(-0.5)], now=C.ENTER_HOLD_S + 0.01)
   assert not valid
 
 
 def test_planner_clearance_is_direction_aware():
   # A close edge on the NON-avoidance side must not block the manoeuvre.
   p = _planner()
-  _step(p, 0.0, [_right_target()])            # avoid left -> only left edges gate
+  _step(p, 0.0, [_right_target()])            # avoid left -> only left (y<0) edges gate
   curv, valid = p.update(model_curvature=0.01, targets=[_right_target()], v_ego=20.0,
-                         road_edges=[_Edge(-0.5)], now=C.ENTER_HOLD_S + 0.01)
+                         road_edges=[_Edge(0.5)], now=C.ENTER_HOLD_S + 0.01)
   assert valid
   assert curv > 0.01
 
-  # mirrored: left target -> avoid right -> only right edges gate; the bias now
-  # pushes curvature below the model value (negative y_des).
+  # mirrored: left target -> avoid right -> only right (y>0) edges gate; the
+  # bias pushes curvature below the model value (negative y_des).
   q = _planner()
-  q.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0, road_edges=[_Edge(0.5)], now=0.0)
+  q.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0, road_edges=[_Edge(-0.5)], now=0.0)
   curv, valid = q.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0,
-                         road_edges=[_Edge(0.5)], now=C.ENTER_HOLD_S + 0.01)
+                         road_edges=[_Edge(-0.5)], now=C.ENTER_HOLD_S + 0.01)
   assert valid
   assert curv < 0.01
+
+  # and the mirror's blocking direction: close right edge (y>0) blocks.
+  r = _planner()
+  r.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0, road_edges=[_Edge(0.5)], now=0.0)
+  _, valid = r.update(model_curvature=0.01, targets=[_left_target()], v_ego=20.0,
+                       road_edges=[_Edge(0.5)], now=C.ENTER_HOLD_S + 0.01)
+  assert not valid
 
 
 def test_planner_takeover_invalid():

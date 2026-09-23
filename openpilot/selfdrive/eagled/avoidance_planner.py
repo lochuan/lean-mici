@@ -82,7 +82,10 @@ def plan(targets: Iterable[Target], max_offset: float = MAX_OFFSET_FREE,
 def edge_clearance(road_edges: Iterable, side: int = 0) -> float:
   """Smallest |y| (m) of a road edge within the lookahead, ``inf`` if none.
 
-  ``side`` > 0 keeps only left edges, < 0 only right edges, 0 both.
+  ``side`` is the bias direction (+1 = bias left, -1 = bias right, 0 = both).
+  Frame convention (verified against upstream ``ldw.py``/``relc.py``):
+  modelV2 y is **right-positive**, so the LEFT edge lies at negative y
+  (roadEdges[0]) and the RIGHT edge at positive y (roadEdges[1]).
   """
   clearance = float("inf")
   for edge in road_edges or []:
@@ -92,9 +95,9 @@ def edge_clearance(road_edges: Iterable, side: int = 0) -> float:
     for x, y in zip(xs, ys, strict=False):
       if x < 0.0 or x > L_LOOKAHEAD:
         continue
-      if side > 0 and y <= 0.0:
+      if side > 0 and y >= 0.0:   # bias left -> keep LEFT edges (y < 0)
         continue
-      if side < 0 and y >= 0.0:
+      if side < 0 and y <= 0.0:   # bias right -> keep RIGHT edges (y > 0)
         continue
       clearance = min(clearance, abs(float(y)))
   return clearance
