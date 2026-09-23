@@ -1,7 +1,7 @@
 """Online calibration collector for the camera->car-frame projection constants.
 
 The radar is the metric ground truth in the car frame (factory calibrated). The
-``avoidanceDebug`` stream publishes, for every associated object, BOTH sources of
+``eagleDebug`` stream publishes, for every associated object, BOTH sources of
 its position under a shared ``pairId``: the radar point (``vision=False``) and
 the YOLO ground-plane projection (``vision=True``).
 
@@ -288,7 +288,7 @@ def _print_report(result: dict) -> None:
 
 def collect_pairs(sm: messaging.SubMaster, duration: float, max_pairs: int,
                   clock=time.monotonic, sleep=time.sleep) -> list[CalibPair]:
-  """Collect paired radar/vision positions from ``avoidanceDebug`` for ``duration`` seconds."""
+  """Collect paired radar/vision positions from ``eagleDebug`` for ``duration`` seconds."""
   pairs: list[CalibPair] = []
   start = clock()
   last_progress = start
@@ -297,8 +297,8 @@ def collect_pairs(sm: messaging.SubMaster, duration: float, max_pairs: int,
     if now - start >= duration or len(pairs) >= max_pairs:
       break
     sm.update(0)
-    if sm.updated.get("avoidanceDebug"):
-      dbg = sm["avoidanceDebug"]
+    if sm.updated.get("eagleDebug"):
+      dbg = sm["eagleDebug"]
       pairs.extend(extract_pairs(dbg.targets, float(dbg.vEgo)))
     if now - last_progress >= 5.0:
       print(f"  {len(pairs)} pairs collected...", flush=True)
@@ -317,7 +317,7 @@ def main(argv: list[str] | None = None, sm_factory: Any = None,
 
   if sm_factory is None:
     import openpilot.cereal.messaging as messaging
-    sm_factory = lambda: messaging.SubMaster(["avoidanceDebug"])  # noqa: E731
+    sm_factory = lambda: messaging.SubMaster(["eagleDebug"])  # noqa: E731
 
   print(f"Collecting paired targets for {args.duration:.0f} s (min {args.min_pairs}, max {args.max_pairs})...")
   pairs = collect_pairs(sm_factory(), args.duration, args.max_pairs, clock=clock, sleep=sleep)

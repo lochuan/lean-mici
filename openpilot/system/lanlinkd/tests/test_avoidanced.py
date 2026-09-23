@@ -9,8 +9,8 @@ from openpilot.system.lanlinkd import avoidanced
 
 
 def _publish_debug(pm: messaging.PubMaster) -> None:
-  msg = messaging.new_message('avoidanceDebug')
-  dbg = msg.avoidanceDebug
+  msg = messaging.new_message('eagleDebug')
+  dbg = msg.eagleDebug
   dbg.valid = True
   dbg.active = True
   dbg.direction = 1
@@ -32,12 +32,12 @@ def _publish_debug(pm: messaging.PubMaster) -> None:
   tgts[1].cls, tgts[1].conf, tgts[1].vision = "person", 0.9, True
   tgts[1].matched, tgts[1].inGate, tgts[1].pairId = True, True, 1
   tgts[1].weight = 1.0
-  pm.send('avoidanceDebug', msg)
+  pm.send('eagleDebug', msg)
 
 
 @pytest.fixture
 def publisher() -> messaging.PubMaster:
-  return messaging.PubMaster(['avoidanceDebug'])
+  return messaging.PubMaster(['eagleDebug'])
 
 
 def _start_cache() -> tuple[avoidanced.AvoidanceCache, threading.Event, threading.Thread]:
@@ -102,7 +102,7 @@ def test_cache_goes_stale_after_silence(publisher, monkeypatch):
 
 # --- 标定状态透传 ---------------------------------------------------------
 # 未标定时 avoidanced 会整体关掉视觉路径,前端只会看到 nVision 恒为 0 而没有
-# 任何解释。AvoidanceDebug 的 capnp 结构里没有降级原因字段,而 openpilot/cereal
+# 任何解释。EagleDebug 的 capnp 结构里没有降级原因字段,而 openpilot/cereal
 # 在 release_lib 的 NATIVE_INPUT_PATHS 里 —— 加字段要设备全量重建。所以标定
 # 状态由 lanlinkd 自己订阅 extrinsicsCalibration 透传。
 
@@ -119,7 +119,7 @@ def _publish_calibration(pm: messaging.PubMaster, status: str, perc: int, valid:
 
 @pytest.fixture
 def cal_publisher() -> messaging.PubMaster:
-  return messaging.PubMaster(['avoidanceDebug', 'extrinsicsCalibration'])
+  return messaging.PubMaster(['eagleDebug', 'extrinsicsCalibration'])
 
 
 def test_cache_reports_uncalibrated_so_the_ui_can_explain_no_vision(cal_publisher):

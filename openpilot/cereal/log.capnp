@@ -1222,7 +1222,7 @@ struct LateralManeuverPlan {
   desiredCurvature @0 :Float32;  # 1/m
 }
 
-struct AvoidanceTarget {
+struct EagleTarget {
   dRel @0 :Float32;      # 车头原点
   yRel @1 :Float32;      # 左正右负，与雷达一致
   vRel @2 :Float32;      # 雷达点才有，视觉目标 0
@@ -1235,7 +1235,7 @@ struct AvoidanceTarget {
   pairId @9 :UInt16;     # 0=未配对；配对双方共享同 id（递增分配）
 }
 
-struct AvoidanceDebug {
+struct EagleDebug {
   valid @0 :Bool;        # planner 本帧 valid
   active @1 :Bool;       # 迟滞后避让激活中
   direction @2 :Int8;    # -1 左 / 0 无 / 1 右
@@ -1249,9 +1249,27 @@ struct AvoidanceDebug {
   nVision @10 :UInt16;
   nAssociated @11 :UInt16;
   edgeClearance @12 :Float32;  # 避让侧路沿余量 m；inf 时发 999.0
-  targets @13 :List(AvoidanceTarget);
+  targets @13 :List(EagleTarget);
   canError @14 :Bool;         # radarTracks.errors.canError
   radarUnavailable @15 :Bool; # radarTracks.errors.radarUnavailableTemporary
+}
+
+struct EagleState {
+  # eagled 感知层态势骨架：本帧融合目标与侧向输入快照。骨架期与 EagleDebug
+  # 同源（复用 EagleTarget）；后续能力（车道归属 C2、每侧最近目标/预算 C3/C9、
+  # 对向检测 C4、vLat C5、几何质量 C7）只加字段——capnp 加字段向后兼容。
+  # 消费者：desire_helper(modeld, 变道门控)、lanlink UI；lateralManeuverPlan
+  # 仍是避让执行输出，与本消息分工：eagleState=看，lateralManeuverPlan=动。
+  targets @0 :List(EagleTarget);  # in-gate 融合目标
+  bsmLeft @1 :Bool;
+  bsmRight @2 :Bool;
+  vEgo @3 :Float32;
+  edgeClearance @4 :Float32;      # 避让侧路沿净空 m；inf 时发 999.0
+  nRadar @5 :UInt16;
+  nVision @6 :UInt16;
+  nAssociated @7 :UInt16;
+  canError @8 :Bool;              # radarTracks.errors.canError
+  radarUnavailable @9 :Bool;      # radarTracks.errors.radarUnavailableTemporary
 }
 
 struct LongitudinalPlan @0xe00b5b3eba12876c {
@@ -2640,7 +2658,8 @@ struct Event {
     bookmarkButton @148 :UserBookmark;
 
     lateralManeuverPlan @150 :LateralManeuverPlan;
-    avoidanceDebug @153 :AvoidanceDebug;
+    eagleDebug @153 :EagleDebug;
+    eagleState @154 :EagleState;
 
     # *********** debug ***********
     testJoystick @52 :Joystick;

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /** 避让监测鸟瞰图：单源轮询 /api/avoidance（500ms），雷达点与视觉目标
- *  都来自 avoidanceDebug targets（vision=false 是雷达点，vision=true 是
+ *  都来自 eagleDebug targets（vision=false 是雷达点，vision=true 是
  *  YOLO 投影目标），planner 叠加（yDes 箭头 + 幽影车道）。
  *
  * 方向语义（review 裁定）：yDes > 0 = 向左偏（与 yRel 左正同号），
  * 箭头按 yDes 符号画；direction = 障碍物侧（+1 = 障碍在右），只做侧别
  * 标识，不画箭头。
  *
- * 降级链：avoidance 快照 stale（avoidanced 未跑/未开）→ "等待数据"占位；
+ * 降级链：avoidance 快照 stale（eagled 未跑/未开）→ "等待数据"占位；
  * CAN 错误 / 雷达暂不可用徽章来自快照透传的 radarTracks.errors。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
@@ -157,7 +157,7 @@ const counts = computed(() => ({
 }));
 
 // 视觉路径被标定门关掉时，V 会恒为 0。不解释的话这看起来像视觉坏了，而实际
-// 上是 avoidanced 有意关掉的：地平面投影的距离对 pitch 极度敏感（40m 处 0.5°
+// 上是 eagled 有意关掉的：地平面投影的距离对 pitch 极度敏感（40m 处 0.5°
 // 误差 = 41%），用未标定的 pitch 会直接生成虚假偏移。
 const visionGated = computed(() => Boolean(av.value?.visionGated) && !avStale.value);
 
@@ -332,7 +332,7 @@ const gridX = (y: number) => lateralX(y, VB);
         </text>
       </g>
 
-      <!-- 无数据占位：avoidanced 未运行或未收到 avoidanceDebug -->
+      <!-- 无数据占位：eagled 未运行或未收到 eagleDebug -->
       <text
         v-if="avStale"
         :x="VB.width / 2"
@@ -341,7 +341,7 @@ const gridX = (y: number) => lateralX(y, VB);
         class="fill-sl-text-3"
         font-size="13"
       >
-        等待数据…（点火且 avoidanced 运行后会发布 avoidanceDebug）
+        等待数据…（点火且 eagled 运行后会发布 eagleDebug）
       </text>
     </svg>
 
@@ -372,7 +372,7 @@ const gridX = (y: number) => lateralX(y, VB);
     <!-- 标定/启用入口已移到 设置 → 转向 → 横向避让:未完成在线标定时开关
          在那里置灰,进度与原因同屏可见,不再两头找 -->
     <div v-if="avStale" class="mt-2 text-[12px] leading-relaxed text-sl-text-3">
-      avoidanced 未运行——先在 设置 → 转向 → 横向避让 完成相机在线标定并开启
+      eagled 未运行——先在 设置 → 转向 → 横向避让 完成相机在线标定并开启
       避让（行驶中自动收敛，无需手动操作），这里才有配对数据。
       标定进度与安装偏移精修也都在那一栏。
     </div>

@@ -381,7 +381,7 @@ def test_daemon_sends_valid_flag_every_frame():
   daemon.update(0.0)                    # enter hysteresis not yet satisfied -> invalid
   daemon.update(C.ENTER_HOLD_S + 0.01)  # active -> valid
 
-  assert len(pm.sent) == 4  # avoidanceDebug (2) + lateralManeuverPlan (2), one debug per frame
+  assert len(pm.sent) == 4  # eagleDebug (2) + lateralManeuverPlan (2), one debug per frame
   service0, msg0 = pm.sent[1]
   service1, msg1 = pm.sent[3]
   assert service0 == service1 == "lateralManeuverPlan"
@@ -396,7 +396,7 @@ def test_daemon_invalid_frame_carries_model_curvature():
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
 
-  assert len(pm.sent) == 4  # avoidanceDebug (2) + lateralManeuverPlan (2)
+  assert len(pm.sent) == 4  # eagleDebug (2) + lateralManeuverPlan (2)
   for _, msg in pm.sent[1::2]:
     assert msg.valid is False
     assert msg.lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
@@ -441,7 +441,7 @@ def test_planner_never_biases_into_an_occupied_blind_spot():
 
 
 def test_reported_direction_matches_commanded_bias_sign():
-  """last_state['direction'] feeds avoidanceDebug; it must match the bias."""
+  """last_state['direction'] feeds eagleDebug; it must match the bias."""
   for bsm in ({}, {"bsm_left": True}, {"bsm_right": True}):
     for targets in ([_right_target()], [_left_target()],
                     [Target(side=-1, dRel=10.0, yRel=-2.0, w=C.VEHICLE_WEIGHT, conf=1.0),

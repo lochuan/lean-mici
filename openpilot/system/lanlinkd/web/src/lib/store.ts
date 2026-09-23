@@ -32,7 +32,7 @@ const state = reactive({
   params: {} as ParamValues,
   status: null as StatusSnapshot | null,
 
-  // 在线标定摘要：独立于 avoidanced 是否运行（lanlinkd 自己订阅
+  // 在线标定摘要：独立于 eagled 是否运行（lanlinkd 自己订阅
   // extrinsicsCalibration）。规则引擎用它在标定完成前挡住横向避让的启用。
   cal: { calStatus: "unknown", calPerc: 0, calValid: false, visionGated: true } as CalState,
 

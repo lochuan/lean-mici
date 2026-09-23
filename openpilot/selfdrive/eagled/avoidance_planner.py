@@ -195,7 +195,7 @@ class AvoidancePlanner:
     self._enter_since: float | None = None
     self._last_target_t: float | None = None
     # Per-frame snapshot of the planner's decision state (eagled reads it to
-    # fill avoidanceDebug; every update() call refreshes it).
+    # fill eagleDebug; every update() call refreshes it).
     self.last_state: dict = {}
 
   def update(self, model_curvature: float, targets: Iterable[Target], v_ego: float,

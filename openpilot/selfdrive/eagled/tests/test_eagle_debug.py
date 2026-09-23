@@ -1,4 +1,4 @@
-"""avoidanceDebug publishing tests (daemon level, stub camera + detector)."""
+"""eagleDebug publishing tests (daemon level, stub camera + detector)."""
 
 import pytest
 
@@ -10,11 +10,11 @@ MODEL_CURVATURE = 0.012
 
 
 def _debug_msgs(pm):
-  return [msg for service, msg in pm.sent if service == 'avoidanceDebug']
+  return [msg for service, msg in pm.sent if service == 'eagleDebug']
 
 
 def test_services_entry_is_5hz_and_not_logged():
-  svc = SERVICE_LIST["avoidanceDebug"]
+  svc = SERVICE_LIST["eagleDebug"]
   assert svc.frequency == 5.
   assert svc.should_log is False
 
@@ -23,11 +23,11 @@ def test_debug_message_sent_every_frame_even_invalid():
   daemon, pm = _daemon(radar_points=[])
   daemon.update(0.0)
   daemon.update(C.DT_5HZ)
-  debug = [(s, m) for s, m in pm.sent if s == 'avoidanceDebug']
+  debug = [(s, m) for s, m in pm.sent if s == 'eagleDebug']
   plans = [(s, m) for s, m in pm.sent if s == 'lateralManeuverPlan']
   assert len(debug) == len(plans) == 2   # every-frame publish, both services
   assert all(m.valid is True for _, m in debug)   # observation is always valid
-  assert debug[-1][1].avoidanceDebug.valid is False   # planner validity lives in the struct
+  assert debug[-1][1].eagleDebug.valid is False   # planner validity lives in the struct
 
 
 def test_debug_targets_radar_and_vision_with_matching_pair_ids():
@@ -39,7 +39,7 @@ def test_debug_targets_radar_and_vision_with_matching_pair_ids():
                        detector=_FakeDetector(detections=[person, far_car]),
                        radar_points=[(20.0, -1.8)])
   daemon.update(0.0)
-  dbg = _debug_msgs(pm)[-1].avoidanceDebug
+  dbg = _debug_msgs(pm)[-1].eagleDebug
 
   radar_t = [t for t in dbg.targets if not t.vision]
   vision_t = [t for t in dbg.targets if t.vision]
@@ -75,7 +75,7 @@ def test_debug_radar_weight_matches_planner_weight_when_vision_confirmed():
                        detector=_FakeDetector(detections=[person]),
                        radar_points=[(20.0, -1.8)])
   daemon.update(0.0)
-  dbg = _debug_msgs(pm)[-1].avoidanceDebug
+  dbg = _debug_msgs(pm)[-1].eagleDebug
   rt = [t for t in dbg.targets if not t.vision][0]
   assert rt.matched is True
   assert rt.cls == "person"
@@ -87,7 +87,7 @@ def test_debug_counts_and_gate_flags_radar_only():
   near, far = (8.0, -1.8), (80.0, 0.0)
   daemon, pm = _daemon(camera=_FakeCamera(), radar_points=[near, far])
   daemon.update(0.0)
-  dbg = _debug_msgs(pm)[-1].avoidanceDebug
+  dbg = _debug_msgs(pm)[-1].eagleDebug
   assert dbg.nRadar == 2 and dbg.nVision == 0 and dbg.nAssociated == 0
   gates = {bool(t.inGate) for t in dbg.targets}
   assert gates == {True, False}
@@ -101,7 +101,7 @@ def test_debug_carries_planner_state():
                        detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
   daemon.update(0.0)
   daemon.update(C.ENTER_HOLD_S + 0.01)
-  dbg = _debug_msgs(pm)[-1].avoidanceDebug
+  dbg = _debug_msgs(pm)[-1].eagleDebug
   assert dbg.valid is True and dbg.active is True
   assert dbg.direction == 1  # target on the right -> avoid left
   assert dbg.yDes > 0.0
@@ -117,7 +117,7 @@ def test_debug_bsm_flags_from_car_state():
   daemon.sm._data["carState"].leftBlindspot = False
   daemon.sm._data["carState"].rightBlindspot = True
   daemon.update(0.0)
-  dbg = _debug_msgs(pm)[-1].avoidanceDebug
+  dbg = _debug_msgs(pm)[-1].eagleDebug
   assert dbg.bsmLeft is False and dbg.bsmRight is True
 
 
@@ -128,5 +128,5 @@ def test_debug_carries_radar_error_flags():
   daemon.sm._data["radarTracks"].errors.canError = True
   daemon.sm._data["radarTracks"].errors.radarUnavailableTemporary = True
   daemon.update(0.0)
-  dbg = _debug_msgs(pm)[-1].avoidanceDebug
+  dbg = _debug_msgs(pm)[-1].eagleDebug
   assert dbg.canError is True and dbg.radarUnavailable is True

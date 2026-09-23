@@ -1,9 +1,9 @@
 # system/lanlinkd/calibration.py
-"""在线标定会话控制：后台收集 avoidanceDebug 配对目标，停止时拟合。
+"""在线标定会话控制：后台收集 eagleDebug 配对目标，停止时拟合。
 
 复用 eagled.calibrate 的纯函数层（extract_pairs / fit_calibrated_offsets /
 format_constants_block），本模块只负责会话生命周期：start 起线程订阅
-avoidanceDebug 持续收集配对，stop 停止并拟合，结果（含可粘贴常量块）存
+eagleDebug 持续收集配对，stop 停止并拟合，结果（含可粘贴常量块）存
 last_result 供前端展示。与 CLI 版（python -m ...calibrate --duration N）的
 区别：无固定时长，开/停由 lanlink 按钮控制；其余语义一致（增量拟合、
 p95<0.3m pass、侧向截距只警告）。
@@ -81,7 +81,7 @@ class CalibrationController:
   def _run(self, stop_event: threading.Event) -> None:
     try:
       from openpilot.cereal import messaging
-      sm = messaging.SubMaster(['avoidanceDebug'])
+      sm = messaging.SubMaster(['eagleDebug'])
     except Exception:
       cloudlog.exception("lanlink calibration: SubMaster init failed")
       with self._lock:
@@ -89,8 +89,8 @@ class CalibrationController:
       return
     while not stop_event.is_set():
       sm.update(500)
-      if sm.updated.get("avoidanceDebug"):
-        dbg = sm["avoidanceDebug"]
+      if sm.updated.get("eagleDebug"):
+        dbg = sm["eagleDebug"]
         with self._lock:
           self._pairs.extend(extract_pairs(dbg.targets, float(dbg.vEgo)))
 

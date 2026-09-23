@@ -9,9 +9,9 @@
 export type Widget = "toggle" | "option" | "multiple_button" | "button" | "info";
 
 /** 在线标定摘要（/api/avoidance 透传的 extrinsicsCalibration 字段）。
- *  avoidanced 在相机未标定时整体关掉视觉路径——地平面投影的 dRel 对 pitch
+ *  eagled 在相机未标定时整体关掉视觉路径——地平面投影的 dRel 对 pitch
  *  的敏感度在 40m 处是 0.5° → 41%，未标定的 pitch 会直接生成虚假偏移。
- *  这份状态独立于 avoidanced 是否运行：lanlinkd 自己订阅标定消息。 */
+ *  这份状态独立于 eagled 是否运行：lanlinkd 自己订阅标定消息。 */
 export interface CalState {
   calStatus: string; // "uncalibrated" | "calibrated" | "recalibrating" | "unknown"
   calPerc: number; // 0-100
@@ -158,8 +158,8 @@ export interface StatusSnapshot {
   capabilities?: Capabilities;
 }
 
-/** 避让监测目标（avoidanceDebug targets 条目；雷达点与视觉目标共用） */
-export interface AvoidanceTarget {
+/** 避让监测目标（eagleDebug targets 条目；雷达点与视觉目标共用） */
+export interface EagleTarget {
   dRel: number; // m，车头原点
   yRel: number; // m，左正
   vRel: number; // m/s，雷达点才有，视觉目标 0
@@ -190,11 +190,11 @@ export interface AvoidanceSnapshot {
   edgeClearance?: number; // 避让侧路沿余量 m；inf 时后端发 999.0
   canError?: boolean; // radarTracks.errors.canError（随 debug 透传）
   radarUnavailable?: boolean; // radarTracks.errors.radarUnavailableTemporary
-  targets?: AvoidanceTarget[];
+  targets?: EagleTarget[];
 
-  // 标定状态：lanlinkd 自己订阅 extrinsicsCalibration 透传。avoidanced 在
+  // 标定状态：lanlinkd 自己订阅 extrinsicsCalibration 透传。eagled 在
   // 相机未标定时整体关掉视觉路径，否则前端只会看到 nVision 恒为 0 而无从解释。
-  // AvoidanceDebug 的 capnp 结构里没有降级原因字段，而加字段要设备全量重建。
+  // EagleDebug 的 capnp 结构里没有降级原因字段，而加字段要设备全量重建。
   calStatus?: string; // "uncalibrated" | "calibrated" | "recalibrating" | "unknown"
   calPerc?: number; // 标定进度 0-100
   calValid?: boolean; // 消息 valid 且 calStatus=="calibrated" 且 rpyCalib 长度为 3

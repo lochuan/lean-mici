@@ -48,7 +48,7 @@ class EagleDaemon:
     self.params = params if params is not None else Params()
     self.sm = sm if sm is not None else messaging.SubMaster(
       ['modelV2', 'carState', 'radarTracks', 'extrinsicsCalibration'])
-    self.pm = pm if pm is not None else messaging.PubMaster(['lateralManeuverPlan', 'avoidanceDebug'])
+    self.pm = pm if pm is not None else messaging.PubMaster(['lateralManeuverPlan', 'eagleDebug'])
     self.planner = planner if planner is not None else AvoidancePlanner()
     self.camera = camera                  # lazy: created via camera_factory on first use
     self.camera_factory = camera_factory
@@ -183,7 +183,7 @@ class EagleDaemon:
 
   def _publish_debug(self, radar_points, detections, n_associated, pairs, car_state,
                      valid: bool, radar_errors=None, vision_cls_by_key=None) -> None:
-    """Build and publish the fused avoidanceDebug snapshot for this frame.
+    """Build and publish the fused eagleDebug snapshot for this frame.
 
     Sent every frame regardless of planner validity: the message envelope
     ``valid`` flag is always true (this is a live observation, not a plan), and
@@ -228,8 +228,8 @@ class EagleDaemon:
         "pairId": vision_pair_ids.get(id(det), 0),
       }))
 
-    msg = messaging.new_message('avoidanceDebug')
-    dbg = msg.avoidanceDebug
+    msg = messaging.new_message('eagleDebug')
+    dbg = msg.eagleDebug
     last = self.planner.last_state
     dbg.valid = bool(valid)
     dbg.active = bool(last.get("active", False))
@@ -259,7 +259,7 @@ class EagleDaemon:
       tgts[i].vision = t["vision"]
       tgts[i].pairId = t["pairId"]
     msg.valid = True
-    self.pm.send('avoidanceDebug', msg)
+    self.pm.send('eagleDebug', msg)
 
 
 def main() -> None:

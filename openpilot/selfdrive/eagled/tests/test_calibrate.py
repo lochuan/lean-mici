@@ -252,7 +252,7 @@ def test_extract_pairs_ignores_unpaired_and_degenerate_groups():
 # --- CLI semantics ----------------------------------------------------------------
 
 class _FakeSM:
-  """Yields one pre-built avoidanceDebug frame per update() call."""
+  """Yields one pre-built eagleDebug frame per update() call."""
 
   def __init__(self, frames):
     self._frames = list(frames)
@@ -261,7 +261,7 @@ class _FakeSM:
   def update(self, timeout):
     if self._frames:
       self._current = self._frames.pop(0)
-      self.updated = {"avoidanceDebug": True}
+      self.updated = {"eagleDebug": True}
     else:
       self.updated = {}
 

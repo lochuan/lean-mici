@@ -8,7 +8,7 @@
  *    dRel 对 pitch 的敏感度在 40m 处是 0.5° → 41%,用未标定的 pitch 会直接
  *    生成虚假偏移,所以开关在收敛前置灰并显示进度。
  *  - CAMERA_TO_FRONT 手工精修:可选,只想精修纵向安装偏移(相机在前保险杠
- *    后方多远)时才跑。配对数据来自避让运行时的 avoidanceDebug 雷达↔视觉
+ *    后方多远)时才跑。配对数据来自避让运行时的 eagleDebug 雷达↔视觉
  *    关联,所以它反过来需要避让已经开着。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
