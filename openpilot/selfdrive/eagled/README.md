@@ -174,7 +174,7 @@ publishes until P1.
 ## Calibration & physical-realism verification (标定与物理真实性验证)
 
 The radar is the metric ground truth in the car frame (factory calibrated). The
-daemon's `avoidanceDebug` stream stamps every associated radar↔vision pair with
+daemon's `eagleDebug` stream stamps every associated radar↔vision pair with
 a shared `pairId`, which gives the same object's position from both sources.
 
 **Division of labour (Task 7):** pitch/yaw/roll are openpilot's job — the
@@ -188,7 +188,7 @@ longitudinal camera→bumper mount offset, so that is all this tool fits.
 ### Online calibration (`calibrate.py`)
 
 `calibrate.py` is a standalone collector process (it never publishes — it only
-subscribes to `avoidanceDebug`). Run it **on the device** while driving:
+subscribes to `eagleDebug`). Run it **on the device** while driving:
 
 ```bash
 python -m openpilot.selfdrive.eagled.calibrate [--duration 120] [--min-pairs 30] [--max-pairs 500]
@@ -205,13 +205,13 @@ Workflow:
 1. Turn `AvoidanceEnabled` on so the eagled process runs at all — the
    process itself is gated on the param (`avoidance_run` in
    `process_config.py`: onroad + car + param). Calibration does **not** require
-   avoidance manoeuvres: `avoidanceDebug`, including the pairId-matched
+   avoidance manoeuvres: `eagleDebug`, including the pairId-matched
    targets, is published every frame the daemon runs, regardless of planner
    validity or bias — but the vision side only runs once `extrinsicsCalibration`
    reports `calibrated` (see [above](#vision-metrics-need-calibration-first)).
    Drive with real lead vehicles ahead at **varied distances** so all three
    bands get pairs; 2-10 minutes is plenty.
-2. Run `calibrate` while driving (or over a recorded `avoidanceDebug` session).
+2. Run `calibrate` while driving (or over a recorded `eagleDebug` session).
    It collects paired `(d_radar, y_radar, d_vision, y_vision, vEgo)` samples.
    **Only `CAMERA_TO_FRONT` is fitted**: the forward residual
    `e_d = d_vis − d_radar` is regressed on basis `[1]` (constant only) →
@@ -248,7 +248,7 @@ measured positions:
    lateral offset (tape from car centreline, e.g. ±1 m, keep |yRel| ≤ 2.5 m so
    it stays in-gate).
 2. Park with the target visible, run the daemon, and read the target's
-   `dRel`/`yRel` from `avoidanceDebug` (lanlink bird's-eye view or a log tap).
+   `dRel`/`yRel` from `eagleDebug` (lanlink bird's-eye view or a log tap).
 3. Compare against the tape values: a constant dRel error → `CAMERA_TO_FRONT`
    (the one constant this tool fits); dRel error growing with distance → pitch
    error and yRel error growing with distance → yaw error — both are
@@ -276,7 +276,7 @@ activation segment it records:
   the summary also carries `y_des_cmd_mean_m`, the raw pre-low-pass command;
 - **road-edge clearance change** on the avoidance side: the manoeuvre must not
   eat into the `EDGE_CLEAR_MIN` margin (shadow records use `None` for "no edge
-  visible" where the daemon's `avoidanceDebug` message sends `999.0` for the
+  visible" where the daemon's `eagleDebug` message sends `999.0` for the
   same condition — don't compare the two directly);
 - **closure ratio** — displacement integrated from the executed curvature bias
   (`∫∫ v²·(curvature − model_curvature) dt²`, post-low-pass: what the plan
