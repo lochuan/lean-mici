@@ -79,7 +79,7 @@ class TestSmokeGateScript(unittest.TestCase):
   def test_shipped_pkls_are_checked(self):
     """A pkl is only readable by the tinygrad that wrote it, and nothing else
     in the pipeline checks it: native_hash only guards release/prebuilt, and
-    avoidanced's YOLO pkl is plain committed source."""
+    eagled's YOLO pkl is plain committed source."""
     self.assertIn("check_device_pkls.py", self.src)
 
   def test_pkl_check_skip_is_explicit(self):

@@ -10,7 +10,7 @@ the release pipeline checks that:
     degrades the release to source-only. But that only guards the *driving*
     pkl, and only by refusing to ship prebuilts -- it never checks that the
     pkl can actually be read.
-  * ``avoidanced``'s YOLO pkl is committed as plain source. It is in no
+  * ``eagled``'s YOLO pkl is committed as plain source. It is in no
     manifest, in no NATIVE_INPUT_PATHS entry, and no guard looks at it at all.
 
 That gap shipped twice. Bumping tinygrad_repo e837e367a -> 0811d78ea in
@@ -19,7 +19,7 @@ eab754fc7 left the prebuilt driving pkl unreadable
 committed in 76dcfaaed was built against the *new* tinygrad while lean-release
 still pinned the old one, so it raised
 "TypeError: CallInfo.__init__() takes from 1 to 6 positional arguments but 7
-were given" on every avoidanced start. The feature had never run end to end on
+were given" on every eagled start. The feature had never run end to end on
 the release branch and no gate noticed.
 
 This has to run on the device: unpickling a QCOM pkl touches the QCOM device
@@ -42,7 +42,7 @@ from pathlib import Path
 # named by their logical path; open_file_chunked resolves the chunk set.
 PKL_PATHS: tuple[str, ...] = (
   "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl",
-  "openpilot/selfdrive/avoidanced/models/yolo_tinygrad.pkl",
+  "openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl",
 )
 
 
@@ -84,7 +84,7 @@ def check(root: Path) -> int:
     print(f"PKL CHECK: FAIL ({failed}/{checked} unreadable)", file=sys.stderr)
     print("  The tinygrad revision this checkout pins cannot read these artifacts.", file=sys.stderr)
     print("  Rebuild them against it: scons for the driving pkl, and", file=sys.stderr)
-    print("  selfdrive/avoidanced/models/compile_yolo_onnx.py for the YOLO pkl.", file=sys.stderr)
+    print("  selfdrive/eagled/models/compile_yolo_onnx.py for the YOLO pkl.", file=sys.stderr)
     return 1
   print(f"PKL CHECK: PASS ({checked} artifact(s))")
   return 0
