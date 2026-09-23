@@ -106,7 +106,8 @@ class ModelState:
     jits = load_oob(open_file_chunked(pkl_path))
 
     metadata = jits['metadata']
-    if 'run_model' not in jits:
+    self.is_run_model = 'run_model' in jits
+    if not self.is_run_model:
       raise ModelUnavailable(f"unsupported model pkl (no run_model): {pkl_path}")
 
     self.frame_copy_size = nv12_copy_size(*get_nv12_info(cam_w, cam_h)[:3])

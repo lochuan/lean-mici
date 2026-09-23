@@ -60,6 +60,16 @@ def fake_car(stop_evt):
 def main():
   duration = int(sys.argv[1]) if len(sys.argv) > 1 else 60
 
+  # 2026-09-23 实车事故的冒烟盲区:modeld 从 params DB 阻塞读 CarParams
+  # (不是 cereal 总线),假线束不指纹 -> card 永不写键 -> modeld 卡在 CP
+  # 等待,加载/推理路径从未被冒烟覆盖(is_run_model AttributeError 就此漏网,
+  # 带病发了两个 release)。注入 demo CarParams 让 modeld 真正过门进入帧循环。
+  from opendbc.car.car_helpers import get_demo_car_params
+  from openpilot.common.params import Params
+  params = Params()
+  params.put("CarParams", get_demo_car_params().to_bytes())
+  print("injected demo CarParams into params DB (modeld CP gate)", flush=True)
+
   stop_evt = threading.Event()
   t = threading.Thread(target=fake_car, args=(stop_evt,), daemon=True)
   t.start()
@@ -123,6 +133,10 @@ def main():
       mgr.wait(timeout=20)
     except subprocess.TimeoutExpired:
       mgr.kill()
+    # 清掉注入的 demo CP:真车点火后 card 指纹会写真实值,但冒烟后若不清理,
+    # 用户下次点火前的短暂窗口里 modeld 可能读到 demo CP。
+    params.remove("CarParams")
+    print("removed injected CarParams from params DB", flush=True)
 
   print(f"\n=== RESULT ({duration}s) ===")
   print(f"crashes: {crashes if crashes else 'NONE'}")
