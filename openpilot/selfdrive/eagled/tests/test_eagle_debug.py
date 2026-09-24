@@ -15,10 +15,13 @@ def _debug_msgs(pm):
   return [msg for service, msg in pm.sent if service == 'eagleDebug']
 
 
-def test_services_entry_is_5hz_and_not_logged():
+def test_services_entry_is_5hz_and_logged():
+  """eagleDebug 必须落 rlog:2026-09-25 路测只统计到"避让触发 57 次",
+  却无从复盘每次的目标/方向/门控原因(should_log=False 的代价)。
+  5Hz、每帧 KB 级,落盘量可忽略。"""
   svc = SERVICE_LIST["eagleDebug"]
   assert svc.frequency == 5.
-  assert svc.should_log is False
+  assert svc.should_log is True
 
 
 def test_debug_message_sent_every_frame_even_invalid():
