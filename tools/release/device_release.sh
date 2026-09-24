@@ -28,7 +28,11 @@ sudo systemctl is-active --quiet comma || { echo "comma 未运行（产物必须
 [ -z "$(git status --porcelain -- . ':!tinygrad_repo' ':!msgq_repo' ':!opendbc_repo' ':!rednose_repo' ':!panda' | grep -v '^??')" ] || { echo "工作树有未提交修改，拒绝发布" >&2; exit 1; }
 
 echo "[-] 同步 lean-master 源内容到设备树（结构性防漂移：发布树 ≡ lean-master + 产物）"
-git fetch origin lean-master:refs/remotes/origin/lean-master
+# 设备到 GitHub 的 TLS 偶发握手失败（fake-IP 代理链路），重试 3 次
+for i in 1 2 3; do
+  git fetch origin lean-master:refs/remotes/origin/lean-master 2>/dev/null && break || sleep 5
+done
+git rev-parse -q --verify origin/lean-master >/dev/null || { echo "lean-master fetch 失败（3 次重试后）" >&2; exit 1; }
 # 白名单 = 产物路径（ARTIFACT_PATHS + data globs 的实际文件）——设备树有、lean-master
 # 没有的运行时产物是扁平模型的预期内容。
 # ls 失败（glob 无匹配，如消费态树没有 yolo pkl）必须吞掉——否则 for 循环 rc≠0，
