@@ -207,8 +207,12 @@ def missing_compiled_keys(header_keys: Iterable[str], compiled_keys: Iterable[st
   so libparams_c.so kept the old key table and lanlink disabled the five new
   avoidance/lane-change settings with "此版本固件未提供该设置". This difference
   is the publish gate for that whole failure class.
+
+  ``compiled_keys`` accepts ``str`` or ``bytes``: ``Params.all_keys()`` returns
+  the compiled table as bytes (ctypes string buffers), the header parser gives
+  str.
   """
-  compiled = set(compiled_keys)
+  compiled = {key.decode() if isinstance(key, bytes) else str(key) for key in compiled_keys}
   return [key for key in header_keys if key not in compiled]
 
 

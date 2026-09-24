@@ -720,5 +720,10 @@ class TestParamsKeyGate(unittest.TestCase):
   def test_missing_keys_empty_when_compiled_superset(self):
     self.assertEqual(release_lib.missing_compiled_keys(["A"], {"A", "Z"}), [])
 
+  def test_missing_keys_accepts_bytes_compiled_keys(self):
+    """Params.all_keys() 返回 ctypes bytes——键名必须归一化后比对。"""
+    self.assertEqual(release_lib.missing_compiled_keys(["A", "B"], [b"A", b"Z"]), ["B"])
+    self.assertEqual(release_lib.missing_compiled_keys(["A"], (b"A",)), [])
+
   def test_missing_keys_empty_for_empty_header(self):
     self.assertEqual(release_lib.missing_compiled_keys([], {"A"}), [])
