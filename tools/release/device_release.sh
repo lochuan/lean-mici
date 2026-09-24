@@ -119,6 +119,10 @@ for n in 4 5 6 7; do
   [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
 done
 ART_TARGETS=$(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py artifact-paths)
+# 先删后建：设备 HEAD track 的旧产物被任何 reset/checkout 恢复后，mtime 比新编的
+# .o 还新，scons 会误判"已是最新"跳过重链（2026-09-24 键表门禁首拦实录）。
+# 对象文件不在此列（未被 git track），删除目标只触发链接，秒级。
+while IFS= read -r t; do rm -f "$SRC/$t"; done <<< "$ART_TARGETS"
 (
   cd "$SRC"
   export PATH="/usr/local/venv/bin:$PATH"
