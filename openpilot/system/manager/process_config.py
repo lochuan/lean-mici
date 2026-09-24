@@ -99,7 +99,7 @@ procs = [
   PythonProcess("ubloxd", "openpilot.system.ubloxd.ubloxd", ublox, enabled=COMMA_HARDWARE),
   PythonProcess("plannerd", "openpilot.selfdrive.controls.plannerd", only_onroad),
   PythonProcess("radard", "openpilot.selfdrive.controls.radard", only_onroad),
-  PythonProcess("eagled", "openpilot.selfdrive.eagled.eagled", eagle_run),
+  PythonProcess("eagled", "openpilot.selfdrive.eagled.eagled", eagle_run, nice=19),
   PythonProcess("hardwared", "openpilot.system.hardware.hardwared", always_run),
   PythonProcess("modem", "openpilot.common.hardware.comma.modem", always_run, enabled=COMMA_HARDWARE),
   PythonProcess("tombstoned", "openpilot.system.tombstoned", always_run, enabled=not PC),

@@ -26,6 +26,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+import time
 
 import numpy as np
 
@@ -339,6 +340,7 @@ class PerceptionCore:
     self.detector = detector              # lazy: YoloDetector on first use
     self.detector_dead = False            # YOLO failed hard -> stop retrying
     self.degraded: set[str] = set()       # radar-only fallback reasons, logged once each
+    self.last_vision_duration_s = 0.0     # wall time of the last detector forward (0 if skipped)
 
   def _degrade(self, reason: str) -> None:
     """Log a radar-only fallback reason once (never spam)."""
@@ -355,6 +357,7 @@ class PerceptionCore:
     re-enable resumes inference without a fresh connect.
     """
     if not vision_enabled:
+      self.last_vision_duration_s = 0.0
       return []
     geom = geometry_from_calibration(extrinsics_msg, extrinsics_valid)
     if not geom.valid:
@@ -381,7 +384,9 @@ class PerceptionCore:
     if self.detector_dead:
       return []
     try:
+      t0 = time.perf_counter()
       detections = self.detector.infer(roi, now=now)
+      self.last_vision_duration_s = time.perf_counter() - t0
     except Exception:
       # Missing pkl (weights are not in the repo) or a hard inference failure:
       # radar-only from here on, logged once, never crash the daemon.

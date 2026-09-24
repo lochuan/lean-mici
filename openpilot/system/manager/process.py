@@ -21,13 +21,17 @@ from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 
 
-def launcher(proc: str, name: str) -> None:
+def launcher(proc: str, name: str, nice: int | None = None) -> None:
   try:
     # import the process
     mod = importlib.import_module(proc)
 
     # rename the process
     setproctitle(proc)
+
+    # best-effort daemons sink below everything else (SCHED_OTHER peers too)
+    if nice is not None:
+      os.nice(nice)
 
     # create new context since we forked
     messaging.reset_context()
@@ -161,12 +165,13 @@ class NativeProcess(ManagerProcess):
 
 
 class PythonProcess(ManagerProcess):
-  def __init__(self, name, module, should_run, enabled=True, sigkill=False):
+  def __init__(self, name, module, should_run, enabled=True, sigkill=False, nice=None):
     self.name = name
     self.module = module
     self.should_run = should_run
     self.enabled = enabled
     self.sigkill = sigkill
+    self.nice = nice
     self.launcher = launcher
 
   def start(self) -> None:
@@ -181,7 +186,7 @@ class PythonProcess(ManagerProcess):
       self.proc = None
 
     cloudlog.info(f"starting python {self.module}")
-    self.proc = Process(name=self.name, target=self.launcher, args=(self.module, self.name))
+    self.proc = Process(name=self.name, target=self.launcher, args=(self.module, self.name, self.nice))
     self.proc.start()
     self.shutting_down = False
 

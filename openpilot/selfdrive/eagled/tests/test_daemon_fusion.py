@@ -47,7 +47,11 @@ class _FakeSubMaster:
     # pre-calibration mount constants (C.CAMERA_PITCH / C.CAMERA_YAW are 0.0),
     # so existing tests keep their exact expected projections.
     self._data = {"modelV2": model_v2, "carState": car_state, "radarTracks": radar,
-                  "extrinsicsCalibration": _NS(calStatus=cal_status, rpyCalib=list(rpy))}
+                  "extrinsicsCalibration": _NS(calStatus=cal_status, rpyCalib=list(rpy)),
+                  # health services: healthy defaults (DeviceHealth degrades to these)
+                  "deviceState": _NS(cpuUsagePercent=[10.0] * 8, memoryUsagePercent=50.0),
+                  "procLog": _NS(mem=_NS(available=2 * 1024 ** 3)),
+                  "deviceMotion": _NS(inputsOK=True)}
     self.valid = valid if valid is not None else dict.fromkeys(self._data, True)
     self.valid.setdefault("extrinsicsCalibration", True)
 

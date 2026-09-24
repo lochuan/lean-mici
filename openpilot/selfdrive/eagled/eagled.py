@@ -37,6 +37,7 @@ if COMMA_HARDWARE:
 
 import time
 
+import cv2
 import numpy as np
 
 import openpilot.cereal.messaging as messaging
@@ -46,9 +47,16 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner
 from openpilot.selfdrive.eagled.camera_stream import CameraStream
+from openpilot.selfdrive.eagled.device_health import DeviceHealth
 from openpilot.selfdrive.eagled.perception import PerceptionCore, PerceptionFrame, gate_target, radar_point_key
+from openpilot.selfdrive.eagled.yolo_detector import DEFAULT_FPS
 
 PARAMS_REFRESH_PERIOD = 1.0  # s
+
+# same cores as main()'s affinity: the throttle factor watches the cores this
+# daemon actually runs on, so its own load feeds back into its own cadence.
+VISION_AFFINITY_CORES = [0, 2, 3]
+VISION_BASE_INTERVAL = 1.0 / DEFAULT_FPS  # s; detector's own fps cap is the floor
 
 
 class EagleDaemon:
@@ -56,13 +64,16 @@ class EagleDaemon:
                camera=None, detector=None, camera_factory=CameraStream):
     self.params = params if params is not None else Params()
     self.sm = sm if sm is not None else messaging.SubMaster(
-      ['modelV2', 'carState', 'radarTracks', 'extrinsicsCalibration'])
+      ['modelV2', 'carState', 'radarTracks', 'extrinsicsCalibration', 'deviceState', 'procLog', 'deviceMotion'])
     self.pm = pm if pm is not None else messaging.PubMaster(['eagleDebug', 'eagleState', 'lateralManeuverPlan'])
     self.planner = planner if planner is not None else AvoidancePlanner()
     self.perception = perception if perception is not None else PerceptionCore(
       camera=camera, detector=detector, camera_factory=camera_factory)
     self.max_offset = C.MAX_OFFSET_FREE
     self.enabled = False
+    self._enabled_prev = False
+    self._next_vision_t = 0.0
+    self._health = DeviceHealth(cores=VISION_AFFINITY_CORES)
     self._last_params_t = -PARAMS_REFRESH_PERIOD
 
   # The camera/YOLO lifecycle lives on the perception core; these read-only
@@ -102,12 +113,25 @@ class EagleDaemon:
   def update(self, now: float) -> None:
     self._refresh_params(now)
     self.sm.update(0)
+    self._health.refresh(self.sm)
 
     model_v2 = self.sm['modelV2']
     car_state = self.sm['carState']
     radar = self.sm['radarTracks']
 
-    frame = self.perception.process(self.sm, now, car_state.vEgo, vision_enabled=self.enabled)
+    # Vision cadence: avoidance off -> no vision at all; otherwise run the
+    # camera+YOLO chain only when the health-gated interval has elapsed
+    # (device CPU/memory pressure and locationd health stretch the interval).
+    if self.enabled and not self._enabled_prev:
+      self._next_vision_t = now          # resume immediately after re-enable
+    self._enabled_prev = self.enabled
+    vision_due = self.enabled and now >= self._next_vision_t
+
+    frame = self.perception.process(self.sm, now, car_state.vEgo, vision_enabled=vision_due)
+    if vision_due:
+      interval, _reason = self._health.inference_interval(now, VISION_BASE_INTERVAL,
+                                                          self.perception.last_vision_duration_s)
+      self._next_vision_t = now + interval
     # Suppress the bias during lane changes: the model curvature is already
     # executing a large lateral manoeuvre and the target's relative bearing is
     # changing fast, so a bias derived from "target is on the left/right" on
@@ -302,7 +326,10 @@ def main() -> None:
   # on cores 0-3, and its ~93ms YOLO bursts delayed the IMU publish past the
   # 100ms gate in locationd -> deviceMotion.inputsOK=false -> "locationd
   # Temporary Error" refused every engagement (root-cause analysis 2026-09-24).
-  config_best_effort_process([0, 2, 3])
+  config_best_effort_process(VISION_AFFINITY_CORES)
+  # OpenCV otherwise fans out worker threads across cores during the NV12->ROI
+  # resizes and detection bursts, starving more important daemons (StarPilot).
+  cv2.setNumThreads(1)
   cloudlog.info("eagled starting")
   daemon = EagleDaemon()
   rk = Ratekeeper(5.0)
