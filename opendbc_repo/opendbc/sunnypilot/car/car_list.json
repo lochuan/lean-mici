@@ -1,0 +1,841 @@
+{
+  "Lexus CT Hybrid 2017-18": {
+    "platform": "LEXUS_CTH",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "CT Hybrid",
+    "year": [
+      "2017",
+      "2018"
+    ],
+    "package": "Lexus Safety System+"
+  },
+  "Lexus ES 2017-18": {
+    "platform": "LEXUS_ES",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "ES",
+    "year": [
+      "2017",
+      "2018"
+    ],
+    "package": "All"
+  },
+  "Lexus ES 2019-25": {
+    "platform": "LEXUS_ES_TSS2",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "ES",
+    "year": [
+      "2019",
+      "2020",
+      "2021",
+      "2022",
+      "2023",
+      "2024",
+      "2025"
+    ],
+    "package": "All"
+  },
+  "Lexus ES Hybrid 2017-18": {
+    "platform": "LEXUS_ES",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "ES Hybrid",
+    "year": [
+      "2017",
+      "2018"
+    ],
+    "package": "All"
+  },
+  "Lexus ES Hybrid 2019-25": {
+    "platform": "LEXUS_ES_TSS2",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "ES Hybrid",
+    "year": [
+      "2019",
+      "2020",
+      "2021",
+      "2022",
+      "2023",
+      "2024",
+      "2025"
+    ],
+    "package": "All"
+  },
+  "Lexus GS F 2016": {
+    "platform": "LEXUS_GS_F",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "GS F",
+    "year": [
+      "2016"
+    ],
+    "package": "All"
+  },
+  "Lexus IS 2017-19": {
+    "platform": "LEXUS_IS",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "IS",
+    "year": [
+      "2017",
+      "2018",
+      "2019"
+    ],
+    "package": "All"
+  },
+  "Lexus IS 2022-24": {
+    "platform": "LEXUS_IS_TSS2",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "IS",
+    "year": [
+      "2022",
+      "2023",
+      "2024"
+    ],
+    "package": "All"
+  },
+  "Lexus LC 2024-25": {
+    "platform": "LEXUS_LC_TSS2",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "LC",
+    "year": [
+      "2024",
+      "2025"
+    ],
+    "package": "All"
+  },
+  "Lexus LS 2018": {
+    "platform": "LEXUS_LS",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "LS",
+    "year": [
+      "2018"
+    ],
+    "package": "All except Lexus Safety System+ A"
+  },
+  "Lexus NX 2018-19": {
+    "platform": "LEXUS_NX",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "NX",
+    "year": [
+      "2018",
+      "2019"
+    ],
+    "package": "All"
+  },
+  "Lexus NX 2020-21": {
+    "platform": "LEXUS_NX_TSS2",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "NX",
+    "year": [
+      "2020",
+      "2021"
+    ],
+    "package": "All"
+  },
+  "Lexus NX Hybrid 2018-19": {
+    "platform": "LEXUS_NX",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "NX Hybrid",
+    "year": [
+      "2018",
+      "2019"
+    ],
+    "package": "All"
+  },
+  "Lexus NX Hybrid 2020-21": {
+    "platform": "LEXUS_NX_TSS2",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "NX Hybrid",
+    "year": [
+      "2020",
+      "2021"
+    ],
+    "package": "All"
+  },
+  "Lexus RC 2018-20": {
+    "platform": "LEXUS_RC",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "RC",
+    "year": [
+      "2018",
+      "2019",
+      "2020"
+    ],
+    "package": "All"
+  },
+  "Lexus RC 2023": {
+    "platform": "LEXUS_RC_TSS2",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "RC",
+    "year": [
+      "2023"
+    ],
+    "package": "All"
+  },
+  "Lexus RX 2016": {
+    "platform": "LEXUS_RX",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "RX",
+    "year": [
+      "2016"
+    ],
+    "package": "Lexus Safety System+"
+  },
+  "Lexus RX 2017-19": {
+    "platform": "LEXUS_RX",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "RX",
+    "year": [
+      "2017",
+      "2018",
+      "2019"
+    ],
+    "package": "All"
+  },
+  "Lexus RX 2020-22": {
+    "platform": "LEXUS_RX_TSS2",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "RX",
+    "year": [
+      "2020",
+      "2021",
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Lexus RX Hybrid 2016": {
+    "platform": "LEXUS_RX",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "RX Hybrid",
+    "year": [
+      "2016"
+    ],
+    "package": "Lexus Safety System+"
+  },
+  "Lexus RX Hybrid 2017-19": {
+    "platform": "LEXUS_RX",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "RX Hybrid",
+    "year": [
+      "2017",
+      "2018",
+      "2019"
+    ],
+    "package": "All"
+  },
+  "Lexus RX Hybrid 2020-22": {
+    "platform": "LEXUS_RX_TSS2",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "RX Hybrid",
+    "year": [
+      "2020",
+      "2021",
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Lexus UX Hybrid 2019-24": {
+    "platform": "TOYOTA_COROLLA_TSS2",
+    "make": "Lexus",
+    "brand": "toyota",
+    "model": "UX Hybrid",
+    "year": [
+      "2019",
+      "2020",
+      "2021",
+      "2022",
+      "2023",
+      "2024"
+    ],
+    "package": "All"
+  },
+  "Toyota Alphard 2019-20": {
+    "platform": "TOYOTA_ALPHARD_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Alphard",
+    "year": [
+      "2019",
+      "2020"
+    ],
+    "package": "All"
+  },
+  "Toyota Alphard Hybrid 2021": {
+    "platform": "TOYOTA_ALPHARD_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Alphard Hybrid",
+    "year": [
+      "2021"
+    ],
+    "package": "All"
+  },
+  "Toyota Avalon 2016": {
+    "platform": "TOYOTA_AVALON",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Avalon",
+    "year": [
+      "2016"
+    ],
+    "package": "Toyota Safety Sense P"
+  },
+  "Toyota Avalon 2017-18": {
+    "platform": "TOYOTA_AVALON",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Avalon",
+    "year": [
+      "2017",
+      "2018"
+    ],
+    "package": "All"
+  },
+  "Toyota Avalon 2019-21": {
+    "platform": "TOYOTA_AVALON_2019",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Avalon",
+    "year": [
+      "2019",
+      "2020",
+      "2021"
+    ],
+    "package": "All"
+  },
+  "Toyota Avalon 2022": {
+    "platform": "TOYOTA_AVALON_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Avalon",
+    "year": [
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Toyota Avalon Hybrid 2019-21": {
+    "platform": "TOYOTA_AVALON_2019",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Avalon Hybrid",
+    "year": [
+      "2019",
+      "2020",
+      "2021"
+    ],
+    "package": "All"
+  },
+  "Toyota Avalon Hybrid 2022": {
+    "platform": "TOYOTA_AVALON_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Avalon Hybrid",
+    "year": [
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Toyota C-HR 2017-20": {
+    "platform": "TOYOTA_CHR",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "C-HR",
+    "year": [
+      "2017",
+      "2018",
+      "2019",
+      "2020"
+    ],
+    "package": "All"
+  },
+  "Toyota C-HR 2021": {
+    "platform": "TOYOTA_CHR_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "C-HR",
+    "year": [
+      "2021"
+    ],
+    "package": "All"
+  },
+  "Toyota C-HR Hybrid 2017-20": {
+    "platform": "TOYOTA_CHR",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "C-HR Hybrid",
+    "year": [
+      "2017",
+      "2018",
+      "2019",
+      "2020"
+    ],
+    "package": "All"
+  },
+  "Toyota C-HR Hybrid 2021-22": {
+    "platform": "TOYOTA_CHR_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "C-HR Hybrid",
+    "year": [
+      "2021",
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Toyota Camry 2018-20": {
+    "platform": "TOYOTA_CAMRY",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Camry",
+    "year": [
+      "2018",
+      "2019",
+      "2020"
+    ],
+    "package": "All"
+  },
+  "Toyota Camry 2021-24": {
+    "platform": "TOYOTA_CAMRY_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Camry",
+    "year": [
+      "2021",
+      "2022",
+      "2023",
+      "2024"
+    ],
+    "package": "All"
+  },
+  "Toyota Camry Hybrid 2018-20": {
+    "platform": "TOYOTA_CAMRY",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Camry Hybrid",
+    "year": [
+      "2018",
+      "2019",
+      "2020"
+    ],
+    "package": "All"
+  },
+  "Toyota Camry Hybrid 2021-24": {
+    "platform": "TOYOTA_CAMRY_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Camry Hybrid",
+    "year": [
+      "2021",
+      "2022",
+      "2023",
+      "2024"
+    ],
+    "package": "All"
+  },
+  "Toyota Corolla 2017-19": {
+    "platform": "TOYOTA_COROLLA",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Corolla",
+    "year": [
+      "2017",
+      "2018",
+      "2019"
+    ],
+    "package": "All"
+  },
+  "Toyota Corolla 2020-22": {
+    "platform": "TOYOTA_COROLLA_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Corolla",
+    "year": [
+      "2020",
+      "2021",
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Toyota Corolla Cross (Non-US only) 2020-23": {
+    "platform": "TOYOTA_COROLLA_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Corolla Cross (Non-US only)",
+    "year": [
+      "2020",
+      "2021",
+      "2022",
+      "2023"
+    ],
+    "package": "All"
+  },
+  "Toyota Corolla Cross Hybrid (Non-US only) 2020-22": {
+    "platform": "TOYOTA_COROLLA_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Corolla Cross Hybrid (Non-US only)",
+    "year": [
+      "2020",
+      "2021",
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Toyota Corolla Hatchback 2019-22": {
+    "platform": "TOYOTA_COROLLA_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Corolla Hatchback",
+    "year": [
+      "2019",
+      "2020",
+      "2021",
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Toyota Corolla Hybrid 2020-22": {
+    "platform": "TOYOTA_COROLLA_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Corolla Hybrid",
+    "year": [
+      "2020",
+      "2021",
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Toyota Corolla Hybrid (South America only) 2020-23": {
+    "platform": "TOYOTA_COROLLA_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Corolla Hybrid (South America only)",
+    "year": [
+      "2020",
+      "2021",
+      "2022",
+      "2023"
+    ],
+    "package": "All"
+  },
+  "Toyota Highlander 2017-19": {
+    "platform": "TOYOTA_HIGHLANDER",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Highlander",
+    "year": [
+      "2017",
+      "2018",
+      "2019"
+    ],
+    "package": "All"
+  },
+  "Toyota Highlander 2020-23": {
+    "platform": "TOYOTA_HIGHLANDER_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Highlander",
+    "year": [
+      "2020",
+      "2021",
+      "2022",
+      "2023"
+    ],
+    "package": "All"
+  },
+  "Toyota Highlander Hybrid 2017-19": {
+    "platform": "TOYOTA_HIGHLANDER",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Highlander Hybrid",
+    "year": [
+      "2017",
+      "2018",
+      "2019"
+    ],
+    "package": "All"
+  },
+  "Toyota Highlander Hybrid 2020-23": {
+    "platform": "TOYOTA_HIGHLANDER_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Highlander Hybrid",
+    "year": [
+      "2020",
+      "2021",
+      "2022",
+      "2023"
+    ],
+    "package": "All"
+  },
+  "Toyota Mirai 2021": {
+    "platform": "TOYOTA_MIRAI",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Mirai",
+    "year": [
+      "2021"
+    ],
+    "package": "All"
+  },
+  "Toyota Prius 2016": {
+    "platform": "TOYOTA_PRIUS",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Prius",
+    "year": [
+      "2016"
+    ],
+    "package": "Toyota Safety Sense P"
+  },
+  "Toyota Prius 2017-20": {
+    "platform": "TOYOTA_PRIUS",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Prius",
+    "year": [
+      "2017",
+      "2018",
+      "2019",
+      "2020"
+    ],
+    "package": "All"
+  },
+  "Toyota Prius 2021-22": {
+    "platform": "TOYOTA_PRIUS_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Prius",
+    "year": [
+      "2021",
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Toyota Prius Prime 2017-20": {
+    "platform": "TOYOTA_PRIUS",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Prius Prime",
+    "year": [
+      "2017",
+      "2018",
+      "2019",
+      "2020"
+    ],
+    "package": "All"
+  },
+  "Toyota Prius Prime 2021-22": {
+    "platform": "TOYOTA_PRIUS_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Prius Prime",
+    "year": [
+      "2021",
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Toyota Prius v 2017": {
+    "platform": "TOYOTA_PRIUS_V",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Prius v",
+    "year": [
+      "2017"
+    ],
+    "package": "Toyota Safety Sense P"
+  },
+  "Toyota RAV4 2016": {
+    "platform": "TOYOTA_RAV4",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "RAV4",
+    "year": [
+      "2016"
+    ],
+    "package": "Toyota Safety Sense P"
+  },
+  "Toyota RAV4 2017-18": {
+    "platform": "TOYOTA_RAV4",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "RAV4",
+    "year": [
+      "2017",
+      "2018"
+    ],
+    "package": "All"
+  },
+  "Toyota RAV4 2019-21": {
+    "platform": "TOYOTA_RAV4_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "RAV4",
+    "year": [
+      "2019",
+      "2020",
+      "2021"
+    ],
+    "package": "All"
+  },
+  "Toyota RAV4 2022": {
+    "platform": "TOYOTA_RAV4_TSS2_2022",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "RAV4",
+    "year": [
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Toyota RAV4 2023-25": {
+    "platform": "TOYOTA_RAV4_TSS2_2023",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "RAV4",
+    "year": [
+      "2023",
+      "2024",
+      "2025"
+    ],
+    "package": "All"
+  },
+  "Toyota RAV4 Hybrid 2016": {
+    "platform": "TOYOTA_RAV4H",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "RAV4 Hybrid",
+    "year": [
+      "2016"
+    ],
+    "package": "Toyota Safety Sense P"
+  },
+  "Toyota RAV4 Hybrid 2017-18": {
+    "platform": "TOYOTA_RAV4H",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "RAV4 Hybrid",
+    "year": [
+      "2017",
+      "2018"
+    ],
+    "package": "All"
+  },
+  "Toyota RAV4 Hybrid 2019-21": {
+    "platform": "TOYOTA_RAV4_TSS2",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "RAV4 Hybrid",
+    "year": [
+      "2019",
+      "2020",
+      "2021"
+    ],
+    "package": "All"
+  },
+  "Toyota RAV4 Hybrid 2022": {
+    "platform": "TOYOTA_RAV4_TSS2_2022",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "RAV4 Hybrid",
+    "year": [
+      "2022"
+    ],
+    "package": "All"
+  },
+  "Toyota RAV4 Hybrid 2023-25": {
+    "platform": "TOYOTA_RAV4_TSS2_2023",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "RAV4 Hybrid",
+    "year": [
+      "2023",
+      "2024",
+      "2025"
+    ],
+    "package": "All"
+  },
+  "Toyota RAV4 Prime 2021-23": {
+    "platform": "TOYOTA_RAV4_PRIME",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "RAV4 Prime",
+    "year": [
+      "2021",
+      "2022",
+      "2023"
+    ],
+    "package": "All"
+  },
+  "Toyota Sienna 2018-20": {
+    "platform": "TOYOTA_SIENNA",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Sienna",
+    "year": [
+      "2018",
+      "2019",
+      "2020"
+    ],
+    "package": "All"
+  },
+  "Toyota Sienna 2021-23": {
+    "platform": "TOYOTA_SIENNA_4TH_GEN",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Sienna",
+    "year": [
+      "2021",
+      "2022",
+      "2023"
+    ],
+    "package": "All"
+  },
+  "Toyota Sienna 2021-26 PATCHED": {
+    "platform": "TOYOTA_SIENNA_PATCHED",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Sienna",
+    "year": [
+      "2021",
+      "2022",
+      "2023",
+      "2024",
+      "2025",
+      "2026"
+    ],
+    "package": "All"
+  },
+  "Toyota Yaris (Non-US only) 2020, 2023": {
+    "platform": "TOYOTA_YARIS",
+    "make": "Toyota",
+    "brand": "toyota",
+    "model": "Yaris (Non-US only)",
+    "year": [
+      "2020",
+      "2023"
+    ],
+    "package": "All"
+  }
+}
