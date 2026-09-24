@@ -27,6 +27,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 from typing import Protocol
+import os
 import threading
 import time
 
@@ -348,7 +349,8 @@ class VisionWorker:
   主循环节奏(0.2-1.5s)远慢于推理(~0.11s),积压不该发生;真积压时最新优先。
   """
 
-  def __init__(self):
+  def __init__(self, cores=None):
+    self._cores = cores
     self._lock = threading.Lock()
     self._job = None
     self._result = None
@@ -371,6 +373,14 @@ class VisionWorker:
     self._thread.join(timeout=2.0)
 
   def _run(self) -> None:
+    if self._cores is not None:
+      # 自钉安全核:正常靠创建时继承(config_best_effort_process 已钉主线程),
+      # 这里显式再钉一次 —— 构造顺序若被改,继承掩码可能失守。core 1 是
+      # sensord(FIFO 1)的核,任何线程踏上去都可能把 IMU 发布拖过 100ms 门。
+      try:
+        os.sched_setaffinity(0, set(self._cores))
+      except (OSError, AttributeError):
+        pass   # 非 Linux(开发机测试)或掩码不可设:靠继承
     while not self._stop.is_set():
       with self._lock:
         job, self._job = self._job, None

@@ -46,6 +46,26 @@ def config_realtime_process(cores: int | list[int], priority: int) -> None:
   set_core_affinity(c)
 
 
+def _pin_all_threads(cores: list[int], task_dir: str = "/proc/self/task") -> None:
+  """把进程内**所有**线程钉到 ``cores``。
+
+  set_core_affinity 只钉调用线程 —— numpy/OpenBLAS 的线程池在 import 期就带着
+  全核掩码存在(2026-09-25 设备实测:7 条线程漏在 0-7,含 core 1),把
+  "core 1 不可触碰"的红线穿透了。遍历 /proc/self/task 一次钉齐;之后新建的
+  线程继承被钉后的创建者掩码,不会再漏。线程在 listdir 与 pin 之间退出是
+  正常竞态,OSError 忽略。非 Linux(开发机)无 /proc,安静跳过。
+  """
+  try:
+    tids = sorted(int(t) for t in os.listdir(task_dir))
+  except (OSError, ValueError):
+    return
+  for tid in tids:
+    try:
+      os.sched_setaffinity(tid, cores)
+    except OSError:
+      pass
+
+
 def config_best_effort_process(cores: int | list[int]) -> None:
   """Non-RT (SCHED_OTHER) process pinned to ``cores``.
 
@@ -59,6 +79,8 @@ def config_best_effort_process(cores: int | list[int]) -> None:
   drop_realtime()
   c = cores if isinstance(cores, list) else [cores, ]
   set_core_affinity(c)
+  if sys.platform == 'linux' and not PC:
+    _pin_all_threads(c)
 
 
 class Ratekeeper:

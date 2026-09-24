@@ -343,8 +343,9 @@ def main() -> None:
   cv2.setNumThreads(1)
   cloudlog.info("eagled starting")
   # 视觉推理走工作线程:取帧+转换+YOLO ~390ms 不许阻塞 plan 的 5Hz 发布
-  # (2026-09-25 路测 4ms/395ms 锯齿的根源)。
-  daemon = EagleDaemon(vision_worker=VisionWorker())
+  # (2026-09-25 路测 4ms/395ms 锯齿的根源)。工作线程自钉 VISION_AFFINITY_CORES
+  # (防线:core 1 = sensord 的核,一步不许踏)。
+  daemon = EagleDaemon(vision_worker=VisionWorker(cores=VISION_AFFINITY_CORES))
   rk = Ratekeeper(5.0)
   while True:
     daemon.update(time.monotonic())

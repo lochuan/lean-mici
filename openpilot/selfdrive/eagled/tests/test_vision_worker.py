@@ -104,3 +104,21 @@ def test_sync_path_unchanged_without_worker():
   core = PerceptionCore(camera=_FakeCamera(frames=[ROI]), detector=_Quick())
   frame = core.process(_core_sm(), 0.0, 20.0, vision_enabled=True, vision_due=True)
   assert len(frame.detections) == 1              # 同拍即得
+
+
+def test_worker_thread_pins_itself_to_given_cores(monkeypatch):
+  """工作线程启动时自钉安全核(防线:构造顺序若变,继承掩码可能失守)。"""
+  from openpilot.selfdrive.eagled import perception as perception_mod
+  calls = []
+  monkeypatch.setattr(perception_mod.os, "sched_setaffinity",
+                      lambda tid, cores: calls.append((tid, sorted(cores))), raising=False)
+  worker = VisionWorker(cores=[0, 2, 3])
+  try:
+    worker.submit(lambda: 42)
+    for _ in range(200):
+      if worker.poll() == 42:
+        break
+      time.sleep(0.01)
+  finally:
+    worker.stop()
+  assert (0, [0, 2, 3]) in calls   # tid=0 → 调用线程(工作线程自身)
