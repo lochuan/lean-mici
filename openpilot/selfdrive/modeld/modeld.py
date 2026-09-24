@@ -115,6 +115,8 @@ class ModelState:
     self.parser = Parser()
     self.full_frames: dict = {}
     self._blob_cache: dict = {}
+    self.LAT_SMOOTH_SECONDS = LAT_SMOOTH_SECONDS
+    self.LONG_SMOOTH_SECONDS = LONG_SMOOTH_SECONDS
 
     self._init_supercombo(jits, metadata, cam_w, cam_h)
 
