@@ -97,6 +97,8 @@ procs = [
   PythonProcess("paramsd", "openpilot.selfdrive.locationd.paramsd", only_onroad),
   PythonProcess("lagd", "openpilot.selfdrive.locationd.lagd", only_onroad),
   PythonProcess("ubloxd", "openpilot.system.ubloxd.ubloxd", ublox, enabled=COMMA_HARDWARE),
+  # GNSS 串口读取器(喂 ubloxRaw 给 ubloxd);无它 GPS 全程为零(noGps 刷屏)
+  PythonProcess("pigeond", "openpilot.system.ubloxd.pigeond", ublox, enabled=COMMA_HARDWARE),
   PythonProcess("plannerd", "openpilot.selfdrive.controls.plannerd", only_onroad),
   PythonProcess("radard", "openpilot.selfdrive.controls.radard", only_onroad),
   PythonProcess("eagled", "openpilot.selfdrive.eagled.eagled", eagle_run, nice=19),
