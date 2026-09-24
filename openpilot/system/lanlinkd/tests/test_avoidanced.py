@@ -195,3 +195,47 @@ def test_cache_does_not_trust_calibrated_status_on_an_invalid_message(cal_publis
   finally:
     exit_event.set()
     t.join(timeout=2)
+
+
+# --- 车道几何透传（lanes.py，方案 A：lanlinkd 自己订阅 modelV2） -------------------
+
+def test_snapshot_includes_lanes_field(cal_publisher):
+  """快照必须带 lanes 键：有 modelV2 帧时是车道 dict，没有时是 None——
+  前端据此决定画不画车道层，字段缺失语义与 null 一致。"""
+  from openpilot.cereal import messaging as _m
+  model_pub = _m.PubMaster(['modelV2'])
+  cache, exit_event, t = _start_cache()
+  try:
+    for _ in range(20):
+      _publish_debug(cal_publisher)
+      msg = _m.new_message('modelV2')
+      msg.modelV2.init('laneLines', 4)
+      msg.modelV2.laneLines[1].x, msg.modelV2.laneLines[1].y = [0.0, 50.0], [-1.75, -1.75]
+      msg.modelV2.laneLineProbs = [0.1, 0.9, 0.1, 0.1]
+      msg.modelV2.laneLineStds = [0.5, 0.1, 0.5, 0.5]
+      model_pub.send('modelV2', msg)
+      time.sleep(0.05)
+      snap = cache.snapshot()
+      if isinstance(snap.get("lanes"), dict):
+        break
+    assert isinstance(snap["lanes"], dict)
+    assert snap["lanes"]["laneLines"][1]["y"][0] == pytest.approx(1.75)
+  finally:
+    exit_event.set()
+    t.join(timeout=2)
+
+
+def test_snapshot_lanes_is_none_without_model_v2(publisher):
+  cache, exit_event, t = _start_cache()
+  try:
+    for _ in range(20):
+      _publish_debug(publisher)
+      time.sleep(0.1)
+      if cache.snapshot().get("stale") is False:
+        break
+    snap = cache.snapshot()
+    assert snap["stale"] is False
+    assert snap["lanes"] is None     # 无 modelV2 帧 -> 无车道层
+  finally:
+    exit_event.set()
+    t.join(timeout=2)

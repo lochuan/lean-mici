@@ -22,6 +22,7 @@ import time
 
 from openpilot.cereal import messaging
 from openpilot.common.swaglog import cloudlog
+from openpilot.system.lanlinkd import lanes as lanes_mod
 
 STALE_AFTER_MS = 1000
 
@@ -66,6 +67,10 @@ class AvoidanceCache:
     self._lock = threading.Lock()
     self._snapshot: dict = {"stale": True}
     self._recv_ms: float = 0.0
+    # 车道几何（modelV2 → lanes.py）：请求时取帧，无后台循环。
+    # snapshot() 只在 API handler 线程调用，LaneCache 的 SubMaster 惰性
+    # 创建、只被该线程触碰，与 run() 线程无共享。
+    self._lane_cache = lanes_mod.LaneCache()
     # 标定状态与 eagleDebug 分开缓存：两者频率不同（100Hz vs 5Hz），
     # 且标定即使停更也仍然是有效信息，不该被 debug 的 staleness 抹掉。
     self._cal: dict = {"calStatus": "unknown", "calPerc": 0, "calValid": False, "visionGated": True}
@@ -128,4 +133,6 @@ class AvoidanceCache:
     # 标定状态即使 debug 停更也要带上：前端用它区分「避让没在跑」和
     # 「避让在跑但视觉被标定门关掉了」。
     snap.update(cal)
+    # 车道几何：modelV2 停更/无帧时为 None，前端不画车道层。
+    snap["lanes"] = self._lane_cache.snapshot()
     return snap
