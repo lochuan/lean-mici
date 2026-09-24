@@ -27,6 +27,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 from typing import Protocol
+import threading
 import time
 
 import numpy as np
@@ -338,10 +339,58 @@ class PerceptionFrame:
       self.objects = []
 
 
+class VisionWorker:
+  """单一在途推理的执行器:主循环 submit 不阻塞,poll 取回结果。
+
+  视觉帧(取帧+转换+YOLO)在主循环里占 ~390ms,Ratekeeper 追帧会让
+  lateralManeuverPlan 的间隔呈 4ms/395ms 锯齿(2026-09-25 路测)。工作线程
+  接走推理,主循环每拍只做融合+发布。邮箱只留一份待跑任务/一份最新结果:
+  主循环节奏(0.2-1.5s)远慢于推理(~0.11s),积压不该发生;真积压时最新优先。
+  """
+
+  def __init__(self):
+    self._lock = threading.Lock()
+    self._job = None
+    self._result = None
+    self._stop = threading.Event()
+    self._thread = threading.Thread(target=self._run, daemon=True, name="eagled-vision")
+    self._thread.start()
+
+  def submit(self, job) -> None:
+    with self._lock:
+      self._job = job
+
+  def poll(self):
+    """取走已完成的结果(只取一次);无结果返回 None。"""
+    with self._lock:
+      res, self._result = self._result, None
+    return res
+
+  def stop(self) -> None:
+    self._stop.set()
+    self._thread.join(timeout=2.0)
+
+  def _run(self) -> None:
+    while not self._stop.is_set():
+      with self._lock:
+        job, self._job = self._job, None
+      if job is None:
+        time.sleep(0.005)
+        continue
+      try:
+        res = job()
+      except Exception:
+        cloudlog.exception("eagled: vision worker job failed")
+        res = None
+      with self._lock:
+        self._result = res
+
+
 class PerceptionCore:
   """Stateful fusion chain: lazy camera/YOLO lifecycle + radar-only degrade."""
 
-  def __init__(self, camera=None, detector=None, camera_factory=CameraStream):
+  def __init__(self, camera=None, detector=None, camera_factory=CameraStream,
+               vision_worker: VisionWorker | None = None):
     self.camera = camera                  # lazy: created via camera_factory on first use
     self.camera_factory = camera_factory
     self.detector = detector              # lazy: YoloDetector on first use
@@ -350,6 +399,8 @@ class PerceptionCore:
     self.last_vision_duration_s = 0.0     # wall time of the last detector forward (0 if skipped)
     self._held: list[dict] = []           # last inference's projected detections
     self._held_t: float = 0.0             # when those detections were projected
+    self._worker = vision_worker          # None = 同步执行(单测/影子工具)
+    self._hold_gen = 0                    # 清 hold 时 +1,作废在途推理结果
 
   def _degrade(self, reason: str) -> None:
     """Log a radar-only fallback reason once (never spam)."""
@@ -361,6 +412,34 @@ class PerceptionCore:
     """Replace the held detections with this tick's outcome (possibly empty)."""
     self._held = list(detections)
     self._held_t = now
+
+  def _submit_vision(self, sm, now: float) -> None:
+    """把 due 拍的推理交给工作线程;hold 锚点用取帧时刻 now。"""
+    extr = sm['extrinsicsCalibration']
+    valid = sm.valid['extrinsicsCalibration']
+    gen = self._hold_gen
+
+    def job():
+      dets = self.detect(extr, valid, now)
+      return (gen, dets, now, self.last_vision_duration_s)
+
+    self._worker.submit(job)
+
+  def _absorb_worker(self) -> None:
+    """把工作线程完成的推理结果落库为新的 hold。过期代际(期间被关闭)丢弃。"""
+    if self._worker is None:
+      return
+    res = self._worker.poll()
+    if res is None:
+      return
+    gen, dets, now, duration = res
+    if gen != self._hold_gen:
+      # 期间发生了 disable 清空:结果作废。detect 的副作用把 duration 写在了
+      # 工作线程上,这里一并归零(保持关闭语义:回到纯雷达且无推理耗时)。
+      self.last_vision_duration_s = 0.0
+      return
+    self._store_hold(dets, now)
+    self.last_vision_duration_s = duration
 
   def _held_detections(self, now: float, v_ego: float) -> list[dict]:
     """TTL 内沿用上次成功推理的检测,dRel 按自车速度补偿。
@@ -445,16 +524,24 @@ class PerceptionCore:
     """
     radar = sm['radarTracks']
     model_v2 = sm['modelV2']
+    self._absorb_worker()
     if not vision_enabled:
-      # 避让关:立即清空保持,回到纯雷达(不让旧目标活过 TTL)。
+      # 避让关:立即清空保持,回到纯雷达(不让旧目标活过 TTL)。代际 +1 作废
+      # 在途推理——它完成时不得复活旧目标。
+      self._hold_gen += 1
       self._store_hold([], now)
       self.last_vision_duration_s = 0.0
       detections = []
     elif vision_due:
-      # due 帧的结果(含降级路径的空列表)整体成为新的保持:保持桥接的是
-      # 调度间隙,不是视觉故障 —— 降级帧不该让上一拍的旧目标复活。
-      detections = self.detect(sm['extrinsicsCalibration'], sm.valid['extrinsicsCalibration'], now)
-      self._store_hold(detections, now)
+      if self._worker is not None:
+        # 异步:本拍沿用旧 hold(补偿后),结果稍后由 _absorb_worker 落库
+        self._submit_vision(sm, now)
+        detections = self._held_detections(now, v_ego)
+      else:
+        # due 帧的结果(含降级路径的空列表)整体成为新的保持:保持桥接的是
+        # 调度间隙,不是视觉故障 —— 降级帧不该让上一拍的旧目标复活。
+        detections = self.detect(sm['extrinsicsCalibration'], sm.valid['extrinsicsCalibration'], now)
+        self._store_hold(detections, now)
     else:
       detections = self._held_detections(now, v_ego)
     # associate needs fy for the box-height fallback on unmatched detections.

@@ -48,7 +48,7 @@ from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner
 from openpilot.selfdrive.eagled.camera_stream import CameraStream
 from openpilot.selfdrive.eagled.device_health import DeviceHealth
-from openpilot.selfdrive.eagled.perception import PerceptionCore, PerceptionFrame, gate_target, radar_point_key
+from openpilot.selfdrive.eagled.perception import PerceptionCore, PerceptionFrame, VisionWorker, gate_target, radar_point_key
 from openpilot.selfdrive.eagled.yolo_detector import DEFAULT_FPS
 
 PARAMS_REFRESH_PERIOD = 1.0  # s
@@ -61,14 +61,15 @@ VISION_BASE_INTERVAL = 1.0 / DEFAULT_FPS  # s; detector's own fps cap is the flo
 
 class EagleDaemon:
   def __init__(self, sm=None, pm=None, params=None, planner=None, perception=None,
-               camera=None, detector=None, camera_factory=CameraStream):
+               camera=None, detector=None, camera_factory=CameraStream, vision_worker=None):
     self.params = params if params is not None else Params()
     self.sm = sm if sm is not None else messaging.SubMaster(
       ['modelV2', 'carState', 'radarTracks', 'extrinsicsCalibration', 'deviceState', 'procLog', 'deviceMotion'])
     self.pm = pm if pm is not None else messaging.PubMaster(['eagleDebug', 'eagleState', 'lateralManeuverPlan'])
     self.planner = planner if planner is not None else AvoidancePlanner()
     self.perception = perception if perception is not None else PerceptionCore(
-      camera=camera, detector=detector, camera_factory=camera_factory)
+      camera=camera, detector=detector, camera_factory=camera_factory,
+      vision_worker=vision_worker)
     self.max_offset = C.MAX_OFFSET_FREE
     self.enabled = False
     self._enabled_prev = False
@@ -341,7 +342,9 @@ def main() -> None:
   # resizes and detection bursts, starving more important daemons (StarPilot).
   cv2.setNumThreads(1)
   cloudlog.info("eagled starting")
-  daemon = EagleDaemon()
+  # 视觉推理走工作线程:取帧+转换+YOLO ~390ms 不许阻塞 plan 的 5Hz 发布
+  # (2026-09-25 路测 4ms/395ms 锯齿的根源)。
+  daemon = EagleDaemon(vision_worker=VisionWorker())
   rk = Ratekeeper(5.0)
   while True:
     daemon.update(time.monotonic())
