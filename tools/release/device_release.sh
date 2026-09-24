@@ -80,15 +80,19 @@ fi
 echo "[-] Materialize 构建 gitlink（msgq/rednose/panda；扁平树只带运行时子集）T=$SECONDS"
 # SConstruct 的 toolpath 需要 msgq_repo/rednose_repo 的 site_scons site_tools，
 # panda/SConscript 需要 panda 的构建源 —— 这些都是 gitlink 内容，扁平树不带。
-# 与 tinygrad 同一模式：按 lean-master 的 gitlink SHA 取上游，重取由 .materialized_sha
-# 引导（发布 commit 会带上该 pin 文件，消费态设备升级后 pin 即失效触发重取）。
+# pin 放 /data/matpins（git 树外）：checkout/reset 会删 repo 内被 track 的文件
+# 却可能留下 repo 内 pin —— 2026-09-25 实录：pin 在内容缺一半时照样判"已在"，
+# scons 死在 No tool module 'cython'。pin 一致还必须验 canary 文件在位。
+# canary = 该 repo 的构建关键文件。发布 commit 不再带 pin。
+PIN_DIR=/data/matpins
 materialize_repo() {
-  local name="$1" url="$2"
+  local name="$1" url="$2" canary="$3"
   local sha pin cur
   sha=$(git -C "$SRC" rev-parse "origin/lean-master:$name")
-  pin="$SRC/$name/.materialized_sha"
+  pin="$PIN_DIR/${name}.sha"
   cur="$(cat "$pin" 2>/dev/null || true)"
-  if [ "$cur" = "$sha" ]; then
+  rm -f "$SRC/$name/.materialized_sha"   # 旧版 repo 内 pin 退役
+  if [ "$cur" = "$sha" ] && [ -e "$SRC/$name/$canary" ]; then
     echo "[ok] $name 已在 $sha"
     return
   fi
@@ -98,12 +102,13 @@ materialize_repo() {
   for i in 1 2 3; do git -C "$tmp" fetch -q --depth=1 origin "$sha" && break || sleep 5; done
   git -C "$tmp" checkout -q FETCH_HEAD
   rm -rf "$SRC/$name" && cp -a "$tmp" "$SRC/$name" && rm -rf "$SRC/$name/.git"
+  mkdir -p "$PIN_DIR"
   echo "$sha" > "$pin"
   echo "[ok] $name materialized at $sha"
 }
-materialize_repo msgq_repo https://github.com/commaai/msgq.git
-materialize_repo rednose_repo https://github.com/commaai/rednose.git
-materialize_repo panda https://github.com/commaai/panda.git
+materialize_repo msgq_repo https://github.com/commaai/msgq.git site_scons/site_tools/cython.py
+materialize_repo rednose_repo https://github.com/commaai/rednose.git site_scons/site_tools/rednose_filter.py
+materialize_repo panda https://github.com/commaai/panda.git SConscript
 
 echo "[-] 全量重建 native 产物（ARTIFACT_PATHS）T=$SECONDS"
 # 扁平树发布不带 scons 步骤的历史欠账：launch_chffrplus.sh 的运行时 prebuilt
