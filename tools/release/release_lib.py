@@ -189,6 +189,24 @@ def sha256_file(path: Path) -> str:
   return digest.hexdigest()
 
 
+def inputs_fingerprint(files: Iterable[str | Path], extras: Iterable[str] = ()) -> str:
+  """文件内容 + 附加串的稳定指纹(与顺序无关);缺文件抛 FileNotFoundError。
+
+  pkl 缓存判据:pkl 只依赖 tinygrad pin、onnx、编译脚本与编译参数,输入不变
+  则指纹不变(2026-09-25 议定:省掉每次发布 ~20 分钟的无谓重编)。
+  """
+  digest = hashlib.sha256()
+  for name in sorted(str(f) for f in files):
+    path = Path(name)
+    if not path.is_file():
+      raise FileNotFoundError(name)
+    digest.update(sha256_file(path).encode())
+  for extra in sorted(extras):
+    digest.update(b"\x00extra\x00")
+    digest.update(extra.encode())
+  return digest.hexdigest()
+
+
 def params_keys_from_header(header_text: str) -> list[str]:
   """Parse every param key registered in ``params_keys.h``.
 
@@ -478,6 +496,10 @@ def main() -> int:
   sub.add_parser("data-artifact-globs", help="print non-ELF data artifact globs")
   sub.add_parser("flat-tree-entries", help="print flat-tree structural entries lean-master does not track")
   sub.add_parser("validate-artifacts", help="validate staged prebuilt artifacts")
+
+  fp_parser = sub.add_parser("fingerprint", help="stable fingerprint of file contents + extras (pkl cache key)")
+  fp_parser.add_argument("files", nargs="+")
+  fp_parser.add_argument("--extra", action="append", default=[], help="extra string mixed into the fingerprint")
   sweep_parser = sub.add_parser(
     "sweep-lfs-pointers",
     help="fail if binary media in a tree checkout are lfs pointer stubs",
@@ -517,6 +539,14 @@ def main() -> int:
   if args.command == "flat-tree-entries":
     for entry in FLAT_TREE_ENTRIES:
       print(entry)
+    return 0
+
+  if args.command == "fingerprint":
+    try:
+      print(inputs_fingerprint(args.files, args.extra))
+    except FileNotFoundError as exc:
+      print(f"fingerprint input missing: {exc}", file=sys.stderr)
+      return 1
     return 0
 
   if args.command == "validate-artifacts":

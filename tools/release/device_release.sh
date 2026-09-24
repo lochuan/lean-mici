@@ -138,48 +138,65 @@ while IFS= read -r t; do rm -f "$SRC/$t"; done <<< "$ART_TARGETS"
 ) || { echo "native 全量重建失败，拒绝发布" >&2; exit 1; }
 echo "[ok] native 全量重建完成 T=$SECONDS"
 
-echo "[-] 重编译 eagled YOLO pkl（与内置 driving 模型同一管线：每次发布重编译对齐树 pin）T=$SECONDS"
+echo "[-] eagled YOLO pkl（输入指纹未变则跳过重编）T=$SECONDS"
+# pkl 嵌入的是某一个 tinygrad revision 的 JIT kernel：pin/onnx/编译脚本/编译
+# 参数任一变化才需要重编（2026-09-25 议定），其余情况重编纯浪费 ~5 分钟。
 YOLO_DIR="openpilot/selfdrive/eagled/models"
 YOLO_PKL="$SRC/$YOLO_DIR/yolo_tinygrad.pkl"
 YOLO_ONNX="$SRC/$YOLO_DIR/yolo26n-bdd7-fp32-384x640.onnx"
 [ -f "$YOLO_ONNX" ] || { echo "yolo onnx 缺失：$YOLO_ONNX —— lean-master 应 tracked 此文件，前置同步步应已落盘" >&2; exit 1; }
-for n in 4 5 6 7; do
-  [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
-done
-(
-  cd "$SRC"
-  DEV=QCOM:IR3 IMAGE=1 FLOAT16=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 \
-  PYTHONPATH="$SRC/tinygrad_repo:$SRC" \
-  /usr/local/venv/bin/python "$SRC/$YOLO_DIR/compile_yolo_onnx.py" "$YOLO_ONNX" "$YOLO_PKL"
-) || { echo "yolo pkl 编译失败，拒绝发布" >&2; exit 1; }
-# 不按 driving 的 get_chunk_targets 切块：yolo pkl ~13MB 远低于按 onnx 估算的
-# 切块上限（2*onnx+10MB ≈ 29MB），且运行时 TinygradRunner 按单文件直读，
-# 切块反而会破坏加载。模型长大越过上限时需连同运行时加载器一起改造。
-echo "[ok] yolo pkl 重编译完成 T=$SECONDS"
+YOLO_FP=$(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py fingerprint \
+  --extra "yolo-pkl-v1" --extra "pin=$TG_SHA" \
+  "$YOLO_ONNX" "$SRC/$YOLO_DIR/compile_yolo_onnx.py")
+if [ -f "$YOLO_PKL" ] && [ "$(cat "$YOLO_PKL.inputs_fp" 2>/dev/null)" = "$YOLO_FP" ]; then
+  echo "[ok] yolo pkl 输入未变，跳过重编 T=$SECONDS"
+else
+  for n in 4 5 6 7; do
+    [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
+  done
+  (
+    cd "$SRC"
+    DEV=QCOM:IR3 IMAGE=1 FLOAT16=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 \
+    PYTHONPATH="$SRC/tinygrad_repo:$SRC" \
+    /usr/local/venv/bin/python "$SRC/$YOLO_DIR/compile_yolo_onnx.py" "$YOLO_ONNX" "$YOLO_PKL"
+  ) || { echo "yolo pkl 编译失败，拒绝发布" >&2; exit 1; }
+  # 不按 driving 的 get_chunk_targets 切块：yolo pkl ~13MB 远低于按 onnx 估算的
+  # 切块上限（2*onnx+10MB ≈ 29MB），且运行时 TinygradRunner 按单文件直读，
+  # 切块反而会破坏加载。模型长大越过上限时需连同运行时加载器一起改造。
+  echo "$YOLO_FP" > "$YOLO_PKL.inputs_fp"
+  echo "[ok] yolo pkl 重编译完成 T=$SECONDS"
+fi
 
-echo "[-] 重编译内置 driving 模型（tinygrad 钉 master，每次发布对齐树 pin）T=$SECONDS"
+echo "[-] 内置 driving 模型（输入指纹未变则跳过重编）T=$SECONDS"
 MODEL_DIR="$SRC/openpilot/selfdrive/modeld"
 DRIVE_PKL="$MODEL_DIR/models/driving_tinygrad.pkl"
 DRIVE_ONNX="$MODEL_DIR/models/driving_supercombo.onnx"
 [ -f "$DRIVE_ONNX" ] || { echo "driving onnx 缺失：$DRIVE_ONNX —— lean-master 应 tracked 此文件，前置同步步应已落盘" >&2; exit 1; }
-for n in 4 5 6 7; do
-  [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
-done
-(
-  cd "$SRC"
-  DEV=QCOM IMAGE=1 FLOAT16=1 NOLOCALS=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 \
-  PYTHONPATH="$SRC/tinygrad_repo:$SRC" \
-  taskset -c 4 /usr/local/venv/bin/python "$MODEL_DIR/compile_modeld.py" \
-    --model-size 512x256 \
-    --camera-resolutions 1344x760 \
-    --onnx "$DRIVE_ONNX" \
-    --output "$DRIVE_PKL" \
-    --frame-skip 4
-) || { echo "内置 driving 模型编译失败，拒绝发布" >&2; exit 1; }
-# 按 SConscript 的估算切块（pkl 超过单文件上限）
-(
-  cd "$SRC"
-  PYTHONPATH="$SRC/openpilot" /usr/local/venv/bin/python - "$DRIVE_PKL" <<'PYEOF'
+DRIVE_ARGS="--model-size 512x256 --camera-resolutions 1344x760 --frame-skip 4"
+DRIVE_FP=$(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py fingerprint \
+  --extra "driving-pkl-v1" --extra "pin=$TG_SHA" --extra "$DRIVE_ARGS" \
+  "$DRIVE_ONNX" "$MODEL_DIR/compile_modeld.py" "$MODEL_DIR/get_model_metadata.py" "$MODEL_DIR/helpers.py")
+if [ -f "$DRIVE_PKL" ] && [ -f "$DRIVE_PKL.chunkmanifest" ] && [ "$(cat "$DRIVE_PKL.inputs_fp" 2>/dev/null)" = "$DRIVE_FP" ]; then
+  echo "[ok] driving pkl 输入未变，跳过重编 T=$SECONDS"
+else
+  for n in 4 5 6 7; do
+    [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
+  done
+  (
+    cd "$SRC"
+    DEV=QCOM IMAGE=1 FLOAT16=1 NOLOCALS=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 \
+    PYTHONPATH="$SRC/tinygrad_repo:$SRC" \
+    taskset -c 4 /usr/local/venv/bin/python "$MODEL_DIR/compile_modeld.py" \
+      --model-size 512x256 \
+      --camera-resolutions 1344x760 \
+      --onnx "$DRIVE_ONNX" \
+      --output "$DRIVE_PKL" \
+      --frame-skip 4
+  ) || { echo "内置 driving 模型编译失败，拒绝发布" >&2; exit 1; }
+  # 按 SConscript 的估算切块（pkl 超过单文件上限）
+  (
+    cd "$SRC"
+    PYTHONPATH="$SRC/openpilot" /usr/local/venv/bin/python - "$DRIVE_PKL" <<'PYEOF'
 import os, sys
 from openpilot.common.file_chunker import chunk_file, get_chunk_targets
 pkl = sys.argv[1]
@@ -188,8 +205,10 @@ targets = get_chunk_targets(pkl, 2.0 * os.path.getsize(onnx) + 10 * 1024 * 1024)
 chunk_file(pkl, targets)
 print("chunked:", [os.path.basename(t) for t in targets])
 PYEOF
-) || { echo "driving pkl 切块失败，拒绝发布" >&2; exit 1; }
-echo "[ok] 内置 driving 模型重编译完成 T=$SECONDS"
+  ) || { echo "driving pkl 切块失败，拒绝发布" >&2; exit 1; }
+  echo "$DRIVE_FP" > "$DRIVE_PKL.inputs_fp"
+  echo "[ok] 内置 driving 模型重编译完成 T=$SECONDS"
+fi
 
 echo "[-] params 键表门禁：params_keys.h 的每个键必须已编译进 libparams_c.so T=$SECONDS"
 /usr/local/venv/bin/python - "$SRC" <<'PYEOF'

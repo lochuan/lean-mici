@@ -727,3 +727,38 @@ class TestParamsKeyGate(unittest.TestCase):
 
   def test_missing_keys_empty_for_empty_header(self):
     self.assertEqual(release_lib.missing_compiled_keys([], {"A"}), [])
+
+
+class TestInputsFingerprint(unittest.TestCase):
+  """pkl 缓存判据:输入(文件内容+附加串)不变则指纹不变。
+
+  2026-09-25 议定:pkl 只依赖 tinygrad pin、onnx、编译脚本与编译参数 ——
+  三者不变时重编纯浪费(每次发布 ~20 分钟)。指纹就是"要不要重编"的唯一依据。
+  """
+
+  def _file(self, td: Path, name: str, content: bytes) -> Path:
+    p = td / name
+    p.write_bytes(content)
+    return p
+
+  def test_same_inputs_same_fingerprint(self):
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      a = self._file(root, "a.bin", b"aaa")
+      b = self._file(root, "b.bin", b"bbb")
+      f1 = release_lib.inputs_fingerprint([a, b], extras=["x"])
+      f2 = release_lib.inputs_fingerprint([b, a], extras=["x"])   # 顺序无关
+      self.assertEqual(f1, f2)
+
+  def test_content_or_extras_change_changes_fingerprint(self):
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      a = self._file(root, "a.bin", b"aaa")
+      base = release_lib.inputs_fingerprint([a], extras=["x"])
+      self.assertNotEqual(base, release_lib.inputs_fingerprint([a], extras=["y"]))
+      a.write_bytes(b"aaa2")
+      self.assertNotEqual(base, release_lib.inputs_fingerprint([a], extras=["x"]))
+
+  def test_missing_input_raises(self):
+    with self.assertRaises(FileNotFoundError):
+      release_lib.inputs_fingerprint([Path("/nonexistent/nope.bin")])
