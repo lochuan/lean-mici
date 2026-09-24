@@ -126,6 +126,23 @@ PYEOF
 ) || { echo "driving pkl 切块失败，拒绝发布" >&2; exit 1; }
 echo "[ok] 内置 driving 模型重编译完成 T=$SECONDS"
 
+echo "[-] params 键表门禁：params_keys.h 的每个键必须已编译进 libparams_c.so T=$SECONDS"
+/usr/local/venv/bin/python - "$SRC" <<'PYEOF'
+import sys
+from pathlib import Path
+sys.path.insert(0, "/tmp/relhelper")
+import release_lib
+from openpilot.common.params import Params
+
+src = Path(sys.argv[1])
+header_keys = release_lib.params_keys_from_header((src / "openpilot/common/params_keys.h").read_text())
+missing = release_lib.missing_compiled_keys(header_keys, Params().all_keys())
+if missing:
+  print("params_keys.h 中未编译进 libparams_c.so 的键:", *missing, sep="\n  ", file=sys.stderr)
+  sys.exit(1)
+print(f"[ok] params key gate: {len(header_keys)} keys all compiled")
+PYEOF
+
 echo "[-] 等 GPU 从编译负载回落（EGL 需要干净的显示/DRM 状态）T=$SECONDS"
 sleep 15
 

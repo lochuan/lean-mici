@@ -677,3 +677,48 @@ class TestFlatTreeEntries(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
+
+
+class TestParamsKeyGate(unittest.TestCase):
+  """发布门禁：params_keys.h 注册的每个键必须已编译进 libparams_c.so。
+
+  2026-09-24 事故：776b4d5a3 只改了头文件，设备 prebuilt 标记 + 扁平树发布
+  流程没有 scons 步骤，libparams_c.so 一直停留在 09-18 的键表 —— lanlink
+  上 5 个避让/变道设置全部显示"此版本固件未提供该设置"。header 与编译产物
+  的差集就是这类事故的门禁。
+  """
+
+  HEADER_SAMPLE = """
+  // comment with {"NotAKey", {PERSISTENT, BOOL}} inside
+  {"AvoidanceEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+  {"AvoidanceSideMargin", {PERSISTENT, FLOAT, "0.3"}},
+  {"AvoidanceEgoHalfWidth", {PERSISTENT, FLOAT, "0.9"}},  // trailing comment
+  {"AvoidanceLaneProbMin", {PERSISTENT, FLOAT, "0.6"}},
+  {"AvoidanceLaneStdMax", {PERSISTENT, FLOAT, "0.3"}},
+  """
+
+  def test_parses_every_key_line_ignoring_comments(self):
+    keys = release_lib.params_keys_from_header(self.HEADER_SAMPLE)
+    self.assertEqual(keys, [
+      "AvoidanceEnabled", "AvoidanceSideMargin", "AvoidanceEgoHalfWidth",
+      "AvoidanceLaneProbMin", "AvoidanceLaneStdMax",
+    ])
+
+  def test_real_header_parses_to_known_keys(self):
+    """Regex 对真实头文件不能失手：已知键必须解析出来，且全表非空。"""
+    header = REPO_ROOT / "openpilot/common/params_keys.h"
+    keys = release_lib.params_keys_from_header(header.read_text())
+    self.assertIn("AvoidanceEnabled", keys)
+    self.assertIn("AvoidanceSideMargin", keys)
+    self.assertIn("LaneChangeNearZone", keys)
+    self.assertGreater(len(keys), 100)
+
+  def test_missing_keys_is_header_minus_compiled(self):
+    header = ["A", "B", "C"]
+    self.assertEqual(release_lib.missing_compiled_keys(header, {"B"}), ["A", "C"])
+
+  def test_missing_keys_empty_when_compiled_superset(self):
+    self.assertEqual(release_lib.missing_compiled_keys(["A"], {"A", "Z"}), [])
+
+  def test_missing_keys_empty_for_empty_header(self):
+    self.assertEqual(release_lib.missing_compiled_keys([], {"A"}), [])

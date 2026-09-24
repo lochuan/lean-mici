@@ -14,6 +14,7 @@ import shutil
 import struct
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 
@@ -186,6 +187,29 @@ def sha256_file(path: Path) -> str:
     for chunk in iter(lambda: f.read(1024 * 1024), b""):
       digest.update(chunk)
   return digest.hexdigest()
+
+
+def params_keys_from_header(header_text: str) -> list[str]:
+  """Parse every param key registered in ``params_keys.h``.
+
+  Entries look like ``{"AvoidanceEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},``;
+  comment lines that merely mention a `{"Name", {` shape must not match, so the
+  pattern anchors on the statement start (leading whitespace + brace).
+  """
+  return re.findall(r'^\s*\{\s*"([A-Za-z0-9_]+)"\s*,\s*\{', header_text, re.MULTILINE)
+
+
+def missing_compiled_keys(header_keys: Iterable[str], compiled_keys: Iterable[str]) -> list[str]:
+  """Header-registered keys absent from the compiled key table, header order.
+
+  2026-09-24 incident: a params_keys.h-only change reached the device through
+  the flat-tree release (no scons step, runtime prebuilt marker skips build.py),
+  so libparams_c.so kept the old key table and lanlink disabled the five new
+  avoidance/lane-change settings with "此版本固件未提供该设置". This difference
+  is the publish gate for that whole failure class.
+  """
+  compiled = set(compiled_keys)
+  return [key for key in header_keys if key not in compiled]
 
 
 def write_manifest(dest: Path, source_commit: str, native_hash: str, files: list[str],
