@@ -78,16 +78,20 @@ echo "[-] 全量重建 native 产物（ARTIFACT_PATHS）T=$SECONDS"
 # 标记让 build.py 永远跳过，C++ 源码改动（如 params_keys.h）在旧流程下根本
 # 不会进二进制 —— 2026-09-24 的 libparams_c.so 键表滞后就是这一类。
 # checkout -- . 恢复了 SConstruct/SConscript；SKIP_CAPNP_REGEN=1：lean AGNOS
-# 没有 capnpc 工具链，扁平树的 gen/cpp 生成物与 schema 同源（e91290670）。
+# 没有 capnpc 工具链，gen/cpp 已随 lean-master 跟踪（2026-09-24 起）。
+# 显式列出 ARTIFACT_PATHS 目标：默认全量会把 eagled 的 yolo pkl 也拉进图里，
+# 而它的 onnx 源在扁平树被剥离，且 pkl 由本脚本自己的步骤重编。
 # 若某次改动动了 .capnp schema，必须先在 Mac 侧重新生成 gen/cpp 再提交，
 # 否则这里的编译用的是旧生成物 —— 目前没有工具能拦这个类别。
 for n in 4 5 6 7; do
   [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
 done
+ART_TARGETS=$(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py artifact-paths)
 (
   cd "$SRC"
+  export PATH="/usr/local/venv/bin:$PATH"
   SKIP_CAPNP_REGEN=1 PYTHONPATH="$SRC:$SRC/openpilot" \
-    /usr/local/venv/bin/scons -j4
+    /usr/local/venv/bin/scons -j4 $ART_TARGETS
 ) || { echo "native 全量重建失败，拒绝发布" >&2; exit 1; }
 echo "[ok] native 全量重建完成 T=$SECONDS"
 
