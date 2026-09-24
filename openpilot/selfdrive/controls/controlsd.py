@@ -33,8 +33,15 @@ LaneChangeDirection = log.LaneChangeDirection
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 
 
-def fuse_curvature(model: float, avoid: float, valid: bool, enabled: bool, fresh: bool = True) -> float:
-  return avoid if (valid and enabled and fresh) else model
+def fuse_curvature(model: float, bias: float, valid: bool, enabled: bool, fresh: bool = True) -> float:
+  """避让偏置叠加到**当前**模型曲率上（2026-09-25 路测后语义修正）。
+
+  plan 的 desiredCurvature 打包着 eagled 拍的模型曲率——送到这里时 p50 已
+  陈旧 188ms,整句替换会把陈旧曲率误差注入转向（实测 0.9m 等效偏移,超过
+  0.35m 避让上限）。curvatureBias 是纯偏置分量,叠加到本拍模型曲率上。
+  任一门不通 → 纯模型曲率。
+  """
+  return model + bias if (valid and enabled and fresh) else model
 
 
 class Controls(ControlsExt):
@@ -155,7 +162,7 @@ class Controls(ControlsExt):
       if self.frame % 100 == 0:
         self.avoidance_enabled = self.params.get_bool("AvoidanceEnabled")
       new_desired_curvature = fuse_curvature(model_v2.action.desiredCurvature,
-                                             self.sm['lateralManeuverPlan'].desiredCurvature,
+                                             self.sm['lateralManeuverPlan'].curvatureBias,
                                              self.sm.valid['lateralManeuverPlan'],
                                              self.avoidance_enabled, fresh)
     else:

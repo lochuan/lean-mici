@@ -11784,6 +11784,8 @@ public:
 
   inline float getDesiredCurvature() const;
 
+  inline float getCurvatureBias() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -11814,6 +11816,9 @@ public:
 
   inline float getDesiredCurvature();
   inline void setDesiredCurvature(float value);
+
+  inline float getCurvatureBias();
+  inline void setCurvatureBias(float value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -37442,6 +37447,20 @@ inline float LateralManeuverPlan::Builder::getDesiredCurvature() {
 inline void LateralManeuverPlan::Builder::setDesiredCurvature(float value) {
   _builder.setDataField<float>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline float LateralManeuverPlan::Reader::getCurvatureBias() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline float LateralManeuverPlan::Builder::getCurvatureBias() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void LateralManeuverPlan::Builder::setCurvatureBias(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
 }
 
 inline float EagleTarget::Reader::getDRel() const {

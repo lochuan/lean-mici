@@ -457,6 +457,35 @@ def test_vision_chain_kept_running_when_avoidance_enabled():
   assert daemon.detector.calls == 1
 
 
+def test_plan_publishes_curvature_bias_separately():
+  """controlsd 融合改为 model+curvatureBias(capnp @1):偏置必须单独发布。
+
+  旧语义整句替换 desiredCurvature 会把 eagled 拍的陈旧模型曲率带进转向
+  （2026-09-25 路测实测偏差超避让上限）。desiredCurvature 保留全量语义
+  供离线消费,curvatureBias 是 controlsd 要叠加的分量。
+  """
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  plan_msg = pm.sent[-1][1].lateralManeuverPlan
+  expected_bias = _first_frame_bias(_expected_offset(20.0, C.VRU_WEIGHT))
+  assert plan_msg.curvatureBias == pytest.approx(expected_bias, rel=1e-6)
+  assert plan_msg.desiredCurvature == pytest.approx(MODEL_CURVATURE + plan_msg.curvatureBias, rel=1e-6)
+
+
+def test_curvature_bias_zero_on_suppressed_frames():
+  """变道压制/无效帧:偏置归零(等于没有避让,不产生任何替换效应)。"""
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
+  daemon.sm._data["modelV2"].meta.laneChangeState = "preLaneChange"
+  daemon.update(0.0)
+  daemon.update(C.ENTER_HOLD_S + 0.01)
+  plan_msg = pm.sent[-1][1].lateralManeuverPlan
+  assert plan_msg.curvatureBias == pytest.approx(0.0)
+  assert plan_msg.desiredCurvature == pytest.approx(MODEL_CURVATURE)
+
+
 # --- vision hold: detections persist between vision ticks -------------------------
 # a4abb7624 回归:vision_due 帧之间 detect() 返回 [],lanlink 的 eagleDebug 快照
 # 被 ~4ms 后的纯雷达帧覆盖,车/人/自行车看起来消失。修复:两次推理之间沿用

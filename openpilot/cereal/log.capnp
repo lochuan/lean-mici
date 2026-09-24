@@ -1220,6 +1220,12 @@ struct DriverAssistance {
 
 struct LateralManeuverPlan {
   desiredCurvature @0 :Float32;  # 1/m
+  # 1/m,相对 modelV2.action.desiredCurvature 的避让偏置分量。
+  # controlsd 融合用这个:当前模型曲率 + curvatureBias —— 绝不拿
+  # desiredCurvature 整句替换(它打包的模型部分到 controlsd 时 p50 已陈旧
+  # 188ms,2026-09-25 路测实测偏差 0.9m 超避让上限)。desiredCurvature 保留
+  # 全量语义供离线消费。未发布的旧消息按 0 读出 = 无偏置,自然回退。
+  curvatureBias @1 :Float32;
 }
 
 struct EagleTarget {

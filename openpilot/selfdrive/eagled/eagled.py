@@ -143,8 +143,9 @@ class EagleDaemon:
     # top of it is unpredictable. laneChangeState lives on modelV2.meta
     # (log.capnp MetaData) — no new subscription needed.
     lane_change_active = str(model_v2.meta.laneChangeState) != "off"
+    model_curv = model_v2.action.desiredCurvature
     curvature, valid = self.planner.update(
-      model_curvature=model_v2.action.desiredCurvature,
+      model_curvature=model_curv,
       targets=frame.targets,
       v_ego=car_state.vEgo,
       budget_left=frame.left.budget,
@@ -174,6 +175,10 @@ class EagleDaemon:
 
     msg = messaging.new_message('lateralManeuverPlan')
     msg.lateralManeuverPlan.desiredCurvature = float(curvature)
+    # controlsd 融合只叠加这个偏置分量（model + curvatureBias,见 capnp 注释）:
+    # desiredCurvature 里的模型部分到 controlsd 时已陈旧一两百 ms,整句替换会
+    # 把陈旧曲率误差注入转向（2026-09-25 路测实测 0.9m 等效偏移,超避让上限）。
+    msg.lateralManeuverPlan.curvatureBias = float(curvature - model_curv)
     msg.valid = bool(valid) and bool(self.sm.valid['modelV2'])
     self.pm.send('lateralManeuverPlan', msg)
 
