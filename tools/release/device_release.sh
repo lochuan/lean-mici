@@ -73,6 +73,34 @@ else
   echo "[ok] tinygrad materialized at $TG_SHA"
 fi
 
+echo "[-] Materialize 构建 gitlink（msgq/rednose/panda；扁平树只带运行时子集）T=$SECONDS"
+# SConstruct 的 toolpath 需要 msgq_repo/rednose_repo 的 site_scons site_tools，
+# panda/SConscript 需要 panda 的构建源 —— 这些都是 gitlink 内容，扁平树不带。
+# 与 tinygrad 同一模式：按 lean-master 的 gitlink SHA 取上游，重取由 .materialized_sha
+# 引导（发布 commit 会带上该 pin 文件，消费态设备升级后 pin 即失效触发重取）。
+materialize_repo() {
+  local name="$1" url="$2"
+  local sha pin cur
+  sha=$(git -C "$SRC" rev-parse "origin/lean-master:$name")
+  pin="$SRC/$name/.materialized_sha"
+  cur="$(cat "$pin" 2>/dev/null || true)"
+  if [ "$cur" = "$sha" ]; then
+    echo "[ok] $name 已在 $sha"
+    return
+  fi
+  local tmp="/tmp/mat_${name%_repo}"
+  rm -rf "$tmp" && git init -q "$tmp"
+  git -C "$tmp" remote add origin "$url"
+  for i in 1 2 3; do git -C "$tmp" fetch -q --depth=1 origin "$sha" && break || sleep 5; done
+  git -C "$tmp" checkout -q FETCH_HEAD
+  rm -rf "$SRC/$name" && cp -a "$tmp" "$SRC/$name" && rm -rf "$SRC/$name/.git"
+  echo "$sha" > "$pin"
+  echo "[ok] $name materialized at $sha"
+}
+materialize_repo msgq_repo https://github.com/commaai/msgq.git
+materialize_repo rednose_repo https://github.com/commaai/rednose.git
+materialize_repo panda https://github.com/commaai/panda.git
+
 echo "[-] 全量重建 native 产物（ARTIFACT_PATHS）T=$SECONDS"
 # 扁平树发布不带 scons 步骤的历史欠账：launch_chffrplus.sh 的运行时 prebuilt
 # 标记让 build.py 永远跳过，C++ 源码改动（如 params_keys.h）在旧流程下根本
