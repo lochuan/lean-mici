@@ -12,13 +12,13 @@ Import('env', 'arch')
 if arch == 'comma_arm64':
   lenv = env.Clone()
 
-  models_dir = Dir("#openpilot/selfdrive/avoidanced/models").abspath
+  models_dir = Dir("#openpilot/selfdrive/eagled/models").abspath
   # the source of the committed-pkl era (fingerprint-verified: 105/223 initializers
   # byte-match the pkl's out-of-band buffers); 8-class head (4+8, adds tricycle)
-  onnx_path = File("#openpilot/selfdrive/avoidanced/models/yolo26n-bdd7-fp32-384x640.onnx").abspath
+  onnx_path = File("#openpilot/selfdrive/eagled/models/yolo26n-bdd7-fp32-384x640.onnx").abspath
   pkl_path = os.path.join(models_dir, "yolo_tinygrad.pkl")
   sidecar_path = pkl_path + ".tinygrad_pin"
-  script_path = File("#openpilot/selfdrive/avoidanced/models/compile_yolo_onnx.py").abspath
+  script_path = File("#openpilot/selfdrive/eagled/models/compile_yolo_onnx.py").abspath
 
   tinygrad_root = env.Dir("#").abspath
   tinygrad_files = ["#" + x for x in glob.glob(env.Dir("#tinygrad_repo").relpath + "/**", recursive=True, root_dir=tinygrad_root)
