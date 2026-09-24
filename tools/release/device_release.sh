@@ -79,7 +79,8 @@ fi
 
 echo "[-] Materialize 构建 gitlink（msgq/rednose/panda；扁平树只带运行时子集）T=$SECONDS"
 # SConstruct 的 toolpath 需要 msgq_repo/rednose_repo 的 site_scons site_tools，
-# panda/SConscript 需要 panda 的构建源 —— 这些都是 gitlink 内容，扁平树不带。
+# panda/SConscript 需要 panda 的构建源，opendbc 的运行时/车辆接口代码也必须
+# 跟 gitlink pin 走（SecOC 降噪修复即一例）—— 这些都是 gitlink 内容，扁平树不带。
 # pin 放 /data/matpins（git 树外）：checkout/reset 会删 repo 内被 track 的文件
 # 却可能留下 repo 内 pin —— 2026-09-25 实录：pin 在内容缺一半时照样判"已在"，
 # scons 死在 No tool module 'cython'。pin 一致还必须验 canary 文件在位。
@@ -109,6 +110,7 @@ materialize_repo() {
 materialize_repo msgq_repo https://github.com/commaai/msgq.git site_scons/site_tools/cython.py
 materialize_repo rednose_repo https://github.com/commaai/rednose.git site_scons/site_tools/rednose_filter.py
 materialize_repo panda https://github.com/commaai/panda.git SConscript
+materialize_repo opendbc_repo https://github.com/lochuan/opendbc.git opendbc/car/car.capnp
 
 echo "[-] 全量重建 native 产物（ARTIFACT_PATHS）T=$SECONDS"
 # 扁平树发布不带 scons 步骤的历史欠账：launch_chffrplus.sh 的运行时 prebuilt
