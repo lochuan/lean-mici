@@ -762,3 +762,50 @@ class TestInputsFingerprint(unittest.TestCase):
   def test_missing_input_raises(self):
     with self.assertRaises(FileNotFoundError):
       release_lib.inputs_fingerprint([Path("/nonexistent/nope.bin")])
+
+
+class TestSchemaStamp(unittest.TestCase):
+  """gen/cpp 与 .capnp schema 一致性门禁:params 键表事故的同类缺口。
+
+  设备无 capnpc 工具链,SKIP_CAPNP_REGEN=1 编译的是 checked-in gen/cpp ——
+  schema 改了忘了在 Mac 侧重生成时,设备会静默编译旧生成物。生成时盖
+  .schema.sha 指纹,发布时校验,漂移即拒发。
+  """
+
+  def _schema(self, td: Path, name: str, content: str) -> Path:
+    p = td / name
+    p.write_text(content)
+    return p
+
+  def test_stamp_then_check_roundtrip(self):
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      gen = root / "gen"
+      gen.mkdir()
+      s1 = self._schema(root, "a.capnp", "struct A {}")
+      s2 = self._schema(root, "b.capnp", "struct B {}")
+      release_lib.stamp_schemas(gen, [s1, s2])
+      ok, reason = release_lib.check_schema_stamp(gen, [s1, s2])
+      self.assertTrue(ok, reason)
+
+  def test_schema_change_after_stamp_fails(self):
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      gen = root / "gen"
+      gen.mkdir()
+      s1 = self._schema(root, "a.capnp", "struct A {}")
+      release_lib.stamp_schemas(gen, [s1])
+      s1.write_text("struct A { x @0 :Float32; }")
+      ok, reason = release_lib.check_schema_stamp(gen, [s1])
+      self.assertFalse(ok)
+      self.assertIn("mismatch", reason)
+
+  def test_missing_stamp_fails(self):
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      gen = root / "gen"
+      gen.mkdir()
+      s1 = self._schema(root, "a.capnp", "struct A {}")
+      ok, reason = release_lib.check_schema_stamp(gen, [s1])
+      self.assertFalse(ok)
+      self.assertIn("missing", reason)

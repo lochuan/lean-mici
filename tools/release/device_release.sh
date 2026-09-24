@@ -210,6 +210,14 @@ PYEOF
   echo "[ok] 内置 driving 模型重编译完成 T=$SECONDS"
 fi
 
+echo "[-] capnp schema/gen 一致性门禁 T=$SECONDS"
+# 设备无 capnpc,SKIP_CAPNP_REGEN=1 编译 checked-in gen/cpp —— schema 改了忘记
+# Mac 侧重生成会静默编译旧结构(params 键表事故的同类缺口,2026-09-25 议定)。
+/usr/local/venv/bin/python /tmp/relhelper/release_lib.py check-schema-stamp \
+  "$SRC/openpilot/cereal/gen/cpp" \
+  "$SRC/openpilot/cereal/log.capnp" "$SRC/openpilot/cereal/deprecated.capnp" \
+  "$SRC/openpilot/cereal/custom.capnp" "$SRC/opendbc_repo/opendbc/car/car.capnp"
+
 echo "[-] params 键表门禁：params_keys.h 的每个键必须已编译进 libparams_c.so T=$SECONDS"
 /usr/local/venv/bin/python - "$SRC" <<'PYEOF'
 import sys

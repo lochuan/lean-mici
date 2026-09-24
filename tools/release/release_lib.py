@@ -234,6 +234,36 @@ def missing_compiled_keys(header_keys: Iterable[str], compiled_keys: Iterable[st
   return [key for key in header_keys if key not in compiled]
 
 
+SCHEMA_STAMP_NAME = ".schema.sha"
+
+
+def stamp_schemas(gen_dir: str | Path, schema_files: Iterable[str | Path]) -> str:
+  """给 checked-in 的 gen/ 盖 schema 指纹(重生成后调用)。返回指纹。"""
+  fp = inputs_fingerprint(schema_files)
+  stamp = Path(gen_dir) / SCHEMA_STAMP_NAME
+  stamp.write_text(fp + "\n")
+  return fp
+
+
+def check_schema_stamp(gen_dir: str | Path, schema_files: Iterable[str | Path]) -> tuple[bool, str]:
+  """校验 gen/ 的 .schema.sha 与 schema 内容一致。
+
+  设备无 capnpc,SKIP_CAPNP_REGEN=1 编译的是 checked-in 生成物 —— schema 改了
+  忘记 Mac 侧重生成会静默编译旧结构(params 键表事故的同类缺口)。
+  """
+  stamp = Path(gen_dir) / SCHEMA_STAMP_NAME
+  if not stamp.is_file():
+    return False, f"schema stamp missing: {stamp} — 用 tools/release/regen_cereal_gen.sh 重生成 gen/ 后提交"
+  want = stamp.read_text().strip()
+  try:
+    got = inputs_fingerprint(schema_files)
+  except FileNotFoundError as exc:
+    return False, f"schema file missing: {exc}"
+  if got != want:
+    return False, f"gen/ 与 schema mismatch(stamp={want[:12]}… current={got[:12]}…) — schema 改动后忘记重生成 gen/cpp"
+  return True, "ok"
+
+
 def write_manifest(dest: Path, source_commit: str, native_hash: str, files: list[str],
                    data_files: list[str] | None = None) -> None:
   """Write ``PREBUILT_MANIFEST`` for artifacts already staged under ``dest``."""
@@ -500,6 +530,14 @@ def main() -> int:
   fp_parser = sub.add_parser("fingerprint", help="stable fingerprint of file contents + extras (pkl cache key)")
   fp_parser.add_argument("files", nargs="+")
   fp_parser.add_argument("--extra", action="append", default=[], help="extra string mixed into the fingerprint")
+
+  stamp_parser = sub.add_parser("stamp-schemas", help="write gen/.schema.sha for the capnp schemas")
+  stamp_parser.add_argument("gen_dir")
+  stamp_parser.add_argument("schemas", nargs="+")
+
+  schema_check = sub.add_parser("check-schema-stamp", help="verify gen/ matches the capnp schemas (publish gate)")
+  schema_check.add_argument("gen_dir")
+  schema_check.add_argument("schemas", nargs="+")
   sweep_parser = sub.add_parser(
     "sweep-lfs-pointers",
     help="fail if binary media in a tree checkout are lfs pointer stubs",
@@ -547,6 +585,22 @@ def main() -> int:
     except FileNotFoundError as exc:
       print(f"fingerprint input missing: {exc}", file=sys.stderr)
       return 1
+    return 0
+
+  if args.command == "stamp-schemas":
+    try:
+      print(stamp_schemas(args.gen_dir, args.schemas))
+    except FileNotFoundError as exc:
+      print(f"schema file missing: {exc}", file=sys.stderr)
+      return 1
+    return 0
+
+  if args.command == "check-schema-stamp":
+    ok, reason = check_schema_stamp(args.gen_dir, args.schemas)
+    if not ok:
+      print(reason, file=sys.stderr)
+      return 1
+    print(f"[ok] schema stamp: {reason}")
     return 0
 
   if args.command == "validate-artifacts":
