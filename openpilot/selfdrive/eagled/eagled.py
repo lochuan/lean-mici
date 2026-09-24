@@ -15,11 +15,14 @@ from the planner. An invalid frame (no target, gated, takeover, disabled)
 still carries the raw model curvature, so controlsd falls back cleanly;
 nothing depends on the message going stale.
 
-Perception runs whenever the device is onroad in a car; avoidance actuation
-is gated separately by the ``AvoidanceEnabled`` param — turning avoidance
-off never turns the eagle's eyes off. When the camera stream, calibration
-or the YOLO weights are unavailable the core degrades to radar-only: the
-reason is logged once and radar-fused frames keep publishing.
+Perception runs whenever the device is onroad in a car; the ``AvoidanceEnabled``
+param gates both the avoidance actuation (planner ``valid`` envelope) and the
+vision chain (camera + YOLO): with avoidance off the core degrades to
+radar-only — the fusion and both streams keep publishing, but the ~5Hz GPU
+burst (an RT task that starves sensord's IRQ-timestamped IMU publishing into
+locationdTemporaryError on shared cores) is skipped. When the camera stream,
+calibration or the YOLO weights are unavailable the core degrades to
+radar-only: the reason is logged once and radar-fused frames keep publishing.
 """
 
 import os
@@ -38,7 +41,7 @@ import numpy as np
 
 import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
-from openpilot.common.realtime import Priority, Ratekeeper, config_realtime_process
+from openpilot.common.realtime import Ratekeeper, config_best_effort_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner
@@ -104,7 +107,7 @@ class EagleDaemon:
     car_state = self.sm['carState']
     radar = self.sm['radarTracks']
 
-    frame = self.perception.process(self.sm, now, car_state.vEgo)
+    frame = self.perception.process(self.sm, now, car_state.vEgo, vision_enabled=self.enabled)
     # Suppress the bias during lane changes: the model curvature is already
     # executing a large lateral manoeuvre and the target's relative bearing is
     # changing fast, so a bias derived from "target is on the left/right" on
@@ -295,7 +298,11 @@ class EagleDaemon:
 
 
 def main() -> None:
-  config_realtime_process([0, 1, 2, 3], Priority.CTRL_LOW)
+  # best-effort: never preempt sensord (FIFO 1, core 1). eagled ran as FIFO 51
+  # on cores 0-3, and its ~93ms YOLO bursts delayed the IMU publish past the
+  # 100ms gate in locationd -> deviceMotion.inputsOK=false -> "locationd
+  # Temporary Error" refused every engagement (root-cause analysis 2026-09-24).
+  config_best_effort_process([0, 2, 3])
   cloudlog.info("eagled starting")
   daemon = EagleDaemon()
   rk = Ratekeeper(5.0)

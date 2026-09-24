@@ -346,8 +346,16 @@ class PerceptionCore:
       self.degraded.add(reason)
       cloudlog.warning(f"eagled: {reason} unavailable, radar-only fallback")
 
-  def detect(self, extrinsics_msg, extrinsics_valid: bool, now: float) -> list[dict]:
-    """Camera -> YOLO -> car-frame projections; ``[]`` keeps the frame radar-only."""
+  def detect(self, extrinsics_msg, extrinsics_valid: bool, now: float,
+             vision_enabled: bool = True) -> list[dict]:
+    """Camera -> YOLO -> car-frame projections; ``[]`` keeps the frame radar-only.
+
+    ``vision_enabled=False`` (avoidance off) skips the camera + YOLO chain
+    entirely — the lazy camera/detector lifecycle is retained, so a later
+    re-enable resumes inference without a fresh connect.
+    """
+    if not vision_enabled:
+      return []
     geom = geometry_from_calibration(extrinsics_msg, extrinsics_valid)
     if not geom.valid:
       # 0.5deg pitch error = 41% distance error at 40m. Running the vision path
@@ -388,11 +396,12 @@ class PerceptionCore:
                               camera_to_front=C.CAMERA_TO_FRONT, roi_meta=roi_meta,
                               frame_height=self.camera.frame_size[1] if self.camera.frame_size else None)
 
-  def process(self, sm, now: float, v_ego: float) -> PerceptionFrame:
+  def process(self, sm, now: float, v_ego: float, vision_enabled: bool = True) -> PerceptionFrame:
     """Run the full fusion chain once and return the frame for this tick."""
     radar = sm['radarTracks']
     model_v2 = sm['modelV2']
-    detections = self.detect(sm['extrinsicsCalibration'], sm.valid['extrinsicsCalibration'], now)
+    detections = self.detect(sm['extrinsicsCalibration'], sm.valid['extrinsicsCalibration'], now,
+                             vision_enabled=vision_enabled)
     # associate needs fy for the box-height fallback on unmatched detections.
     # Intrinsics live on the camera (None until the first successful connect),
     # and with no detections associate never reads fy, so 0.0 is a safe fallback.

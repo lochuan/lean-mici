@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from openpilot.selfdrive.eagled import constants as C
-from openpilot.selfdrive.eagled.eagled import EagleDaemon
+from openpilot.selfdrive.eagled.eagled import EagleDaemon, PARAMS_REFRESH_PERIOD
 from openpilot.selfdrive.eagled.projection import RoiMeta
 
 MODEL_CURVATURE = 0.012
@@ -376,3 +376,77 @@ def test_daemon_passes_frame_height_to_projection(monkeypatch):
                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0)]))
   daemon.perception.detect(daemon.sm['extrinsicsCalibration'], True, 0.0)
   assert seen == [760]              # 1344x760 帧高,非 None
+
+
+# --- AvoidanceEnabled gates the vision chain (sensord starvation fix) --------------
+
+
+class _MutableParams:
+  """_FakeParams whose AvoidanceEnabled can be flipped mid-run."""
+
+  def __init__(self):
+    self.enabled = False
+
+  def get_bool(self, key, block=False):
+    return self.enabled
+
+  def get(self, key, block=False, return_default=False):
+    return None
+
+
+def test_vision_chain_skipped_when_avoidance_disabled():
+  """避让关:相机+YOLO 链路整段跳过(0 次推理),双流仍按帧发布、雷达路径不受影响。"""
+  params = _MutableParams()
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
+                 meta=_NS(laneChangeState="off"))
+  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
+  radar = _NS(points=[_NS(dRel=8.0, yRel=-1.8, vRel=0.0)],
+              errors=_NS(canError=False, radarUnavailableTemporary=False))
+  pm = _FakePubMaster()
+  sm = _FakeSubMaster(model_v2, car_state, radar,
+                      valid={"modelV2": True, "carState": True, "radarTracks": True})
+  camera = _FakeCamera(frames=[ROI])
+  detector = _FakeDetector(detections=[_box_at(20.0, -1.0)])
+  daemon = EagleDaemon(sm=sm, pm=pm, params=params, camera=camera, detector=detector)
+  # >1s spacing: beat the params refresh throttle (PARAMS_REFRESH_PERIOD)
+  daemon.update(0.0)
+  daemon.update(PARAMS_REFRESH_PERIOD + 0.1)
+  assert detector.calls == 0
+  assert len(camera._frames) == 1                  # 相机未被消费
+  st = [msg for service, msg in pm.sent if service == "eagleState"][-1].eagleState
+  dbg = [msg for service, msg in pm.sent if service == "eagleDebug"][-1].eagleDebug
+  assert st.nVision == 0 and dbg.nVision == 0      # 纯雷达帧
+  assert st.nRadar == 1                            # 雷达行照常进画面
+  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
+  assert len(plans) == 2                           # 计划流不因视觉关闭而断
+
+
+def test_vision_chain_resumes_after_avoidance_reenable():
+  """避让关->开:惰性相机/检测器生命周期保留,推理无需重建即恢复。"""
+  params = _MutableParams()
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
+                 meta=_NS(laneChangeState="off"))
+  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
+  radar = _NS(points=[], errors=_NS(canError=False, radarUnavailableTemporary=False))
+  pm = _FakePubMaster()
+  sm = _FakeSubMaster(model_v2, car_state, radar,
+                      valid={"modelV2": True, "carState": True, "radarTracks": True})
+  detector = _FakeDetector(detections=[_box_at(20.0, -1.0)])
+  daemon = EagleDaemon(sm=sm, pm=pm, params=params, camera=_FakeCamera(frames=[ROI] * 2),
+                       detector=detector)
+  daemon.update(0.0)
+  assert detector.calls == 0
+  params.enabled = True
+  daemon.update(PARAMS_REFRESH_PERIOD + 0.1)
+  assert detector.calls == 1
+  st = [msg for service, msg in pm.sent if service == "eagleState"][-1].eagleState
+  assert st.nVision == 1
+
+
+def test_vision_chain_kept_running_when_avoidance_enabled():
+  """避让开(默认):行为与历史一致,每帧推理。"""
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI]),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0)]),
+                       radar_points=[])
+  daemon.update(0.0)
+  assert daemon.detector.calls == 1

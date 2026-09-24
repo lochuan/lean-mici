@@ -46,6 +46,21 @@ def config_realtime_process(cores: int | list[int], priority: int) -> None:
   set_core_affinity(c)
 
 
+def config_best_effort_process(cores: int | list[int]) -> None:
+  """Non-RT (SCHED_OTHER) process pinned to ``cores``.
+
+  For daemons that must never preempt latency-critical producers. The canonical
+  case: sensord (FIFO 1, core 1) timestamps IMU samples from the GPIO IRQ and
+  locationd rejects any sample whose publish latency exceeds 100ms — an RT
+  burst anywhere on core 1 directly converts into locationdTemporaryError and
+  a refused engagement.
+  """
+  gc.disable()
+  drop_realtime()
+  c = cores if isinstance(cores, list) else [cores, ]
+  set_core_affinity(c)
+
+
 class Ratekeeper:
   def __init__(self, rate: float, print_delay_threshold: float | None = 0.0) -> None:
     """Rate in Hz for ratekeeping. print_delay_threshold must be nonnegative."""

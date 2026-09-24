@@ -169,8 +169,8 @@ def test_state_published_every_frame_with_ingate_targets_only():
 
 
 def test_state_publishes_even_when_avoidance_disabled():
-  # AvoidanceEnabled gates the lateralManeuverPlan actuation only: with the
-  # param off the perception streams keep flowing.
+  # AvoidanceEnabled gates the lateralManeuverPlan actuation and the vision
+  # chain; with the param off the streams keep flowing, radar-only.
   daemon, pm = _daemon(enabled=False, radar_points=[(8.0, -1.8)])
   daemon.update(0.0)
   plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
