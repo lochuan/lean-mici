@@ -157,10 +157,12 @@ def test_daemon_defers_vision_while_locationd_unhealthy():
   assert detector.calls == 1
   daemon.update(0.2)                     # recovery window (real-time) -> deferred
   assert detector.calls == 1
-  # streams still publish every tick — only inference is deferred
+  # streams still publish every tick — only inference is deferred. The deferred
+  # tick serves the HELD detections from the last successful inference (the
+  # vision picture persists; blanking it was the a4abb7624 lanlink regression).
   states = [msg for service, msg in pm.sent if service == "eagleState"]
   assert len(states) == 2
-  assert states[-1].eagleState.nVision == 0
+  assert states[-1].eagleState.nVision == 1
   plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
   assert len(plans) == 2
   # after the recovery interval elapses, inference resumes

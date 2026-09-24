@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Protocol
 import time
@@ -39,6 +40,12 @@ from openpilot.selfdrive.eagled.projection import geometry_from_calibration, hor
 from openpilot.selfdrive.eagled.yolo_detector import YoloDetector
 
 YOLO_PKL_PATH = Path(__file__).parent / "models" / "yolo_tinygrad.pkl"
+
+# 两次推理之间沿用上次检测的最长时间。推理节拍由健康门控拉长(0.2s~1.5s),
+# 没有保持的话 eagleDebug 的视觉目标在间隙里被纯雷达帧清空 —— lanlink 上
+# 车/人/自行车看起来消失(a4abb7624 回归)。1s 覆盖了大部分节拍间隙,同时
+# 把陈旧目标的寿命封顶。
+VISION_HOLD_TTL_S = 1.0
 
 
 class RadarPoint(Protocol):
@@ -341,6 +348,8 @@ class PerceptionCore:
     self.detector_dead = False            # YOLO failed hard -> stop retrying
     self.degraded: set[str] = set()       # radar-only fallback reasons, logged once each
     self.last_vision_duration_s = 0.0     # wall time of the last detector forward (0 if skipped)
+    self._held: list[dict] = []           # last inference's projected detections
+    self._held_t: float = 0.0             # when those detections were projected
 
   def _degrade(self, reason: str) -> None:
     """Log a radar-only fallback reason once (never spam)."""
@@ -348,17 +357,38 @@ class PerceptionCore:
       self.degraded.add(reason)
       cloudlog.warning(f"eagled: {reason} unavailable, radar-only fallback")
 
-  def detect(self, extrinsics_msg, extrinsics_valid: bool, now: float,
-             vision_enabled: bool = True) -> list[dict]:
+  def _store_hold(self, detections: list[dict], now: float) -> None:
+    """Replace the held detections with this tick's outcome (possibly empty)."""
+    self._held = list(detections)
+    self._held_t = now
+
+  def _held_detections(self, now: float, v_ego: float) -> list[dict]:
+    """TTL 内沿用上次成功推理的检测,dRel 按自车速度补偿。
+
+    持有的是上次推理时刻的车体坐标:自车前进 vEgo·age 后目标更近,纵向
+    dRel 同步收缩;bearing 是 dRel/yRel 的派生量(association 的匹配键),
+    一并重算。补偿后越过保险杠(dRel <= 0)的目标已经从旁边过去了,丢弃
+    而不是报负距离。yRel 不补偿:自车横向速度不可知(变道中),1s 内的
+    横向漂移远小于 dRel 的老化误差。
+    """
+    age = now - self._held_t
+    if not self._held or age > VISION_HOLD_TTL_S:
+      return []
+    out: list[dict] = []
+    for det in self._held:
+      d_rel = det["dRel"] - v_ego * age
+      if d_rel <= 0.0:
+        continue
+      out.append({**det, "dRel": d_rel, "bearing": math.atan2(-det["yRel"], d_rel)})
+    return out
+
+  def detect(self, extrinsics_msg, extrinsics_valid: bool, now: float) -> list[dict]:
     """Camera -> YOLO -> car-frame projections; ``[]`` keeps the frame radar-only.
 
-    ``vision_enabled=False`` (avoidance off) skips the camera + YOLO chain
-    entirely — the lazy camera/detector lifecycle is retained, so a later
-    re-enable resumes inference without a fresh connect.
+    Only called on ``vision_due`` ticks (see :meth:`process`): the enable/disable
+    gating lives in :meth:`process`, so every call here either runs the full
+    chain or hits one of the degrade paths below.
     """
-    if not vision_enabled:
-      self.last_vision_duration_s = 0.0
-      return []
     geom = geometry_from_calibration(extrinsics_msg, extrinsics_valid)
     if not geom.valid:
       # 0.5deg pitch error = 41% distance error at 40m. Running the vision path
@@ -375,7 +405,10 @@ class PerceptionCore:
     frame = self.camera.frame(horizon_row=horizon_row)
     if frame is None:
       # No camerad stream (PC) or no fresh frame this tick; connect keeps
-      # retrying inside CameraStream, the reason is only logged once.
+      # retrying inside CameraStream, the reason is only logged once. Zero the
+      # duration too: a stale one would keep the processing_cost throttle reason
+      # alive for interval decisions that saw no inference at all.
+      self.last_vision_duration_s = 0.0
       self._degrade("camera")
       return []
     roi, roi_meta = frame
@@ -401,12 +434,29 @@ class PerceptionCore:
                               camera_to_front=C.CAMERA_TO_FRONT, roi_meta=roi_meta,
                               frame_height=self.camera.frame_size[1] if self.camera.frame_size else None)
 
-  def process(self, sm, now: float, v_ego: float, vision_enabled: bool = True) -> PerceptionFrame:
-    """Run the full fusion chain once and return the frame for this tick."""
+  def process(self, sm, now: float, v_ego: float, vision_enabled: bool = True,
+              vision_due: bool = True) -> PerceptionFrame:
+    """Run the full fusion chain once and return the frame for this tick.
+
+    两个开关分开:``vision_enabled`` 是视觉链总开关(AvoidanceEnabled),
+    ``vision_due`` 是"本拍该不该推理"(健康门控的节拍)。非 due 帧不推理,
+    但沿用 TTL 内的上次检测(按 ego 位移补偿)—— 否则 eagleDebug 的视觉
+    目标在推理间隙被纯雷达帧清空,lanlink 上车/人/自行车闪烁消失。
+    """
     radar = sm['radarTracks']
     model_v2 = sm['modelV2']
-    detections = self.detect(sm['extrinsicsCalibration'], sm.valid['extrinsicsCalibration'], now,
-                             vision_enabled=vision_enabled)
+    if not vision_enabled:
+      # 避让关:立即清空保持,回到纯雷达(不让旧目标活过 TTL)。
+      self._store_hold([], now)
+      self.last_vision_duration_s = 0.0
+      detections = []
+    elif vision_due:
+      # due 帧的结果(含降级路径的空列表)整体成为新的保持:保持桥接的是
+      # 调度间隙,不是视觉故障 —— 降级帧不该让上一拍的旧目标复活。
+      detections = self.detect(sm['extrinsicsCalibration'], sm.valid['extrinsicsCalibration'], now)
+      self._store_hold(detections, now)
+    else:
+      detections = self._held_detections(now, v_ego)
     # associate needs fy for the box-height fallback on unmatched detections.
     # Intrinsics live on the camera (None until the first successful connect),
     # and with no detections associate never reads fy, so 0.0 is a safe fallback.

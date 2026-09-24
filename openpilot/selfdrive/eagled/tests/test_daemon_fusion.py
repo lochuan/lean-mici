@@ -5,6 +5,7 @@ import pytest
 
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.eagled import EagleDaemon, PARAMS_REFRESH_PERIOD
+from openpilot.selfdrive.eagled.perception import PerceptionCore
 from openpilot.selfdrive.eagled.projection import RoiMeta
 
 MODEL_CURVATURE = 0.012
@@ -454,3 +455,86 @@ def test_vision_chain_kept_running_when_avoidance_enabled():
                        radar_points=[])
   daemon.update(0.0)
   assert daemon.detector.calls == 1
+
+
+# --- vision hold: detections persist between vision ticks -------------------------
+# a4abb7624 回归:vision_due 帧之间 detect() 返回 [],lanlink 的 eagleDebug 快照
+# 被 ~4ms 后的纯雷达帧覆盖,车/人/自行车看起来消失。修复:两次推理之间沿用
+# 上一次成功推理的检测(TTL 内),并按自车速度补偿纵向距离。
+
+def _core_sm(v_ego=20.0):
+  """PerceptionCore 直测用的最小 SubMaster(无 pm/planner 参与)。"""
+  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
+                 meta=_NS(laneChangeState="off"))
+  car_state = _NS(vEgo=v_ego, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
+  radar = _NS(points=[], errors=_NS(canError=False, radarUnavailableTemporary=False))
+  return _FakeSubMaster(model_v2, car_state, radar)
+
+def test_vision_targets_persist_between_vision_ticks():
+  """非视觉帧沿用上次推理的检测:nVision 保持,不触发新推理。"""
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
+  daemon.update(0.0)   # due tick: 推理并缓存
+  daemon.update(0.1)   # 非 due tick(< 0.2s 视觉节拍): 复用保持
+  assert daemon.detector.calls == 1                    # 没有新推理
+  st = [msg for service, msg in pm.sent if service == "eagleState"][-1].eagleState
+  dbg = [msg for service, msg in pm.sent if service == "eagleDebug"][-1].eagleDebug
+  assert st.nVision == 1 and dbg.nVision == 1
+  rows = [t for t in dbg.targets if t.vision]
+  assert len(rows) == 1 and rows[0].cls == "person"
+
+
+def test_held_detections_compensate_ego_motion():
+  """dRel 按自车速度收缩:dRel -= vEgo·age;yRel 横向不补偿。"""
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
+  daemon.update(0.0)                       # due tick: 框投影到 dRel 20
+  daemon.sm._data["carState"].vEgo = 12.0  # 视觉帧之后自车减速
+  daemon._next_vision_t = 5.0              # 强制下一帧非 due
+  daemon.update(0.5)                       # 持有 0.5s
+  dbg = [msg for service, msg in pm.sent if service == "eagleDebug"][-1].eagleDebug
+  row = [t for t in dbg.targets if t.vision][0]
+  assert row.dRel == pytest.approx(20.0 - 12.0 * 0.5)   # 14.0,不是 20.0
+  assert row.yRel == pytest.approx(-1.8)
+
+
+def test_held_detections_expire_after_ttl():
+  """超过 TTL(1.0s,perception.VISION_HOLD_TTL_S)的保持检测清空,不会无限复活旧目标。"""
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
+  daemon.update(0.0)
+  daemon.sm._data["carState"].vEgo = 0.0   # 隔离 TTL 过期与自车补偿
+  daemon._next_vision_t = 5.0
+  daemon.update(1.1)                       # > 1.0s TTL
+  dbg = [msg for service, msg in pm.sent if service == "eagleDebug"][-1].eagleDebug
+  assert dbg.nVision == 0
+
+
+def test_held_detections_past_bumper_are_dropped():
+  """补偿后越过保险杠(dRel <= 0)的目标已经过去了,丢弃而不是报负距离。"""
+  core = PerceptionCore(camera=_FakeCamera(frames=[ROI]),
+                        detector=_FakeDetector(detections=[_box_at(5.0, -1.8, cls="person")]))
+  frame = core.process(_core_sm(), 0.0, 20.0, vision_enabled=True, vision_due=True)
+  assert len(frame.detections) == 1
+  frame = core.process(_core_sm(), C.DT_5HZ, 30.0, vision_enabled=True, vision_due=False)
+  assert frame.detections == []            # 5 - 30*0.2 = -1.0 -> 丢
+
+
+def test_hold_cleared_immediately_when_vision_disabled():
+  """避让关闭立即清空保持:不让旧目标活过 TTL。"""
+  core = PerceptionCore(camera=_FakeCamera(frames=[ROI]),
+                        detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
+  core.process(_core_sm(), 0.0, 20.0, vision_enabled=True, vision_due=True)
+  core.process(_core_sm(), C.DT_5HZ, 20.0, vision_enabled=False, vision_due=False)
+  assert core.process(_core_sm(), 2 * C.DT_5HZ, 20.0, vision_enabled=True, vision_due=False).detections == []
+  assert core.last_vision_duration_s == 0.0
+
+
+def test_vision_duration_resets_when_camera_frame_missing():
+  """相机当拍无帧:清零 last_vision_duration_s,不让旧耗时污染节流原因。"""
+  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI]),
+                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8)]))
+  daemon.update(0.0)                              # due,推理一次
+  daemon.perception.last_vision_duration_s = 0.5  # 人为注入旧耗时
+  daemon.update(C.DT_5HZ)                         # due(0.2),相机无帧 -> 降级
+  assert daemon.perception.last_vision_duration_s == 0.0

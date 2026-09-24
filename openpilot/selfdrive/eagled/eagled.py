@@ -119,15 +119,20 @@ class EagleDaemon:
     car_state = self.sm['carState']
     radar = self.sm['radarTracks']
 
-    # Vision cadence: avoidance off -> no vision at all; otherwise run the
-    # camera+YOLO chain only when the health-gated interval has elapsed
-    # (device CPU/memory pressure and locationd health stretch the interval).
+    # Vision cadence: two separate switches. ``self.enabled`` (AvoidanceEnabled)
+    # gates the whole camera+YOLO chain; ``vision_due`` says whether THIS tick
+    # runs an inference (health-gated interval). Non-due ticks serve the held
+    # detections (ego-motion compensated) instead of publishing a radar-only
+    # frame: a4abb7624 blanked the vision picture between inferences, so
+    # lanlink's eagleDebug snapshot — overwritten ~4ms after each ~0.4s vision
+    # frame by the Ratekeeper catch-up tick — showed no cars/peds/bikes.
     if self.enabled and not self._enabled_prev:
       self._next_vision_t = now          # resume immediately after re-enable
     self._enabled_prev = self.enabled
     vision_due = self.enabled and now >= self._next_vision_t
 
-    frame = self.perception.process(self.sm, now, car_state.vEgo, vision_enabled=vision_due)
+    frame = self.perception.process(self.sm, now, car_state.vEgo,
+                                    vision_enabled=self.enabled, vision_due=vision_due)
     if vision_due:
       interval, _reason = self._health.inference_interval(now, VISION_BASE_INTERVAL,
                                                           self.perception.last_vision_duration_s)
