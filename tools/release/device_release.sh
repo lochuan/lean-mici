@@ -73,6 +73,24 @@ else
   echo "[ok] tinygrad materialized at $TG_SHA"
 fi
 
+echo "[-] 全量重建 native 产物（ARTIFACT_PATHS）T=$SECONDS"
+# 扁平树发布不带 scons 步骤的历史欠账：launch_chffrplus.sh 的运行时 prebuilt
+# 标记让 build.py 永远跳过，C++ 源码改动（如 params_keys.h）在旧流程下根本
+# 不会进二进制 —— 2026-09-24 的 libparams_c.so 键表滞后就是这一类。
+# checkout -- . 恢复了 SConstruct/SConscript；SKIP_CAPNP_REGEN=1：lean AGNOS
+# 没有 capnpc 工具链，扁平树的 gen/cpp 生成物与 schema 同源（e91290670）。
+# 若某次改动动了 .capnp schema，必须先在 Mac 侧重新生成 gen/cpp 再提交，
+# 否则这里的编译用的是旧生成物 —— 目前没有工具能拦这个类别。
+for n in 4 5 6 7; do
+  [ "$(cat /sys/devices/system/cpu/cpu$n/online 2>/dev/null)" = "0" ] && echo 1 | sudo tee /sys/devices/system/cpu/cpu$n/online >/dev/null
+done
+(
+  cd "$SRC"
+  SKIP_CAPNP_REGEN=1 PYTHONPATH="$SRC:$SRC/openpilot" \
+    /usr/local/venv/bin/scons -j4
+) || { echo "native 全量重建失败，拒绝发布" >&2; exit 1; }
+echo "[ok] native 全量重建完成 T=$SECONDS"
+
 echo "[-] 重编译 eagled YOLO pkl（与内置 driving 模型同一管线：每次发布重编译对齐树 pin）T=$SECONDS"
 YOLO_DIR="openpilot/selfdrive/eagled/models"
 YOLO_PKL="$SRC/$YOLO_DIR/yolo_tinygrad.pkl"
