@@ -207,6 +207,28 @@ export interface AvoidanceSnapshot {
   calPerc?: number; // 标定进度 0-100
   calValid?: boolean; // 消息 valid 且 calStatus=="calibrated" 且 rpyCalib 长度为 3
   visionGated?: boolean; // 视觉路径是否被标定门关掉（= !calValid）
+
+  // 车道几何（lanlinkd 自己订阅 modelV2，lanes.py）：modelV2 停更/无帧为 null
+  lanes?: LaneSnapshot | null;
+}
+
+/** lanes.py lane_snapshot 的 wire 形状。y 为雷达左正（y=-y_model），
+ *  x 网格 0-60m（与 LANE_GRID_X 对齐）。line.y null = 该线本轮不可用。 */
+export interface LaneLineSnap {
+  /** 共享网格上的 y 值（m，左正） */
+  y: number[] | null;
+  prob?: number | null; // 车道线：laneLineProbs（外侧线透明度用）
+  std?: number | null; // laneLineStds / roadEdgeStds
+}
+
+export interface LaneSnapshot {
+  x: number[];
+  /** [远左外线, 本道左边界, 本道右边界, 远右外线]；单项可为 null */
+  laneLines: (LaneLineSnap | null)[];
+  /** [左路沿, 右路沿] */
+  roadEdges: (LaneLineSnap | null)[];
+  /** modelV2 预测路径（本车轨迹） */
+  path?: { y: number[] | null; std: number[] | null } | null;
 }
 
 /** /api/calibration/status：在线标定会话状态（CalibrationController）。
