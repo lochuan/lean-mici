@@ -50,7 +50,7 @@ def _model_v2(left=(-1.75, -1.75), right=(1.75, 1.75), prob=(0.1, 0.9, 0.1, 0.1)
 
 
 def _snap(m, ctf=CTF):
-  return lanes.lane_snapshot(m, recv_mono=100.0, now_mono=100.05, camera_to_front=ctf)
+  return lanes.lane_snapshot(m, recv_mono=100.0, now_mono=100.05, camera_to_front=ctf, valid=True)
 
 
 # --- 网格与符号 -------------------------------------------------------------------
@@ -139,9 +139,15 @@ def test_stale_modelV2_returns_none():
   # modelV2 新鲜度走 common.stream_gate（登记阈值 1s），超龄/边界语义同源
   from openpilot.common.stream_gate import MAX_AGE_S
   assert lanes.lane_snapshot(_model_v2(), recv_mono=100.0, now_mono=100.0 + MAX_AGE_S["modelV2"] + 0.01,
-                             camera_to_front=CTF) is None
+                             camera_to_front=CTF, valid=True) is None
   assert lanes.lane_snapshot(_model_v2(), recv_mono=100.0, now_mono=100.0 + MAX_AGE_S["modelV2"],
-                             camera_to_front=CTF) is not None
+                             camera_to_front=CTF, valid=True) is not None
+
+
+def test_invalid_envelope_modelV2_returns_none():
+  # ③：envelope invalid 的帧不过接收门（modeld 的 modelV2 在 vipc 丢帧时置 invalid）
+  assert lanes.lane_snapshot(_model_v2(), recv_mono=100.0, now_mono=100.05,
+                             camera_to_front=CTF, valid=False) is None
 
 
 # --- LaneCache 集成（真实 SubMaster 链路） ----------------------------------------
@@ -151,6 +157,7 @@ def test_lane_cache_serves_published_model_v2():
   cache = lanes.LaneCache()
   pub = messaging.PubMaster(['modelV2'])
   msg = messaging.new_message('modelV2')
+  msg.valid = True   # 生产端 modeld 在 fill_model_msg 里置 envelope valid
   ml = msg.modelV2
   ml.init('laneLines', 4)
   ml.laneLines[1].x, ml.laneLines[1].y = [0.0, 50.0], [-1.75, -1.75]

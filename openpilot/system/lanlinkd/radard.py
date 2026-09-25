@@ -14,10 +14,13 @@ import time
 
 from openpilot.cereal import messaging
 from openpilot.common.swaglog import cloudlog
+from openpilot.common.stream_gate import StreamStatus, stream_status
 
-# radarTracks 是 20Hz；超过这个时长没有新帧就认为数据停了
-# （熄火、card 未运行、无雷达平台都会落到这里）
-STALE_AFTER_MS = 2000
+# radarTracks 新鲜度走 ``common.stream_gate``（登记阈值 2s，理由随表登记）：
+# 20Hz 点迹、card 熄火即停报（熄火、card 未运行、无雷达平台都会落到这里）。
+# staleness 用本地接收时刻（time.monotonic）判断，不比对 logMonoTime：
+# card 与本进程同机同源，但直接比报文时间戳会把 SubMaster 积压的旧帧
+# 误判为新鲜，本地计时更直白。
 
 
 def _point(p) -> dict:
@@ -34,6 +37,7 @@ class RadarCache:
     self._lock = threading.Lock()
     self._snapshot: dict = {"stale": True}
     self._recv_ms: float = 0.0
+    self._recv_valid: bool = False
 
   def run(self, exit_event: threading.Event) -> None:
     try:
@@ -62,11 +66,14 @@ class RadarCache:
       with self._lock:
         self._snapshot = snap
         self._recv_ms = time.monotonic() * 1000.0
+        self._recv_valid = bool(sm.valid['radarTracks'])  # ③：无效帧不过接收门
 
   def snapshot(self) -> dict:
     with self._lock:
       snap = dict(self._snapshot)
       recv_ms = self._recv_ms
-    if not snap.get("stale") and (time.monotonic() * 1000.0 - recv_ms) > STALE_AFTER_MS:
+      recv_valid = self._recv_valid
+    age_s = None if recv_ms == 0.0 else (time.monotonic() * 1000.0 - recv_ms) / 1000.0
+    if stream_status("radarTracks", age_s, valid=recv_valid) is not StreamStatus.FRESH:
       return {"stale": True}
     return snap

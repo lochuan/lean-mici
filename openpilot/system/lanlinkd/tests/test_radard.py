@@ -15,8 +15,9 @@ from openpilot.cereal import messaging
 from openpilot.system.lanlinkd import radard
 
 
-def _publish_tracks(pm: messaging.PubMaster, n_points: int, d_rel: float) -> None:
+def _publish_tracks(pm: messaging.PubMaster, n_points: int, d_rel: float, valid: bool = True) -> None:
   msg = messaging.new_message('radarTracks')
+  msg.valid = valid   # 生产端 card.py 在雷达错误时置 False（envelope，见 sm.valid）
   pts = msg.radarTracks.init('points', n_points)
   for i, pt in enumerate(pts):
     pt.trackId = i
@@ -59,14 +60,37 @@ def test_cache_captures_published_tracks(publisher):
 
 
 def test_cache_goes_stale_after_silence(publisher, monkeypatch):
-  monkeypatch.setattr(radard, "STALE_AFTER_MS", 200)
+  # monkeypatch 打的是策略表：radard 若没走 stream_gate，这个 patch 不生效，测试即红
+  import openpilot.common.stream_gate as stream_gate
+  monkeypatch.setitem(stream_gate.MAX_AGE_S, "radarTracks", 0.2)
   cache, exit_event, t = _start_cache()
   try:
     for _ in range(10):
       _publish_tracks(publisher, 1, 10.0)
       time.sleep(0.05)
     assert cache.snapshot()["stale"] is False
-    time.sleep(0.4)  # 静默超过 STALE_AFTER_MS
+    time.sleep(0.4)  # 静默超过调低后的登记阈值
+    assert cache.snapshot()["stale"] is True
+  finally:
+    exit_event.set()
+    t.join(timeout=2)
+
+
+def test_invalid_envelope_frame_goes_stale(publisher):
+  """envelope invalid（card.py 报雷达错误时）的帧必须标 stale，不能当新鲜（③）。"""
+  cache, exit_event, t = _start_cache()
+  try:
+    for _ in range(20):
+      _publish_tracks(publisher, 1, 10.0)
+      time.sleep(0.05)
+      if cache.snapshot().get("stale") is False:
+        break
+    assert cache.snapshot()["stale"] is False
+    for _ in range(10):
+      _publish_tracks(publisher, 1, 10.0, valid=False)
+      time.sleep(0.05)
+      if cache.snapshot().get("stale") is True:
+        break
     assert cache.snapshot()["stale"] is True
   finally:
     exit_event.set()

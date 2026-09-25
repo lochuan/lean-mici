@@ -9,7 +9,7 @@ radarUnavailable，来自 radarTracks.errors，随 debug 透传），所以前�
 
 staleness 走 ``common.stream_gate``（eagleDebug 登记阈值 1s：5Hz 数据 5 帧没
 新数据即视为停更），本地接收时刻（time.monotonic）喂给判定；envelope valid
-维持现状不查（fix/stream-gate 纯重构，不顺带收紧）。
+一并过门（③：无效帧标 stale，行为更保守——之前不查，收紧是有意的）。
 
 标定状态单独订阅 extrinsicsCalibration 透传：avoidanced 在相机未标定时整体
 关掉视觉路径（地平面投影的 dRel 对 pitch 的敏感度在 40m 处是 0.5° → 41%，
@@ -68,6 +68,7 @@ class AvoidanceCache:
     self._lock = threading.Lock()
     self._snapshot: dict = {"stale": True}
     self._recv_ms: float = 0.0
+    self._recv_valid: bool = False
     self._params = params
     # 车道几何（modelV2 → lanes.py）：请求时取帧，无后台循环。
     # snapshot() 只在 API handler 线程调用，LaneCache 的 SubMaster 惰性
@@ -125,14 +126,16 @@ class AvoidanceCache:
       with self._lock:
         self._snapshot = snap
         self._recv_ms = time.monotonic() * 1000.0
+        self._recv_valid = bool(sm.valid['eagleDebug'])  # ③：无效帧不过接收门
 
   def snapshot(self) -> dict:
     with self._lock:
       snap = dict(self._snapshot)
       recv_ms = self._recv_ms
+      recv_valid = self._recv_valid
       cal = dict(self._cal)
     age_s = None if recv_ms == 0.0 else (time.monotonic() * 1000.0 - recv_ms) / 1000.0
-    if stream_status("eagleDebug", age_s, valid=True) is not StreamStatus.FRESH:
+    if stream_status("eagleDebug", age_s, valid=recv_valid) is not StreamStatus.FRESH:
       snap = {"stale": True}
     # 标定状态即使 debug 停更也要带上：前端用它区分「避让没在跑」和
     # 「避让在跑但视觉被标定门关掉了」。
