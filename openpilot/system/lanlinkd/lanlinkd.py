@@ -50,7 +50,7 @@ class LanlinkApp:
     self.params = Params()
     self.version_info = {k: params_api.to_str(self.params.get(k)) or "" for k in VERSION_PARAMS}
     self.cache = StatusCache(self.version_info, device_type="pc" if PC else HARDWARE.get_device_type(), params=self.params)
-    self.avoidance = AvoidanceCache()
+    self.avoidance = AvoidanceCache(self.params)
     self.calibration = CalibrationController()
     self.exit_event = threading.Event()
     self._settings_ui: dict | None = None

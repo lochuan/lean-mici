@@ -109,15 +109,14 @@ class LaneCache:
 
   只在 API handler 线程使用：SubMaster 惰性创建，snapshot() 每次调用
   先收一轮再判定新鲜度。超龄/无帧返回 None，调用方决定省略字段。
-  ``camera_to_front`` 为安装偏移读取点（T5 起由调用方每帧注入）。
+  ``camera_to_front`` 为安装偏移注入点（票 #6）：调用方每帧从读点取值注入。
   """
 
-  def __init__(self, camera_to_front: float, clock=time.monotonic):
+  def __init__(self, clock=time.monotonic):
     self._sm: messaging.SubMaster | None = None
     self._clock = clock
-    self._camera_to_front = camera_to_front
 
-  def snapshot(self) -> dict | None:
+  def snapshot(self, camera_to_front: float) -> dict | None:
     if self._sm is None:
       try:
         self._sm = messaging.SubMaster(['modelV2'])
@@ -125,7 +124,7 @@ class LaneCache:
         return None
     self._sm.update(0)
     return lane_snapshot(self._sm['modelV2'], self._sm.recv_time['modelV2'], self._clock(),
-                         camera_to_front=self._camera_to_front)
+                         camera_to_front=camera_to_front)
 
   def stop(self) -> None:
     self._sm = None

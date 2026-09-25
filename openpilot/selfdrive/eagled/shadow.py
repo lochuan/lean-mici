@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from openpilot.selfdrive.eagled import constants as C
+from openpilot.common.model_geometry import read_camera_to_front
 from openpilot.common.params import Params
 from openpilot.selfdrive.eagled.association import associate as associate_daemon
 from openpilot.selfdrive.eagled.association import nearest_pairs_by_bearing
@@ -143,15 +144,18 @@ class ShadowRecord:
 def associate(radar_points: Iterable[RadarTarget], vision_objects: Iterable[VisionObject],
               fy: float = 425.25,
               max_dbearing: float = ASSOC_MAX_DBEARING_SHADOW,
-              max_drange: float = ASSOC_MAX_DRANGE_SHADOW) -> list[tuple[RadarTarget, VisionObject, float, str | None]]:
+              max_drange: float = ASSOC_MAX_DRANGE_SHADOW, *,
+              camera_to_front: float) -> list[tuple[RadarTarget, VisionObject, float, str | None]]:
   """Radar<->vision association on bearing (the offline wide-gate variant).
 
   Thin wrapper over the shared bearing matcher in :mod:`association` (the daemon
   path uses the same matcher with a tighter bearing gate). Returns
   ``(radar, vision, dbearing, vision_cls)`` tuples, one per matched radar
   target; ``vision_cls`` is None when the vision side carries no class.
+  ``camera_to_front`` 为安装偏移注入点（票 #6 唯一读点的取值）。
   """
-  pairs, _ = nearest_pairs_by_bearing(radar_points, vision_objects, fy, max_dbearing, max_drange)
+  pairs, _ = nearest_pairs_by_bearing(radar_points, vision_objects, fy, max_dbearing, max_drange,
+                                      camera_to_front=camera_to_front)
   return pairs
 
 
@@ -165,14 +169,16 @@ class ShadowEvaluator:
   """
 
   def __init__(self, planner: AvoidancePlanner | None = None, max_offset: float = C.MAX_OFFSET_FREE,
-               clock=time.perf_counter, detector=None):
+               clock=time.perf_counter, detector=None, params=None):
     self.planner = planner if planner is not None else AvoidancePlanner()
     self.max_offset = max_offset
     self._clock = clock
     self.detector = detector
+    # 安装偏移每帧经唯一读点取值（票 #6）；params 缺省自建（离线回放吃设备同一份设置）
+    self._params = params if params is not None else Params()
     self.records: list[ShadowRecord] = []
 
-  def _project(self, frame: ShadowFrame) -> list[dict] | None:
+  def _project(self, frame: ShadowFrame, camera_to_front: float) -> list[dict] | None:
     """Detector -> car-frame projections; ``None`` keeps the leadsV3 proxy path."""
     if self.detector is None:
       return None
@@ -182,11 +188,12 @@ class ShadowEvaluator:
     fx, fy, cx, cy = frame.intrinsics
     return project_detections(detections, fx=fx, fy=fy, cx=cx, cy=cy,
                               height=C.CAMERA_HEIGHT, pitch=C.CAMERA_PITCH, yaw=C.CAMERA_YAW,
-                              camera_to_front=C.CAMERA_TO_FRONT, roi_meta=frame.roi_meta,
+                              camera_to_front=camera_to_front, roi_meta=frame.roi_meta,
                               frame_height=frame.frame_height)
 
   def step(self, frame: ShadowFrame) -> ShadowRecord:
-    projected = self._project(frame)
+    camera_to_front = read_camera_to_front(self._params)  # 安装偏移每帧经唯一读点取值（票 #6）
+    projected = self._project(frame, camera_to_front)
     # fy for the association gates: the fused path guarantees intrinsics (see
     # _project); the proxy path never reads fy (VisionObject ranges come from
     # the object's own x), so 0.0 is a safe placeholder there.
@@ -196,7 +203,7 @@ class ShadowEvaluator:
       # radar points absorb; the rest stay independent planner targets. The
       # pairs also feed fuse_objects: confirmed points survive the static-speed
       # gate and take the vision class weight, exactly like the daemon.
-      _, fused, pairs = associate_daemon(frame.radar_points, projected, fy=fy)
+      _, fused, pairs = associate_daemon(frame.radar_points, projected, fy=fy, camera_to_front=camera_to_front)
       confirmed_keys = tuple(radar_point_key(p[0]) for p in pairs)
       vision_cls_by_key = {radar_point_key(p[0]): p[3] for p in pairs}
       objects = fuse_objects(frame.radar_points, fused, v_ego=frame.v_ego,
@@ -231,7 +238,7 @@ class ShadowEvaluator:
     )
     latency_ms = (self._clock() - t0) * 1e3
 
-    pairs = associate(metric_radar, vision_objects, fy=fy)
+    pairs = associate(metric_radar, vision_objects, fy=fy, camera_to_front=camera_to_front)
     residual = max((abs(radar.yRel - obj.y) for radar, obj, _, _ in pairs), default=None)
 
     jerk = None
@@ -480,8 +487,8 @@ def iter_frames(messages: Iterable, sample_period: float = 0.2, limit: int | Non
 
 def evaluate_records(frames: Iterable[ShadowFrame], planner: AvoidancePlanner | None = None,
                      max_offset: float = C.MAX_OFFSET_FREE, clock=time.perf_counter,
-                     detector=None) -> tuple[list[ShadowRecord], dict]:
-  evaluator = ShadowEvaluator(planner=planner, max_offset=max_offset, clock=clock, detector=detector)
+                     detector=None, params=None) -> tuple[list[ShadowRecord], dict]:
+  evaluator = ShadowEvaluator(planner=planner, max_offset=max_offset, clock=clock, detector=detector, params=params)
   records = evaluator.run(frames)
   return records, summarize(records)
 

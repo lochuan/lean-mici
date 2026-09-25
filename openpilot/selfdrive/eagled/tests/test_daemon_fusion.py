@@ -361,7 +361,7 @@ def test_vision_is_gated_off_when_uncalibrated():
   daemon, pm = _daemon()           # 沿用本文件现有 helper
   daemon.sm.valid["extrinsicsCalibration"] = True
   daemon.sm["extrinsicsCalibration"].calStatus = "uncalibrated"
-  dets = daemon.perception.detect(daemon.sm['extrinsicsCalibration'], True, 0.0)
+  dets = daemon.perception.detect(daemon.sm['extrinsicsCalibration'], True, 0.0, C.CAMERA_TO_FRONT)
   assert dets == []
   assert daemon.degraded == {"calibration"}
 
@@ -379,7 +379,7 @@ def test_daemon_passes_frame_height_to_projection(monkeypatch):
   monkeypatch.setattr(mod, "project_detections", spy)
   daemon, _ = _daemon(camera=_FakeCamera(frames=[ROI]),
                       detector=_FakeDetector(detections=[_box_at(20.0, -1.0)]))
-  daemon.perception.detect(daemon.sm['extrinsicsCalibration'], True, 0.0)
+  daemon.perception.detect(daemon.sm['extrinsicsCalibration'], True, 0.0, C.CAMERA_TO_FRONT)
   assert seen == [760]              # 1344x760 帧高,非 None
 
 
@@ -543,9 +543,9 @@ def test_held_detections_past_bumper_are_dropped():
   """补偿后越过保险杠(dRel <= 0)的目标已经过去了,丢弃而不是报负距离。"""
   core = PerceptionCore(camera=_FakeCamera(frames=[ROI]),
                         detector=_FakeDetector(detections=[_box_at(5.0, -1.8, cls="person")]))
-  frame = core.process(_core_sm(), 0.0, 20.0, vision_enabled=True, vision_due=True)
+  frame = core.process(_core_sm(), 0.0, 20.0, C.CAMERA_TO_FRONT, vision_enabled=True, vision_due=True)
   assert len(frame.detections) == 1
-  frame = core.process(_core_sm(), C.DT_5HZ, 30.0, vision_enabled=True, vision_due=False)
+  frame = core.process(_core_sm(), C.DT_5HZ, 30.0, C.CAMERA_TO_FRONT, vision_enabled=True, vision_due=False)
   assert frame.detections == []            # 5 - 30*0.2 = -1.0 -> 丢
 
 
@@ -553,9 +553,9 @@ def test_hold_cleared_immediately_when_vision_disabled():
   """避让关闭立即清空保持:不让旧目标活过 TTL。"""
   core = PerceptionCore(camera=_FakeCamera(frames=[ROI]),
                         detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
-  core.process(_core_sm(), 0.0, 20.0, vision_enabled=True, vision_due=True)
-  core.process(_core_sm(), C.DT_5HZ, 20.0, vision_enabled=False, vision_due=False)
-  assert core.process(_core_sm(), 2 * C.DT_5HZ, 20.0, vision_enabled=True, vision_due=False).detections == []
+  core.process(_core_sm(), 0.0, 20.0, C.CAMERA_TO_FRONT, vision_enabled=True, vision_due=True)
+  core.process(_core_sm(), C.DT_5HZ, 20.0, C.CAMERA_TO_FRONT, vision_enabled=False, vision_due=False)
+  assert core.process(_core_sm(), 2 * C.DT_5HZ, 20.0, C.CAMERA_TO_FRONT, vision_enabled=True, vision_due=False).detections == []
   assert core.last_vision_duration_s == 0.0
 
 

@@ -32,8 +32,9 @@ _Avoid_: 摄像头、前视相机
 
 ### 标定与精修
 
-**安装偏移**（`CAMERA_TO_FRONT`）:
+**安装偏移**（`CAMERA_TO_FRONT`，Params 键 `CameraToFront`）:
 视觉相机与前保险杠之间的纵向距离，是相机系与车体系之间的纵向换算量。
+运行时值的唯一读点是 `model_geometry.read_camera_to_front`（未落盘回退出厂默认）。
 _Avoid_: CameraOffset（那是上游的相机偏移软件修正，另一回事）、外参
 
 **安装偏移精修**:

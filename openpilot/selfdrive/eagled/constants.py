@@ -5,6 +5,8 @@ Task 5 brief. Everything that shapes the bias lives here so Params can override
 the limits without touching planner logic.
 """
 
+from openpilot.common.model_geometry import CAMERA_TO_FRONT_DEFAULT
+
 # Geometry / gate
 L_LOOKAHEAD = 35.0   # m, preview distance used for the curvature bias
 D_MAX = 50.0         # m, proximity ramp far distance
@@ -83,7 +85,9 @@ CAMERA_YAW = 0.0       # rad, camera yaw, positive = looking left
 # (radar_interface.py fills dRel "from front of car"). A camera-frame ground
 # point is therefore FARTHER than the radar-frame distance, so this offset is
 # subtracted when aligning projected dRel to radar dRel.
-CAMERA_TO_FRONT = 1.5  # m, windshield camera behind the front bumper
+# 出厂默认/初值（票 #6 降级）：数值唯一来源在 model_geometry；运行时值一律经
+# model_geometry.read_camera_to_front（Params 键 CameraToFront）每帧读取，别处不得直读。
+CAMERA_TO_FRONT = CAMERA_TO_FRONT_DEFAULT
 
 # ROI 模式。SQUASH 是历史行为:整帧压进 640x384。在 mici 宽相机(1344x760)上
 # 它一行都没裁(crop_h = min(760, 806) = 760),整帧被压 2.1x/1.98x 且带 6%

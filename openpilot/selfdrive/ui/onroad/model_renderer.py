@@ -5,9 +5,8 @@ from openpilot.cereal import messaging
 from opendbc.car.structs import car
 from dataclasses import dataclass, field
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.common.model_geometry import VehicleFrameLine, geometry_to_vehicle_frame, vehicle_to_camera_frame
+from openpilot.common.model_geometry import VehicleFrameLine, geometry_to_vehicle_frame, read_camera_to_front, vehicle_to_camera_frame
 from openpilot.common.params import Params
-from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app
@@ -61,7 +60,7 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
     self._path_offset_z = HEIGHT_INIT[0]
     self._counter = -1
     self._camera_offset = ui_state.params.get("CameraOffset", return_default=True)
-    self._camera_to_front = C.CAMERA_TO_FRONT  # 安装偏移；T5（票 #6）起改从 Params 读点
+    self._camera_to_front = read_camera_to_front(ui_state.params)  # 安装偏移唯一读点（票 #6），每帧重读
     # Initialize ModelPoints objects
     self._path = ModelPoints()
     self._lane_lines = [ModelPoints() for _ in range(4)]
@@ -111,6 +110,7 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
     if self._counter % 60 == 0:
       self._camera_offset = ui_state.params.get("CameraOffset", return_default=True)
     self._counter += 1
+    self._camera_to_front = read_camera_to_front(ui_state.params)  # 每帧重读，保存即下一帧生效
 
     if sm.updated['carParams']:
       self._longitudinal_control = sm['carParams'].openpilotLongitudinalControl

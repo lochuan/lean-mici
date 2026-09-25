@@ -42,7 +42,7 @@ def test_matching_is_mutually_exclusive():
   h_px = FY * C.CLASS_HEIGHTS_M["person"] / (20.0 + C.CAMERA_TO_FRONT)  # 保险杠系 20.0m
   radars = [R(20.0, 0.5), R(20.5, 0.6)]
   dets = [_det(math.atan2(-0.55, 20.2), h_px=h_px)]
-  n, fused, pairs = associate(radars, dets, fy=FY)
+  n, fused, pairs = associate(radars, dets, fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 1
   assert len(pairs) == 1
   assert fused == []
@@ -56,7 +56,7 @@ def test_radar_exclusion_two_detections_cannot_share_one_radar():
   h_px = FY * C.CLASS_HEIGHTS_M["person"] / (20.0 + C.CAMERA_TO_FRONT)  # 保险杠系 20.0m
   radars = [R(20.0, 0.0), R(20.0, 1.5)]   # r1 方位角 -0.0749,离两个检测都 > 0.035
   dets = [_det(0.0, h_px=h_px), _det(0.01, h_px=h_px)]
-  n, fused, pairs = associate(radars, dets, fy=FY)
+  n, fused, pairs = associate(radars, dets, fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 1
   assert len(pairs) == 1
   assert pairs[0][0] is radars[0]
@@ -66,7 +66,7 @@ def test_radar_exclusion_two_detections_cannot_share_one_radar():
 
 def test_unmatched_detection_gets_box_height_range():
   dets = [_det(0.0, cls="person", h_px=FY * 1.7 / 25.0)]
-  n, fused, pairs = associate([], dets, fy=FY)
+  n, fused, pairs = associate([], dets, fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 0 and pairs == []
   assert len(fused) == 1
   # 25.0 是相机系; dRel 与雷达同参照(保险杠系), 必须减安装偏置。
@@ -76,18 +76,18 @@ def test_unmatched_detection_gets_box_height_range():
 
 def test_unmatched_detection_yrel_sign_follows_bearing():
   """bearing 向图像右为正, 而 yRel 左正 -> 必须反号。"""
-  right = associate([], [_det(0.1, h_px=FY * 1.7 / 20.0)], fy=FY)[1][0]
+  right = associate([], [_det(0.1, h_px=FY * 1.7 / 20.0)], fy=FY, camera_to_front=C.CAMERA_TO_FRONT)[1][0]
   assert right["yRel"] < 0.0
 
 
 def test_detection_without_usable_height_is_dropped():
-  assert associate([], [_det(0.0, cls="unknown", h_px=40.0)], fy=FY)[1] == []
+  assert associate([], [_det(0.0, cls="unknown", h_px=40.0)], fy=FY, camera_to_front=C.CAMERA_TO_FRONT)[1] == []
 
 
 def test_bearing_gate_rejects_a_far_off_target():
   radars = [R(20.0, 0.0)]
   dets = [_det(C.ASSOC_MAX_DBEARING * 3)]
-  n, fused, pairs = associate(radars, dets, fy=FY)
+  n, fused, pairs = associate(radars, dets, fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 0
   assert len(fused) == 1          # 未匹配 -> 退回框高测距
 
@@ -96,7 +96,7 @@ def test_range_gate_rejects_same_bearing_different_range():
   """同方位但距离差极大的目标不应配上(方位角单独不足以判别)。"""
   radars = [R(40.0, 0.0)]
   dets = [_det(0.0, cls="person", h_px=FY * 1.7 / 5.0)]   # 框高说相机系 5m
-  n, fused, pairs = associate(radars, dets, fy=FY)
+  n, fused, pairs = associate(radars, dets, fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 0
 
 
@@ -104,7 +104,7 @@ def test_matched_pair_carries_the_vision_class():
   """匹配对要用视觉类别升级权重: 雷达看到的摩托车不该按 vehicle 算。"""
   radars = [R(20.0, 0.0)]
   dets = [_det(0.0, cls="motorcycle", h_px=FY * 1.7 / 20.0)]
-  n, fused, pairs = associate(radars, dets, fy=FY)
+  n, fused, pairs = associate(radars, dets, fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 1
   assert pairs[0][3] == "motorcycle"
 
@@ -117,7 +117,7 @@ def test_object_style_vision_matches_via_derived_bearing():
   形态, 重写时丢掉了这个双态支持 —— 这里钉死它不能再次悄悄退化。"""
   radar = [R(20.0, -1.0)]
   obj = VO(x=20.0, y=-1.0)   # bearing = atan2(1.0, 20.0) == radar bearing
-  n, fused, pairs = associate(radar, [obj], fy=FY)
+  n, fused, pairs = associate(radar, [obj], fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 1
   assert pairs[0][1] is obj
   assert pairs[0][3] is None  # 对象侧没有类别
@@ -127,7 +127,7 @@ def test_object_style_secondary_gate_uses_object_x():
   """无 cls/boxHeightPx 的对象: 二级门退用对象自带的 x 作为它的距离。"""
   radar = [R(40.0, 0.0)]
   pairs, _ = nearest_pairs_by_bearing(radar, [VO(x=5.0, y=0.0)], FY,
-                                      C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DRANGE_M)
+                                      C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DRANGE_M, camera_to_front=C.CAMERA_TO_FRONT)
   assert pairs == []          # 同方位, 但对象自报 5m vs 雷达 40m
 
 
@@ -136,14 +136,14 @@ def test_object_style_box_height_attrs_drive_the_gate():
   radar = [R(40.0, 0.0)]
   obj = VO(x=40.0, y=0.0, cls="person", box_height_px=FY * 1.7 / 5.0)  # 框高说 5m
   pairs, _ = nearest_pairs_by_bearing(radar, [obj], FY,
-                                      C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DRANGE_M)
+                                      C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DRANGE_M, camera_to_front=C.CAMERA_TO_FRONT)
   assert pairs == []
 
 
 def test_dict_without_gate_inputs_skips_secondary_gate():
   """只有 bearing 的 dict: 无 cls/boxHeightPx 也不暴露 x -> 跳过二级门, 纯方位匹配。"""
   radar = [R(40.0, 0.0)]
-  n, fused, pairs = associate(radar, [{"bearing": 0.0}], fy=FY)
+  n, fused, pairs = associate(radar, [{"bearing": 0.0}], fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 1
   assert fused == []
 
@@ -151,7 +151,7 @@ def test_dict_without_gate_inputs_skips_secondary_gate():
 def test_nearest_pairs_by_bearing_pair_shape():
   radars = [R(20.0, 0.0)]
   dets = [_det(0.0, cls="motorcycle", h_px=FY * 1.7 / 20.0)]
-  pairs, matched = nearest_pairs_by_bearing(radars, dets, FY, C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DRANGE_M)
+  pairs, matched = nearest_pairs_by_bearing(radars, dets, FY, C.ASSOC_MAX_DBEARING, C.ASSOC_MAX_DRANGE_M, camera_to_front=C.CAMERA_TO_FRONT)
   assert matched == {0}
   radar, obj, db, cls = pairs[0]
   assert radar is radars[0] and obj is dets[0]
@@ -187,7 +187,7 @@ def test_vision_only_close_vru_survives_the_own_lane_gate():
 
   相机原点方位角配保险杠系距离会把 yRel 缩小 d/(d+CAMERA_TO_FRONT) 倍:
   1.5m 被缩到 ~1.15m,掉进 own-lane 门,避让整条丢失。"""
-  n, fused, pairs = associate([], _project(_box_at(5.0, 1.5)), fy=FY)
+  n, fused, pairs = associate([], _project(_box_at(5.0, 1.5)), fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 0 and pairs == []
   assert len(fused) == 1
   assert fused[0]["yRel"] == pytest.approx(1.5, rel=1e-3)
@@ -203,7 +203,7 @@ def test_short_range_large_offset_pair_matches():
   相机原点 vs 保险杠原点的视差在这个几何下贡献 ~0.037 rad 假 Δbearing,
   超过 0.035 门限 —— 真配对被拆散。"""
   radars = [R(8.0, 2.0)]
-  n, fused, pairs = associate(radars, _project(_box_at(8.0, 2.0)), fy=FY)
+  n, fused, pairs = associate(radars, _project(_box_at(8.0, 2.0)), fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 1
   assert fused == []
   assert pairs[0][3] == "person"

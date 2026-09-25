@@ -146,7 +146,7 @@ def test_stale_modelV2_returns_none():
 
 def test_lane_cache_serves_published_model_v2():
   from openpilot.cereal import messaging
-  cache = lanes.LaneCache(camera_to_front=CTF)
+  cache = lanes.LaneCache()
   pub = messaging.PubMaster(['modelV2'])
   msg = messaging.new_message('modelV2')
   ml = msg.modelV2
@@ -159,7 +159,7 @@ def test_lane_cache_serves_published_model_v2():
     snap = None
     for _ in range(20):   # 订阅建立前的帧会丢，循环发送直到收到
       pub.send('modelV2', msg)
-      snap = cache.snapshot()
+      snap = cache.snapshot(camera_to_front=CTF)
       if snap is not None:
         break
       time.sleep(0.05)
@@ -170,8 +170,8 @@ def test_lane_cache_serves_published_model_v2():
 
 
 def test_lane_cache_returns_none_before_any_frame():
-  cache = lanes.LaneCache(camera_to_front=CTF)
+  cache = lanes.LaneCache()
   try:
-    assert cache.snapshot() is None
+    assert cache.snapshot(camera_to_front=CTF) is None
   finally:
     cache.stop()

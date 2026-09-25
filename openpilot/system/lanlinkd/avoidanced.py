@@ -22,7 +22,7 @@ import time
 
 from openpilot.cereal import messaging
 from openpilot.common.swaglog import cloudlog
-from openpilot.selfdrive.eagled import constants as C
+from openpilot.common.model_geometry import read_camera_to_front
 from openpilot.system.lanlinkd import lanes as lanes_mod
 
 STALE_AFTER_MS = 1000
@@ -64,15 +64,16 @@ def _calibration(msg, valid: bool) -> dict:
 
 
 class AvoidanceCache:
-  def __init__(self):
+  def __init__(self, params):
     self._lock = threading.Lock()
     self._snapshot: dict = {"stale": True}
     self._recv_ms: float = 0.0
+    self._params = params
     # 车道几何（modelV2 → lanes.py）：请求时取帧，无后台循环。
     # snapshot() 只在 API handler 线程调用，LaneCache 的 SubMaster 惰性
     # 创建、只被该线程触碰，与 run() 线程无共享。
-    # camera_to_front：安装偏移注入点（T5 起每帧从 Params 读，暂读常量）。
-    self._lane_cache = lanes_mod.LaneCache(camera_to_front=C.CAMERA_TO_FRONT)
+    # camera_to_front：安装偏移每次快照经唯一读点取值注入（票 #6，保存即生效）。
+    self._lane_cache = lanes_mod.LaneCache()
     # 标定状态与 eagleDebug 分开缓存：两者频率不同（100Hz vs 5Hz），
     # 且标定即使停更也仍然是有效信息，不该被 debug 的 staleness 抹掉。
     self._cal: dict = {"calStatus": "unknown", "calPerc": 0, "calValid": False, "visionGated": True}
@@ -136,5 +137,5 @@ class AvoidanceCache:
     # 「避让在跑但视觉被标定门关掉了」。
     snap.update(cal)
     # 车道几何：modelV2 停更/无帧时为 None，前端不画车道层。
-    snap["lanes"] = self._lane_cache.snapshot()
+    snap["lanes"] = self._lane_cache.snapshot(camera_to_front=read_camera_to_front(self._params))
     return snap

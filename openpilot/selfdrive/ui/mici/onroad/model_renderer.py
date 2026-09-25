@@ -6,8 +6,7 @@ from opendbc.car.structs import car
 from dataclasses import dataclass, field
 from openpilot.common.params import Params
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.common.model_geometry import VehicleFrameLine, geometry_to_vehicle_frame, vehicle_to_camera_frame
-from openpilot.selfdrive.eagled import constants as C
+from openpilot.common.model_geometry import VehicleFrameLine, geometry_to_vehicle_frame, read_camera_to_front, vehicle_to_camera_frame
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.selfdrive.ui.mici.onroad import blend_colors
@@ -86,7 +85,7 @@ class ModelRenderer(Widget, ModelRendererSP):
 
     self._counter = -1
     self._camera_offset = ui_state.params.get("CameraOffset", return_default=True)
-    self._camera_to_front = C.CAMERA_TO_FRONT  # 安装偏移；T5（票 #6）起改从 Params 读点
+    self._camera_to_front = read_camera_to_front(ui_state.params)  # 安装偏移唯一读点（票 #6），每帧重读
 
     self._exp_gradient = Gradient(
       start=(0.0, 1.0),  # Bottom of path
@@ -110,6 +109,7 @@ class ModelRenderer(Widget, ModelRendererSP):
     if self._counter % 180 == 0:  # This runs at 60fps, so we query every 3 seconds
       self._camera_offset = ui_state.params.get("CameraOffset", return_default=True)
     self._counter += 1
+    self._camera_to_front = read_camera_to_front(ui_state.params)  # 每帧重读，保存即下一帧生效
 
     self._torque_filter.update(-ui_state.sm['carOutput'].actuatorsOutput.torque)
 

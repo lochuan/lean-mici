@@ -10,10 +10,12 @@
 from types import SimpleNamespace as NS
 
 from openpilot.common.model_geometry import (
+  CAMERA_TO_FRONT_DEFAULT,
   VehicleFrameGeometry,
   VehicleFrameLine,
   geometry_to_vehicle_frame,
   line_to_vehicle_frame,
+  read_camera_to_front,
   vehicle_to_camera_frame,
 )
 
@@ -107,3 +109,33 @@ def test_projection_boundary_places_lead_at_true_distance():
   # 前车 dRel=20（车体系，保险杠原点）→ 投影矩阵该吃相机系 21.5
   #（相机在保险杠后方 1.5m）。这正是 UI 前车标记的历史帧混用处。
   assert vehicle_to_camera_frame(20.0, 1.2, 0.0, CTF) == (21.5, -1.2, 0.0)
+
+
+# --- 安装偏移读点（票 #6） -----------------------------------------------------------
+
+class _FakeParams:
+  """duck-type Params（get(key) → 值/None）。"""
+
+  def __init__(self, data=None):
+    self.data = dict(data or {})
+
+  def get(self, key):
+    return self.data.get(key)
+
+
+def test_read_camera_to_front_falls_back_to_factory_default():
+  # 键未落盘 = 未精修过 = 出厂默认；数值唯一来源是 CAMERA_TO_FRONT_DEFAULT
+  assert read_camera_to_front(_FakeParams()) == CAMERA_TO_FRONT_DEFAULT == CTF
+
+
+def test_read_camera_to_front_reads_saved_value():
+  assert read_camera_to_front(_FakeParams({"CameraToFront": "1.25"})) == 1.25
+  assert read_camera_to_front(_FakeParams({"CameraToFront": 2.0})) == 2.0
+
+
+def test_read_camera_to_front_save_takes_effect_next_read():
+  # 「保存即下一帧生效」：读点无缓存，写入后的下一次读取立即返回新值
+  p = _FakeParams()
+  assert read_camera_to_front(p) == CAMERA_TO_FRONT_DEFAULT
+  p.data["CameraToFront"] = "2.5"
+  assert read_camera_to_front(p) == 2.5

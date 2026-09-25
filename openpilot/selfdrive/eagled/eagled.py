@@ -41,6 +41,7 @@ import cv2
 import numpy as np
 
 import openpilot.cereal.messaging as messaging
+from openpilot.common.model_geometry import read_camera_to_front
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper, config_best_effort_process
 from openpilot.common.swaglog import cloudlog
@@ -132,7 +133,9 @@ class EagleDaemon:
     self._enabled_prev = self.enabled
     vision_due = self.enabled and now >= self._next_vision_t
 
-    frame = self.perception.process(self.sm, now, car_state.vEgo,
+    # 安装偏移：每拍经唯一读点取值（票 #6），保存即下一拍生效。
+    camera_to_front = read_camera_to_front(self.params)
+    frame = self.perception.process(self.sm, now, car_state.vEgo, camera_to_front,
                                     vision_enabled=self.enabled, vision_due=vision_due)
     if vision_due:
       interval, _reason = self._health.inference_interval(now, VISION_BASE_INTERVAL,

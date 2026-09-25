@@ -14,6 +14,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+CAMERA_TO_FRONT_DEFAULT = 1.5  # 出厂默认安装偏移：相机在前保险杠后方 1.5m
+
+
+def read_camera_to_front(params) -> float:
+  """安装偏移的唯一读点（票 #6）：Params 键 ``CameraToFront``，未落盘回退出厂默认。
+
+  消费方（eagled 判定、lanlinkd 展示、车内 UI）每帧经本函数取值——保存新值
+  下一帧即生效，任何地方不得再直读常量或另设读点。params duck-typed（只要有
+  ``get(key)``，返回 str/bytes/float/None 皆可）。
+  """
+  try:
+    v = params.get("CameraToFront")
+  except Exception:
+    v = None  # 旧库未注册该键等异常形态：回退出厂默认（同 apply_param_overrides 惯例）
+  return CAMERA_TO_FRONT_DEFAULT if v is None else float(v)
+
 
 @dataclass(frozen=True)
 class VehicleFrameLine:

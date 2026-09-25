@@ -92,11 +92,12 @@ class LaneGeometry:
   path_std: tuple
 
 
-def lane_geometry(model_v2) -> LaneGeometry | None:
+def lane_geometry(model_v2, camera_to_front: float) -> LaneGeometry | None:
   """Extract ego-lane boundaries (laneLines[1]/[2]) + path with C7 quality flags.
 
   几何本身经 ``model_geometry`` 换算（解释权的唯一落点）：输出已是车体系
-  （x 前保险杠原点、y 左正），目标与几何在判定中同原点。
+  （x 前保险杠原点、y 左正），目标与几何在判定中同原点。``camera_to_front``
+  为安装偏移（票 #6 读点注入，本模块不持 Params）。
 
   None = 模型几何整体不可用（字段缺失/列表为空）——目标判定回退固定带。
   对 duck-typed 测试桩安全：缺属性的假 modelV2 直接得 None。
@@ -108,7 +109,7 @@ def lane_geometry(model_v2) -> LaneGeometry | None:
     return None
   if len(probs) <= C.LANE_IDX_RIGHT or len(stds) <= C.LANE_IDX_RIGHT:
     return None
-  vgeo = geometry_to_vehicle_frame(model_v2, camera_to_front=C.CAMERA_TO_FRONT)
+  vgeo = geometry_to_vehicle_frame(model_v2, camera_to_front=camera_to_front)
   left, right = vgeo.lane_lines[C.LANE_IDX_LEFT], vgeo.lane_lines[C.LANE_IDX_RIGHT]
   if left is None or right is None:
     return None
@@ -431,14 +432,14 @@ class PerceptionCore:
     self._held = list(detections)
     self._held_t = now
 
-  def _submit_vision(self, sm, now: float) -> None:
+  def _submit_vision(self, sm, now: float, camera_to_front: float) -> None:
     """把 due 拍的推理交给工作线程;hold 锚点用取帧时刻 now。"""
     extr = sm['extrinsicsCalibration']
     valid = sm.valid['extrinsicsCalibration']
     gen = self._hold_gen
 
     def job():
-      dets = self.detect(extr, valid, now)
+      dets = self.detect(extr, valid, now, camera_to_front)
       return (gen, dets, now, self.last_vision_duration_s)
 
     self._worker.submit(job)
@@ -479,7 +480,7 @@ class PerceptionCore:
       out.append({**det, "dRel": d_rel, "bearing": math.atan2(-det["yRel"], d_rel)})
     return out
 
-  def detect(self, extrinsics_msg, extrinsics_valid: bool, now: float) -> list[dict]:
+  def detect(self, extrinsics_msg, extrinsics_valid: bool, now: float, camera_to_front: float) -> list[dict]:
     """Camera -> YOLO -> car-frame projections; ``[]`` keeps the frame radar-only.
 
     Only called on ``vision_due`` ticks (see :meth:`process`): the enable/disable
@@ -528,11 +529,11 @@ class PerceptionCore:
     return project_detections(detections, fx=fx, fy=fy, cx=cx, cy=cy,
                               height=C.CAMERA_HEIGHT, pitch=geom.pitch,
                               yaw=geom.yaw, roll=geom.roll,
-                              camera_to_front=C.CAMERA_TO_FRONT, roi_meta=roi_meta,
+                              camera_to_front=camera_to_front, roi_meta=roi_meta,
                               frame_height=self.camera.frame_size[1] if self.camera.frame_size else None)
 
-  def process(self, sm, now: float, v_ego: float, vision_enabled: bool = True,
-              vision_due: bool = True) -> PerceptionFrame:
+  def process(self, sm, now: float, v_ego: float, camera_to_front: float,
+              vision_enabled: bool = True, vision_due: bool = True) -> PerceptionFrame:
     """Run the full fusion chain once and return the frame for this tick.
 
     两个开关分开:``vision_enabled`` 是视觉链总开关(AvoidanceEnabled),
@@ -553,12 +554,12 @@ class PerceptionCore:
     elif vision_due:
       if self._worker is not None:
         # 异步:本拍沿用旧 hold(补偿后),结果稍后由 _absorb_worker 落库
-        self._submit_vision(sm, now)
+        self._submit_vision(sm, now, camera_to_front)
         detections = self._held_detections(now, v_ego)
       else:
         # due 帧的结果(含降级路径的空列表)整体成为新的保持:保持桥接的是
         # 调度间隙,不是视觉故障 —— 降级帧不该让上一拍的旧目标复活。
-        detections = self.detect(sm['extrinsicsCalibration'], sm.valid['extrinsicsCalibration'], now)
+        detections = self.detect(sm['extrinsicsCalibration'], sm.valid['extrinsicsCalibration'], now, camera_to_front)
         self._store_hold(detections, now)
     else:
       detections = self._held_detections(now, v_ego)
@@ -566,7 +567,7 @@ class PerceptionCore:
     # Intrinsics live on the camera (None until the first successful connect),
     # and with no detections associate never reads fy, so 0.0 is a safe fallback.
     fy = self.camera.intrinsics[1] if self.camera is not None and self.camera.intrinsics else 0.0
-    n_associated, fused, pairs = associate(radar.points, detections, fy=fy)
+    n_associated, fused, pairs = associate(radar.points, detections, fy=fy, camera_to_front=camera_to_front)
     # Confirmation keys are trackId-based (radar_point_key): pycapnp hands out a
     # fresh wrapper object on every access to radar.points, so id() keys built
     # from associate's materialized points would never match the points
@@ -574,7 +575,7 @@ class PerceptionCore:
     confirmed_keys = tuple(radar_point_key(p[0]) for p in pairs)
     vision_cls_by_key = {radar_point_key(p[0]): p[3] for p in pairs}
     # C2/C7: 车道几何一次提取,本帧所有目标判定共用（含遥测侧的 _target_rows）。
-    lane_geo = lane_geometry(model_v2)
+    lane_geo = lane_geometry(model_v2, camera_to_front)
     objects = fuse_objects(radar.points, fused, v_ego=v_ego,
                           confirmed_keys=confirmed_keys,
                           vision_cls_by_key=vision_cls_by_key,

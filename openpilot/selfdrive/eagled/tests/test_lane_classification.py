@@ -45,7 +45,7 @@ class _MD:
 
 
 def _geo(md) -> LaneGeometry:
-  geo = lane_geometry(md)
+  geo = lane_geometry(md, C.CAMERA_TO_FRONT)
   assert geo is not None
   return geo
 
@@ -219,8 +219,8 @@ class TestTier3FixedBand:
     """缺属性的假 modelV2（daemon 测试桩形态）安全回退,绝不起异常。"""
     class _Bare:
       action = None
-    assert lane_geometry(_Bare()) is None
-    assert lane_geometry(None) is None
+    assert lane_geometry(_Bare(), C.CAMERA_TO_FRONT) is None
+    assert lane_geometry(None, C.CAMERA_TO_FRONT) is None
 
 
 # --- lane_geometry 质量门 ----------------------------------------------------------
@@ -235,14 +235,14 @@ class TestLaneGeometryExtraction:
   def test_missing_lists_return_none(self):
     md = _MD()
     md.laneLines = []
-    assert lane_geometry(md) is None
+    assert lane_geometry(md, C.CAMERA_TO_FRONT) is None
     md2 = _MD()
     md2.position = None
-    assert lane_geometry(md2) is None
+    assert lane_geometry(md2, C.CAMERA_TO_FRONT) is None
 
   def test_path_std_missing_disables_tier2(self):
     """position 桩没有 yStd 时 path_std=() -> tier 2 安全关闭。"""
     md = _MD()
     del md.position.yStd
-    geo = lane_geometry(md)
+    geo = lane_geometry(md, C.CAMERA_TO_FRONT)
     assert geo is not None and geo.path_std == ()

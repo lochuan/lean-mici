@@ -54,7 +54,7 @@ def _frame(t, radar=(), vision=(), curvature=0.01, v_ego=20.0, **kwargs):
 def test_associate_matches_nearest_within_gates():
   radar = [RadarTarget(10.0, -1.0)]
   vision = [VisionObject(10.4, -1.2), VisionObject(30.0, 0.0)]
-  pairs = associate(radar, vision)
+  pairs = associate(radar, vision, camera_to_front=C.CAMERA_TO_FRONT)
   assert len(pairs) == 1
   assert pairs[0][1].x == pytest.approx(10.4)
 
@@ -69,7 +69,7 @@ def test_associate_rejects_same_bearing_out_of_range_gate():
   bearing = math.atan2(1.0, 10.0)                    # radar bearing
   d = 10.0 + ASSOC_MAX_DRANGE_SHADOW + 0.1           # same bearing, farther out
   vision = [VisionObject(d, -d * math.tan(bearing))]
-  assert associate(radar, vision) == []
+  assert associate(radar, vision, camera_to_front=C.CAMERA_TO_FRONT) == []
 
 
 def test_shadow_bearing_gate_is_wider_than_daemons():
@@ -80,19 +80,19 @@ def test_shadow_bearing_gate_is_wider_than_daemons():
   dbearing = (C.ASSOC_MAX_DBEARING + ASSOC_MAX_DBEARING_SHADOW) / 2.0
   radar = [RadarTarget(20.0, 0.0)]
   vision = [VisionObject(20.0, -20.0 * math.tan(dbearing))]
-  assert len(associate(radar, vision)) == 1          # inside the shadow gate
+  assert len(associate(radar, vision, camera_to_front=C.CAMERA_TO_FRONT)) == 1          # inside the shadow gate
   # Daemon side: same bearing, box height chosen so the range gate passes
   # (bumper-frame range == 20 m) — rejection must come from the bearing gate.
   det = {"bearing": dbearing, "cls": "person",
          "boxHeightPx": FY * C.CLASS_HEIGHTS_M["person"] / (20.0 + C.CAMERA_TO_FRONT)}
-  n, fused, _ = associate_daemon(radar, [det], fy=FY)
+  n, fused, _ = associate_daemon(radar, [det], fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 0
   assert len(fused) == 1                             # falls back to box-height ranging
 
 
 def test_associate_handles_empty_inputs():
-  assert associate([], [VisionObject(1.0, 0.0)]) == []
-  assert associate([RadarTarget(1.0, 0.0)], []) == []
+  assert associate([], [VisionObject(1.0, 0.0)], camera_to_front=C.CAMERA_TO_FRONT) == []
+  assert associate([RadarTarget(1.0, 0.0)], [], camera_to_front=C.CAMERA_TO_FRONT) == []
 
 
 # --- evaluator ---------------------------------------------------------------

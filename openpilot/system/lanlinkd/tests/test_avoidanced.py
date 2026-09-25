@@ -7,6 +7,8 @@ import pytest
 from openpilot.cereal import messaging
 from openpilot.system.lanlinkd import avoidanced
 
+from .fake_params import FakeParams
+
 
 def _publish_debug(pm: messaging.PubMaster) -> None:
   msg = messaging.new_message('eagleDebug')
@@ -49,7 +51,7 @@ def publisher() -> messaging.PubMaster:
 
 
 def _start_cache() -> tuple[avoidanced.AvoidanceCache, threading.Event, threading.Thread]:
-  cache = avoidanced.AvoidanceCache()
+  cache = avoidanced.AvoidanceCache(FakeParams())
   exit_event = threading.Event()
   t = threading.Thread(target=cache.run, args=(exit_event,), daemon=True)
   t.start()

@@ -20,7 +20,7 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from openpilot.selfdrive.eagled.constants import CAMERA_PITCH, CAMERA_TO_FRONT, CAMERA_YAW, ROI_HORIZON_MARGIN, ROI_MODE, ROI_MODE_NATIVE, class_weight
+from openpilot.selfdrive.eagled.constants import CAMERA_PITCH, CAMERA_YAW, ROI_HORIZON_MARGIN, ROI_MODE, ROI_MODE_NATIVE, class_weight
 from openpilot.selfdrive.eagled.ranging import is_truncated
 from openpilot.selfdrive.eagled.yolo_detector import INPUT_H, INPUT_W
 
@@ -146,7 +146,7 @@ def project_box_to_vehicle(u: float, v: float, fx: float, fy: float, cx: float, 
 
 def project_detections(dets: Iterable[dict] | None, fx: float, fy: float, cx: float, cy: float,
                        height: float, pitch: float = CAMERA_PITCH, yaw: float = CAMERA_YAW,
-                       roll: float = 0.0, camera_to_front: float = CAMERA_TO_FRONT,
+                       roll: float = 0.0, *, camera_to_front: float,
                        roi_meta: RoiMeta | None = None,
                        frame_height: float | None = None) -> list[dict]:
   """YOLO ROI boxes -> car-frame detections for ``fuse_targets`` / ``associate``.
