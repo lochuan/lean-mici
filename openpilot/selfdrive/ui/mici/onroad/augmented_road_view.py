@@ -26,8 +26,8 @@ WIDE_CAM = VisionStreamType.VISION_STREAM_WIDE_ROAD
 DEFAULT_DEVICE_CAMERA = DEVICE_CAMERAS["tici", "ar0231"]
 
 
-WIDE_CAM_MAX_SPEED = 5.0  # m/s (10 mph)
-ROAD_CAM_MIN_SPEED = 10  # m/s (25 mph)
+WIDE_CAM_MAX_SPEED = 5.0  # m/s (11 mph)
+ROAD_CAM_MIN_SPEED = 10.0  # m/s (22 mph)
 
 CAM_Y_OFFSET = 20
 
