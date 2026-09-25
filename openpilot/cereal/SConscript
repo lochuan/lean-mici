@@ -3,14 +3,16 @@ Import('env', 'common', 'msgq')
 cereal_dir = Dir('.')
 gen_dir = Dir('gen')
 
-# Build cereal
-schema_files = ['log.capnp', 'deprecated.capnp', 'custom.capnp']
-car_capnp = '#opendbc_repo/opendbc/car/car.capnp'
-all_output = schema_files + ['car.capnp']
+# Build cereal —— schema 清单的唯一登记表在 schemas.py（fix/schema-registry ①），
+# 构建输入与生成目标都从登记表推导，不在此手写 schema 名。
+from openpilot.cereal.schemas import SCHEMAS
+
+schema_sources = [f'#{p}' for p in SCHEMAS]
+all_output = [p.rsplit('/', 1)[-1] for p in SCHEMAS]
 import os
 if os.getenv('SKIP_CAPNP_REGEN') != '1':
   env.Command([f'gen/cpp/{s}.c++' for s in all_output] + [f'gen/cpp/{s}.h' for s in all_output],
-              schema_files + [car_capnp],
+              schema_sources,
               f"capnpc --src-prefix={cereal_dir.path} --src-prefix=opendbc_repo/opendbc/car --import-path=opendbc_repo/opendbc/car $SOURCES -o c++:{gen_dir.path}/cpp/")
 
 cereal = env.Library('cereal', [f'gen/cpp/{s}.c++' for s in all_output])
