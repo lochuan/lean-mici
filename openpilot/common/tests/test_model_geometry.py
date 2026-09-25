@@ -9,14 +9,19 @@
 """
 from types import SimpleNamespace as NS
 
+import pytest
+
 from openpilot.common.model_geometry import (
   CAMERA_TO_FRONT_DEFAULT,
+  CAMERA_TO_FRONT_MAX,
+  CAMERA_TO_FRONT_MIN,
   VehicleFrameGeometry,
   VehicleFrameLine,
   geometry_to_vehicle_frame,
   line_to_vehicle_frame,
   read_camera_to_front,
   vehicle_to_camera_frame,
+  write_camera_to_front,
 )
 
 CTF = 1.5  # 安装偏移，默认出厂值
@@ -139,3 +144,54 @@ def test_read_camera_to_front_save_takes_effect_next_read():
   assert read_camera_to_front(p) == CAMERA_TO_FRONT_DEFAULT
   p.data["CameraToFront"] = "2.5"
   assert read_camera_to_front(p) == 2.5
+
+
+# --- 安装偏移写点 + 防呆（票 #7） ----------------------------------------------------
+
+class _RecordingParams(_FakeParams):
+  """记录 put 的形态：真 Params 的 FLOAT 键只收 float，block=True 才同步落盘。"""
+
+  def __init__(self, data=None):
+    super().__init__(data)
+    self.puts = []
+
+  def put(self, key, value, block=False):
+    self.puts.append((key, value, block))
+    self.data[key] = value
+
+
+def test_camera_to_front_physical_range_is_half_to_two_and_half_metres():
+  assert (CAMERA_TO_FRONT_MIN, CAMERA_TO_FRONT_MAX) == (0.5, 2.5)
+
+
+def test_write_camera_to_front_puts_float_synchronously_and_next_read_sees_it():
+  p = _RecordingParams()
+  write_camera_to_front(p, 1.62)
+  assert p.puts == [("CameraToFront", 1.62, True)]
+  assert type(p.puts[0][1]) is float
+  assert read_camera_to_front(p) == 1.62
+
+
+def test_write_camera_to_front_accepts_range_endpoints():
+  p = _RecordingParams()
+  write_camera_to_front(p, 0.5)
+  write_camera_to_front(p, 2.5)
+  assert [v for _, v, _ in p.puts] == [0.5, 2.5]
+
+
+@pytest.mark.parametrize("bad", [0.49, 2.51, -1.0, float("nan"), float("inf")])
+def test_write_camera_to_front_rejects_out_of_range_without_writing(bad):
+  p = _RecordingParams()
+  with pytest.raises(ValueError):
+    write_camera_to_front(p, bad)
+  assert p.puts == []
+
+
+def test_read_camera_to_front_clamps_out_of_range_saved_value():
+  # 通用 params API 可绕过写点落盘任意值：读点钳到物理区间，下游不吃离谱几何
+  assert read_camera_to_front(_FakeParams({"CameraToFront": 9.0})) == 2.5
+  assert read_camera_to_front(_FakeParams({"CameraToFront": "0.1"})) == 0.5
+
+
+def test_read_camera_to_front_non_finite_saved_value_falls_back_to_default():
+  assert read_camera_to_front(_FakeParams({"CameraToFront": float("nan")})) == CAMERA_TO_FRONT_DEFAULT

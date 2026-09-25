@@ -51,7 +51,7 @@ class LanlinkApp:
     self.version_info = {k: params_api.to_str(self.params.get(k)) or "" for k in VERSION_PARAMS}
     self.cache = StatusCache(self.version_info, device_type="pc" if PC else HARDWARE.get_device_type(), params=self.params)
     self.avoidance = AvoidanceCache(self.params)
-    self.calibration = CalibrationController()
+    self.calibration = CalibrationController(self.params)
     self.exit_event = threading.Event()
     self._settings_ui: dict | None = None
     self._wifi_manager = None
@@ -239,7 +239,7 @@ class LanlinkApp:
   async def avoidance_get(self, request: Request) -> HTTPResponse:
     return json_response(self.avoidance.snapshot())
 
-  # ---- avoidance calibration session (collect/fit eagled projection constants) ----
+  # ---- avoidance calibration session (collect/fit/save the CameraToFront mount offset) ----
 
   async def calibration_start(self, request: Request) -> HTTPResponse:
     if not self.calibration.start():
@@ -248,6 +248,12 @@ class LanlinkApp:
 
   async def calibration_stop(self, request: Request) -> HTTPResponse:
     return json_response(self.calibration.stop())
+
+  async def calibration_apply(self, request: Request) -> HTTPResponse:
+    ok, payload = self.calibration.apply()
+    if not ok:
+      return _json_error(409, payload)
+    return json_response(payload)
 
   async def calibration_status(self, request: Request) -> HTTPResponse:
     return json_response(self.calibration.status())
@@ -310,6 +316,7 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("GET", "/api/avoidance", "avoidance_get"),
   ("POST", "/api/calibration/start", "calibration_start"),
   ("POST", "/api/calibration/stop", "calibration_stop"),
+  ("POST", "/api/calibration/apply", "calibration_apply"),
   ("GET", "/api/calibration/status", "calibration_status"),
   ("GET", "/api/capabilities", "capabilities"),
   ("GET", "/api/settings_ui", "settings_ui"),

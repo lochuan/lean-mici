@@ -12,9 +12,13 @@
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 CAMERA_TO_FRONT_DEFAULT = 1.5  # 出厂默认安装偏移：相机在前保险杠后方 1.5m
+# 物理合理区间（票 #7）：写点越界拒绝，读点越界钳制
+CAMERA_TO_FRONT_MIN = 0.5
+CAMERA_TO_FRONT_MAX = 2.5
 
 
 def read_camera_to_front(params) -> float:
@@ -22,13 +26,29 @@ def read_camera_to_front(params) -> float:
 
   消费方（eagled 判定、lanlinkd 展示、车内 UI）每帧经本函数取值——保存新值
   下一帧即生效，任何地方不得再直读常量或另设读点。params duck-typed（只要有
-  ``get(key)``，返回 str/bytes/float/None 皆可）。
+  ``get(key)``，返回 str/bytes/float/None 皆可）。通用 params API 能绕过写点
+  落盘任意值，故越界值钳到物理区间、非有限值回退出厂默认。
   """
   try:
     v = params.get("CameraToFront")
+    v = None if v is None else float(v)
   except Exception:
     v = None  # 旧库未注册该键等异常形态：回退出厂默认（同 apply_param_overrides 惯例）
-  return CAMERA_TO_FRONT_DEFAULT if v is None else float(v)
+  if v is None or not math.isfinite(v):
+    return CAMERA_TO_FRONT_DEFAULT
+  return min(max(v, CAMERA_TO_FRONT_MIN), CAMERA_TO_FRONT_MAX)
+
+
+def write_camera_to_front(params, value: float) -> None:
+  """安装偏移的唯一写点（票 #7）：区间外拒绝（ValueError，不落盘）。
+
+  FLOAT 键只收 float；``block=True`` 同步落盘，写完下一帧读点即见新值。
+  """
+  value = float(value)
+  if not (CAMERA_TO_FRONT_MIN <= value <= CAMERA_TO_FRONT_MAX):
+    bounds = f"[{CAMERA_TO_FRONT_MIN}, {CAMERA_TO_FRONT_MAX}]"
+    raise ValueError(f"CameraToFront {value} m outside physical range {bounds} m")
+  params.put("CameraToFront", value, block=True)
 
 
 @dataclass(frozen=True)

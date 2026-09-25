@@ -239,9 +239,10 @@ python -m openpilot.selfdrive.eagled.calibrate [--duration 120] [--min-pairs 30]
 
 **lanlink 一键版（推荐）**：避让监测图状态条右侧的"开始标定/停止标定"按钮
 走同一套拟合（`POST /api/calibration/start|stop`，`GET /api/calibration/status`），
-无固定时长，开/停由你控制；停止后页面直接显示 p95 残差、Δfront、警告和
-**可复制的 constants.py 建议块**（Δpitch/Δyaw 不再拟合 —— 在线标定负责，
-页面显示为 "—"）。配对 <30 时结果标记"仅供参考"。
+无固定时长，开/停由你控制；停止后页面直接显示残差散布（p95）、Δfront、警告和
+建议值（当前 → 建议），点**「保存并生效」**（`POST /api/calibration/apply`）即写
+Params `CameraToFront`，下一帧生效，无需重编（票 #7）。防呆：配对 <30 或建议值
+越出 0.5–2.5 m 时拒绝保存（409）并显示原因。
 
 Workflow:
 
@@ -258,7 +259,7 @@ Workflow:
    It collects paired `(d_radar, y_radar, d_vision, y_vision, vEgo)` samples.
    **Only `CAMERA_TO_FRONT` is fitted**: the forward residual
    `e_d = d_vis − d_radar` is regressed on basis `[1]` (constant only) →
-   `CAMERA_TO_FRONT += Δfront`. Everything else is diagnostic, reported but
+   Params `CameraToFront += Δfront`. Everything else is diagnostic, reported but
    never folded into a constant:
    - a **constant** lateral residual (`e_y` intercept) → lateral mount-offset
      warning: the camera/radar origins are sideways of each other; fix it
@@ -270,16 +271,20 @@ Workflow:
    - the **banded residual table** (≤10 m / 10–25 m / 25–40 m, see the P0
      criteria above) grades the post-correction residuals; empty bands report
      `pass: None` and are listed as a coverage warning.
-3. Paste the printed `constants.py` block (one line: `CAMERA_TO_FRONT`),
-   rebuild, and re-run. **Iteration semantics:** the vision coordinates already
-   include the constant currently compiled in, so the fitted delta is an
-   *increment* — 1-2 rounds converge.
+3. The tool writes the new value to Params `CameraToFront` itself (consumers
+   pick it up next frame, no rebuild) — but only when the save guard passes:
+   at least 30 pairs and a result within the physical 0.5–2.5 m range;
+   otherwise it prints `NOT SAVED` with the reason. Re-run to verify.
+   **Iteration semantics:** the vision coordinates already include the value
+   currently in effect, so the fitted delta is an *increment* on it — 1-2
+   rounds converge.
 4. Accept when the **banded verdict** passes (the tool exits 0; exit 1 means
    insufficient pairs or a populated band out of tolerance).
 
 The report shows pair count, vEgo range, forward residual p95 before/after the
-`CAMERA_TO_FRONT` increment, lateral residual p95 (report only), the banded
-table, warnings, and the banded pass/fail verdict.
+`CameraToFront` increment, lateral residual p95 (report only), the banded
+table, warnings, the banded pass/fail verdict, and the current → proposed
+`CameraToFront` value.
 
 ### Static tape-measure spot check (静态卷尺抽查)
 

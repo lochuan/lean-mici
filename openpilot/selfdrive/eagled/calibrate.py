@@ -10,9 +10,12 @@ Since Task 2 the projection takes pitch/yaw/roll from openpilot's live
 reads ``CAMERA_PITCH``/``CAMERA_YAW`` — so this tool fits ONLY what live
 calibration cannot provide: the longitudinal camera->front-bumper mount offset.
 The forward residual ``e_d = d_vis - d_radar`` is regressed on ``[1]`` (constant
-only) -> ``CAMERA_TO_FRONT += d_front_m``. Fitting Δpitch/Δyaw here would hand
-the operator numbers nothing consumes, and invite "correcting" a calibration
-openpilot maintains continuously.
+only) -> Params ``CameraToFront`` += ``d_front_m`` (票 #7: written directly via
+``model_geometry.write_camera_to_front`` when :func:`propose_camera_to_front`'s
+guard passes — enough pairs, result within the physical range; consumers pick
+it up next frame). Fitting Δpitch/Δyaw here would hand the operator numbers
+nothing consumes, and invite "correcting" a calibration openpilot maintains
+continuously.
 
 Everything else is DIAGNOSTIC, reported but never folded into a constant:
 
@@ -31,7 +34,8 @@ Usage (on the device, with ``AvoidanceEnabled`` on and real traffic ahead)::
     python -m openpilot.selfdrive.eagled.calibrate [--duration 120] [--min-pairs 30] [--max-pairs 500]
 
 Exit codes: 0 = banded residual verdict pass, 1 = insufficient pairs or a
-populated band out of tolerance.
+populated band out of tolerance. Saving is gated by the save guard alone,
+independent of the exit code.
 """
 
 from __future__ import annotations
@@ -45,6 +49,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from openpilot.common.model_geometry import (CAMERA_TO_FRONT_MAX, CAMERA_TO_FRONT_MIN,
+                                             read_camera_to_front, write_camera_to_front)
 from openpilot.selfdrive.eagled import constants as C
 
 if TYPE_CHECKING:
@@ -62,6 +68,8 @@ BANDS = (("le10m", 0.0, 10.0, 0.40), ("10to25m", 10.0, 25.0, 1.20),
 BEARING_PASS_DEG = 0.6
 # Minimum pairs for a meaningful fit: 1 fitted constant + statistical floor.
 MIN_FIT_PAIRS = 3
+# Minimum pairs before a fit may be SAVED to Params (below it: shown, not saved).
+MIN_SAVE_PAIRS = 30
 # Constant lateral residual above this suggests a lateral mount offset (camera
 # or radar origin sideways of the other) — reported, never auto-corrected.
 LATERAL_BIAS_WARN_M = 0.10
@@ -251,22 +259,29 @@ def fit_calibrated_offsets(pairs: Sequence[CalibPair], height: float = C.CAMERA_
   }
 
 
-def format_constants_block(result: dict) -> str:
-  """Paste-ready constants.py block with the suggested CAMERA_TO_FRONT increment.
+def propose_camera_to_front(result: dict, current: float) -> dict:
+  """Save guard for the fitted mount offset (票 #7).
 
-  Only ``CAMERA_TO_FRONT`` is hand-fitted: pitch/yaw/roll are maintained by
-  openpilot's ``extrinsicsCalibration`` and the projection no longer reads
-  ``CAMERA_PITCH``/``CAMERA_YAW``, so no pitch/yaw lines are printed.
+  Incremental semantics: the collected ``d_vision`` already carries ``current``,
+  so the proposal is ``current + d_front_m`` — an ABSOLUTE value, so saving it
+  twice never double-counts the increment. Refused (``savable: False``) with
+  fewer than ``MIN_SAVE_PAIRS`` pairs or outside the physical range.
   """
-  new_front = C.CAMERA_TO_FRONT + result["d_front_m"]
-  lines = [
-    f"# Fit from {result['n_pairs']} pairs, post-correction forward p95 {result['forward_p95_after_m']:.3f} m.",
-    "# Only CAMERA_TO_FRONT is hand-fitted: pitch/yaw/roll come from openpilot's",
-    "# extrinsicsCalibration and are no longer read by the projection — do not",
-    "# patch them here.",
-    f"CAMERA_TO_FRONT = {new_front:.4f}  # was {C.CAMERA_TO_FRONT:.4f} ({result['d_front_m']:+.4f} m)",
-  ]
-  return "\n".join(lines)
+  proposed = float(current) + float(result["d_front_m"])
+  reason = None
+  if result["n_pairs"] < MIN_SAVE_PAIRS:
+    reason = f"配对样本不足：{result['n_pairs']} 对（保存至少 {MIN_SAVE_PAIRS} 对）"
+  elif not (CAMERA_TO_FRONT_MIN <= proposed <= CAMERA_TO_FRONT_MAX):
+    bounds = f"{CAMERA_TO_FRONT_MIN}–{CAMERA_TO_FRONT_MAX} m"
+    reason = f"建议值 {proposed:.3f} m 超出物理合理区间 {bounds}，检查安装或数据后重采"
+  return {"current_m": float(current), "proposed_m": proposed,
+          "savable": reason is None, "reject_reason": reason}
+
+
+def _print_proposal(proposal: dict) -> None:
+  print(f"CameraToFront: {proposal['current_m']:.4f} m -> {proposal['proposed_m']:.4f} m")
+  if not proposal["savable"]:
+    print(f"NOT SAVED: {proposal['reject_reason']}")
 
 
 def _print_report(result: dict) -> None:
@@ -308,7 +323,7 @@ def collect_pairs(sm: messaging.SubMaster, duration: float, max_pairs: int,
 
 
 def main(argv: list[str] | None = None, sm_factory: Any = None,
-         clock=time.monotonic, sleep=time.sleep) -> int:
+         clock=time.monotonic, sleep=time.sleep, params: Any = None) -> int:
   parser = argparse.ArgumentParser(description="Online calibration collector for eagled projection constants.")
   parser.add_argument("--duration", type=float, default=120.0, help="collection window in seconds")
   parser.add_argument("--min-pairs", type=int, default=30, help="minimum pairs required to fit")
@@ -327,9 +342,17 @@ def main(argv: list[str] | None = None, sm_factory: Any = None,
     print("Drive with AvoidanceEnabled on, following other vehicles at varied distances, then retry.")
     return 1
 
+  if params is None:
+    from openpilot.common.params import Params
+    params = Params()
+
   result = fit_calibrated_offsets(pairs)
   _print_report(result)
-  print(format_constants_block(result))
+  proposal = propose_camera_to_front(result, read_camera_to_front(params))
+  _print_proposal(proposal)
+  if proposal["savable"]:
+    write_camera_to_front(params, proposal["proposed_m"])
+    print("saved to Params CameraToFront (takes effect next frame)")
   return 0 if result["pass"] else 1
 
 

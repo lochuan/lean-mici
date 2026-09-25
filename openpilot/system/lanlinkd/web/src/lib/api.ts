@@ -48,6 +48,7 @@ export const api = {
   calibrationStatus: () => request<CalibrationStatus>("/api/calibration/status"),
   calibrationStart: () => request<CalibrationStatus>("/api/calibration/start", { method: "POST" }),
   calibrationStop: () => request<CalibrationStatus>("/api/calibration/stop", { method: "POST" }),
+  calibrationApply: () => request<CalibrationStatus>("/api/calibration/apply", { method: "POST" }),
 
   // ---- 单 key 写 ----
   putParam: (key: string, value: string) =>

@@ -7,12 +7,14 @@
  *    行驶中收敛,没有任何手动步骤。它是启用横向避让的门槛——地平面投影的
  *    dRel 对 pitch 的敏感度在 40m 处是 0.5° → 41%,用未标定的 pitch 会直接
  *    生成虚假偏移,所以开关在收敛前置灰并显示进度。
- *  - CAMERA_TO_FRONT 手工精修:可选,只想精修纵向安装偏移(相机在前保险杠
+ *  - CameraToFront 精修:可选,只想精修纵向安装偏移(相机在前保险杠
  *    后方多远)时才跑。配对数据来自避让运行时的 eagleDebug 雷达↔视觉
- *    关联,所以它反过来需要避让已经开着。
+ *    关联,所以它反过来需要避让已经开着。拟合后「保存并生效」一键写进
+ *    Params,下一帧生效(票 #7)。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
+import { saveButtonState } from "@/lib/calibration";
 import type { CalibrationStatus } from "@/lib/schema";
 import { boolValue, store } from "@/lib/store";
 import Badge from "./ui/Badge.vue";
@@ -39,6 +41,22 @@ async function toggleCalibration(): Promise<void> {
   }
 }
 
+const saving = ref(false);
+const saveError = ref("");
+
+async function applyCalibration(): Promise<void> {
+  saving.value = true;
+  saveError.value = "";
+  try {
+    calib.value = await api.calibrationApply();
+  } catch (e) {
+    saveError.value = e instanceof ApiError ? e.message : "保存失败";
+    await pollCalib();
+  } finally {
+    saving.value = false;
+  }
+}
+
 onMounted(() => {
   void pollCalib();
   calibTimer = setInterval(() => void pollCalib(), 1000);
@@ -62,9 +80,12 @@ const onlineHint = computed(() => {
   return "正常行驶即自动收敛——需要车速 > 15 mph 且车道线清晰。完成前上方的启用开关保持置灰。";
 });
 
-// ---- CAMERA_TO_FRONT 手工精修(可选) ----
+// ---- CameraToFront 精修(可选) ----
 const calibRunning = computed(() => Boolean(calib.value?.running));
 const calibResult = computed(() => calib.value?.last_result ?? null);
+const saveState = computed(() =>
+  calibResult.value?.camera_to_front ? saveButtonState(calibResult.value) : null,
+);
 const calibError = computed(() => calib.value?.last_error ?? null);
 const avoidanceOn = computed(() => boolValue("AvoidanceEnabled"));
 const manualBlockedReason = computed(() =>
@@ -105,7 +126,7 @@ const calibBands = computed(() =>
       <p class="mt-1 leading-relaxed text-sl-text-3">{{ onlineHint }}</p>
     </div>
 
-    <!-- CAMERA_TO_FRONT 手工精修 -->
+    <!-- CameraToFront 精修 -->
     <div class="border-t border-sl-border/70 pt-3">
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <span class="font-semibold text-sl-text-2">安装偏移精修（可选）</span>
@@ -127,7 +148,7 @@ const calibBands = computed(() =>
         <span v-if="manualBlockedReason" class="text-sl-warn/90">{{ manualBlockedReason }}</span>
       </div>
       <p class="mt-1 leading-relaxed text-sl-text-3">
-        精修纵向安装偏移 CAMERA_TO_FRONT（相机在前保险杠后方多远）。默认 1.5m
+        精修纵向安装偏移 CameraToFront（相机在前保险杠后方多远）。默认 1.5m
         对所有标准安装已经正确，通常不需要跑。
       </p>
 
@@ -150,6 +171,13 @@ const calibBands = computed(() =>
         <div class="mt-2 grid gap-1 text-sl-text-3 md:grid-cols-2">
           <span>Δfront {{ calibResult.d_front_m.toFixed(3) }} m</span>
           <span>侧向偏置 {{ calibResult.lateral_bias_m.toFixed(3) }} m</span>
+          <span v-if="calibResult.forward_p95_after_m !== undefined">
+            纵向残差散布 p95 {{ calibResult.forward_p95_before_m?.toFixed(3) }} →
+            {{ calibResult.forward_p95_after_m.toFixed(3) }} m
+          </span>
+          <span v-if="calibResult.lateral_p95_m !== undefined">
+            侧向残差散布 p95 {{ calibResult.lateral_p95_m.toFixed(3) }} m
+          </span>
         </div>
         <p class="mt-1 text-[11px] leading-relaxed text-sl-text-3">
           pitch / yaw 已由 openpilot 的在线标定持续维护，这里不再拟合；侧向偏置是
@@ -177,11 +205,28 @@ const calibBands = computed(() =>
           </p>
         </div>
         <div v-for="w in calibResult.warnings" :key="w" class="mt-1 text-sl-warn">{{ w }}</div>
-        <pre class="mt-2 overflow-x-auto rounded bg-sl-bg p-2 font-mono text-[11px] leading-relaxed text-sl-text-2">{{ calibResult.constants_block }}</pre>
-        <p class="mt-1 text-[11px] text-sl-text-3">
-          粘贴到 constants.py 后重编再跑一轮（增量语义，1-2 轮收敛）。
-        </p>
       </details>
+
+      <!-- 保存并生效：防呆在后端，越界/样本不足时按钮置灰并给出原因 -->
+      <div v-if="!calibError && saveState" class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <span class="text-sl-text-2">安装偏移 {{ saveState.summary }}</span>
+        <button
+          type="button"
+          :class="cn(
+            'rounded-md bg-sl-accent/15 px-3 py-1 text-[12px] font-semibold text-sl-accent transition-colors hover:bg-sl-accent/25',
+            (!saveState.enabled || saving) && 'pointer-events-none opacity-40',
+          )"
+          :title="saveState.reason"
+          @click="applyCalibration"
+        >
+          {{ saveState.label }}
+        </button>
+        <span v-if="saveState.reason" class="text-sl-warn/90">{{ saveState.reason }}</span>
+        <span v-if="saveError" class="text-sl-warn/90">{{ saveError }}</span>
+      </div>
+      <p v-if="!calibError && saveState" class="mt-1 text-[11px] leading-relaxed text-sl-text-3">
+        保存即写入设置，下一帧生效，无需重编。增量语义：保存后再跑一轮验证，1–2 轮收敛。
+      </p>
     </div>
   </div>
 </template>

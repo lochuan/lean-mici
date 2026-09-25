@@ -15,8 +15,8 @@ import pytest
 
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.calibrate import (BANDS, BEARING_PASS_DEG, CalibPair, MIN_FIT_PAIRS,
-                                                      banded_residuals, extract_pairs,
-                                                      fit_calibrated_offsets, format_constants_block, main)
+                                                      MIN_SAVE_PAIRS, banded_residuals, extract_pairs,
+                                                      fit_calibrated_offsets, main, propose_camera_to_front)
 from openpilot.selfdrive.eagled.projection import project_box_to_vehicle
 
 # Synthetic wide-camera intrinsics (full frame 1344x760, focal 425.25), same as
@@ -151,12 +151,32 @@ def test_fit_reports_p95_improvement():
   assert result["forward_p95_after_m"] < 0.1
 
 
-def test_format_constants_block_applies_increments():
-  result = fit_calibrated_offsets(_synth_pairs(d_front=0.3))
-  block = format_constants_block(result)
-  assert f"CAMERA_TO_FRONT = {C.CAMERA_TO_FRONT + result['d_front_m']:.4f}" in block
-  assert "CAMERA_PITCH" not in block
-  assert "CAMERA_YAW" not in block
+# --- 保存防呆（票 #7）：建议值 = 当前值 + d_front（增量语义），越界/样本不足拒绝 ---
+
+def test_min_save_pairs_is_thirty():
+  assert MIN_SAVE_PAIRS == 30
+
+
+def test_propose_adds_fitted_increment_to_current_value():
+  proposal = propose_camera_to_front({"n_pairs": 40, "d_front_m": 0.3}, current=1.5)
+  assert proposal["current_m"] == 1.5
+  assert proposal["proposed_m"] == pytest.approx(1.8)
+  assert proposal["savable"] is True
+  assert proposal["reject_reason"] is None
+
+
+def test_propose_rejects_too_few_pairs():
+  proposal = propose_camera_to_front({"n_pairs": 29, "d_front_m": 0.1}, current=1.5)
+  assert proposal["savable"] is False
+  assert "29" in proposal["reject_reason"]
+  assert proposal["proposed_m"] == pytest.approx(1.6)  # 仍展示，但不许存
+
+
+@pytest.mark.parametrize("current,d_front", [(2.4, 0.3), (0.6, -0.2)])
+def test_propose_rejects_value_outside_physical_range(current, d_front):
+  proposal = propose_camera_to_front({"n_pairs": 100, "d_front_m": d_front}, current=current)
+  assert proposal["savable"] is False
+  assert "0.5" in proposal["reject_reason"] and "2.5" in proposal["reject_reason"]
 
 
 # --- banded residuals (Task 7) --------------------------------------------------
@@ -287,19 +307,72 @@ def _debug_frame(pairs_spec):
   return SimpleNamespace(targets=targets, vEgo=20.0)
 
 
+class _FakeParams:
+  def __init__(self, data=None):
+    self.data = dict(data or {})
+    self.puts = []
+
+  def get(self, key):
+    return self.data.get(key)
+
+  def put(self, key, value, block=False):
+    self.puts.append((key, value, block))
+    self.data[key] = value
+
+
+def _offset_frames(n, e_d, d0=10.0):
+  """n 帧、每帧一对，视觉 dRel 比雷达远恒定 e_d（= 安装偏移少计了 e_d）。"""
+  frames = []
+  for i in range(n):
+    d = d0 + i * 0.5
+    targets = [_target(d, -1.0, pair_id=1, vision=False), _target(d + e_d, -1.0, pair_id=1, vision=True)]
+    frames.append(SimpleNamespace(targets=targets, vEgo=20.0))
+  return frames
+
+
 def test_main_insufficient_pairs_exits_1():
   sm = _FakeSM([_debug_frame([(20.0, -1.0)])])  # 1 pair < min 30
+  params = _FakeParams()
   code = main(["--duration", "10", "--min-pairs", "30"], sm_factory=lambda: sm,
-              clock=_FakeClock(), sleep=lambda s: None)
+              clock=_FakeClock(), sleep=lambda s: None, params=params)
   assert code == 1
+  assert params.puts == []
 
 
 def test_main_collects_fits_and_passes_on_clean_data():
   frames = [_debug_frame([(10.0 + i * 0.5, -1.0)]) for i in range(40)]
   sm = _FakeSM(frames)
   code = main(["--duration", "10", "--min-pairs", "30", "--max-pairs", "500"],
-              sm_factory=lambda: sm, clock=_FakeClock(), sleep=lambda s: None)
+              sm_factory=lambda: sm, clock=_FakeClock(), sleep=lambda s: None, params=_FakeParams())
   assert code == 0  # zero residual -> p95 0.0 -> pass
+
+
+def test_main_saves_incremented_value_to_params_when_guard_passes():
+  # 当前已存 1.6，采集到恒定 +0.2m 纵向残差 → 写 1.8（增量，不从出厂默认重算）
+  params = _FakeParams({"CameraToFront": 1.6})
+  sm = _FakeSM(_offset_frames(40, 0.2))
+  main(["--duration", "100", "--min-pairs", "30"], sm_factory=lambda: sm,
+       clock=_FakeClock(), sleep=lambda s: None, params=params)
+  assert len(params.puts) == 1
+  key, value, block = params.puts[0]
+  assert (key, block) == ("CameraToFront", True)
+  assert value == pytest.approx(1.8)
+
+
+def test_main_refuses_to_save_out_of_range_value():
+  params = _FakeParams({"CameraToFront": 2.4})
+  sm = _FakeSM(_offset_frames(40, 0.3))  # 2.4 + 0.3 = 2.7 > 2.5
+  main(["--duration", "100", "--min-pairs", "30"], sm_factory=lambda: sm,
+       clock=_FakeClock(), sleep=lambda s: None, params=params)
+  assert params.puts == []
+
+
+def test_main_refuses_to_save_with_fewer_than_min_save_pairs():
+  params = _FakeParams()
+  sm = _FakeSM(_offset_frames(10, 0.2))  # 10 对：够 --min-pairs 5 拟合，不够 30 保存
+  main(["--duration", "100", "--min-pairs", "5"], sm_factory=lambda: sm,
+       clock=_FakeClock(), sleep=lambda s: None, params=params)
+  assert params.puts == []
 
 
 def test_main_fails_on_out_of_tolerance_residual():
@@ -314,7 +387,7 @@ def test_main_fails_on_out_of_tolerance_residual():
     frames.append(SimpleNamespace(targets=targets, vEgo=20.0))
   sm = _FakeSM(frames)
   code = main(["--duration", "10", "--min-pairs", "30"], sm_factory=lambda: sm,
-              clock=_FakeClock(), sleep=lambda s: None)
+              clock=_FakeClock(), sleep=lambda s: None, params=_FakeParams())
   assert code == 1
 
 

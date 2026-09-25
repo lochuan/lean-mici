@@ -202,7 +202,29 @@ class TestCalibrationRoutes:
     assert r.status == 200
     assert r.json["running"] is False
     assert r.json["last_result"]["n_pairs"] == 8
-    assert "constants_block" in r.json["last_result"]
+    assert r.json["last_result"]["camera_to_front"]["savable"] is False  # 8 对 < 30
+
+  def _stop_with_offset(self, app, n: int, e: float):
+    from openpilot.selfdrive.eagled.calibrate import CalibPair
+    ctl = app.ctx.state.calibration
+    ctl._pairs = [CalibPair(d_radar=5.0 + i, y_radar=-1.0, d_vision=5.0 + i + e, y_vision=-1.0, v_ego=20.0)
+                  for i in range(n)]
+    ctl._thread = None
+    app.test_client.post("/api/calibration/stop")
+
+  def test_apply_saves_to_params(self, app):
+    self._stop_with_offset(app, 40, 0.2)
+    _, r = app.test_client.post("/api/calibration/apply")
+    assert r.status == 200
+    assert r.json["last_result"]["saved"] is True
+    assert app.ctx.fake_params._v["CameraToFront"] == pytest.approx(1.7)
+
+  def test_apply_rejected_returns_409_without_saving(self, app):
+    self._stop_with_offset(app, 10, 0.2)
+    _, r = app.test_client.post("/api/calibration/apply")
+    assert r.status == 409
+    assert "10" in r.json["error"]
+    assert "CameraToFront" not in app.ctx.fake_params._v
 
 
 class TestStaticRoutes:

@@ -240,8 +240,10 @@ export interface LaneSnapshot {
 }
 
 /** /api/calibration/status：在线标定会话状态（CalibrationController）。
- *  last_result 是 fit_calibrated_offsets 的输出 + constants_block（可直接
- *  粘贴进 constants.py 的建议值）；insufficient = 配对数低于推荐下限 30。
+ *  last_result 是 fit_calibrated_offsets 的输出 + camera_to_front（建议值与
+ *  保存防呆结论）+ saved；insufficient = 配对数低于保存下限 30。
+ *  POST /api/calibration/apply 一键把建议值写进 Params CameraToFront，
+ *  防呆拒绝时返回 409（票 #7）。
  *
  *  pitch/yaw 已不再由这里拟合：投影改用 openpilot 的 extrinsicsCalibration
  *  实时 rpy，CAMERA_PITCH/CAMERA_YAW 常数不再被读取，手工拟合它们只会给出
@@ -273,7 +275,17 @@ export interface CalibrationResult {
   warnings?: string[];
   pass: boolean;
   insufficient?: boolean;
-  constants_block: string;
+  camera_to_front: CameraToFrontProposal;
+  saved: boolean; // 已经 POST /api/calibration/apply 写进 Params
+}
+
+/** propose_camera_to_front 的保存防呆结论：proposed = 当前值 + d_front（增量）；
+ *  配对 < 30 或越出 0.5–2.5m 时 savable=false，reject_reason 给出原因。 */
+export interface CameraToFrontProposal {
+  current_m: number;
+  proposed_m: number;
+  savable: boolean;
+  reject_reason: string | null;
 }
 
 export interface CalibrationStatus {
