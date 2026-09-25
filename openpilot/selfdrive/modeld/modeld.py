@@ -17,6 +17,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.params import Params
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import config_realtime_process, DT_MDL
+from openpilot.common.stream_gate import StreamStatus, stream_status
 from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.common.transformations.model import get_warp_matrix
@@ -386,10 +387,14 @@ def main(demo=False):
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
       mdv2sp_send = messaging.new_message('modelDataV2SP')
       left_edge, right_edge = RELC.update_and_fill(modelv2_send.modelV2, mdv2sp_send.modelDataV2SP, v_ego)
-      # C9 变道清空门:eagleState 是 5Hz 观测流,1.0s 内不新鲜(从未收到/无效)
-      # -> 清空标志传 None,desire_helper 回退纯 BSM+relc 门控,绝不因感知缺失锁死变道。
-      eagle_fresh = (sm.seen['eagleState'] and sm.valid['eagleState']
-                    and (time.monotonic() - sm.recv_time['eagleState']) < 1.0)
+      # C9 变道清空门:eagleState 是 5Hz 观测流,新鲜度经观测流接收门判定
+      # (fix/stream-gate,阈值/语义见 common.stream_gate)。不新鲜(从未收到/
+      # 无效/超龄) -> 清空标志传 None,desire_helper 回退纯 BSM+relc 门控,
+      # 绝不因感知缺失锁死变道。
+      eagle_status = stream_status("eagleState",
+                                   None if not sm.seen['eagleState'] else time.monotonic() - sm.recv_time['eagleState'],
+                                   valid=sm.valid['eagleState'])
+      eagle_fresh = eagle_status is StreamStatus.FRESH
       eagle_state = sm['eagleState']
       DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, left_edge, right_edge,
                 change_clear_left=eagle_state.changeClearLeft if eagle_fresh else None,

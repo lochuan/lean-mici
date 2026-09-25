@@ -59,7 +59,8 @@ def _start_cache() -> tuple[avoidanced.AvoidanceCache, threading.Event, threadin
 
 
 def test_cache_captures_published_debug(publisher):
-  assert avoidanced.STALE_AFTER_MS == 1000  # 5Hz 数据：1s 无新帧即视为停更
+  from openpilot.common.stream_gate import MAX_AGE_S
+  assert MAX_AGE_S["eagleDebug"] == 1.0  # 5Hz 数据：1s 无新帧即视为停更
   cache, exit_event, t = _start_cache()
   try:
     for _ in range(20):  # 5Hz 数据，多发几帧等 SubMaster 收到
@@ -100,7 +101,8 @@ def test_cache_captures_published_debug(publisher):
 
 
 def test_cache_goes_stale_after_silence(publisher, monkeypatch):
-  monkeypatch.setattr(avoidanced, "STALE_AFTER_MS", 200)
+  import openpilot.common.stream_gate as stream_gate
+  monkeypatch.setitem(stream_gate.MAX_AGE_S, "eagleDebug", 0.2)
   cache, exit_event, t = _start_cache()
   try:
     for _ in range(10):
@@ -109,7 +111,7 @@ def test_cache_goes_stale_after_silence(publisher, monkeypatch):
       if cache.snapshot().get("stale") is False:
         break
     assert cache.snapshot()["stale"] is False
-    time.sleep(0.4)  # 静默超过 STALE_AFTER_MS
+    time.sleep(0.4)  # 静默超过调低后的登记阈值
     assert cache.snapshot()["stale"] is True
   finally:
     exit_event.set()
@@ -178,7 +180,8 @@ def test_cache_reports_calibrated(cal_publisher):
 def test_cache_does_not_trust_calibrated_status_on_an_invalid_message(cal_publisher):
   """calStatus 说已标定但消息无效时不能当成已标定。
 
-  与 projection.geometry_from_calibration 的判定保持一致 —— 那边同样要求
+  与 projection.calibrated_geometry_from_msg 的判定同源（fix/stream-gate ②
+  后唯一出口）—— 那边同样要求
   valid 且 rpyCalib 长度为 3,一个空的 rpyCalib 配 "calibrated" 不能当成
   零角度使用。两处判定若分叉,前端就会声称视觉在跑而 daemon 其实关掉了。
   """

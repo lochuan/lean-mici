@@ -39,12 +39,14 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.association import associate
 from openpilot.selfdrive.eagled.camera_stream import CameraStream
-from openpilot.selfdrive.eagled.projection import geometry_from_calibration, horizon_row_for, project_detections
+from openpilot.selfdrive.eagled.projection import calibrated_geometry_from_msg, horizon_row_for, project_detections
 from openpilot.selfdrive.eagled.yolo_detector import YoloDetector
 
 YOLO_PKL_PATH = Path(__file__).parent / "models" / "yolo_tinygrad.pkl"
 
-# 两次推理之间沿用上次检测的最长时间。推理节拍由健康门控拉长(0.2s~1.5s),
+# 视觉检测持有时段：两次推理之间沿用上次检测的最长时间。推理节拍由设备遥测
+# 节流（device_health.DeviceHealth）拉长(0.2s~1.5s),与消息新鲜度
+# （common.stream_gate）是两个概念，勿混。
 # 没有保持的话 eagleDebug 的视觉目标在间隙里被纯雷达帧清空 —— lanlink 上
 # 车/人/自行车看起来消失(a4abb7624 回归)。1s 覆盖了大部分节拍间隙,同时
 # 把陈旧目标的寿命封顶。
@@ -461,8 +463,10 @@ class PerceptionCore:
     self.last_vision_duration_s = duration
 
   def _held_detections(self, now: float, v_ego: float) -> list[dict]:
-    """TTL 内沿用上次成功推理的检测,dRel 按自车速度补偿。
+    """视觉检测持有时段内沿用上次成功推理的检测,dRel 按自车速度补偿。
 
+    （这是推理间隙的检测缓存保鲜期,不是消息新鲜度——后者见
+    common.stream_gate，两者概念不同，勿混。）
     持有的是上次推理时刻的车体坐标:自车前进 vEgo·age 后目标更近,纵向
     dRel 同步收缩;bearing 是 dRel/yRel 的派生量(association 的匹配键),
     一并重算。补偿后越过保险杠(dRel <= 0)的目标已经从旁边过去了,丢弃
@@ -487,8 +491,8 @@ class PerceptionCore:
     gating lives in :meth:`process`, so every call here either runs the full
     chain or hits one of the degrade paths below.
     """
-    geom = geometry_from_calibration(extrinsics_msg, extrinsics_valid)
-    if not geom.valid:
+    geom = calibrated_geometry_from_msg(extrinsics_msg, valid=extrinsics_valid)
+    if geom is None:
       # 0.5deg pitch error = 41% distance error at 40m. Running the vision path
       # on an uncalibrated camera is exactly how spurious biases get produced,
       # so fall back to radar-only until openpilot's calibration converges.
