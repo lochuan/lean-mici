@@ -215,7 +215,8 @@ export interface AvoidanceSnapshot {
 /** lanes.py lane_snapshot 的 wire 形状。两套同网格几何（y 均为左正、
  *  x 网格 0-60m，坐标语义由后端 model_geometry 独占解释，前端只画图）：
  *  - corrected：车体系（x 前保险杠原点）——鸟瞰图默认层，与雷达目标同原点。
- *  - raw：换算前的相机系采样（ctf=0）——叠加层即精修仪器，两套错位 = 安装偏移。
+ *  - raw：零安装偏移的车体系（ctf=0 过同一换算口，y 同为左正；x 原点即相机）
+ *    ——叠加层即精修仪器，两套错位 = 安装偏移。
  *  line.y null = 该线本轮不可用。 */
 export interface LaneLineSnap {
   /** 共享网格上的 y 值（m，左正） */

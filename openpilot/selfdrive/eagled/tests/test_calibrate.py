@@ -17,6 +17,7 @@ from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.calibrate import (BANDS, BEARING_PASS_DEG, CalibPair, MIN_FIT_PAIRS,
                                                       MIN_SAVE_PAIRS, banded_residuals, extract_pairs,
                                                       fit_calibrated_offsets, main, propose_camera_to_front)
+from openpilot.common.model_geometry import write_camera_to_front
 from openpilot.selfdrive.eagled.projection import project_box_to_vehicle
 
 # Synthetic wide-camera intrinsics (full frame 1344x760, focal 425.25), same as
@@ -177,6 +178,18 @@ def test_propose_rejects_value_outside_physical_range(current, d_front):
   proposal = propose_camera_to_front({"n_pairs": 100, "d_front_m": d_front}, current=current)
   assert proposal["savable"] is False
   assert "0.5" in proposal["reject_reason"] and "2.5" in proposal["reject_reason"]
+
+
+@pytest.mark.parametrize("value", [0.5, 2.5, 0.49, 2.51, float("nan"), float("inf")])
+def test_save_guard_and_write_point_share_one_range_judgement(value):
+  # 保存防呆与写点必须同判同界：任何值要么两边都收、要么两边都拒
+  write_ok = True
+  try:
+    write_camera_to_front(_FakeParams(), value)
+  except ValueError:
+    write_ok = False
+  save_ok = propose_camera_to_front({"n_pairs": 100, "d_front_m": value - 1.5}, current=1.5)["savable"]
+  assert save_ok == write_ok
 
 
 # --- banded residuals (Task 7) --------------------------------------------------

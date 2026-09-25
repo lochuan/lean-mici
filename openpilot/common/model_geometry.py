@@ -36,7 +36,24 @@ def read_camera_to_front(params) -> float:
     v = None  # 旧库未注册该键等异常形态：回退出厂默认（同 apply_param_overrides 惯例）
   if v is None or not math.isfinite(v):
     return CAMERA_TO_FRONT_DEFAULT
-  return min(max(v, CAMERA_TO_FRONT_MIN), CAMERA_TO_FRONT_MAX)
+  return clamp_camera_to_front(v)
+
+
+def clamp_camera_to_front(value: float) -> float:
+  """安装偏移的唯一值域钳制（读点防呆）：越界收到物理区间边界。"""
+  return min(max(float(value), CAMERA_TO_FRONT_MIN), CAMERA_TO_FRONT_MAX)
+
+
+def camera_to_front_range_error(value: float) -> str | None:
+  """安装偏移的唯一值域判断（写点/保存防呆共用）：区间内返回 None，否则返回拒绝文案。
+
+  非有限值（NaN/inf）同样拒绝。
+  """
+  value = float(value)
+  if not math.isfinite(value) or not (CAMERA_TO_FRONT_MIN <= value <= CAMERA_TO_FRONT_MAX):
+    bounds = f"{CAMERA_TO_FRONT_MIN}–{CAMERA_TO_FRONT_MAX} m"
+    return f"CameraToFront {value} m 超出物理合理区间 {bounds}"
+  return None
 
 
 def write_camera_to_front(params, value: float) -> None:
@@ -45,9 +62,8 @@ def write_camera_to_front(params, value: float) -> None:
   FLOAT 键只收 float；``block=True`` 同步落盘，写完下一帧读点即见新值。
   """
   value = float(value)
-  if not (CAMERA_TO_FRONT_MIN <= value <= CAMERA_TO_FRONT_MAX):
-    bounds = f"[{CAMERA_TO_FRONT_MIN}, {CAMERA_TO_FRONT_MAX}]"
-    raise ValueError(f"CameraToFront {value} m outside physical range {bounds} m")
+  if (error := camera_to_front_range_error(value)) is not None:
+    raise ValueError(error)
   params.put("CameraToFront", value, block=True)
 
 

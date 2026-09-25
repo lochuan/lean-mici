@@ -86,6 +86,7 @@ class ModelRenderer(Widget, ModelRendererSP):
     self._counter = -1
     self._camera_offset = ui_state.params.get("CameraOffset", return_default=True)
     self._camera_to_front = read_camera_to_front(ui_state.params)  # 安装偏移唯一读点（票 #6），每帧重读
+    self._raw_points_ctf: float | None = None  # raw_points 构建时用的安装偏移，变了须重建（见 _render）
 
     self._exp_gradient = Gradient(
       start=(0.0, 1.0),  # Bottom of path
@@ -137,10 +138,13 @@ class ModelRenderer(Widget, ModelRendererSP):
     lead_one = radar_state.leadOne if radar_state else None
     render_lead_indicator = self._longitudinal_control and radar_state is not None
 
-    # Update model data when needed
+    # Update model data when needed。安装偏移变了也要同帧重建 raw_points：raw_points
+    # 是按构建时的 ctf 换算的车体系，换算口每帧用当前值逆变换，两边不同帧会让车道
+    # 像素瞬时错位一个 Δctf。
     model_updated = sm.updated['modelV2']
-    if model_updated or sm.updated['radarState'] or self._transform_dirty:
-      if model_updated:
+    ctf_changed = self._camera_to_front != self._raw_points_ctf
+    if model_updated or ctf_changed or sm.updated['radarState'] or self._transform_dirty:
+      if model_updated or ctf_changed:
         self._update_raw_points(model)
 
       path_x_array = self._path.raw_points[:, 0]
@@ -163,6 +167,7 @@ class ModelRenderer(Widget, ModelRendererSP):
   def _update_raw_points(self, model):
     """Update raw 3D points from model data (车体系，几何解释权在 model_geometry)"""
     geom = geometry_to_vehicle_frame(model, camera_to_front=self._camera_to_front)
+    self._raw_points_ctf = self._camera_to_front
 
     self._path.raw_points = self._to_point_array(geom.path)
     for i, lane_line in enumerate(geom.lane_lines):

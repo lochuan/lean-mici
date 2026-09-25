@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from openpilot.common.model_geometry import (CAMERA_TO_FRONT_MAX, CAMERA_TO_FRONT_MIN,
+from openpilot.common.model_geometry import (camera_to_front_range_error,
                                              read_camera_to_front, write_camera_to_front)
 from openpilot.selfdrive.eagled import constants as C
 
@@ -271,9 +271,8 @@ def propose_camera_to_front(result: dict, current: float) -> dict:
   reason = None
   if result["n_pairs"] < MIN_SAVE_PAIRS:
     reason = f"配对样本不足：{result['n_pairs']} 对（保存至少 {MIN_SAVE_PAIRS} 对）"
-  elif not (CAMERA_TO_FRONT_MIN <= proposed <= CAMERA_TO_FRONT_MAX):
-    bounds = f"{CAMERA_TO_FRONT_MIN}–{CAMERA_TO_FRONT_MAX} m"
-    reason = f"建议值 {proposed:.3f} m 超出物理合理区间 {bounds}，检查安装或数据后重采"
+  elif (range_error := camera_to_front_range_error(proposed)) is not None:
+    reason = f"{range_error}（建议值），检查安装或数据后重采"
   return {"current_m": float(current), "proposed_m": proposed,
           "savable": reason is None, "reject_reason": reason}
 
