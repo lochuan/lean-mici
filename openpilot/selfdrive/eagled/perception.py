@@ -33,6 +33,7 @@ import time
 
 import numpy as np
 
+from openpilot.common.model_geometry import geometry_to_vehicle_frame
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.selfdrive.eagled import constants as C
@@ -72,7 +73,10 @@ class Target:
 
 @dataclass(frozen=True)
 class LaneGeometry:
-  """Ego-lane boundaries + model path in the modelV2 frame (y right-positive).
+  """Ego-lane boundaries + model path in the **vehicle frame** (y left-positive).
+
+  几何来自 ``model_geometry`` 的换算输出：x 以前保险杠为原点（dRel 同参照）、
+  y 左正（yRel 同参照）——判定里目标与几何同原点，无手写坐标换算。
 
   ``left_valid``/``right_valid`` 是 C7 置信门（laneLineProbs/Stds）的逐边裁决：
   边界线磨损/无划线的那一侧为 False，该侧目标回退到 path-relative 层。
@@ -91,30 +95,34 @@ class LaneGeometry:
 def lane_geometry(model_v2) -> LaneGeometry | None:
   """Extract ego-lane boundaries (laneLines[1]/[2]) + path with C7 quality flags.
 
+  几何本身经 ``model_geometry`` 换算（解释权的唯一落点）：输出已是车体系
+  （x 前保险杠原点、y 左正），目标与几何在判定中同原点。
+
   None = 模型几何整体不可用（字段缺失/列表为空）——目标判定回退固定带。
   对 duck-typed 测试桩安全：缺属性的假 modelV2 直接得 None。
   """
-  lines = getattr(model_v2, "laneLines", None)
   probs = getattr(model_v2, "laneLineProbs", None)
   stds = getattr(model_v2, "laneLineStds", None)
   position = getattr(model_v2, "position", None)
-  if lines is None or probs is None or stds is None or position is None:
+  if probs is None or stds is None or position is None:
     return None
-  if len(lines) <= C.LANE_IDX_RIGHT or len(probs) <= C.LANE_IDX_RIGHT or len(stds) <= C.LANE_IDX_RIGHT:
+  if len(probs) <= C.LANE_IDX_RIGHT or len(stds) <= C.LANE_IDX_RIGHT:
     return None
-  left, right = lines[C.LANE_IDX_LEFT], lines[C.LANE_IDX_RIGHT]
-  if len(left.x) == 0 or len(right.x) == 0:
+  vgeo = geometry_to_vehicle_frame(model_v2, camera_to_front=C.CAMERA_TO_FRONT)
+  left, right = vgeo.lane_lines[C.LANE_IDX_LEFT], vgeo.lane_lines[C.LANE_IDX_RIGHT]
+  if left is None or right is None:
     return None
   left_valid = float(probs[C.LANE_IDX_LEFT]) >= C.LANE_PROB_MIN and float(stds[C.LANE_IDX_LEFT]) <= C.LANE_STD_MAX
   right_valid = float(probs[C.LANE_IDX_RIGHT]) >= C.LANE_PROB_MIN and float(stds[C.LANE_IDX_RIGHT]) <= C.LANE_STD_MAX
-  path_x = tuple(position.x)
+  path = vgeo.path
+  path_x = path.x if path is not None else ()
   # duck-typed position 桩可能没有 yStd -> tier 2 安全关闭
   path_std = tuple(getattr(position, "yStd", ()) or ())
   return LaneGeometry(
     left_valid=left_valid, right_valid=right_valid,
-    left_x=tuple(left.x), left_y=tuple(left.y),
-    right_x=tuple(right.x), right_y=tuple(right.y),
-    path_x=path_x, path_y=tuple(position.y),
+    left_x=left.x, left_y=left.y,
+    right_x=right.x, right_y=right.y,
+    path_x=path_x, path_y=(path.y if path is not None else ()),
     path_std=path_std if len(path_std) == len(path_x) else (),
   )
 
@@ -134,28 +142,28 @@ def gate_target(dRel: float, yRel: float, cls, geo: LaneGeometry | None) -> tupl
   tier 1/2/3 都要求中心已偏出 ``OWN_LANE_HALF_WIDTH``: 0.35m 偏置绕不开
   本道中心的障碍,那留给纵向和驾驶员。
 
-  Frame: 雷达 yRel 左正,modelV2 y 右正,本函数内部换算 ``y_m = -yRel``。
+  Frame: 全链路车体系（yRel 左正、x 前保险杠原点）——geo 来自
+  ``model_geometry`` 的换算输出,目标与几何同原点,本函数不做坐标换算。
   """
   if not (0.0 < dRel <= C.D_GATE):
     return False, 0
-  y_m = -yRel  # 雷达左正 -> modelV2 右正
   if geo is not None:
     if yRel > 0.0 and geo.left_valid:
-      # 目标在左:车身边缘(y_m + hw)越过左边界即侵入本道
+      # 目标在左:车身边缘(yRel - hw)越过左边界即侵入本道
       bound = float(np.interp(dRel, geo.left_x, geo.left_y))
-      intrudes = (y_m + C.class_half_width(cls)) > bound
-      lane = -1 if y_m < bound else 0
+      intrudes = (yRel - C.class_half_width(cls)) < bound
+      lane = -1 if yRel > bound else 0
       return intrudes and abs(yRel) >= C.OWN_LANE_HALF_WIDTH, lane
     if yRel < 0.0 and geo.right_valid:
       bound = float(np.interp(dRel, geo.right_x, geo.right_y))
-      intrudes = (y_m - C.class_half_width(cls)) < bound
-      lane = 1 if y_m > bound else 0
+      intrudes = (yRel + C.class_half_width(cls)) > bound
+      lane = 1 if yRel < bound else 0
       return intrudes and abs(yRel) >= C.OWN_LANE_HALF_WIDTH, lane
     # tier 2: path-relative（边界该侧不可信时的弯道正确回退）
     if len(geo.path_x) > 0 and len(geo.path_std) == len(geo.path_x):
       if float(np.interp(dRel, geo.path_x, geo.path_std)) <= C.PATH_STD_MAX:
-        # 路径横向偏差,转回左正 yRel 语义后套固定带
-        d_y_rel = float(np.interp(dRel, geo.path_x, geo.path_y)) - y_m
+        # 路径横向偏差,左正语义直接相减
+        d_y_rel = yRel - float(np.interp(dRel, geo.path_x, geo.path_y))
         off_path = C.OWN_LANE_HALF_WIDTH <= abs(d_y_rel) <= C.Y_GATE
         lane = (-1 if d_y_rel > 0 else 1) if abs(d_y_rel) >= C.OWN_LANE_HALF_WIDTH else 0
         return off_path, lane

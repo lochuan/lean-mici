@@ -1,10 +1,11 @@
 """C2 车道相对分类 + C7 置信门控测试（gate_target 三级判定）。
 
 Frame 约定（ldw.py / relc.py / radard.py 三源验证）:
-- 雷达 yRel 左正;modelV2 y 右正,gate_target 内部换算 y_m = -yRel
-- laneLines[1] = 本道左边界（负 y）,[2] = 本道右边界（正 y）
-- 推导速查（tier 1,左边界 L<0,car 半宽 hw=0.9,标准 3.5m 车道 L=-1.75）:
-  左侧目标侵入条件 y_m + hw > L  ⇔  yRel < |L| + hw = 2.65
+- 全链路车体系:雷达 yRel 左正,LaneGeometry 经 model_geometry 换算后
+  y 左正、x 前保险杠原点（与 dRel 同参照）,gate_target 内无坐标换算。
+- laneLines[1] = 本道左边界（左正 +y）,[2] = 本道右边界（-y）
+- 推导速查（tier 1,左边界 L>0,car 半宽 hw=0.9,标准 3.5m 车道 L=1.75）:
+  左侧目标侵入条件 yRel - hw < L  ⇔  yRel < L + hw = 2.65
 """
 
 
@@ -121,6 +122,21 @@ class TestTier1LaneRelative:
     in_gate, lane = gate_target(5.0, 2.9, "car", geo)
     assert in_gate is False and lane == -1
 
+  def test_gate_samples_lane_geometry_at_bumper_distance(self):
+    """门限在**车体系距离**上采样车道几何（T2/票 #3 的行为修正）。
+
+    左边界相机系 x=(5,20,40)、y=(-1.75,-2.0,-4.0)（右正）。几何经
+    model_geometry 换算后 x 整体前移一个安装偏移 1.5m（相机在保险杠后方）:
+    dRel=20 采样到的是相机系 21.5 处的插值 2.15,而非 20 处的 2.0。
+    car 半宽 0.9:yRel=3.0 的车身边缘 2.1 —— 换算后判「侵入」,
+    未换算的旧混系采样在此处判「未侵入」。本测试只接受换算后语义。
+    """
+    md = _MD()
+    md.laneLines = [_Line(-1.75), _Line(-1.75, -2.0, -4.0), _Line(1.75), _Line(1.75)]
+    geo = _geo(md)
+    in_gate, lane = gate_target(20.0, 3.0, "car", geo)
+    assert in_gate is True and lane == -1
+
   def test_per_side_validity(self):
     """左边界磨损 -> 左侧目标回退 tier 2;右侧目标仍走 tier 1。"""
     geo = _geo(_MD(stds=(0.9, 0.1)))
@@ -133,17 +149,17 @@ class TestTier1LaneRelative:
 
 class TestTier2PathRelative:
   def _curved_path_geo(self) -> LaneGeometry:
-    # 边界置信不达标 + 左弯路径（右正帧负 y）,position.yStd 达标
+    # 边界置信不达标 + 左弯路径（车体系左正 y 随距离增大）,position.yStd 达标
     return LaneGeometry(left_valid=False, right_valid=False,
-                        left_x=(5.0, 40.0), left_y=(-1.75, -1.75),
-                        right_x=(5.0, 40.0), right_y=(1.75, 1.75),
-                        path_x=(5.0, 20.0, 40.0), path_y=(-1.0, -2.2, -4.0),
+                        left_x=(5.0, 40.0), left_y=(1.75, 1.75),
+                        right_x=(5.0, 40.0), right_y=(-1.75, -1.75),
+                        path_x=(5.0, 20.0, 40.0), path_y=(1.0, 2.2, 4.0),
                         path_std=(0.1, 0.1, 0.1))
 
   def test_curve_same_lane_lead_excluded(self):
     """弯道上的同车道前车:固定带把它当侧向威胁,路径相对正确排除。
 
-    路径在 40m 处弯到 y=-4.0;沿着路径行驶的前车车体系 yRel≈4.0 —— 相对
+    路径在 40m 处弯到 yRel=4.0（左）;沿着路径行驶的前车 yRel≈4.0 —— 相对
     路径的偏差 ≈ 0,不是威胁。
     """
     geo = self._curved_path_geo()
@@ -153,7 +169,7 @@ class TestTier2PathRelative:
   def test_curve_same_car_rel_coord_changes_with_distance(self):
     """同一车体系 yRel=2.0 的目标,弯道上按距离分别判定 —— 固定带做不到。
 
-    路径 20m 处 -2.2:偏差 -0.2,还在路径附近（排除）;40m 处 -4.0:偏差
+    路径 20m 处 2.2（左）:偏差 -0.2,还在路径附近（排除）;40m 处 4.0:偏差
     -2.0,目标已在路径右外侧 2m,压到带内（威胁,lane=+1 右侧）。
     """
     geo = self._curved_path_geo()
@@ -165,10 +181,10 @@ class TestTier2PathRelative:
   def test_curve_off_path_target_in_band(self):
     """弯道上的侧向威胁:相对路径偏差落在 [1.2, 2.5] 带内才触发。"""
     geo = self._curved_path_geo()
-    # 20m 处路径 -2.2:目标车体系 yRel=4.5(左) -> 偏差 = -2.2-(-4.5) = 2.3,带内
+    # 20m 处路径 2.2（左）:目标车体系 yRel=4.5(左) -> 偏差 = 4.5-2.2 = 2.3,带内
     in_gate, lane = gate_target(20.0, 4.5, "car", geo)
     assert in_gate is True and lane == -1
-    # 偏差过远（邻道正常车流）:yRel=7.0 -> 偏差 = -2.2-(-7.0) = 4.8 > 2.5
+    # 偏差过远（邻道正常车流）:yRel=7.0 -> 偏差 = 7.0-2.2 = 4.8 > 2.5
     in_gate, lane = gate_target(20.0, 7.0, "car", geo)
     assert in_gate is False and lane == -1
 
