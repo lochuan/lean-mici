@@ -904,3 +904,60 @@ class TestCheckParamsKeys(unittest.TestCase):
       hdr.parent.mkdir(parents=True)
       hdr.write_text('{"Alpha", {PERSISTENT, BOOL}},\n')
       self.assertEqual(release_lib.check_params_keys(root, {b"Alpha"}), [])
+
+
+class TestFlatTreeGate(unittest.TestCase):
+  """stage 树发布门禁下沉（fix/release-stages ②）。
+
+  原 device_release.sh 里一段 heredoc 现场写「遍历找 ELF 查 PC 路径 + 验
+  tinygrad pin 可解析」——30 行判据藏在壳里，测试完全够不着。下沉为
+  check_flat_tree 后判据可测，壳只留一行调用。
+  """
+
+  def test_clean_tree_passes(self):
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      (root / "bin").mkdir()
+      (root / "bin" / "app").write_bytes(elf_bytes(183))
+      (root / "tinygrad_repo").mkdir()
+      (root / "tinygrad_repo" / "TINYGRAD_PIN").write_text("a" * 40 + "\n")
+      self.assertEqual(release_lib.check_flat_tree(root), [])
+
+  def test_pc_built_elf_is_reported(self):
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      (root / "lib.so").write_bytes(elf_bytes(183) + release_lib.PC_PATH_MARKER)
+      (root / "tinygrad_repo").mkdir()
+      (root / "tinygrad_repo" / "TINYGRAD_PIN").write_text("a" * 40 + "\n")
+      problems = release_lib.check_flat_tree(root)
+      self.assertEqual(len(problems), 1)
+      self.assertIn("lib.so", problems[0])
+      self.assertIn("PC-built", problems[0])
+
+  def test_non_elf_with_pc_marker_is_fine(self):
+    """PC 路径标记只在 ELF 上是事故；文本里出现 /.comma 是正常源码。"""
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      (root / "note.txt").write_text(b"/.comma".decode())
+      (root / "tinygrad_repo").mkdir()
+      (root / "tinygrad_repo" / "TINYGRAD_PIN").write_text("a" * 40 + "\n")
+      self.assertEqual(release_lib.check_flat_tree(root), [])
+
+  def test_unresolvable_tinygrad_pin_is_reported(self):
+    """发布树剥了 .git，pin 解析不出 = 选择器四层门控全失效，必须拒发。"""
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      problems = release_lib.check_flat_tree(root)
+      self.assertTrue(any("tinygrad pin" in p for p in problems))
+
+  def test_check_flat_tree_cli_reports_and_fails(self):
+    import sys as _sys
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      (root / "lib.so").write_bytes(elf_bytes(183) + release_lib.PC_PATH_MARKER)
+      out = subprocess.run(
+        [_sys.executable, str(MODULE_PATH), "check-flat-tree", td],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+      )
+      self.assertEqual(out.returncode, 1)
+      self.assertIn("lib.so", out.stderr)

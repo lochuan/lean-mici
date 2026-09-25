@@ -540,6 +540,34 @@ def stage_tinygrad_pin(stage: Path) -> str | None:
     return None
 
 
+def check_flat_tree(tree: Path) -> list[str]:
+  """Stage 树发布门禁的全部判据（fix/release-stages ②）：返回问题清单，空 = 通过。
+
+  两条判据，原先埋在 device_release.sh 的 heredoc 里、测试够不着：
+
+  * **PC 路径守卫**：扁平树里所有 ELF 都不得含 ``/.comma`` 编译路径（09-11 交叉
+    构建事故的回归防线；设备本树构建的结构性产物，此处为回归防线）。非 ELF 文件
+    里出现 ``/.comma`` 是正常源码，不查。
+  * **tinygrad pin 可解析**：发布树剥了 ``.git``，pin 解析不出 = 选择器四层门控
+    全失效，拒绝发布。
+  """
+  problems: list[str] = []
+  for p in sorted(tree.rglob("*")):
+    if not p.is_file() or p.is_symlink():
+      continue
+    try:
+      with p.open("rb") as f:
+        if f.read(4) != b"\x7fELF":
+          continue
+    except OSError:
+      continue
+    if has_pc_paths(p):
+      problems.append(f"PC-built ELF in release tree: {p.relative_to(tree)}")
+  if stage_tinygrad_pin(tree) is None:
+    problems.append("stage tree cannot resolve its tinygrad pin; refusing to publish")
+  return problems
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   sub = parser.add_subparsers(dest="command", required=True)
@@ -552,6 +580,9 @@ def main() -> int:
   sub.add_parser("data-artifact-globs", help="print non-ELF data artifact globs")
   sub.add_parser("flat-tree-entries", help="print flat-tree structural entries lean-master does not track")
   sub.add_parser("validate-artifacts", help="validate staged prebuilt artifacts")
+
+  flat_check = sub.add_parser("check-flat-tree", help="stage tree publish gate (PC-path ELFs + tinygrad pin)")
+  flat_check.add_argument("tree")
 
   key_check = sub.add_parser("check-params-keys", help="publish gate: every params_keys.h key compiled into libparams_c")
   key_check.add_argument("src_root")
@@ -600,6 +631,12 @@ def main() -> int:
     for rel in ARTIFACT_PATHS:
       print(rel)
     return 0
+
+  if args.command == "check-flat-tree":
+    problems = check_flat_tree(Path(args.tree))
+    for p in problems:
+      print(p, file=sys.stderr)
+    return 1 if problems else 0
 
   if args.command == "schema-paths":
     for rel in load_schema_registry():
