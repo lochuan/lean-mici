@@ -85,3 +85,9 @@ def test_empty_and_malformed_lines_degrade_to_none_items():
 def test_missing_z_defaults_to_ground_level():
   line = line_to_vehicle_frame([10.0], [2.0], None, camera_to_front=CTF)
   assert line == VehicleFrameLine(x=(8.5,), y=(-2.0,), z=(0.0,))
+
+
+def test_empty_z_list_defaults_to_ground_level():
+  # capnp 折线未填 z 时是空列表而非 None（真实 modelV2 形态）
+  line = line_to_vehicle_frame([10.0, 20.0], [2.0, 2.0], [], camera_to_front=CTF)
+  assert line == VehicleFrameLine(x=(8.5, 18.5), y=(-2.0, -2.0), z=(0.0, 0.0))

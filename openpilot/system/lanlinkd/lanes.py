@@ -1,14 +1,18 @@
 """车道几何快照：modelV2 → 避让监测俯视图的车道数据源。
 
-设计（2026-09-24 spec，方案 A）：lanlinkd 自己订阅 modelV2，不动 capnp。
+设计（2026-09-25 spec #1 / 票 #4，方案 A）：lanlinkd 自己订阅 modelV2，不动 capnp。
 conflate socket 请求时取帧——/api/avoidance 约 2Hz，每请求最多解码一帧，
 不跑后台解码循环。
 
-坐标约定（与 eagled gate_target 一致，视图与判定必须同坐标系）：
-- modelV2 y 右正、x 以相机为原点；雷达 yRel 左正、x 以保险杠为原点。
-- 这里只做 y 取负：``y_radar = -y_model``。x 直接当 dRel 用——eagled 的
-  lane_geometry 插值就是这么用的（CAMERA_TO_FRONT 未换算是已记录的
-  待修项，视图照它画，保持与判定一致）。
+坐标语义由 ``model_geometry`` 独占解释（spec #1）：本模块只做重采样与组装，
+不做符号翻转/偏移换算。快照携带两套同网格几何：
+
+- ``corrected``：``model_geometry(ctf=安装偏移)`` —— 车体系（x 前保险杠原点、
+  y 左正），鸟瞰图默认层，与雷达目标/判定同原点。
+- ``raw``：``model_geometry(ctf=0)`` —— 与换算前的展示行为逐点一致。
+
+叠加视图两套曲线的错位 = 安装偏移本身，即精修仪器（自检：错位应等于
+正在生效的 CAMERA_TO_FRONT）。
 """
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ import time
 import numpy as np
 
 from openpilot.cereal import messaging
+from openpilot.common.model_geometry import geometry_to_vehicle_frame
 
 # 俯视图显示范围：前方 0-60m。固定网格让前端不用处理不规则采样。
 LANE_GRID_X = tuple(range(0, 65, 5))
@@ -32,17 +37,54 @@ def _resample(x, y) -> list[float] | None:
   return [float(v) for v in np.interp(list(LANE_GRID_X), np.asarray(x, dtype=float), np.asarray(y, dtype=float))]
 
 
-def _line_entry(x, y, prob=None, std=None) -> dict:
-  y = None if y is None else [-float(v) for v in y]   # 右正 -> 左正
+def _line_entry(line, prob=None, std=None) -> dict | None:
+  """车体系折线 → 快照项；线不可用返回 None。y 左正（model_geometry 出口）。"""
+  if line is None:
+    return None
+  y = _resample(line.x, line.y)
   return {
-    "y": _resample(x, y),
+    "y": y,
     "prob": float(prob) if prob is not None else None,
     "std": float(std) if std is not None else None,
+  } if y is not None else None
+
+
+def _geometry_set(model_v2, probs, stds, edge_stds, position, camera_to_front: float) -> dict:
+  """一帧 modelV2 → 一套展示就绪几何（4 车道线 + 2 路沿 + 路径）。"""
+  vgeo = geometry_to_vehicle_frame(model_v2, camera_to_front=camera_to_front)
+
+  def _line_at(idx: int) -> dict | None:
+    if probs is not None and len(probs) > idx and stds is not None and len(stds) > idx:
+      prob, std = probs[idx], stds[idx]
+    else:
+      prob, std = None, None
+    return _line_entry(vgeo.lane_lines[idx], prob=prob, std=std)
+
+  def _edge_at(idx: int) -> dict | None:
+    std = edge_stds[idx] if edge_stds is not None and len(edge_stds) > idx else None
+    return _line_entry(vgeo.road_edges[idx], std=std)
+
+  path = None
+  if vgeo.path is not None:
+    y = _resample(vgeo.path.x, vgeo.path.y)
+    if y is not None:
+      path = {
+        "y": y,
+        "std": _resample(vgeo.path.x, getattr(position, "yStd", None)),
+      }
+
+  return {
+    "laneLines": [_line_at(i) for i in range(4)],
+    "roadEdges": [_edge_at(i) for i in range(2)],
+    "path": path,
   }
 
 
-def lane_snapshot(model_v2, recv_mono: float, now_mono: float) -> dict | None:
+def lane_snapshot(model_v2, recv_mono: float, now_mono: float, camera_to_front: float) -> dict | None:
   """一帧 modelV2 → lanes dict；超龄返回 None。任何字段缺失降级为 None 项。
+
+  ``camera_to_front`` 是注入的安装偏移值（精修结果的消费点，单一读点由调用方
+  负责）。corrected/raw 两套几何同网格，逐线 quality 字段随各集携带。
 
   本车道边界的实/虚线裁决不用这里的 prob/std 重复阈值——直接消费
   eagleDebug 的 laneLeftValid/laneRightValid（eagled C7 门的结论）。
@@ -50,44 +92,15 @@ def lane_snapshot(model_v2, recv_mono: float, now_mono: float) -> dict | None:
   """
   if now_mono - recv_mono > LANE_MAX_AGE_S:
     return None
-  lines = getattr(model_v2, "laneLines", None)
   probs = getattr(model_v2, "laneLineProbs", None)
   stds = getattr(model_v2, "laneLineStds", None)
-  edges = getattr(model_v2, "roadEdges", None)
   edge_stds = getattr(model_v2, "roadEdgeStds", None)
   position = getattr(model_v2, "position", None)
 
-  def _line_at(idx: int) -> dict | None:
-    if lines is None or len(lines) <= idx:
-      return None
-    prob = float(probs[idx]) if probs is not None and len(probs) > idx else None
-    std = float(stds[idx]) if stds is not None and len(stds) > idx else None
-    entry = _line_entry(lines[idx].x, lines[idx].y, prob=prob, std=std)
-    return entry if entry["y"] is not None else None
-
-  def _edge_at(idx: int) -> dict | None:
-    if edges is None or len(edges) <= idx:
-      return None
-    std = float(edge_stds[idx]) if edge_stds is not None and len(edge_stds) > idx else None
-    entry = _line_entry(edges[idx].x, edges[idx].y, std=std)
-    return entry if entry["y"] is not None else None
-
-  path = None
-  if position is not None:
-    y = getattr(position, "y", None)
-    y_radar = None if y is None else [-float(v) for v in y]   # 右正 -> 左正
-    path = {
-      "y": _resample(position.x, y_radar),
-      "std": _resample(position.x, getattr(position, "yStd", None)),
-    }
-    if path["y"] is None:
-      path = None
-
   return {
     "x": list(LANE_GRID_X),
-    "laneLines": [_line_at(i) for i in range(4)],
-    "roadEdges": [_edge_at(i) for i in range(2)],
-    "path": path,
+    "corrected": _geometry_set(model_v2, probs, stds, edge_stds, position, camera_to_front),
+    "raw": _geometry_set(model_v2, probs, stds, edge_stds, position, 0.0),
   }
 
 
@@ -96,11 +109,13 @@ class LaneCache:
 
   只在 API handler 线程使用：SubMaster 惰性创建，snapshot() 每次调用
   先收一轮再判定新鲜度。超龄/无帧返回 None，调用方决定省略字段。
+  ``camera_to_front`` 为安装偏移读取点（T5 起由调用方每帧注入）。
   """
 
-  def __init__(self, clock=time.monotonic):
+  def __init__(self, camera_to_front: float, clock=time.monotonic):
     self._sm: messaging.SubMaster | None = None
     self._clock = clock
+    self._camera_to_front = camera_to_front
 
   def snapshot(self) -> dict | None:
     if self._sm is None:
@@ -109,7 +124,8 @@ class LaneCache:
       except Exception:
         return None
     self._sm.update(0)
-    return lane_snapshot(self._sm['modelV2'], self._sm.recv_time['modelV2'], self._clock())
+    return lane_snapshot(self._sm['modelV2'], self._sm.recv_time['modelV2'], self._clock(),
+                         camera_to_front=self._camera_to_front)
 
   def stop(self) -> None:
     self._sm = None

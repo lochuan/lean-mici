@@ -1,10 +1,11 @@
-/** 车道视图纯函数层：modelV2 车道几何快照 → SVG 路径/形状。
+/** 车道视图纯函数层：车道几何快照 → SVG 路径/形状。
  *
  *  与 radar.ts / avoidance.ts 同款分工：可测的几何与判定逻辑全在这里，
- *  AvoidanceView.vue 只做渲染。坐标约定与后端 lanes.py 一致：
- *  y 左正（雷达系）、dRel 保险杠原点、x 网格 0-60m（LANE_GRID_X）。
+ *  AvoidanceView.vue 只做渲染。坐标语义由后端 model_geometry 独占解释
+ *  （spec #1）：快照已是展示就绪数据（corrected/raw 同网格、y 左正、
+ *  x 网格 0-60m），本层不做符号翻转/偏移换算，只做 SVG 映射。
  */
-import type { EagleTarget, LaneLineSnap, LaneSnapshot } from "./schema";
+import type { EagleTarget, LaneGeometrySet, LaneLineSnap } from "./schema";
 import { lateralX, rangeY, type RadarViewBox } from "./radar";
 
 /** 本车道边界索引（lanes.py 同款 openpilot 惯例） */
@@ -120,10 +121,10 @@ export function shapePx(shape: TargetShape, vb: RadarViewBox): { kind: "rect" | 
   return { kind: shape.kind, wPx, hPx };
 }
 
-/** lanes 快照存在且至少本车道一条边界可用时才认为有车道层可画。 */
-export function hasLaneLayer(lanes: LaneSnapshot | null | undefined): lanes is LaneSnapshot {
-  if (!lanes?.laneLines) return false;
-  const l = lanes.laneLines[LIDX_LEFT];
-  const r = lanes.laneLines[LIDX_RIGHT];
+/** 一套几何存在且至少本车道一条边界可用时才认为有车道层可画。 */
+export function hasLaneLayer(set: LaneGeometrySet | null | undefined): set is LaneGeometrySet {
+  if (!set?.laneLines) return false;
+  const l = set.laneLines[LIDX_LEFT];
+  const r = set.laneLines[LIDX_RIGHT];
   return Boolean(l?.y?.length || r?.y?.length);
 }

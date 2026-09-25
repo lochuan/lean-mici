@@ -41,13 +41,16 @@ def line_to_vehicle_frame(x, y, z, camera_to_front: float) -> VehicleFrameLine |
 
   x/y/z 为逐点序列（duck-typed：list/tuple/capnp 列表皆可）。缺任一序列、
   序列为空或长度不一致返回 None，不抛异常——模型桩形态千差万别。
+  z 无值（None 或空，capnp 未填即空列表）按地面处理；有值则须与 x 等长。
   """
   if x is None or y is None:
     return None
   xs, ys = list(x), list(y)
   if len(xs) == 0 or len(xs) != len(ys):
     return None
-  zs = [0.0] * len(xs) if z is None else list(z)
+  zs = [] if z is None else list(z)
+  if len(zs) == 0:
+    zs = [0.0] * len(xs)
   if len(zs) != len(xs):
     return None
   return VehicleFrameLine(

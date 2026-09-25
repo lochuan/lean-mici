@@ -13,7 +13,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "@/lib/api";
-import type { AvoidanceSnapshot, LaneLineSnap, LaneSnapshot } from "@/lib/schema";
+import type { AvoidanceSnapshot, LaneGeometrySet, LaneLineSnap, LaneSnapshot } from "@/lib/schema";
 import {
   CLS_FILL,
   CLS_LABEL,
@@ -104,12 +104,22 @@ const radarUnavailable = computed(
 const lanes = computed<LaneSnapshot | null>(() => (avStale.value ? null : (av.value?.lanes ?? null)));
 const grid = computed<number[]>(() => lanes.value?.x ?? Array.from({ length: 13 }, (_, i) => i * 5));
 
-const lineAt = (idx: number): LaneLineSnap | null => lanes.value?.laneLines?.[idx] ?? null;
-const edgeAt = (idx: number): LaneLineSnap | null => lanes.value?.roadEdges?.[idx] ?? null;
+// 默认画修正后几何（车体系，与雷达目标同原点）；叠加 raw（换算前）即精修仪器。
+const showRaw = ref(false);
+const geo = computed<LaneGeometrySet | null>(() => lanes.value?.corrected ?? null);
+const rawGeo = computed<LaneGeometrySet | null>(() => (showRaw.value ? (lanes.value?.raw ?? null) : null));
+
+const lineAt = (idx: number): LaneLineSnap | null => geo.value?.laneLines?.[idx] ?? null;
+const edgeAt = (idx: number): LaneLineSnap | null => geo.value?.roadEdges?.[idx] ?? null;
 const laneD = (l: LaneLineSnap | null) => lanePathD(l, grid.value, VB);
 const fillD = (a: LaneLineSnap | null, b: LaneLineSnap | null) => laneFillD(a, b, grid.value, VB);
 const fillL = (a: LaneLineSnap | null, b: LaneLineSnap | null) => fillD(a, b) ?? undefined;
-const pathD = computed<string | undefined>(() => lanePathD(lanes.value?.path ?? null, grid.value, VB) ?? undefined);
+const pathD = computed<string | undefined>(() => lanePathD(geo.value?.path ?? null, grid.value, VB) ?? undefined);
+
+// raw 叠加层：只画本道两边界 + 路径（仪器用途看错位，不画全量）
+const rawLeftD = computed(() => laneD(rawGeo.value?.laneLines?.[LIDX_LEFT] ?? null) ?? undefined);
+const rawRightD = computed(() => laneD(rawGeo.value?.laneLines?.[LIDX_RIGHT] ?? null) ?? undefined);
+const rawPathD = computed(() => lanePathD(rawGeo.value?.path ?? null, grid.value, VB) ?? undefined);
 
 // 外侧车道线透明度：prob<0.3/未知不画（lib/lanes.outerLineOpacity）
 const outerLeftStyle = computed(() => {
@@ -239,6 +249,16 @@ const gridX = (y: number) => lateralX(y, VB);
         <div class="flex items-center gap-1.5">
           <span class="h-0.5 w-3 bg-sl-warn" /> 路沿
         </div>
+        <button
+          type="button"
+          class="flex items-center gap-1.5 rounded border px-1.5 py-0.5"
+          :class="showRaw ? 'border-sl-warn text-sl-warn' : 'border-sl-text-3 text-sl-text-3'"
+          :aria-pressed="showRaw"
+          @click="showRaw = !showRaw"
+        >
+          <span class="h-0.5 w-3 border-t border-dashed border-current" />
+          叠加原始
+        </button>
       </div>
     </div>
 
@@ -343,6 +363,16 @@ const gridX = (y: number) => lateralX(y, VB);
         :stroke-dasharray="laneRightValid ? undefined : '6 6'"
         stroke-linecap="round"
       />
+
+      <!-- raw 叠加（精修仪器）：换算前几何，与 corrected 的错位 = 安装偏移 -->
+      <g v-if="showRaw" class="pointer-events-none">
+        <path v-if="rawLeftD" :d="rawLeftD" fill="none" stroke="currentColor"
+              class="text-sl-warn" stroke-width="1.5" stroke-dasharray="2 4" />
+        <path v-if="rawRightD" :d="rawRightD" fill="none" stroke="currentColor"
+              class="text-sl-warn" stroke-width="1.5" stroke-dasharray="2 4" />
+        <path v-if="rawPathD" :d="rawPathD" fill="none" stroke="currentColor"
+              class="text-sl-warn" stroke-width="1" stroke-dasharray="1 5" />
+      </g>
 
       <!-- 目标：类别定形（car 矩形/person 圆/bike 窄条），inGate 红描边 -->
       <g v-if="!avStale">

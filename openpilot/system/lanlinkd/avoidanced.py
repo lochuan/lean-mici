@@ -22,6 +22,7 @@ import time
 
 from openpilot.cereal import messaging
 from openpilot.common.swaglog import cloudlog
+from openpilot.selfdrive.eagled import constants as C
 from openpilot.system.lanlinkd import lanes as lanes_mod
 
 STALE_AFTER_MS = 1000
@@ -70,7 +71,8 @@ class AvoidanceCache:
     # 车道几何（modelV2 → lanes.py）：请求时取帧，无后台循环。
     # snapshot() 只在 API handler 线程调用，LaneCache 的 SubMaster 惰性
     # 创建、只被该线程触碰，与 run() 线程无共享。
-    self._lane_cache = lanes_mod.LaneCache()
+    # camera_to_front：安装偏移注入点（T5 起每帧从 Params 读，暂读常量）。
+    self._lane_cache = lanes_mod.LaneCache(camera_to_front=C.CAMERA_TO_FRONT)
     # 标定状态与 eagleDebug 分开缓存：两者频率不同（100Hz vs 5Hz），
     # 且标定即使停更也仍然是有效信息，不该被 debug 的 staleness 抹掉。
     self._cal: dict = {"calStatus": "unknown", "calPerc": 0, "calValid": False, "visionGated": True}

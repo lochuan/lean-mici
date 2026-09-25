@@ -219,7 +219,9 @@ def test_snapshot_includes_lanes_field(cal_publisher):
       if isinstance(snap.get("lanes"), dict):
         break
     assert isinstance(snap["lanes"], dict)
-    assert snap["lanes"]["laneLines"][1]["y"][0] == pytest.approx(1.75)
+    # 双集契约：corrected（车体系）与 raw（换算前）同网格，raw 与换算前行为逐点一致
+    assert snap["lanes"]["corrected"]["laneLines"][1]["y"][0] == pytest.approx(1.75)
+    assert snap["lanes"]["raw"]["laneLines"][1]["y"][0] == pytest.approx(1.75)
   finally:
     exit_event.set()
     t.join(timeout=2)
