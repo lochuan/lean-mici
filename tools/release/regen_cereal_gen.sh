@@ -18,12 +18,9 @@ if [ ! -x "$CAPNP_BIN/capnpc" ]; then
 fi
 export PATH="$CAPNP_BIN:$PATH"
 
-SCHEMAS=(
-  openpilot/cereal/log.capnp
-  openpilot/cereal/deprecated.capnp
-  openpilot/cereal/custom.capnp
-  opendbc_repo/opendbc/car/car.capnp
-)
+# schema 清单不在这里手写：唯一登记表在 openpilot/cereal/schemas.py，
+# 经 release_lib.py schema-paths 取（fix/schema-registry ①）。
+SCHEMAS=($(python3 tools/release/release_lib.py schema-paths))
 
 capnpc --src-prefix=openpilot/cereal --src-prefix=opendbc_repo/opendbc/car \
   --import-path=opendbc_repo/opendbc/car \

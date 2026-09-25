@@ -213,27 +213,12 @@ fi
 echo "[-] capnp schema/gen 一致性门禁 T=$SECONDS"
 # 设备无 capnpc,SKIP_CAPNP_REGEN=1 编译 checked-in gen/cpp —— schema 改了忘记
 # Mac 侧重生成会静默编译旧结构(params 键表事故的同类缺口,2026-09-25 议定)。
+# schema 清单走唯一登记表（openpilot/cereal/schemas.py），此处不再手抄路径。
 /usr/local/venv/bin/python /tmp/relhelper/release_lib.py check-schema-stamp \
-  "$SRC/openpilot/cereal/gen/cpp" \
-  "$SRC/openpilot/cereal/log.capnp" "$SRC/openpilot/cereal/deprecated.capnp" \
-  "$SRC/openpilot/cereal/custom.capnp" "$SRC/opendbc_repo/opendbc/car/car.capnp"
+  --root "$SRC" "$SRC/openpilot/cereal/gen/cpp"
 
 echo "[-] params 键表门禁：params_keys.h 的每个键必须已编译进 libparams_c.so T=$SECONDS"
-/usr/local/venv/bin/python - "$SRC" <<'PYEOF'
-import sys
-from pathlib import Path
-sys.path.insert(0, "/tmp/relhelper")
-import release_lib
-from openpilot.common.params import Params
-
-src = Path(sys.argv[1])
-header_keys = release_lib.params_keys_from_header((src / "openpilot/common/params_keys.h").read_text())
-missing = release_lib.missing_compiled_keys(header_keys, Params().all_keys())
-if missing:
-  print("params_keys.h 中未编译进 libparams_c.so 的键:", *missing, sep="\n  ", file=sys.stderr)
-  sys.exit(1)
-print(f"[ok] params key gate: {len(header_keys)} keys all compiled")
-PYEOF
+/usr/local/venv/bin/python /tmp/relhelper/release_lib.py check-params-keys "$SRC"
 
 echo "[-] 等 GPU 从编译负载回落（EGL 需要干净的显示/DRM 状态）T=$SECONDS"
 sleep 15

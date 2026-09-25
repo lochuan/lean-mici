@@ -809,3 +809,98 @@ class TestSchemaStamp(unittest.TestCase):
       ok, reason = release_lib.check_schema_stamp(gen, [s1])
       self.assertFalse(ok)
       self.assertIn("missing", reason)
+
+
+class TestSchemaRegistry(unittest.TestCase):
+  """schema/构建输入清单的唯一登记表（fix/schema-registry ①）。
+
+  同一个「cereal 有哪几个 schema」的事实此前登记三份（regen 脚本数组、
+  device_release 门禁参数、SConscript 构建输入），漏改一处不报错——只是
+  发布物悄悄缺件。登记表落 openpilot/cereal/schemas.py：SConscript 同包
+  import，shell 经 release_lib.py schema-paths CLI 取（照 artifact-paths 先例）。
+  这些断言测的是**接线**：消费方从登记表取数，防止有人在 shell 里手写回一份。
+  """
+
+  def test_registry_lists_exactly_the_four_schemas(self):
+    from openpilot.cereal.schemas import SCHEMAS
+    self.assertEqual(SCHEMAS, (
+      "openpilot/cereal/log.capnp",
+      "openpilot/cereal/deprecated.capnp",
+      "openpilot/cereal/custom.capnp",
+      "opendbc_repo/opendbc/car/car.capnp",
+    ))
+
+  def test_registry_entries_exist_in_tree(self):
+    from openpilot.cereal.schemas import SCHEMAS
+    for rel in SCHEMAS:
+      self.assertTrue((REPO_ROOT / rel).is_file(), rel)
+
+  def test_registry_entries_are_repo_relative(self):
+    """规范形是仓库相对路径：$SRC 绝对形 / SCons '#' 锚形由消费方各自推导。"""
+    from openpilot.cereal.schemas import SCHEMAS
+    for rel in SCHEMAS:
+      self.assertFalse(rel.startswith(("/", "#")), rel)
+
+  def test_schema_paths_cli_matches_registry(self):
+    import sys as _sys
+    from openpilot.cereal.schemas import SCHEMAS
+    out = subprocess.run(
+      [_sys.executable, str(MODULE_PATH), "schema-paths"],
+      capture_output=True, text=True, cwd=REPO_ROOT, check=True,
+    )
+    self.assertEqual(tuple(out.stdout.split()), SCHEMAS)
+
+  def test_check_schema_stamp_defaults_to_registry(self):
+    """缺省参数走登记表：发布门禁不再手抄 schema 清单。"""
+    import sys as _sys
+    from openpilot.cereal.schemas import SCHEMAS
+    gen = REPO_ROOT / "openpilot/cereal/gen/cpp"
+    ok_default = subprocess.run(
+      [_sys.executable, str(MODULE_PATH), "check-schema-stamp", str(gen)],
+      capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    ok_explicit = subprocess.run(
+      [_sys.executable, str(MODULE_PATH), "check-schema-stamp", str(gen), *SCHEMAS],
+      capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    self.assertEqual(ok_default.returncode, ok_explicit.returncode)
+    self.assertEqual(ok_default.stdout, ok_explicit.stdout)
+
+  def test_sconscript_consumes_registry(self):
+    """SConscript 的构建输入必须从登记表推导——源码级接线断言
+    （Q6a：消费方从登记表取数这个接线本身要有人看着）。"""
+    src = (REPO_ROOT / "openpilot/cereal/SConscript").read_text()
+    self.assertIn("from openpilot.cereal.schemas import", src)
+    for name in ("log.capnp", "deprecated.capnp", "custom.capnp"):
+      self.assertNotIn(f"'{name}'", src, f"SConscript 不得手写 schema 名 {name}")
+
+  def test_regen_shell_pulls_schema_list_from_cli(self):
+    sh = (REPO_ROOT / "tools/release/regen_cereal_gen.sh").read_text()
+    self.assertIn("schema-paths", sh)
+    self.assertNotIn("openpilot/cereal/log.capnp", sh,
+                     "regen 脚本不得手写 schema 路径（要经 schema-paths 取）")
+
+
+class TestCheckParamsKeys(unittest.TestCase):
+  """params 键表门禁下沉为 check-params-keys（fix/schema-registry ② 捎带）。
+
+  规则（params_keys_from_header/missing_compiled_keys）已在上方覆盖；
+  这里测下沉后的接线：CLI 子命令做「读 header → 取编译表 → 比对 → 非零拒发」。
+  """
+
+  def test_check_params_keys_reports_missing_and_fails(self):
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      hdr = root / "openpilot/common/params_keys.h"
+      hdr.parent.mkdir(parents=True)
+      hdr.write_text('{"Alpha", {PERSISTENT, BOOL}},\n  {"Beta", {PERSISTENT, BOOL}},\n')
+      missing = release_lib.check_params_keys(root, {b"Alpha"})
+      self.assertEqual(missing, ["Beta"])
+
+  def test_check_params_keys_empty_when_all_compiled(self):
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      hdr = root / "openpilot/common/params_keys.h"
+      hdr.parent.mkdir(parents=True)
+      hdr.write_text('{"Alpha", {PERSISTENT, BOOL}},\n')
+      self.assertEqual(release_lib.check_params_keys(root, {b"Alpha"}), [])

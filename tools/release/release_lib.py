@@ -8,6 +8,7 @@ which files may ship, how they are hashed, and when ``prebuilt`` is valid.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 import hashlib
 import shutil
@@ -232,6 +233,30 @@ def missing_compiled_keys(header_keys: Iterable[str], compiled_keys: Iterable[st
   """
   compiled = {key.decode() if isinstance(key, bytes) else str(key) for key in compiled_keys}
   return [key for key in header_keys if key not in compiled]
+
+
+def load_schema_registry(src_root: str | Path = ".") -> tuple[str, ...]:
+  """cereal schema 的唯一登记表（openpilot/cereal/schemas.py，仓库相对路径）。
+
+  按文件路径加载而不是 ``import openpilot.cereal.schemas``：本模块在设备上以
+  /tmp/relhelper/release_lib.py 单文件形态运行，包 import 会拖出
+  openpilot/cereal/__init__ 的 capnp 解析链；登记表是纯数据，按文件取即可。
+  """
+  path = Path(src_root) / "openpilot" / "cereal" / "schemas.py"
+  spec = importlib.util.spec_from_file_location("cereal_schemas", path)
+  if spec is None or spec.loader is None:
+    raise FileNotFoundError(f"schema registry not loadable: {path}")
+  mod = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(mod)
+  return tuple(mod.SCHEMAS)
+
+
+def check_params_keys(src_root: str | Path, compiled_keys: Iterable[str | bytes]) -> list[str]:
+  """params 键表门禁的全部判定：``src_root`` 的 params_keys.h 中未编译进
+  键表的键（header 顺序）。2026-09-24 事故的 publish gate，见
+  :func:`missing_compiled_keys`。"""
+  header_text = (Path(src_root) / "openpilot" / "common" / "params_keys.h").read_text()
+  return missing_compiled_keys(params_keys_from_header(header_text), compiled_keys)
 
 
 SCHEMA_STAMP_NAME = ".schema.sha"
@@ -523,9 +548,13 @@ def main() -> int:
   hash_parser.add_argument("commit", nargs="?", default="HEAD")
 
   sub.add_parser("artifact-paths", help="print native artifact paths")
+  sub.add_parser("schema-paths", help="print the capnp schema registry (openpilot/cereal/schemas.py)")
   sub.add_parser("data-artifact-globs", help="print non-ELF data artifact globs")
   sub.add_parser("flat-tree-entries", help="print flat-tree structural entries lean-master does not track")
   sub.add_parser("validate-artifacts", help="validate staged prebuilt artifacts")
+
+  key_check = sub.add_parser("check-params-keys", help="publish gate: every params_keys.h key compiled into libparams_c")
+  key_check.add_argument("src_root")
 
   fp_parser = sub.add_parser("fingerprint", help="stable fingerprint of file contents + extras (pkl cache key)")
   fp_parser.add_argument("files", nargs="+")
@@ -537,7 +566,10 @@ def main() -> int:
 
   schema_check = sub.add_parser("check-schema-stamp", help="verify gen/ matches the capnp schemas (publish gate)")
   schema_check.add_argument("gen_dir")
-  schema_check.add_argument("schemas", nargs="+")
+  schema_check.add_argument("schemas", nargs="*",
+                            help="omit to use the openpilot/cereal/schemas.py registry")
+  schema_check.add_argument("--root", default=".",
+                            help="tree root holding openpilot/cereal/schemas.py (device: $SRC)")
   sweep_parser = sub.add_parser(
     "sweep-lfs-pointers",
     help="fail if binary media in a tree checkout are lfs pointer stubs",
@@ -569,6 +601,22 @@ def main() -> int:
       print(rel)
     return 0
 
+  if args.command == "schema-paths":
+    for rel in load_schema_registry():
+      print(rel)
+    return 0
+
+  if args.command == "check-params-keys":
+    src = Path(args.src_root)
+    sys.path.insert(0, str(src))
+    from openpilot.common.params import Params
+    missing = check_params_keys(src, Params().all_keys())
+    if missing:
+      print("params_keys.h 中未编译进 libparams_c.so 的键:", *missing, sep="\n  ", file=sys.stderr)
+      return 1
+    print("[ok] params key gate passed")
+    return 0
+
   if args.command == "data-artifact-globs":
     for pattern in DATA_ARTIFACT_GLOBS:
       print(pattern)
@@ -596,7 +644,8 @@ def main() -> int:
     return 0
 
   if args.command == "check-schema-stamp":
-    ok, reason = check_schema_stamp(args.gen_dir, args.schemas)
+    schemas = args.schemas or [str(Path(args.root) / rel) for rel in load_schema_registry(args.root)]
+    ok, reason = check_schema_stamp(args.gen_dir, schemas)
     if not ok:
       print(reason, file=sys.stderr)
       return 1
