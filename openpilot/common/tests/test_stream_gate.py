@@ -10,9 +10,9 @@ from openpilot.common.stream_gate import MAX_AGE_S, StreamStatus, stream_status
 
 
 def test_policy_table_covers_all_gated_streams():
-  # 四条被门控的观测流，阈值 1s 量级，一处定义
+  # 五条被门控的观测流；radarTracks 阈值放宽的理由就写在表里（fix/stream-gate-2）
   assert MAX_AGE_S == {"eagleState": 1.0, "lateralManeuverPlan": 1.0,
-                       "eagleDebug": 1.0, "modelV2": 1.0}
+                       "eagleDebug": 1.0, "modelV2": 1.0, "radarTracks": 2.0}
 
 
 def test_unknown_stream_is_programming_error():

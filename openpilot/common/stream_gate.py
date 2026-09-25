@@ -26,12 +26,15 @@ from __future__ import annotations
 from enum import Enum
 
 # 各观测流的接收时限（s）。消费者侧判定超龄即弃用——流名之外不接受自定义阈值，
-# 阈值改动只应发生在这一处。
+# 阈值改动只应发生在这一处，每格注明放宽/收紧的理由。
 MAX_AGE_S: dict[str, float] = {
   "eagleState": 1.0,
   "lateralManeuverPlan": 1.0,
   "eagleDebug": 1.0,
   "modelV2": 1.0,
+  # radarTracks 是 20Hz 高频点迹且 card 熄火即停报，2s = 40 帧没新数据；
+  # 其余观测流是 5~20Hz 语义流，1s 足够。理由随表登记，不散在消费点注释里。
+  "radarTracks": 2.0,
 }
 
 

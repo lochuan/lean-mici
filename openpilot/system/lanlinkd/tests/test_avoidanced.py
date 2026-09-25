@@ -10,8 +10,9 @@ from openpilot.system.lanlinkd import avoidanced
 from .fake_params import FakeParams
 
 
-def _publish_debug(pm: messaging.PubMaster) -> None:
+def _publish_debug(pm: messaging.PubMaster, valid: bool = True) -> None:
   msg = messaging.new_message('eagleDebug')
+  msg.valid = valid   # 生产端 eagled._publish_debug 置 envelope valid（③ 起接收门要查）
   dbg = msg.eagleDebug
   dbg.valid = True
   dbg.active = True
@@ -118,6 +119,27 @@ def test_cache_goes_stale_after_silence(publisher, monkeypatch):
     t.join(timeout=2)
 
 
+def test_invalid_envelope_frame_goes_stale(publisher):
+  """③：envelope invalid 的 eagleDebug 帧必须标 stale，不能当新鲜展示。"""
+  cache, exit_event, t = _start_cache()
+  try:
+    for _ in range(20):
+      _publish_debug(publisher)
+      time.sleep(0.1)
+      if cache.snapshot().get("stale") is False:
+        break
+    assert cache.snapshot()["stale"] is False
+    for _ in range(10):
+      _publish_debug(publisher, valid=False)
+      time.sleep(0.1)
+      if cache.snapshot().get("stale") is True:
+        break
+    assert cache.snapshot()["stale"] is True
+  finally:
+    exit_event.set()
+    t.join(timeout=2)
+
+
 # --- 标定状态透传 ---------------------------------------------------------
 # 未标定时 avoidanced 会整体关掉视觉路径,前端只会看到 nVision 恒为 0 而没有
 # 任何解释。EagleDebug 的 capnp 结构里没有降级原因字段,而 openpilot/cereal
@@ -214,6 +236,7 @@ def test_snapshot_includes_lanes_field(cal_publisher):
     for _ in range(20):
       _publish_debug(cal_publisher)
       msg = _m.new_message('modelV2')
+      msg.valid = True   # 生产端 modeld 在 fill_model_msg 里置 envelope valid
       msg.modelV2.init('laneLines', 4)
       msg.modelV2.laneLines[1].x, msg.modelV2.laneLines[1].y = [0.0, 50.0], [-1.75, -1.75]
       msg.modelV2.laneLineProbs = [0.1, 0.9, 0.1, 0.1]

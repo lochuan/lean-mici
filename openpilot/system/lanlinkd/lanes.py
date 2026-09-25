@@ -81,17 +81,20 @@ def _geometry_set(model_v2, probs, stds, edge_stds, position, camera_to_front: f
   }
 
 
-def lane_snapshot(model_v2, recv_mono: float, now_mono: float, camera_to_front: float) -> dict | None:
-  """一帧 modelV2 → lanes dict；超龄返回 None。任何字段缺失降级为 None 项。
+def lane_snapshot(model_v2, recv_mono: float, now_mono: float, camera_to_front: float,
+                  valid: bool = True) -> dict | None:
+  """一帧 modelV2 → lanes dict；超龄/无效帧返回 None。任何字段缺失降级为 None 项。
 
   ``camera_to_front`` 是注入的安装偏移值（精修结果的消费点，单一读点由调用方
-  负责）。corrected/raw 两套几何同网格，逐线 quality 字段随各集携带。
+  负责）。``valid`` 是 envelope 有效性（modeld 在 vipc 丢帧/外参未见时置
+  False，③ 起无效帧不过接收门）。corrected/raw 两套几何同网格，逐线 quality
+  字段随各集携带。
 
   本车道边界的实/虚线裁决不用这里的 prob/std 重复阈值——直接消费
   eagleDebug 的 laneLeftValid/laneRightValid（eagled C7 门的结论）。
   prob 只用于外侧线的透明度显示。
   """
-  if stream_status("modelV2", now_mono - recv_mono, valid=True) is not StreamStatus.FRESH:
+  if stream_status("modelV2", now_mono - recv_mono, valid=valid) is not StreamStatus.FRESH:
     return None
   probs = getattr(model_v2, "laneLineProbs", None)
   stds = getattr(model_v2, "laneLineStds", None)
@@ -125,7 +128,7 @@ class LaneCache:
         return None
     self._sm.update(0)
     return lane_snapshot(self._sm['modelV2'], self._sm.recv_time['modelV2'], self._clock(),
-                         camera_to_front=camera_to_front)
+                         camera_to_front=camera_to_front, valid=bool(self._sm.valid['modelV2']))
 
   def stop(self) -> None:
     self._sm = None
