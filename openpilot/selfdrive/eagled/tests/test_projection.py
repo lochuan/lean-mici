@@ -218,7 +218,7 @@ def test_geometry_closes_the_loop_in_both_roi_modes():
 # --- live extrinsics calibration (task 2 brief) ---------------------------------
 
 from openpilot.selfdrive.eagled.projection import (CalibratedGeometry,
-                                                       geometry_from_calibration,
+                                                       calibrated_geometry_from_msg,
                                                        horizon_row_for)
 
 
@@ -229,24 +229,25 @@ class _FakeCal:
 
 
 def test_uncalibrated_geometry_is_invalid():
-  g = geometry_from_calibration(_FakeCal("uncalibrated", []), valid=True)
-  assert not g.valid
+  assert calibrated_geometry_from_msg(_FakeCal("uncalibrated", []), valid=True) is None
 
 
 def test_calibrated_geometry_carries_rpy():
-  g = geometry_from_calibration(_FakeCal("calibrated", [0.01, 0.02, 0.03]), valid=True)
-  assert g.valid
-  assert (g.roll, g.pitch, g.yaw) == (0.01, 0.02, 0.03)
+  g = calibrated_geometry_from_msg(_FakeCal("calibrated", [0.01, 0.02, 0.03]), valid=True)
+  assert g == CalibratedGeometry(True, 0.01, 0.02, 0.03)
 
 
 def test_stale_message_is_invalid_even_if_calibrated():
-  g = geometry_from_calibration(_FakeCal("calibrated", [0.0, 0.0, 0.0]), valid=False)
-  assert not g.valid
+  assert calibrated_geometry_from_msg(_FakeCal("calibrated", [0.0, 0.0, 0.0]), valid=False) is None
 
 
 def test_short_rpy_is_invalid():
-  g = geometry_from_calibration(_FakeCal("calibrated", [0.0, 0.0]), valid=True)
-  assert not g.valid
+  assert calibrated_geometry_from_msg(_FakeCal("calibrated", [0.0, 0.0]), valid=True) is None
+
+
+def test_non_numeric_rpy_is_invalid_not_an_exception():
+  # 垃圾值按「标定无效」拒绝（fix/stream-gate ② 定案），绝不抛给调用方
+  assert calibrated_geometry_from_msg(_FakeCal("calibrated", [0.0, "x", 0.0]), valid=True) is None
 
 
 def test_horizon_row_tracks_pitch():

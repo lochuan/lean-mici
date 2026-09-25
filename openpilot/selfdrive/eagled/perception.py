@@ -39,7 +39,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.association import associate
 from openpilot.selfdrive.eagled.camera_stream import CameraStream
-from openpilot.selfdrive.eagled.projection import geometry_from_calibration, horizon_row_for, project_detections
+from openpilot.selfdrive.eagled.projection import calibrated_geometry_from_msg, horizon_row_for, project_detections
 from openpilot.selfdrive.eagled.yolo_detector import YoloDetector
 
 YOLO_PKL_PATH = Path(__file__).parent / "models" / "yolo_tinygrad.pkl"
@@ -491,8 +491,8 @@ class PerceptionCore:
     gating lives in :meth:`process`, so every call here either runs the full
     chain or hits one of the degrade paths below.
     """
-    geom = geometry_from_calibration(extrinsics_msg, extrinsics_valid)
-    if not geom.valid:
+    geom = calibrated_geometry_from_msg(extrinsics_msg, valid=extrinsics_valid)
+    if geom is None:
       # 0.5deg pitch error = 41% distance error at 40m. Running the vision path
       # on an uncalibrated camera is exactly how spurious biases get produced,
       # so fall back to radar-only until openpilot's calibration converges.

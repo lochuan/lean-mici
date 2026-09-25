@@ -180,7 +180,8 @@ def test_cache_reports_calibrated(cal_publisher):
 def test_cache_does_not_trust_calibrated_status_on_an_invalid_message(cal_publisher):
   """calStatus 说已标定但消息无效时不能当成已标定。
 
-  与 projection.geometry_from_calibration 的判定保持一致 —— 那边同样要求
+  与 projection.calibrated_geometry_from_msg 的判定同源（fix/stream-gate ②
+  后唯一出口）—— 那边同样要求
   valid 且 rpyCalib 长度为 3,一个空的 rpyCalib 配 "calibrated" 不能当成
   零角度使用。两处判定若分叉,前端就会声称视觉在跑而 daemon 其实关掉了。
   """

@@ -25,6 +25,7 @@ from openpilot.cereal import messaging
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.model_geometry import read_camera_to_front
 from openpilot.common.stream_gate import StreamStatus, stream_status
+from openpilot.selfdrive.eagled.projection import calibrated_geometry_from_msg
 from openpilot.system.lanlinkd import lanes as lanes_mod
 
 
@@ -48,13 +49,12 @@ def _calibration(msg, valid: bool) -> dict:
   """extrinsicsCalibration -> 前端要的标定摘要。
 
   ``visionGated`` 是给前端解释 ``nVision == 0`` 用的：avoidanced 只在标定
-  有效时才跑视觉路径，判定与 projection.geometry_from_calibration 一致
-  （必须 valid、calStatus == "calibrated"、且 rpyCalib 长度为 3 —— 一个
-  空的 rpyCalib 配 "calibrated" 不能当成零角度）。
+  有效时才跑视觉路径，判定走 projection.calibrated_geometry_from_msg 的
+  唯一出口（fix/stream-gate ②），与判定路径同源不再各写一份。摘要里的
+  calStatus/calPerc 是展示字段，与判定无关。
   """
   status = str(getattr(msg, "calStatus", "unknown"))
-  rpy = list(getattr(msg, "rpyCalib", []) or [])
-  cal_valid = bool(valid) and status == "calibrated" and len(rpy) == 3
+  cal_valid = calibrated_geometry_from_msg(msg, valid=valid) is not None
   return {
     "calStatus": status,
     "calPerc": int(getattr(msg, "calPerc", 0) or 0),

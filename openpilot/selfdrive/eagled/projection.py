@@ -81,17 +81,27 @@ class CalibratedGeometry:
   yaw: float
 
 
-UNCALIBRATED = CalibratedGeometry(False, 0.0, 0.0, 0.0)
+UNCALIBRATED = CalibratedGeometry(False, 0.0, 0.0, 0.0)  # horizon_row_for 等调用方的「未标定」占位
 
 
-def geometry_from_calibration(msg, valid: bool) -> CalibratedGeometry:
-  """``extrinsicsCalibration`` -> CalibratedGeometry. 任何疑点都判为无效。"""
+def calibrated_geometry_from_msg(msg, *, valid: bool) -> CalibratedGeometry | None:
+  """``extrinsicsCalibration`` -> CalibratedGeometry，标定无效返回 None（判定唯一出口，fix/stream-gate ②）。
+
+  eagled 判定路径与 lanlinkd 展示共用这一份判定：要求 envelope valid、
+  ``calStatus == "calibrated"``、rpyCalib 恰 3 个**数值**角。垃圾值（非数值角）
+  按标定无效拒绝、不抛异常——float 转换失败与缺字段同属「存疑即无效」。
+  一个空的 rpyCalib 配 "calibrated" 不能当成零角度。
+  """
   if not valid or str(getattr(msg, "calStatus", "")) != "calibrated":
-    return UNCALIBRATED
+    return None
   rpy = list(getattr(msg, "rpyCalib", []) or [])
   if len(rpy) != 3:
-    return UNCALIBRATED
-  return CalibratedGeometry(True, float(rpy[0]), float(rpy[1]), float(rpy[2]))
+    return None
+  try:
+    roll, pitch, yaw = (float(r) for r in rpy)
+  except (TypeError, ValueError):
+    return None
+  return CalibratedGeometry(True, roll, pitch, yaw)
 
 
 def horizon_row_for(cy: float, fy: float, geom: CalibratedGeometry) -> float:
