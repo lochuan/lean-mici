@@ -59,7 +59,8 @@ def _start_cache() -> tuple[avoidanced.AvoidanceCache, threading.Event, threadin
 
 
 def test_cache_captures_published_debug(publisher):
-  assert avoidanced.STALE_AFTER_MS == 1000  # 5Hz 数据：1s 无新帧即视为停更
+  from openpilot.common.stream_gate import MAX_AGE_S
+  assert MAX_AGE_S["eagleDebug"] == 1.0  # 5Hz 数据：1s 无新帧即视为停更
   cache, exit_event, t = _start_cache()
   try:
     for _ in range(20):  # 5Hz 数据，多发几帧等 SubMaster 收到
@@ -100,7 +101,8 @@ def test_cache_captures_published_debug(publisher):
 
 
 def test_cache_goes_stale_after_silence(publisher, monkeypatch):
-  monkeypatch.setattr(avoidanced, "STALE_AFTER_MS", 200)
+  import openpilot.common.stream_gate as stream_gate
+  monkeypatch.setitem(stream_gate.MAX_AGE_S, "eagleDebug", 0.2)
   cache, exit_event, t = _start_cache()
   try:
     for _ in range(10):
@@ -109,7 +111,7 @@ def test_cache_goes_stale_after_silence(publisher, monkeypatch):
       if cache.snapshot().get("stale") is False:
         break
     assert cache.snapshot()["stale"] is False
-    time.sleep(0.4)  # 静默超过 STALE_AFTER_MS
+    time.sleep(0.4)  # 静默超过调低后的登记阈值
     assert cache.snapshot()["stale"] is True
   finally:
     exit_event.set()

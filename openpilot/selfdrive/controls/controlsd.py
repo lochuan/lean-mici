@@ -20,7 +20,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, S
 from openpilot.selfdrive.controls.lib.latcontrol_curvature import LatControlCurvature
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
-from openpilot.selfdrive.eagled.constants import AVOIDANCE_STALE_S
+from openpilot.common.stream_gate import StreamStatus, stream_status
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
@@ -33,15 +33,29 @@ LaneChangeDirection = log.LaneChangeDirection
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 
 
-def fuse_curvature(model: float, bias: float, valid: bool, enabled: bool, fresh: bool = True) -> float:
+def plan_bias_or_none(bias: float, *, last_recv_s: float, now: float,
+                      valid: bool, enabled: bool) -> float | None:
+  """避让偏置的组合门：收帧计时 → 观测流接收门 → enabled（fix/stream-gate）。
+
+  返回 bias 或 None（None = 任一门不通，调用方回退纯模型曲率）。
+  ``last_recv_s`` 是 lateralManeuverPlan 最近收帧时刻（monotonic s），
+  未收到过传 -inf；新鲜度定义见 ``common.stream_gate``。
+  """
+  age_s = now - last_recv_s if math.isfinite(last_recv_s) else None
+  if not enabled or stream_status("lateralManeuverPlan", age_s, valid=valid) is not StreamStatus.FRESH:
+    return None
+  return bias
+
+
+def fuse_curvature(model: float, bias: float | None) -> float:
   """避让偏置叠加到**当前**模型曲率上（2026-09-25 路测后语义修正）。
 
   plan 的 desiredCurvature 打包着 eagled 拍的模型曲率——送到这里时 p50 已
   陈旧 188ms,整句替换会把陈旧曲率误差注入转向（实测 0.9m 等效偏移,超过
   0.35m 避让上限）。curvatureBias 是纯偏置分量,叠加到本拍模型曲率上。
-  任一门不通 → 纯模型曲率。
+  bias 为 None（plan_bias_or_none 的门没过）→ 纯模型曲率。
   """
-  return model + bias if (valid and enabled and fresh) else model
+  return model if bias is None else model + bias
 
 
 class Controls(ControlsExt):
@@ -158,13 +172,13 @@ class Controls(ControlsExt):
     if CC.latActive:
       if self.sm.updated['lateralManeuverPlan']:
         self.last_avoidance_recv_s = time.monotonic()
-      fresh = (time.monotonic() - self.last_avoidance_recv_s) < AVOIDANCE_STALE_S
       if self.frame % 100 == 0:
         self.avoidance_enabled = self.params.get_bool("AvoidanceEnabled")
-      new_desired_curvature = fuse_curvature(model_v2.action.desiredCurvature,
-                                             self.sm['lateralManeuverPlan'].curvatureBias,
-                                             self.sm.valid['lateralManeuverPlan'],
-                                             self.avoidance_enabled, fresh)
+      bias = plan_bias_or_none(self.sm['lateralManeuverPlan'].curvatureBias,
+                               last_recv_s=self.last_avoidance_recv_s, now=time.monotonic(),
+                               valid=self.sm.valid['lateralManeuverPlan'],
+                               enabled=self.avoidance_enabled)
+      new_desired_curvature = fuse_curvature(model_v2.action.desiredCurvature, bias)
     else:
       new_desired_curvature = self.curvature
     self.frame += 1

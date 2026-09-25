@@ -7,8 +7,9 @@ dict，序列化在收帧时一次完成。快照含雷达 CAN 错误标志（ca
 radarUnavailable，来自 radarTracks.errors，随 debug 透传），所以前端
 不再需要独立的 /api/radar 端点。
 
-staleness 用本地接收时刻（time.monotonic）判断：
-eagleDebug 是 5Hz，STALE_AFTER_MS 取 1s（5 帧没新数据即视为停更）。
+staleness 走 ``common.stream_gate``（eagleDebug 登记阈值 1s：5Hz 数据 5 帧没
+新数据即视为停更），本地接收时刻（time.monotonic）喂给判定；envelope valid
+维持现状不查（fix/stream-gate 纯重构，不顺带收紧）。
 
 标定状态单独订阅 extrinsicsCalibration 透传：avoidanced 在相机未标定时整体
 关掉视觉路径（地平面投影的 dRel 对 pitch 的敏感度在 40m 处是 0.5° → 41%，
@@ -23,9 +24,8 @@ import time
 from openpilot.cereal import messaging
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.model_geometry import read_camera_to_front
+from openpilot.common.stream_gate import StreamStatus, stream_status
 from openpilot.system.lanlinkd import lanes as lanes_mod
-
-STALE_AFTER_MS = 1000
 
 
 def _target(t) -> dict:
@@ -131,7 +131,8 @@ class AvoidanceCache:
       snap = dict(self._snapshot)
       recv_ms = self._recv_ms
       cal = dict(self._cal)
-    if not snap.get("stale") and (time.monotonic() * 1000.0 - recv_ms) > STALE_AFTER_MS:
+    age_s = None if recv_ms == 0.0 else (time.monotonic() * 1000.0 - recv_ms) / 1000.0
+    if stream_status("eagleDebug", age_s, valid=True) is not StreamStatus.FRESH:
       snap = {"stale": True}
     # 标定状态即使 debug 停更也要带上：前端用它区分「避让没在跑」和
     # 「避让在跑但视觉被标定门关掉了」。

@@ -136,9 +136,11 @@ def test_duck_typed_model_without_any_geometry_yields_all_none():
 
 
 def test_stale_modelV2_returns_none():
-  assert lanes.lane_snapshot(_model_v2(), recv_mono=100.0, now_mono=100.0 + lanes.LANE_MAX_AGE_S + 0.01,
+  # modelV2 新鲜度走 common.stream_gate（登记阈值 1s），超龄/边界语义同源
+  from openpilot.common.stream_gate import MAX_AGE_S
+  assert lanes.lane_snapshot(_model_v2(), recv_mono=100.0, now_mono=100.0 + MAX_AGE_S["modelV2"] + 0.01,
                              camera_to_front=CTF) is None
-  assert lanes.lane_snapshot(_model_v2(), recv_mono=100.0, now_mono=100.0 + lanes.LANE_MAX_AGE_S,
+  assert lanes.lane_snapshot(_model_v2(), recv_mono=100.0, now_mono=100.0 + MAX_AGE_S["modelV2"],
                              camera_to_front=CTF) is not None
 
 

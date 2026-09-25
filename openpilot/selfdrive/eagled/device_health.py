@@ -1,4 +1,7 @@
-"""Device-health adaptive throttle for eagled's vision chain.
+"""设备遥测节流（DeviceHealth）for eagled's vision chain.
+
+这是「健康度」三个易混概念之一（见 common.stream_gate 模块 docstring 的
+拆词）：按 CPU/内存遥测调推理节流，与消息新鲜度、雷达健康字段均无关。
 
 Ported from StarPilot (starpilot/common/cpu_throttle.py and the memory-pressure
 / livePose-recovery intervals in starpilot/system/speed_limit_vision.py): a

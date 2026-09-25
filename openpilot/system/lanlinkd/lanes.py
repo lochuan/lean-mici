@@ -22,10 +22,11 @@ import numpy as np
 
 from openpilot.cereal import messaging
 from openpilot.common.model_geometry import geometry_to_vehicle_frame
+from openpilot.common.stream_gate import StreamStatus, stream_status
 
 # 俯视图显示范围：前方 0-60m。固定网格让前端不用处理不规则采样。
 LANE_GRID_X = tuple(range(0, 65, 5))
-LANE_MAX_AGE_S = 1.0     # modelV2 停更超过 1s 视为整体不可用
+# modelV2 新鲜度走 ``common.stream_gate``（登记阈值 1s），超龄视为整体不可用
 # laneLines 索引：0=远左外线 1=本道左边界 2=本道右边界 3=远右外线（openpilot 惯例）
 _LIDX_OUTER_LEFT, _LIDX_LEFT, _LIDX_RIGHT, _LIDX_OUTER_RIGHT = 0, 1, 2, 3
 
@@ -90,7 +91,7 @@ def lane_snapshot(model_v2, recv_mono: float, now_mono: float, camera_to_front: 
   eagleDebug 的 laneLeftValid/laneRightValid（eagled C7 门的结论）。
   prob 只用于外侧线的透明度显示。
   """
-  if now_mono - recv_mono > LANE_MAX_AGE_S:
+  if stream_status("modelV2", now_mono - recv_mono, valid=True) is not StreamStatus.FRESH:
     return None
   probs = getattr(model_v2, "laneLineProbs", None)
   stds = getattr(model_v2, "laneLineStds", None)

@@ -44,3 +44,10 @@ _Avoid_: 标定（标定指 `extrinsicsCalibration` 的 pitch/yaw/roll 姿态拟
 **显示偏移**（`CameraOffset`）:
 上游自带的相机偏移软件修正参数，用于设备安装不正时的显示修正，与 eagled 的几何解释无关。
 _Avoid_: 安装偏移
+
+### 观测流接收
+
+**观测流接收门**（stream gate）:
+「这条流还新鲜吗」的唯一判定出口（`common/stream_gate.stream_status`）：
+三态（新鲜 / 过期 / 从未收到），按流名查登记阈值。消费方回退动作留在各自调用点。
+_Avoid_: 新鲜度策略、健康度（设备遥测节流 `device_health.DeviceHealth` 与雷达健康字段 canError/radarUnavailable 是另外两件事）
