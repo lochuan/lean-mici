@@ -60,6 +60,15 @@ def line_to_vehicle_frame(x, y, z, camera_to_front: float) -> VehicleFrameLine |
   )
 
 
+def vehicle_to_camera_frame(x, y, z, camera_to_front: float) -> tuple:
+  """车体系点 → 相机系点（``line_to_vehicle_frame`` 的逐点逆）。
+
+  投影边界用：往相机透视矩阵（输入原点=相机）送点前补回安装偏移。
+  x/y/z 可为标量或 numpy 数组（逐点广播）；返回 (x + 偏移, -y, z) 的元组。
+  """
+  return (x + camera_to_front, -y, z)
+
+
 def geometry_to_vehicle_frame(model_v2, camera_to_front: float) -> VehicleFrameGeometry:
   """一帧模型几何（duck-typed modelV2）→ 车体系几何。
 

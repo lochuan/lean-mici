@@ -14,6 +14,7 @@ from openpilot.common.model_geometry import (
   VehicleFrameLine,
   geometry_to_vehicle_frame,
   line_to_vehicle_frame,
+  vehicle_to_camera_frame,
 )
 
 CTF = 1.5  # 安装偏移，默认出厂值
@@ -91,3 +92,18 @@ def test_empty_z_list_defaults_to_ground_level():
   # capnp 折线未填 z 时是空列表而非 None（真实 modelV2 形态）
   line = line_to_vehicle_frame([10.0, 20.0], [2.0, 2.0], [], camera_to_front=CTF)
   assert line == VehicleFrameLine(x=(8.5, 18.5), y=(-2.0, -2.0), z=(0.0, 0.0))
+
+
+# --- 逆换算（投影边界口，票 #5） ---------------------------------------------------
+
+def test_camera_frame_roundtrip_is_identity():
+  # 出口换算与投影边界换算必须共用一套语义：出去再回来 = 恒等
+  cam = (10.0, -2.0, 0.3)   # 相机系（x 前正、y 右正）
+  veh = line_to_vehicle_frame([cam[0]], [cam[1]], [cam[2]], camera_to_front=CTF)
+  assert vehicle_to_camera_frame(veh.x[0], veh.y[0], veh.z[0], CTF) == cam
+
+
+def test_projection_boundary_places_lead_at_true_distance():
+  # 前车 dRel=20（车体系，保险杠原点）→ 投影矩阵该吃相机系 21.5
+  #（相机在保险杠后方 1.5m）。这正是 UI 前车标记的历史帧混用处。
+  assert vehicle_to_camera_frame(20.0, 1.2, 0.0, CTF) == (21.5, -1.2, 0.0)
