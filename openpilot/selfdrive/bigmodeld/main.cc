@@ -566,6 +566,8 @@ class Bigmodeld {
       // 查无且非旧 = 编码输出被吞：码流断档（情形 C）——显式上报调度器
       //（新序列 + 双路 request）+ 序列头门重新关门（断档后首帧必须双路 IDR）。
       // dedup 键取 frame_id | 高位（与 frame_idx 键空间隔离，防误吞）。
+      // ponytail: 跨路 frame_id 同值会键碰撞（第二路上报被去重压掉；首报已开序列、
+      // 危害小），升级路径 = frame_id/frame_idx 强类型 + 独立键空间（19 号票）。
       LOGE("bigmodeld: %s 编码输出无对应提交（码流断档）frame_id=%u",
            sid == kRoad ? "road" : "wide", extra.frame_id);
       sender_->notify_stream_gap();
