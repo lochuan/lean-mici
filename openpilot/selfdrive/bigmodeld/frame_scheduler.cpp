@@ -18,6 +18,9 @@ SchedStep FrameScheduler::start_new_sequence(bool drop_detected) {
 SchedStep FrameScheduler::on_connect() {
   SchedStep s = start_new_sequence(false);
   have_last_submit_ = false;
+  // frame_idx 重新编号，去重窗口作废
+  recent_drop_n_ = 0;
+  recent_drop_pos_ = 0;
   return s;
 }
 
@@ -57,7 +60,22 @@ SchedStep FrameScheduler::on_frame_submit(uint32_t frame_idx) {
   return s;
 }
 
+// 同一 frame 的重复显式上报只报一次：查窗口并在窗口内登记（新报才登记）。
+bool FrameScheduler::drop_already_reported(uint32_t frame_idx) {
+  for (int i = 0; i < recent_drop_n_; i++) {
+    if (recent_drop_[i] == frame_idx) return true;
+  }
+  recent_drop_[recent_drop_pos_] = frame_idx;
+  recent_drop_pos_ = (recent_drop_pos_ + 1) % kDropDedupWindow;
+  if (recent_drop_n_ < kDropDedupWindow) recent_drop_n_++;
+  return false;
+}
+
 SchedStep FrameScheduler::on_frame_dropped(uint32_t frame_idx) {
+  // 配对缺帧是「每侧各杀一次」的：同一 frame_id 的第二次显式上报静默，
+  // 不再开新序列/重复 request（否则会多插一对 IDR 并双计丢帧）。
+  if (drop_already_reported(frame_idx)) return SchedStep{};
+
   SchedStep s = start_new_sequence(true);
   // 显式上报后提交序锚点前移：下一个提交帧不把同一死亡再报成空洞（互斥同
   // have_last_sent_ 口径）；其后真正缺帧仍会以空洞暴露。锚点只前进不后退——

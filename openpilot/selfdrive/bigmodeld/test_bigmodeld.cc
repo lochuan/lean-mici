@@ -13,6 +13,7 @@
 #include "frame_codec.h"
 #include "frame_meta.h"
 #include "frame_scheduler.h"
+#include "pair_matcher.h"
 #include "uplink_sender.h"
 
 // ---- 极简测试框架 ----
@@ -104,6 +105,27 @@ static void test_sched_drop() {
   for (uint32_t i = 14; i <= 22; i++) CHECK(!s.on_frame_submit(i).any());
   SchedStep s23 = s.on_frame_submit(23);  // 新序列第 20 帧
   CHECK(s23.road_idr && !s23.wide_idr);
+}
+
+// 同一 frame 的重复显式上报只报一次（配对两侧各杀一次）——16 号真机 run1 双报修复
+static void test_sched_drop_dedup() {
+  FrameScheduler s;
+  s.on_connect();
+  s.on_frame_submit(0);
+
+  SchedStep d1 = s.on_frame_dropped(2);
+  CHECK(d1.drop_detected && d1.request_keyframe_road && d1.request_keyframe_wide);
+  SchedStep d2 = s.on_frame_dropped(2);  // 同帧另一侧杀：静默
+  CHECK(!d2.any());
+  SchedStep d3 = s.on_frame_dropped(3);  // 不同帧照常
+  CHECK(d3.drop_detected && d3.request_keyframe_road && d3.request_keyframe_wide);
+  SchedStep d4 = s.on_frame_dropped(3);  // 队列覆盖重复上报同帧：同样静默
+  CHECK(!d4.any());
+
+  // 重连后 frame_idx 重新编号：去重窗口作废
+  s.on_connect();
+  SchedStep d5 = s.on_frame_dropped(3);
+  CHECK(d5.drop_detected);
 }
 
 // 提交序空洞兜底（无人显式上报的死亡帧）→ 同样新序列，落点=洞后首帧
@@ -689,9 +711,123 @@ static void test_meta_provider() {
   CHECK(h.t_eof == 43);
 }
 
+// ---- 配对状态机（16 号诊断修复：按 timestamp_sof 配对，不按 frame_id）----
+using PM = bgm::PairMatcher<int>;
+
+// bug 最小复现（真机 2026-09-28：两路 frame_id 恒差 3372 且持续漂移）：
+// frame_id 不等但 SOF 对齐 → 必须成对
+static void test_pair_off_fid_aligned_sof() {
+  PM m;
+  uint64_t t = 1000000000ULL;
+  for (int k = 0; k < 5; k++) {
+    PM::Actions a1 = m.push(true, {100 + (uint32_t)k, t + 50000000ULL * k, k});
+    CHECK(!a1.pair);
+    PM::Actions a2 = m.push(false, {5000 + (uint32_t)k, t + 50000000ULL * k + 70000, k});
+    CHECK(a2.pair);
+    CHECK(a2.road.frame_id == 100 + k);
+    CHECK(a2.wide.frame_id == 5000 + k);
+    CHECK(!a2.kill_road && !a2.kill_wide);
+  }
+}
+
+// 反例锁定：frame_id 相等不是配对键，SOF 错开 30 ms 不许成对（且旧帧超窗驱逐）
+static void test_pair_same_fid_offset_sof() {
+  PM m;
+  PM::Actions a1 = m.push(true, {7, 1000000000ULL, 0});
+  CHECK(!a1.pair);
+  PM::Actions a2 = m.push(false, {7, 1000000000ULL + 30000000ULL, 1});
+  CHECK(!a2.pair);
+  CHECK(a2.kill_road && a2.road_dead.frame_id == 7);
+  CHECK(!a2.kill_wide);
+}
+
+// 容差边界：10 ms 成对、11 ms 不成对
+static void test_pair_tolerance_boundary() {
+  PM m;
+  m.push(true, {1, 5000000000ULL, 0});
+  PM::Actions a = m.push(false, {2, 5000000000ULL + bgm::kPairToleranceNs, 1});
+  CHECK(a.pair);
+
+  PM m2;
+  m2.push(true, {1, 5000000000ULL, 0});
+  PM::Actions b = m2.push(false, {2, 5000000000ULL + bgm::kPairToleranceNs + 1, 1});
+  CHECK(!b.pair);
+  CHECK(b.kill_road && b.road_dead.frame_id == 1);  // road 超窗驱逐
+}
+
+// 置换杀旧（对路缺帧）+ wide 侧死亡与 road 侧死亡分开标记
+static void test_pair_replace_and_evict() {
+  PM m;
+  uint64_t t = 2000000000ULL;
+  m.push(true, {10, t, 0});
+  PM::Actions a = m.push(true, {11, t + 50000000ULL, 1});  // road 连发，wide 缺帧
+  CHECK(!a.pair);
+  CHECK(a.kill_road && a.road_dead.frame_id == 10);
+  CHECK(!a.kill_wide);
+
+  PM::Actions b = m.push(true, {12, t + 100000000ULL, 2});
+  CHECK(b.kill_road && b.road_dead.frame_id == 11);
+
+  // wide 侧死亡只标 kill_wide（不上报调度器）
+  PM m2;
+  m2.push(false, {20, t, 10});
+  PM::Actions c = m2.push(false, {21, t + 50000000ULL, 11});  // wide 连发 → 置换杀旧
+  CHECK(c.kill_wide && c.wide_dead.frame_id == 20 && !c.kill_road);
+  PM::Actions d = m2.push(true, {30, t + 100000000ULL, 12});  // road 晚到 → wide 21 超窗驱逐
+  CHECK(d.kill_wide && d.wide_dead.frame_id == 21 && !d.kill_road && !d.pair);
+}
+
+// 同步组仿真（真机形态）：两路 SOF 同 50 ms 网格对齐（stagger 70 µs），各自跳过
+// 不同槽位（road 每 37 槽缺 1、wide 每 12 槽缺 1）。断言：同槽成对恰好一次、
+// 缺槽单侧死亡、每帧恰好退出一次、无错配。
+static void test_pair_rate_mismatch_sim() {
+  const int N = 120;
+  const uint64_t t0 = 3000000000ULL, period = 50000000ULL;
+  auto road_has = [](int k) { return k % 37 != 0; };
+  auto wide_has = [](int k) { return k % 12 != 0; };
+
+  PM m;
+  std::vector<std::pair<uint32_t, uint32_t>> pairs;
+  std::vector<uint32_t> dead;
+  int expected_pairs = 0;
+
+  for (int k = 0; k < N; k++) {
+    if (road_has(k) && wide_has(k)) expected_pairs++;
+    // 到达顺序 = SOF 顺序：road 先（stagger 早 70 µs）
+    if (road_has(k)) {
+      PM::Actions a = m.push(true, {(uint32_t)(100 + k), t0 + period * k, k});
+      if (a.pair) pairs.push_back({a.road.frame_id, a.wide.frame_id});
+      if (a.kill_road) dead.push_back(a.road_dead.frame_id);
+      if (a.kill_wide) dead.push_back(a.wide_dead.frame_id);
+    }
+    if (wide_has(k)) {
+      PM::Actions a = m.push(false, {(uint32_t)(5000 + k), t0 + period * k + 70000, 1000 + k});
+      if (a.pair) pairs.push_back({a.road.frame_id, a.wide.frame_id});
+      if (a.kill_road) dead.push_back(a.road_dead.frame_id);
+      if (a.kill_wide) dead.push_back(a.wide_dead.frame_id);
+    }
+  }
+
+  CHECK((int)pairs.size() == expected_pairs);  // 同槽全配上，无错配无漏配
+  int total = 0;
+  for (int k = 0; k < N; k++) total += (road_has(k) ? 1 : 0) + (wide_has(k) ? 1 : 0);
+  int leftover = (m.has_pending(true) ? 1 : 0) + (m.has_pending(false) ? 1 : 0);
+  CHECK(2 * (int)pairs.size() + (int)dead.size() + leftover == total);  // 每帧恰好退出一次
+
+  std::vector<uint32_t> used;
+  for (auto& p : pairs) {
+    used.push_back(p.first);
+    used.push_back(p.second);
+  }
+  used.insert(used.end(), dead.begin(), dead.end());
+  std::sort(used.begin(), used.end());
+  CHECK(std::unique(used.begin(), used.end()) == used.end());  // 无重复使用/重复杀死
+}
+
 int main() {
   test_sched_gop();
   test_sched_drop();
+  test_sched_drop_dedup();
   test_sched_submit_gap();
   test_sched_sent_hole();
   test_sched_sent_mute_after_explicit();
@@ -713,6 +849,12 @@ int main() {
 
   test_warp_golden();
   test_meta_provider();
+
+  test_pair_off_fid_aligned_sof();
+  test_pair_same_fid_offset_sof();
+  test_pair_tolerance_boundary();
+  test_pair_replace_and_evict();
+  test_pair_rate_mismatch_sim();
 
   printf("%d checks, %d fails\n", g_checks, g_fails);
   return g_fails == 0 ? 0 : 1;

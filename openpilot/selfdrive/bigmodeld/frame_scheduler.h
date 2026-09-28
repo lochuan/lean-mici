@@ -44,6 +44,7 @@ class FrameScheduler {
   SchedStep on_frame_submit(uint32_t frame_idx);
 
   // 帧在进编码器前死亡（配对缺帧）或被发送队列显式丢弃：立即新序列。
+  // 同一 frame 的重复显式上报（同一 frame_id 两侧各杀一次）只报一次。
   SchedStep on_frame_dropped(uint32_t frame_idx);
 
   // 实际发出一帧：实际发出 frame_idx 序列出现空洞 = 丢帧（显式上报之外的兜底）。
@@ -51,6 +52,7 @@ class FrameScheduler {
 
  private:
   SchedStep start_new_sequence(bool drop_detected);
+  bool drop_already_reported(uint32_t frame_idx);
 
   int seq_pos_ = 0;
   bool pending_req_road_ = false;
@@ -62,4 +64,12 @@ class FrameScheduler {
   uint32_t last_submit_idx_ = 0;
   bool have_last_sent_ = false;
   uint32_t last_sent_idx_ = 0;
+
+  // 同一 frame 重复上报去重（配对两侧各杀一次只报一次）：每连接内最近
+  // kDropDedupWindow 次显式上报的 idx 窗口。双侧杀帧的两次上报间隔不超过
+  // 流间偏斜（1~2 帧），窗口足够；on_connect 清空（frame_idx 重新编号）。
+  static constexpr int kDropDedupWindow = 32;
+  uint32_t recent_drop_[kDropDedupWindow] = {};
+  int recent_drop_n_ = 0;
+  int recent_drop_pos_ = 0;
 };

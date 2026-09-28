@@ -46,6 +46,7 @@
 #include "frame_codec.h"
 #include "frame_meta.h"
 #include "frame_scheduler.h"
+#include "pair_matcher.h"
 #include "uplink_sender.h"
 
 #ifndef MSG_NOSIGNAL
@@ -254,9 +255,11 @@ struct EncoderCtx {
   std::vector<uint8_t> au;  // 回调线程私有（每编码器一条 dequeue 线程）
 };
 
-// frame_idx = VisionIpcBufExtra.frame_id − 基准；kNewConnection 后基准 = 重连后
-// 第一个被编号的帧（组帧或配对杀帧，先到为准）。相机缺帧/未配对/队列丢弃全部
-// 表现为序号断档 = CONTEXT.md「丢帧」。
+// frame_idx = road 侧 VisionIpcBufExtra.frame_id − 基准；kNewConnection 后基准 =
+// 重连后第一个被编号的帧（组帧或配对杀帧，先到为准）。frame_id 是 road 的出帧
+// 计数器（每出帧 +1、严格递增）；配对杀帧/队列丢弃表现为序号断档 = CONTEXT.md
+// 「丢帧」。注意：相机内部缺帧不体现为断档（frame_id 只按出帧递增，见
+// pair_matcher.h 的实测依据）。
 struct FrameIndexer {
   bool have_base = false;
   uint32_t base = 0;
@@ -406,9 +409,8 @@ class Bigmodeld {
   }
 
  private:
+  // 帧负载：配对状态机槽内携带（配对键/序号在 PairMatcher::Frame 上）
   struct Slot {
-    bool has = false;
-    uint32_t frame_id = 0;
     VisionIpcBufExtra extra = {};
     VisionBuf* buf = nullptr;
   };
@@ -442,34 +444,32 @@ class Bigmodeld {
   }
 
   // ---- 配对 / 编码（持 state_mtx）----
+  // 配对键 = timestamp_sof 邻近（见 pair_matcher.h：真机实测两路 frame_id 是各自
+  // 独立的出帧计数器、持续漂移，不能作配对键）。死亡帧只把 road 侧上报调度器：
+  // frame_idx 用 road 计数器（严格递增），wide 计数器漂移不得混入序号空间。
   void place_frame(StreamId sid, const VisionIpcBufExtra& extra, VisionBuf* buf) {
     std::lock_guard<std::mutex> lk(state_mtx_);
     drain_events_locked();
 
-    Slot& mine = slots_[sid];
-    if (mine.has && mine.frame_id != extra.frame_id) {
-      // 迟到侧杀掉旧帧 = 配对缺帧死亡（同一 frame_id 两侧各杀一次只报一次）
-      report_drop_locked(mine.frame_id);
-      ctx_[sid].pool.release(mine.buf);
-      mine = {};
-    }
-    mine.has = true;
-    mine.frame_id = extra.frame_id;
-    mine.extra = extra;
-    mine.buf = buf;
+    const bool is_road = (sid == kRoad);
+    bgm::PairMatcher<Slot>::Frame f{extra.frame_id, extra.timestamp_sof, Slot{extra, buf}};
+    bgm::PairMatcher<Slot>::Actions a = matcher_.push(is_road, f);
 
-    Slot& other = slots_[1 - sid];
-    if (other.has && other.frame_id == extra.frame_id) {
-      Slot road = (sid == kRoad) ? mine : other;
-      Slot wide = (sid == kRoad) ? other : mine;
-      mine = {};
-      other = {};
-      encode_pair_locked(road, wide);
+    if (a.kill_road) {
+      report_drop_locked(a.road_dead.frame_id);
+      ctx_[kRoad].pool.release(a.road_dead.payload.buf);
+    }
+    if (a.kill_wide) {
+      LOGW("bigmodeld: 丢帧（wide 侧配对缺帧）frame_id=%u", a.wide_dead.frame_id);
+      ctx_[kWide].pool.release(a.wide_dead.payload.buf);
+    }
+    if (a.pair) {
+      encode_pair_locked(a.road.payload, a.wide.payload);
     }
   }
 
   void encode_pair_locked(Slot road, Slot wide) {
-    const uint32_t frame_id = road.frame_id;
+    const uint32_t frame_id = road.extra.frame_id;
     const uint32_t frame_idx = indexer_.index(frame_id);
 
     // I 帧事件必须先于本帧 encode_frame（21 号实测「下一帧立即 I 帧」）：
@@ -499,6 +499,9 @@ class Bigmodeld {
     om.hdr = hdr;
     ctx_[kRoad].meta.push(om);
     om.hdr = {};
+    // 查表键 = 各路自己的 frame_id（on_encoded 按本路 extra.frame_id 取回；两路
+    // frame_id 计数器漂移，不能混用同一个键）
+    om.frame_id = wide.extra.frame_id;
     ctx_[kWide].meta.push(om);
 
     // 两路同时提交编码；缓冲由 input_done_callback 归还池
@@ -637,7 +640,7 @@ class Bigmodeld {
   std::mutex state_mtx_;
   FrameScheduler sched_;
   FrameIndexer indexer_;
-  Slot slots_[2];
+  bgm::PairMatcher<Slot> matcher_;
   bool need_req_road_ = false;  // 事件累积的 request_keyframe，组帧前统一 flush
   bool need_req_wide_ = false;
 

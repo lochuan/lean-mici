@@ -34,8 +34,8 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
    丢帧来源：配对杀帧、发送队列覆盖丢弃（即时）、提交序/发出序空洞（兜底）；显式上报与
    空洞检测互斥：sent 侧 `have_last_sent_` 锚点复位、submit 侧锚点随显式上报前移、同一
    frame_id 两侧各杀一次只报一次。camera 滞后/上游覆盖不进编码器，死亡表现为序号断档。
-3. **发送**：submit_road 即组 chunk1（头 160 B‖road 段，flags bit0 实际/bit1 预测）先发
-   （road 出包即发）；submit_wide 组 chunk2（wide_len‖wide‖MAC16 零）。槽：在途 1 + 排队 1
+3. **发送**：submit_road 即组 chunk1（头 160 B‖road 段，flags bit0=road 段 IDR、
+   bit1=wide 段 IDR）先发（road 出包即发）；submit_wide 组 chunk2（wide_len‖wide‖MAC16 零）。槽：在途 1 + 排队 1
    （只留最新；新包覆盖=丢旧包报 kDrop；旧 frame_idx 迟到包静默丢）。假死=对在途帧 ≥200 ms
    无进展（写阻塞或 wide 缺失）→ 尝试发完在途帧（含连续部分写，不撕裂）否则截断 → 重连，
    报 kStall。重连每次 connect 1 s 超时，连败 3 次报 kLinkLost，之后持续重试、成功复位；
