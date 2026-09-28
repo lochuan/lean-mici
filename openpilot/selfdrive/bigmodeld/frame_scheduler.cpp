@@ -1,5 +1,30 @@
 #include "frame_scheduler.h"
 
+void FrameIndexer::reset() {
+  have_base_ = false;
+  sof_base_ns_ = 0;
+  last_idx_ = 0;
+}
+
+uint32_t FrameIndexer::index(uint64_t road_sof_ns) {
+  if (!have_base_) {
+    sof_base_ns_ = road_sof_ns;
+    have_base_ = true;
+    last_idx_ = 0;
+    return 0;
+  }
+
+  // 与 (delta + 25 ms) / 50 ms 等价，避免 delta + 25 ms 的整数溢出。
+  const uint64_t delta = road_sof_ns >= sof_base_ns_ ? road_sof_ns - sof_base_ns_ : 0;
+  uint64_t next_idx = delta / kFramePeriodNs;
+  if (delta % kFramePeriodNs >= kFramePeriodNs / 2) next_idx++;
+
+  // SOF 正常间隔为 50~66 ms；仍防止异常近邻/重复时间戳落在同一槽。
+  if (next_idx <= last_idx_) next_idx = last_idx_ + 1;
+  last_idx_ = next_idx;
+  return static_cast<uint32_t>(last_idx_);
+}
+
 SchedStep FrameScheduler::start_new_sequence(bool drop_detected) {
   SchedStep s;
   s.drop_detected = drop_detected;
@@ -10,14 +35,11 @@ SchedStep FrameScheduler::start_new_sequence(bool drop_detected) {
   seq_pos_ = 0;
   next_idr_seq_road_ = 0;
   next_idr_seq_wide_ = 0;
-  // 显式上报与空洞检测互斥：新序列起点未「发出」过，后续空洞检测从下一次 on_frame_sent 起算
-  have_last_sent_ = false;
   return s;
 }
 
 SchedStep FrameScheduler::on_connect() {
   SchedStep s = start_new_sequence(false);
-  have_last_submit_ = false;
   // frame_idx 重新编号，去重窗口作废
   recent_drop_n_ = 0;
   recent_drop_pos_ = 0;
@@ -25,17 +47,8 @@ SchedStep FrameScheduler::on_connect() {
 }
 
 SchedStep FrameScheduler::on_frame_submit(uint32_t frame_idx) {
+  (void)frame_idx;  // frame_idx 是时间槽编号；GOP 相位按实际提交帧计数，不按空槽数计
   SchedStep s;
-
-  // 提交序缺口兜底：帧在进编码器前死亡但没人显式上报（如两路相机同时缺帧）
-  if (have_last_submit_ && frame_idx != last_submit_idx_ + 1) {
-    SchedStep d = start_new_sequence(true);
-    s.request_keyframe_road = s.request_keyframe_road || d.request_keyframe_road;
-    s.request_keyframe_wide = s.request_keyframe_wide || d.request_keyframe_wide;
-    s.drop_detected = true;
-  }
-  last_submit_idx_ = frame_idx;
-  have_last_submit_ = true;
 
   // 新序列第 10 帧给 wide 再补一次 I 帧（恢复「wide 比 road 晚 10 帧」相位）
   if (seq_pos_ == 10) {
@@ -72,33 +85,14 @@ bool FrameScheduler::drop_already_reported(uint32_t frame_idx) {
 }
 
 SchedStep FrameScheduler::on_frame_dropped(uint32_t frame_idx) {
-  // 配对缺帧是「每侧各杀一次」的：同一 frame_id 的第二次显式上报静默，
-  // 不再开新序列/重复 request（否则会多插一对 IDR 并双计丢帧）。
+  // 码流断档统一入口（kDrop / MetaCache kGapMiss 情形 C / kHeadBarrier）：
+  // 同一时间槽重复显式上报只处理一次，避免重复开序列/发 request。
   if (drop_already_reported(frame_idx)) return SchedStep{};
 
-  SchedStep s = start_new_sequence(true);
-  // 显式上报后提交序锚点前移：下一个提交帧不把同一死亡再报成空洞（互斥同
-  // have_last_sent_ 口径）；其后真正缺帧仍会以空洞暴露。锚点只前进不后退——
-  // 发送队列覆盖丢弃的帧已提交过，锚点可能在其后。
-  if (!have_last_submit_ || frame_idx > last_submit_idx_) {
-    last_submit_idx_ = frame_idx;
-    have_last_submit_ = true;
-  }
-  return s;
+  return start_new_sequence(true);
 }
 
 SchedStep FrameScheduler::on_frame_sent(uint32_t frame_idx) {
-  if (!have_last_sent_) {
-    // 新序列的第一发出帧（显式丢弃上报后或连接刚建立）
-    have_last_sent_ = true;
-    last_sent_idx_ = frame_idx;
-    return SchedStep{};
-  }
-  if (frame_idx != last_sent_idx_ + 1) {
-    // 实际发出 frame_idx 序列出现空洞 = 丢帧
-    last_sent_idx_ = frame_idx;
-    return start_new_sequence(true);
-  }
-  last_sent_idx_ = frame_idx;
+  (void)frame_idx;
   return SchedStep{};
 }

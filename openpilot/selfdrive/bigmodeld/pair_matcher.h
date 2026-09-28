@@ -18,9 +18,9 @@
 //   - 已知损耗：同路置换先于对路帧到达（对路迟到 > ~50 ms）时丢一对，属
 //     单槽取舍；两路同窗帧共存未配对即证明非同帧。
 //
-// 调用方约定：死亡帧只有 road 侧上报调度器（frame_idx = road 计数器，严格
-// 单调）；wide 侧死亡只记日志——两路 frame_id 计数器漂移，混入同一序号空间
-// 会破坏 frame_idx 严格递增（线协议 BAD_FRAME）与调度器缺口检测。
+// 调用方约定：两侧死亡都只做计数/日志并归还缓冲，不上报 FrameScheduler、不触发
+// 新序列或 request_keyframe。只有 road 死亡帧可用其 timestamp_sof 建立/推进 frame_idx
+// 时间槽；wide 的 SOF 不参与编号。时间槽空洞是相机缺帧/未配对的常态，不表示码流断档。
 
 #include <cstdint>
 
@@ -44,9 +44,9 @@ class PairMatcher {
   };
 
   struct Actions {
-    bool kill_road = false;   // road 帧死亡（调用方上报调度器 + 归还缓冲）
+    bool kill_road = false;   // road 帧死亡（调用方只计数/日志 + 归还缓冲）
     Frame road_dead;
-    bool kill_wide = false;   // wide 帧死亡（只记日志 + 归还缓冲）
+    bool kill_wide = false;   // wide 帧死亡（调用方只计数/日志 + 归还缓冲）
     Frame wide_dead;
     bool pair = false;        // 成对（两帧出槽，进编码器）
     Frame road, wide;
