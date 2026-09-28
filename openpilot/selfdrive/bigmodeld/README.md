@@ -65,8 +65,10 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
    不反向取锁）。SCHED_FIFO 53 + 绑核 EINVAL 容忍（`util::set_realtime_priority`/
    `set_core_affinity`，仿 `encoderd.cc:214-216`）。
    frame_idx = VisionIpcBufExtra.frame_id − 基准，kNewConnection 后基准 = 重连后第一个被
-   编号的帧（组帧或配对杀帧，先到为准）；相机缺帧/未配对/队列丢弃全表现为序号断档 =
-   `1b-model-qnn/CONTEXT.md`「丢帧」。
+   编号的帧（组帧或配对杀帧，先到为准）。编号只覆盖相机实出的帧（frame_id 每出帧 +1、
+   无跳变）：**未配对/队列丢弃**表现为序号断档 = `1b-model-qnn/CONTEXT.md`「丢帧」；
+   **相机内部缺帧**不体现为断档、只体现为 `t_eof` 时间缺口（≈100 ms，实测相机出帧
+   <20 Hz）。后一口径与 CONTEXT.md 有出入，修订见 16 号票 TODO。
 7. **TODO(04 号)**：desire[8]/action_t[2] 现置零——权威在 modeld 的 DesireHelper 与 13 号
    延迟公式，经 msgq 接线；REPLY 的 outputs[0:2066) 与遥测同样留待 msgq 转交 modeld
    （ReplyTracker 只缓存最新 + 分段统计）。
