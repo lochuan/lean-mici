@@ -1,0 +1,11 @@
+Import('env', 'arch', 'messaging', 'common', 'visionipc', 'ffmpeg_libs', 'logger_lib')
+
+# bigmodeld（16 号 C4 上行进程）：V4L2 硬编 + VisionIPC + cereal，只在设备构建
+if arch != "comma_arm64":
+  Return()
+
+libs = [logger_lib, common, messaging, visionipc] + ffmpeg_libs + ['pthread', 'm', 'zstd']
+
+env.Program('bigmodeld',
+            ['main.cc', 'frame_codec.cpp', 'frame_meta.cpp', 'frame_scheduler.cpp', 'uplink_sender.cpp'],
+            LIBS=libs)

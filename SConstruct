@@ -290,6 +290,7 @@ SConscript([
   'openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/SConscript',
   'openpilot/selfdrive/locationd/SConscript',
   'openpilot/selfdrive/modeld/SConscript',
+  'openpilot/selfdrive/bigmodeld/SConscript',
   'openpilot/selfdrive/eagled/SConscript',
   'openpilot/selfdrive/ui/SConscript',
 ])

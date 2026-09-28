@@ -79,6 +79,8 @@ procs = [
   PythonProcess("timed", "openpilot.system.timed", always_run, enabled=not PC),
 
   PythonProcess("modeld", "openpilot.selfdrive.modeld.modeld", only_onroad),
+  # C4 上行进程（16 号）：生命周期跟随 modeld，双路硬编经 TCP 上送
+  NativeProcess("bigmodeld", "openpilot/selfdrive/bigmodeld", ["./bigmodeld"], only_onroad),
 
   PythonProcess("sensord", "openpilot.system.sensord.sensord", only_onroad, enabled=not PC),
   PythonProcess("ui", "openpilot.selfdrive.ui.ui", always_run),
