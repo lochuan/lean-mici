@@ -42,6 +42,7 @@
 #include <vector>
 
 #include "frame_codec.h"
+#include "frame_ids.h"
 
 // 可注入系统接缝（宿主测试用假 socket）
 class UplinkSocket {
@@ -58,14 +59,15 @@ enum class UplinkEvent {
   kStall,          // 假死（≥200 ms 无进展）：发完在途帧或截断后重连，上报重置
   kLinkLost,       // 连续 3 次重连失败（每次 1 s 超时）升级「连接丢失」
   kDrop,           // 排队旧帧被覆盖丢弃 / 主线上报编码输出缺帧·段长超限（码流断档）
+  kStreamGap,      // 编码输出被吞（MetaCache kGapMiss 情形 C）——仅 main.cc 合成，sender 不发
   kHeadBarrier,    // 序列头门丢弃（非双路 IDR 帧不开流；非断档，调用方补 request）
   kFrameSent,      // 一帧完整发出
 };
 
 struct UplinkEventInfo {
   UplinkEvent ev;
-  uint32_t frame_idx;
-  uint32_t conn_epoch = 0;  // 仅 kNewConnection 填：连接代号，调用方 stamp 后续提交
+  FrameIdx frame_idx{};
+  ConnEpoch conn_epoch{};  // 仅 kNewConnection 填：连接代号，调用方 stamp 后续提交
 };
 
 struct UplinkSenderConfig {
@@ -85,11 +87,11 @@ class UplinkSender {
   //（MetaProvider::fill）；flags 由本函数按 road_idr_actual（bit0）与 wide_idr_predicted
   //（bit1）置位——bit0 用实际 keyframe 位（精确）、bit1 用 I 帧策略预测（头先于 wide 包发出）。
   // road_idr_predicted 只供序列头门用（不进线协议）。conn_epoch 与当前连接不符时静默丢弃。
-  void submit_road(uint32_t conn_epoch, uint32_t frame_idx, const bgm1::FrameHeader& hdr,
+  void submit_road(ConnEpoch conn_epoch, FrameIdx frame_idx, const bgm1::FrameHeader& hdr,
                    const uint8_t* road, size_t road_len,
                    bool road_idr_actual, bool road_idr_predicted, bool wide_idr_predicted);
   // wide 包到达时调（编码回调）。wide_actual_idr 与预测不符会记入 wide_idr_mismatches()。
-  void submit_wide(uint32_t conn_epoch, uint32_t frame_idx, const uint8_t* wide, size_t wide_len,
+  void submit_wide(ConnEpoch conn_epoch, FrameIdx frame_idx, const uint8_t* wide, size_t wide_len,
                    bool wide_actual_idr);
 
   // 发送循环单步（发送线程）；返回本次是否有进展（无进展时调用方可以小睡）。
@@ -107,11 +109,11 @@ class UplinkSender {
   int connect_failures() const;
   uint64_t wide_idr_mismatches() const;  // bit1 预测与 wide 包实际 keyframe 不符次数
   uint64_t stale_submits() const;        // 旧连接代号的迟到提交（静默丢弃）
-  uint32_t conn_epoch() const;           // 当前连接代号（kNewConnection 事件同值）
+  ConnEpoch conn_epoch() const;      // 当前连接代号（kNewConnection 事件同值）
 
  private:
   struct OutFrame {
-    uint32_t frame_idx = 0;
+    FrameIdx frame_idx{};
     bool has_road = false;
     bool has_wide = false;
     bool road_idr_actual = false;
@@ -125,21 +127,21 @@ class UplinkSender {
     bool chunk1_done = false;
   };
 
-  OutFrame* find_or_create_locked(uint32_t frame_idx);
+  OutFrame* find_or_create_locked(FrameIdx frame_idx);
   void drop_connection_locked();
   void try_finish_inflight_locked();
   // 序列头门：排队帧两路到齐即裁决——预测+实测双 IDR 开门，否则整对丢弃（kHeadBarrier）
   void resolve_head_gate_locked();
   // 已丢帧登记（残包静默丢弃，不重复上报）
-  void note_dropped_locked(uint32_t frame_idx);
-  bool is_dropped_locked(uint32_t frame_idx) const;
+  void note_dropped_locked(FrameIdx frame_idx);
+  bool is_dropped_locked(FrameIdx frame_idx) const;
 
   // 在途帧写出推进（连续部分写直到整帧发完/写不动/写错误——部分写不截断）。
   // track_progress 为假时不更新进展时戳（假死补发路径）。
   enum class WriteState { kDone, kBlocked, kError };
   WriteState write_out_locked(OutFrame& f, uint64_t now, bool track_progress);
 
-  void emit_locked(UplinkEvent ev, uint32_t frame_idx);
+  void emit_locked(UplinkEvent ev, FrameIdx frame_idx);
 
   UplinkSocket* sock_;
   std::function<uint64_t()> now_;
@@ -148,7 +150,7 @@ class UplinkSender {
 
   mutable std::mutex mtx_;
   bool connected_ = false;
-  uint32_t conn_epoch_ = 0;   // 每次建连 +1（kNewConnection 事件带出）
+  ConnEpoch conn_epoch_{};  // 每次建连 +1（kNewConnection 事件带出）
   bool stream_open_ = false;  // 序列头门：已发出合格双路 IDR 对
   int connect_failures_ = 0;
   bool has_inflight_ = false;
@@ -161,7 +163,7 @@ class UplinkSender {
 
   // 已丢帧 frame_idx 小窗口（残包/迟到包静默丢弃，避免重复上报 kHeadBarrier）
   static constexpr int kDroppedWindow = 32;
-  uint32_t dropped_recent_[kDroppedWindow] = {};
+  FrameIdx dropped_recent_[kDroppedWindow] = {};
   int dropped_n_ = 0;
   int dropped_pos_ = 0;
 };

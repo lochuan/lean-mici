@@ -22,12 +22,13 @@
 #include <vector>
 
 #include "frame_codec.h"
+#include "frame_ids.h"
 
 // 编码输出回调按 frame_id 取回的提交上下文
 struct OutMeta {
-  uint32_t frame_id = 0;    // 查表键 = 各路自己的 frame_id（两路计数器独立、持续漂移）
-  uint32_t frame_idx = 0;   // 连接内 50 ms 时间槽编号（进 FRAME 头）
-  uint32_t conn_epoch = 0;  // 连接代号（sender 建连次数）：迟到旧连接输出在 submit 侧拒绝
+  CamFrameId frame_id{};    // 查表键 = 各路自己的 frame_id（两路计数器独立、持续漂移）
+  FrameIdx frame_idx{};     // 连接内 50 ms 时间槽编号（进 FRAME 头）
+  ConnEpoch conn_epoch{};   // 连接代号（sender 建连次数）：迟到旧连接输出在 submit 侧拒绝
   bool road_idr_pred = false;  // 本帧 IDR 预测（FRAME 头 bit0 用实际位，此处供序列头门）
   bool wide_idr_pred = false;  // FRAME 头 bit1（预测；只许欠报不许误报）
   bgm1::FrameHeader hdr;
@@ -54,7 +55,7 @@ class MetaCache {
     last_pushed_id_ = m.frame_id;
   }
 
-  Result take(uint32_t frame_id) {
+  Result take(CamFrameId frame_id) {
     std::lock_guard<std::mutex> lk(mtx_);
     Result r;
     for (size_t i = 0; i < q_.size(); i++) {
@@ -83,12 +84,12 @@ class MetaCache {
     std::lock_guard<std::mutex> lk(mtx_);
     q_.clear();
     pushed_since_clear_ = false;
-    last_pushed_id_ = 0;
+    last_pushed_id_ = CamFrameId{};
   }
 
  private:
   std::mutex mtx_;
   std::deque<OutMeta> q_;
   bool pushed_since_clear_ = false;
-  uint32_t last_pushed_id_ = 0;
+  CamFrameId last_pushed_id_{};
 };

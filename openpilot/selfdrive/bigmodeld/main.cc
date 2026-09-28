@@ -417,8 +417,8 @@ class Bigmodeld {
   }
 
   void encode_pair_locked(Slot road, Slot wide) {
-    const uint32_t frame_id = road.extra.frame_id;
-    const uint32_t frame_idx = indexer_.index(road.extra.timestamp_sof);
+    const CamFrameId frame_id{road.extra.frame_id};
+    const FrameIdx frame_idx = indexer_.index(road.extra.timestamp_sof);
 
     // I 帧事件必须先于本帧 encode_frame（21 号实测「下一帧立即 I 帧」）：
     // 本帧自己的预测 + 事件累积的请求都在此刻发出（落点 = 事件后第一个提交帧），
@@ -438,12 +438,12 @@ class Bigmodeld {
 
     bgm1::FrameHeader hdr;
     meta_.fill(road.extra.timestamp_eof, &hdr);
-    hdr.frame_idx = frame_idx;
+    hdr.frame_idx = u32(frame_idx);
 
     OutMeta om;
     om.frame_id = frame_id;
     om.frame_idx = frame_idx;
-    om.conn_epoch = cur_epoch_.load(std::memory_order_relaxed);
+    om.conn_epoch = ConnEpoch{cur_epoch_.load(std::memory_order_relaxed)};
     om.road_idr_pred = s.road_idr;
     om.wide_idr_pred = s.wide_idr;
     om.hdr = hdr;
@@ -451,7 +451,7 @@ class Bigmodeld {
     om.hdr = {};
     // 查表键 = 各路自己的 frame_id（on_encoded 按本路 extra.frame_id 取回；两路
     // frame_id 计数器漂移，不能混用同一个键）
-    om.frame_id = wide.extra.frame_id;
+    om.frame_id = CamFrameId{wide.extra.frame_id};
     ctx_[kWide].meta.push(om);
 
     // 两路同时提交编码；缓冲由 input_done_callback 归还池
@@ -461,10 +461,10 @@ class Bigmodeld {
 
   void account_pair_drop_locked(bool is_road, const bgm::PairMatcher<Slot>::Frame& dead) {
     if (is_road) {
-      const uint32_t frame_idx = indexer_.index(dead.timestamp_sof);
+      const FrameIdx frame_idx = indexer_.index(dead.timestamp_sof);
       const uint64_t count = ++pair_drop_road_count_;
       LOGW("bigmodeld: 配对缺帧（road，仅记账）frame_id=%u frame_idx=%u count=%llu",
-           dead.frame_id, frame_idx, (unsigned long long)count);
+           dead.frame_id, u32(frame_idx), (unsigned long long)count);
     } else {
       const uint64_t count = ++pair_drop_wide_count_;
       LOGW("bigmodeld: 配对缺帧（wide，仅记账）frame_id=%u count=%llu",
@@ -501,16 +501,19 @@ class Bigmodeld {
         LOGW("bigmodeld: 新连接（frame_idx 与 I 帧状态重置）");
         break;
       case UplinkEvent::kStall:
-        LOGE("bigmodeld: 假死（≥200 ms 无进展）截断重连 frame_idx=%u", e.frame_idx);
+        LOGE("bigmodeld: 假死（≥200 ms 无进展）截断重连 frame_idx=%u", u32(e.frame_idx));
         break;
       case UplinkEvent::kLinkLost:
         LOGE("bigmodeld: 连接丢失（连续重连失败，持续重试中）");
         break;
       case UplinkEvent::kDrop:
-        LOGW("bigmodeld: 丢帧（发送队列覆盖/编码输出缺帧）frame_idx=%u", e.frame_idx);
+        LOGW("bigmodeld: 丢帧（发送队列覆盖/编码输出缺帧）frame_idx=%u", u32(e.frame_idx));
+        break;
+      case UplinkEvent::kStreamGap:
+        LOGW("bigmodeld: 码流断档（编码输出被吞，main 合成）");
         break;
       case UplinkEvent::kHeadBarrier:
-        LOGW("bigmodeld: 序列头门丢弃（非双路 IDR 对不开流）frame_idx=%u", e.frame_idx);
+        LOGW("bigmodeld: 序列头门丢弃（非双路 IDR 对不开流）frame_idx=%u", u32(e.frame_idx));
         break;
       case UplinkEvent::kFrameSent:
         break;
@@ -530,7 +533,7 @@ class Bigmodeld {
       SchedStep s;
       switch (e.ev) {
         case UplinkEvent::kNewConnection:
-          cur_epoch_.store(e.conn_epoch, std::memory_order_relaxed);
+          cur_epoch_.store(u32(e.conn_epoch), std::memory_order_relaxed);
           indexer_.reset();
           // 旧连接的编码在途输出不带进新连接（重连清空队列同款）
           ctx_[kRoad].meta.clear();
@@ -541,6 +544,10 @@ class Bigmodeld {
         case UplinkEvent::kHeadBarrier:
           // 码流断档 / 序列头门丢弃：都开新序列 + 双路 request（对的下一提交帧起 IDR）
           s = sched_.on_frame_dropped(e.frame_idx);
+          break;
+        case UplinkEvent::kStreamGap:
+          // 编码输出被吞（情形 C）：无 frame_idx 键、无重复上报，不去重
+          s = sched_.on_stream_gap();
           break;
         case UplinkEvent::kFrameSent:
           s = sched_.on_frame_sent(e.frame_idx);
@@ -555,7 +562,7 @@ class Bigmodeld {
   // ---- 编码输出回调（编码器 dequeue 线程）----
   void on_encoded(StreamId sid, VisionIpcBufExtra& extra, unsigned int flags,
                   kj::ArrayPtr<capnp::byte> header, kj::ArrayPtr<capnp::byte> dat) {
-    MetaCache::Result r = ctx_[sid].meta.take(extra.frame_id);
+    MetaCache::Result r = ctx_[sid].meta.take(CamFrameId{extra.frame_id});
     if (r.st != MetaTake::kHit) {
       if (r.st == MetaTake::kStaleMiss) {
         // 旧连接/已清/已弹的迟到输出（连接建立窗口）：序列头门兜底，静默丢弃
@@ -565,15 +572,14 @@ class Bigmodeld {
       }
       // 查无且非旧 = 编码输出被吞：码流断档（情形 C）——显式上报调度器
       //（新序列 + 双路 request）+ 序列头门重新关门（断档后首帧必须双路 IDR）。
-      // dedup 键取 frame_id | 高位（与 frame_idx 键空间隔离，防误吞）。
-      // ponytail: 跨路 frame_id 同值会键碰撞（第二路上报被去重压掉；首报已开序列、
-      // 危害小），升级路径 = frame_id/frame_idx 强类型 + 独立键空间（19 号票）。
+      // kStreamGap 不入 frame_idx 键空间、不去重（同 frame_id 不会二次输出，
+      // 跨路同值也不再互相吞掉——18 号 review 魔法位 hack 的收编，19 号 #2）。
       LOGE("bigmodeld: %s 编码输出无对应提交（码流断档）frame_id=%u",
            sid == kRoad ? "road" : "wide", extra.frame_id);
       sender_->notify_stream_gap();
       {
         std::lock_guard<std::mutex> lk(ev_mtx_);
-        evs_.push_back({UplinkEvent::kDrop, 0x80000000u | (extra.frame_id & 0x7fffffffu)});
+        evs_.push_back({UplinkEvent::kStreamGap, FrameIdx{}});
       }
       return;
     }
@@ -582,7 +588,7 @@ class Bigmodeld {
     // 命中前缀死条目（FIFO 下输出已丢）同样 = 码流断档：上报 + 关门（各路 dedup 到 frame_idx）
     if (!r.dead.empty()) {
       LOGE("bigmodeld: %s 编码输出缺帧 %zu 个（frame_idx=%u 起）码流断档",
-           sid == kRoad ? "road" : "wide", r.dead.size(), r.dead.front().frame_idx);
+           sid == kRoad ? "road" : "wide", r.dead.size(), u32(r.dead.front().frame_idx));
       sender_->notify_stream_gap();
       std::lock_guard<std::mutex> lk(ev_mtx_);
       evs_.push_back({UplinkEvent::kDrop, r.dead.front().frame_idx});
@@ -606,7 +612,7 @@ class Bigmodeld {
     // 不进发送路径（丢帧上报 + 新序列 + 序列头门关门，经事件队列按序落状态机）
     if (len > bgm1::kDefaultMaxSegment) {
       LOGE("bigmodeld: %s 段长 %zu 超上限 %u，丢帧 frame_idx=%u",
-           sid == kRoad ? "road" : "wide", len, bgm1::kDefaultMaxSegment, om.frame_idx);
+           sid == kRoad ? "road" : "wide", len, bgm1::kDefaultMaxSegment, u32(om.frame_idx));
       sender_->notify_stream_gap();
       std::lock_guard<std::mutex> lk(ev_mtx_);
       evs_.push_back({UplinkEvent::kDrop, om.frame_idx});
@@ -638,7 +644,7 @@ class Bigmodeld {
   bool need_req_wide_ = false;
   // 连接代号（sender 建连次数，kNewConnection 事件带出）：组帧时 stamp 进 OutMeta，
   // submit 侧与 sender 当前代号不符即拒（重连窗口内旧输出不得混进新连接）
-  std::atomic<uint32_t> cur_epoch_{0};
+  std::atomic<uint32_t> cur_epoch_{0};  // ConnEpoch 的裸存储（atomic 强类型无加法）
 
   std::mutex ev_mtx_;
   std::vector<UplinkEventInfo> evs_;

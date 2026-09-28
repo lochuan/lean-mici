@@ -10,7 +10,8 @@
 //     落点 = 事件后的第一个提交帧 = 新序列第 0 帧。
 //   - 新序列第 10 帧给 wide 再补一次 request_keyframe()（恢复「wide 晚 10 帧」相位）。
 //   - 只有码流断档才触发丢帧恢复：发送侧显式丢弃（kDrop：队列覆盖、段长超限、
-//     主线上报编码输出缺帧）与 MetaCache kGapMiss（情形 C：输出被吞）。配对失败和
+//     主线上报编码输出缺帧，走 on_frame_dropped 按 frame_idx 去重）与 MetaCache
+//     kGapMiss（情形 C：输出被吞，走 on_stream_gap 不去重）。配对失败和
 //     frame_idx 时间槽空洞都只记账，不重开序列。假死截断/重连仍由 kNewConnection
 //     开新序列。序列头门丢弃（kHeadBarrier）非断档，但同样经 on_frame_dropped 起
 //     新序列 + 双路 request（断档后首帧恒为双路 IDR 对）。
@@ -23,13 +24,15 @@
 
 #include <cstdint>
 
+#include "frame_ids.h"
+
 // 将 road timestamp_sof 映射到 50 ms 时间槽：首个被编号 SOF 为基准，连接内严格递增。
 class FrameIndexer {
  public:
   static constexpr uint64_t kFramePeriodNs = 50'000'000ULL;
 
   void reset();
-  uint32_t index(uint64_t road_sof_ns);
+  FrameIdx index(uint64_t road_sof_ns);
 
  private:
   bool have_base_ = false;
@@ -56,20 +59,23 @@ class FrameScheduler {
 
   // 帧提交编码前调用（事件必须先于本帧 encode_frame）。seq 位置 10 给 wide 补 I，
   // 返回本帧 IDR 预测；frame_idx 空槽不触发恢复。
-  SchedStep on_frame_submit(uint32_t frame_idx);
+  SchedStep on_frame_submit(FrameIdx frame_idx);
 
-  // 码流断档：立即新序列；调用方三种情形——发送侧显式丢弃（kDrop）、编码输出缺帧
-  // （MetaCache kGapMiss，情形 C）、序列头门丢弃（kHeadBarrier）。配对失败/时间槽
-  // 空洞不调用此接口。
+  // 码流断档（有 frame_idx 键的显式上报）：立即新序列；调用方两种情形——发送侧
+  // 显式丢弃（kDrop）、序列头门丢弃（kHeadBarrier）。配对失败/时间槽空洞不调用此接口。
   // 同一 frame 的重复显式上报只报一次（例如同一帧的两路编码段都超限）。
-  SchedStep on_frame_dropped(uint32_t frame_idx);
+  SchedStep on_frame_dropped(FrameIdx frame_idx);
+
+  // 码流断档（无键上报：MetaCache kGapMiss，情形 C）：不参与 frame_idx 去重
+  // （main.cc 合成，跨路 frame_id 不入 frame_idx 键空间），每次都开新序列。
+  SchedStep on_stream_gap();
 
   // 实际发出只作事件通知；frame_idx 时间槽空洞不代表码流断档。
-  SchedStep on_frame_sent(uint32_t frame_idx);
+  SchedStep on_frame_sent(FrameIdx frame_idx);
 
  private:
   SchedStep start_new_sequence(bool drop_detected);
-  bool drop_already_reported(uint32_t frame_idx);
+  bool drop_already_reported(FrameIdx frame_idx);
 
   int seq_pos_ = 0;
   bool pending_req_road_ = false;
@@ -81,7 +87,7 @@ class FrameScheduler {
   // kDropDedupWindow 次显式丢弃的 idx 窗口；on_connect 清空（frame_idx 重新
   // 编号）。（18 号 #5 后配对死亡只记账、不上报 scheduler，此处只服务发送侧。）
   static constexpr int kDropDedupWindow = 32;
-  uint32_t recent_drop_[kDropDedupWindow] = {};
+  FrameIdx recent_drop_[kDropDedupWindow] = {};
   int recent_drop_n_ = 0;
   int recent_drop_pos_ = 0;
 };

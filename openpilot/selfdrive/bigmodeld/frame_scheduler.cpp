@@ -6,12 +6,12 @@ void FrameIndexer::reset() {
   last_idx_ = 0;
 }
 
-uint32_t FrameIndexer::index(uint64_t road_sof_ns) {
+FrameIdx FrameIndexer::index(uint64_t road_sof_ns) {
   if (!have_base_) {
     sof_base_ns_ = road_sof_ns;
     have_base_ = true;
     last_idx_ = 0;
-    return 0;
+    return FrameIdx{0};
   }
 
   // 与 (delta + 25 ms) / 50 ms 等价，避免 delta + 25 ms 的整数溢出。
@@ -22,7 +22,7 @@ uint32_t FrameIndexer::index(uint64_t road_sof_ns) {
   // SOF 正常间隔为 50~66 ms；仍防止异常近邻/重复时间戳落在同一槽。
   if (next_idx <= last_idx_) next_idx = last_idx_ + 1;
   last_idx_ = next_idx;
-  return static_cast<uint32_t>(last_idx_);
+  return FrameIdx{static_cast<uint32_t>(last_idx_)};
 }
 
 SchedStep FrameScheduler::start_new_sequence(bool drop_detected) {
@@ -46,7 +46,7 @@ SchedStep FrameScheduler::on_connect() {
   return s;
 }
 
-SchedStep FrameScheduler::on_frame_submit(uint32_t frame_idx) {
+SchedStep FrameScheduler::on_frame_submit(FrameIdx frame_idx) {
   (void)frame_idx;  // frame_idx 是时间槽编号；GOP 相位按实际提交帧计数，不按空槽数计
   SchedStep s;
 
@@ -74,7 +74,7 @@ SchedStep FrameScheduler::on_frame_submit(uint32_t frame_idx) {
 }
 
 // 同一 frame 的重复显式上报只报一次：查窗口并在窗口内登记（新报才登记）。
-bool FrameScheduler::drop_already_reported(uint32_t frame_idx) {
+bool FrameScheduler::drop_already_reported(FrameIdx frame_idx) {
   for (int i = 0; i < recent_drop_n_; i++) {
     if (recent_drop_[i] == frame_idx) return true;
   }
@@ -84,15 +84,21 @@ bool FrameScheduler::drop_already_reported(uint32_t frame_idx) {
   return false;
 }
 
-SchedStep FrameScheduler::on_frame_dropped(uint32_t frame_idx) {
-  // 码流断档统一入口（kDrop / MetaCache kGapMiss 情形 C / kHeadBarrier）：
+SchedStep FrameScheduler::on_frame_dropped(FrameIdx frame_idx) {
+  // 码流断档统一入口（kDrop / kHeadBarrier）：
   // 同一时间槽重复显式上报只处理一次，避免重复开序列/发 request。
   if (drop_already_reported(frame_idx)) return SchedStep{};
 
   return start_new_sequence(true);
 }
 
-SchedStep FrameScheduler::on_frame_sent(uint32_t frame_idx) {
+SchedStep FrameScheduler::on_stream_gap() {
+  // 编码输出被吞（MetaCache kGapMiss 情形 C）：无 frame_idx 键、无重复上报问题
+  // （同 frame_id 不会二次输出），不参与去重，每次照常开新序列。
+  return start_new_sequence(true);
+}
+
+SchedStep FrameScheduler::on_frame_sent(FrameIdx frame_idx) {
   (void)frame_idx;
   return SchedStep{};
 }

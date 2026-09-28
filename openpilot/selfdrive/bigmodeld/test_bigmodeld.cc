@@ -52,38 +52,38 @@ static void test_sched_gop() {
   CHECK(!c.drop_detected);
 
   // 新序列第 0 帧 = request 落点：两路 IDR
-  SchedStep s0 = s.on_frame_submit(0);
+  SchedStep s0 = s.on_frame_submit(FrameIdx{0});
   CHECK(s0.road_idr && s0.wide_idr);
   CHECK(!s0.request_keyframe_road && !s0.request_keyframe_wide && !s0.drop_detected);
 
   for (uint32_t i = 1; i <= 9; i++) {
-    SchedStep x = s.on_frame_submit(i);
+    SchedStep x = s.on_frame_submit(FrameIdx{i});
     CHECK(!x.any());
   }
 
   // 第 10 帧：wide 补 I（本帧发出 request、本帧即 IDR）
-  SchedStep s10 = s.on_frame_submit(10);
+  SchedStep s10 = s.on_frame_submit(FrameIdx{10});
   CHECK(s10.request_keyframe_wide && s10.wide_idr && !s10.road_idr);
 
-  for (uint32_t i = 11; i <= 19; i++) CHECK(!s.on_frame_submit(i).any());
+  for (uint32_t i = 11; i <= 19; i++) CHECK(!s.on_frame_submit(FrameIdx{i}).any());
 
   // road GOP 20
-  SchedStep s20 = s.on_frame_submit(20);
+  SchedStep s20 = s.on_frame_submit(FrameIdx{20});
   CHECK(s20.road_idr && !s20.wide_idr && !s20.request_keyframe_wide);
 
-  for (uint32_t i = 21; i <= 29; i++) CHECK(!s.on_frame_submit(i).any());
+  for (uint32_t i = 21; i <= 29; i++) CHECK(!s.on_frame_submit(FrameIdx{i}).any());
 
   // wide 基准 30（0,10,30,50,…）
-  SchedStep s30 = s.on_frame_submit(30);
+  SchedStep s30 = s.on_frame_submit(FrameIdx{30});
   CHECK(s30.wide_idr && !s30.road_idr && !s30.request_keyframe_wide);
 
-  for (uint32_t i = 31; i <= 39; i++) CHECK(!s.on_frame_submit(i).any());
+  for (uint32_t i = 31; i <= 39; i++) CHECK(!s.on_frame_submit(FrameIdx{i}).any());
 
-  SchedStep s40 = s.on_frame_submit(40);
+  SchedStep s40 = s.on_frame_submit(FrameIdx{40});
   CHECK(s40.road_idr && !s40.wide_idr);
-  for (uint32_t i = 41; i <= 49; i++) CHECK(!s.on_frame_submit(i).any());
+  for (uint32_t i = 41; i <= 49; i++) CHECK(!s.on_frame_submit(FrameIdx{i}).any());
 
-  SchedStep s50 = s.on_frame_submit(50);
+  SchedStep s50 = s.on_frame_submit(FrameIdx{50});
   CHECK(s50.wide_idr && !s50.road_idr);
 }
 
@@ -91,20 +91,20 @@ static void test_sched_gop() {
 static void test_sched_drop() {
   FrameScheduler s;
   s.on_connect();
-  s.on_frame_submit(0);
-  s.on_frame_submit(1);
+  s.on_frame_submit(FrameIdx{0});
+  s.on_frame_submit(FrameIdx{1});
 
-  SchedStep d = s.on_frame_dropped(2);  // 发送侧显式丢弃，不是配对失败
+  SchedStep d = s.on_frame_dropped(FrameIdx{2});  // 发送侧显式丢弃，不是配对失败
   CHECK(d.drop_detected && d.request_keyframe_road && d.request_keyframe_wide);
 
   // 落点 = 事件后第一个提交帧（新序列第 0 帧）
-  SchedStep s3 = s.on_frame_submit(3);
+  SchedStep s3 = s.on_frame_submit(FrameIdx{3});
   CHECK(s3.road_idr && s3.wide_idr && !s3.drop_detected);
-  for (uint32_t i = 4; i <= 12; i++) CHECK(!s.on_frame_submit(i).any());
-  SchedStep s13 = s.on_frame_submit(13);  // 新序列第 10 帧
+  for (uint32_t i = 4; i <= 12; i++) CHECK(!s.on_frame_submit(FrameIdx{i}).any());
+  SchedStep s13 = s.on_frame_submit(FrameIdx{13});  // 新序列第 10 帧
   CHECK(s13.request_keyframe_wide && s13.wide_idr);
-  for (uint32_t i = 14; i <= 22; i++) CHECK(!s.on_frame_submit(i).any());
-  SchedStep s23 = s.on_frame_submit(23);  // 新序列第 20 帧
+  for (uint32_t i = 14; i <= 22; i++) CHECK(!s.on_frame_submit(FrameIdx{i}).any());
+  SchedStep s23 = s.on_frame_submit(FrameIdx{23});  // 新序列第 20 帧
   CHECK(s23.road_idr && !s23.wide_idr);
 }
 
@@ -112,21 +112,34 @@ static void test_sched_drop() {
 static void test_sched_drop_dedup() {
   FrameScheduler s;
   s.on_connect();
-  s.on_frame_submit(0);
+  s.on_frame_submit(FrameIdx{0});
 
-  SchedStep d1 = s.on_frame_dropped(2);
+  SchedStep d1 = s.on_frame_dropped(FrameIdx{2});
   CHECK(d1.drop_detected && d1.request_keyframe_road && d1.request_keyframe_wide);
-  SchedStep d2 = s.on_frame_dropped(2);  // 重复上报：静默
+  SchedStep d2 = s.on_frame_dropped(FrameIdx{2});  // 重复上报：静默
   CHECK(!d2.any());
-  SchedStep d3 = s.on_frame_dropped(3);  // 不同帧照常
+  SchedStep d3 = s.on_frame_dropped(FrameIdx{3});  // 不同帧照常
   CHECK(d3.drop_detected && d3.request_keyframe_road && d3.request_keyframe_wide);
-  SchedStep d4 = s.on_frame_dropped(3);  // 同一槽第二次上报：同样静默
+  SchedStep d4 = s.on_frame_dropped(FrameIdx{3});  // 同一槽第二次上报：同样静默
   CHECK(!d4.any());
 
   // 重连后 frame_idx 重新编号：去重窗口作废
   s.on_connect();
-  SchedStep d5 = s.on_frame_dropped(3);
+  SchedStep d5 = s.on_frame_dropped(FrameIdx{3});
   CHECK(d5.drop_detected);
+}
+
+// 19 号 #2 回归：编码输出被吞（kStreamGap）无键、不去重——两路 frame_id 同值时
+// 两次断档上报都必须生效（旧版 0x80000000u|frame_id 魔法位键会吞掉第二路）
+static void test_sched_stream_gap_no_dedup() {
+  FrameScheduler s;
+  s.on_connect();
+  s.on_frame_submit(FrameIdx{0});
+
+  SchedStep g1 = s.on_stream_gap();  // road 输出被吞
+  CHECK(g1.drop_detected && g1.request_keyframe_road && g1.request_keyframe_wide);
+  SchedStep g2 = s.on_stream_gap();  // wide 同 frame_id 输出同样被吞：不得被去重压掉
+  CHECK(g2.drop_detected && g2.request_keyframe_road && g2.request_keyframe_wide);
 }
 
 // frame_idx 是时间槽：提交序出现空槽不恢复，GOP 相位仍按实际提交帧数推进
@@ -135,7 +148,7 @@ static void test_sched_submit_time_slot_hole() {
   s.on_connect();
   const uint32_t slots[] = {0, 1, 3, 5, 6, 8, 9, 11, 12, 13, 15};
   for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
-    SchedStep step = s.on_frame_submit(slots[i]);
+    SchedStep step = s.on_frame_submit(FrameIdx{slots[i]});
     if (i == 0) {
       CHECK(step.road_idr && step.wide_idr);
     } else if (i == 10) {
@@ -152,11 +165,11 @@ static void test_sched_sent_time_slot_hole() {
   FrameScheduler s;
   s.on_connect();
 
-  CHECK(!s.on_frame_sent(0).any());
-  CHECK(!s.on_frame_sent(1).any());
-  CHECK(!s.on_frame_sent(3).any());  // 时间槽 2 为空，但码流没有断
-  CHECK(!s.on_frame_sent(4).any());
-  CHECK(!s.on_frame_sent(6).any());
+  CHECK(!s.on_frame_sent(FrameIdx{0}).any());
+  CHECK(!s.on_frame_sent(FrameIdx{1}).any());
+  CHECK(!s.on_frame_sent(FrameIdx{3}).any());  // 时间槽 2 为空，但码流没有断
+  CHECK(!s.on_frame_sent(FrameIdx{4}).any());
+  CHECK(!s.on_frame_sent(FrameIdx{6}).any());
 }
 
 // 50 ms 一个时间槽；SOF 100 ms 跳跃对应 +2。重连重置时间基准。
@@ -165,22 +178,22 @@ static void test_frame_indexer() {
   constexpr uint64_t ms = 1000000ULL;
   FrameIndexer indexer;
 
-  uint32_t idx = indexer.index(t0);
-  CHECK(idx == 0);
-  uint32_t prev = idx;
+  FrameIdx idx = indexer.index(t0);
+  CHECK(u32(idx) == 0);
+  uint32_t prev = u32(idx);
   idx = indexer.index(t0 + 50 * ms);
-  CHECK(idx == prev + 1);
-  prev = idx;
+  CHECK(u32(idx) == prev + 1);
+  prev = u32(idx);
   idx = indexer.index(t0 + 150 * ms);  // 相邻 SOF 相差 100 ms，跨两个槽
-  CHECK(idx == prev + 2);
-  prev = idx;
+  CHECK(u32(idx) == prev + 2);
+  prev = u32(idx);
   idx = indexer.index(t0 + 200 * ms);
-  CHECK(idx == prev + 1);
+  CHECK(u32(idx) == prev + 1);
 
   // 连接重置后，首个被编号 SOF 成为新基准，即使绝对 SOF 已向前很久也从 0 起。
   indexer.reset();
-  CHECK(indexer.index(t0 + 10000 * ms) == 0);
-  CHECK(indexer.index(t0 + 10050 * ms) == 1);
+  CHECK(indexer.index(t0 + 10000 * ms) == FrameIdx{0});
+  CHECK(indexer.index(t0 + 10050 * ms) == FrameIdx{1});
 }
 
 // =====================================================================
@@ -240,9 +253,9 @@ static bgm1::FrameHeader test_hdr() {
 static void open_head(UplinkSender& s, uint32_t ep, uint32_t idx,
                       const uint8_t* road, size_t road_len,
                       const uint8_t* wide, size_t wide_len) {
-  s.submit_road(ep, idx, test_hdr(), road, road_len, /*road_actual=*/true,
+  s.submit_road(ConnEpoch{ep}, FrameIdx{idx}, test_hdr(), road, road_len, /*road_actual=*/true,
                 /*road_pred=*/true, /*wide_pred=*/true);
-  s.submit_wide(ep, idx, wide, wide_len, /*wide_actual=*/true);
+  s.submit_wide(ConnEpoch{ep}, FrameIdx{idx}, wide, wide_len, /*wide_actual=*/true);
 }
 
 // 出包即发：序列头门放行后（头对 = 预测+实测双路 IDR），中流 road 即可先发 chunk1，
@@ -252,7 +265,7 @@ static void test_sender_road_out_goes() {
   uint64_t now = 1000;
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, e.frame_idx, e.conn_epoch}); });
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
 
   CHECK(s.step());  // 建连
   CHECK(s.connected() && sock.connect_calls == 1);
@@ -281,13 +294,13 @@ static void test_sender_road_out_goes() {
   }
 
   // 中流（帧 1）：road 出包即发——chunk1 先走，未报 kFrameSent（wide 缺）
-  s.submit_road(evs[0].ep, 1, test_hdr(), road, sizeof road, false, false, false);
+  s.submit_road(ConnEpoch{evs[0].ep}, FrameIdx{1}, test_hdr(), road, sizeof road, false, false, false);
   CHECK(s.step());
   CHECK(sock.written.size() == bgm1::frame_wire_size(sizeof road, sizeof wide) +
                                bgm1::kFrameHdrSize + sizeof road);
   CHECK(evs.size() == 2);
 
-  s.submit_wide(evs[0].ep, 1, wide, sizeof wide, false);
+  s.submit_wide(ConnEpoch{evs[0].ep}, FrameIdx{1}, wide, sizeof wide, false);
   CHECK(s.step());
   CHECK(evs.size() == 3 && evs[2].ev == UplinkEvent::kFrameSent && evs[2].idx == 1);
 }
@@ -298,7 +311,7 @@ static void test_sender_flags() {
   uint64_t now = 0;
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, e.frame_idx, e.conn_epoch}); });
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
   s.step();
 
   const uint8_t p[3] = {1, 2, 3};
@@ -314,12 +327,12 @@ static void test_sender_flags() {
   CHECK(s.wide_idr_mismatches() == 0);
 
   // 预测 1 实际 0（误报风险）→ 计数
-  s.submit_road(1, 8, test_hdr(), p, sizeof p, false, false, true);
-  s.submit_wide(1, 8, p, sizeof p, false);
+  s.submit_road(ConnEpoch{1}, FrameIdx{8}, test_hdr(), p, sizeof p, false, false, true);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{8}, p, sizeof p, false);
   CHECK(s.wide_idr_mismatches() == 1);
   // 预测 0 实际 1（欠报无害）→ 也计数（口径：不符即计）
-  s.submit_road(1, 9, test_hdr(), p, sizeof p, false, false, false);
-  s.submit_wide(1, 9, p, sizeof p, true);
+  s.submit_road(ConnEpoch{1}, FrameIdx{9}, test_hdr(), p, sizeof p, false, false, false);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{9}, p, sizeof p, true);
   CHECK(s.wide_idr_mismatches() == 2);
 }
 
@@ -336,7 +349,7 @@ static void test_sender_queue_overwrite() {
   bool saw_drop = false;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
                  [&](const UplinkEventInfo& e) {
-                   evs.push_back({e.ev, e.frame_idx, e.conn_epoch});
+                   evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)});
                    if (e.ev == UplinkEvent::kNewConnection) {
                      connect_step = sched.on_connect();
                    } else if (e.ev == UplinkEvent::kDrop) {
@@ -354,35 +367,35 @@ static void test_sender_queue_overwrite() {
 
   sock.mode = FakeSock::kBlock;  // 写不动 → 头对帧 0 停在在途
   const uint8_t p[2] = {0xaa, 0xbb};
-  SchedStep s0 = sched.on_frame_submit(0);
+  SchedStep s0 = sched.on_frame_submit(FrameIdx{0});
   CHECK(s0.road_idr && s0.wide_idr);
   open_head(s, 1, 0, p, sizeof p, p, sizeof p);  // 头对开流
   s.step();  // queued → inflight，写阻塞
 
-  CHECK(!sched.on_frame_submit(1).any());
-  s.submit_road(1, 1, test_hdr(), p, sizeof p, false, false, false);
-  s.submit_wide(1, 1, p, sizeof p, false);
+  CHECK(!sched.on_frame_submit(FrameIdx{1}).any());
+  s.submit_road(ConnEpoch{1}, FrameIdx{1}, test_hdr(), p, sizeof p, false, false, false);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{1}, p, sizeof p, false);
   s.step();  // 进排队槽
   CHECK(evs.empty());
 
   // 新包覆盖排队槽 = 丢弃帧 1（kDrop，码流断档）→ 序列头门关门
-  CHECK(!sched.on_frame_submit(2).any());
-  s.submit_road(1, 2, test_hdr(), p, sizeof p, false, false, false);
+  CHECK(!sched.on_frame_submit(FrameIdx{2}).any());
+  s.submit_road(ConnEpoch{1}, FrameIdx{2}, test_hdr(), p, sizeof p, false, false, false);
   CHECK(evs.size() == 1 && evs[0].ev == UplinkEvent::kDrop && evs[0].idx == 1);
   CHECK(saw_drop && drop_step.drop_detected);
   CHECK(drop_step.request_keyframe_road && drop_step.request_keyframe_wide);
 
   // 替代帧 2 是 P 对 → 序列头门丢弃（kHeadBarrier），不得成为断档后首帧
-  s.submit_wide(1, 2, p, sizeof p, false);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{2}, p, sizeof p, false);
   s.step();
   CHECK(evs.size() == 2 && evs[1].ev == UplinkEvent::kHeadBarrier && evs[1].idx == 2);
 
   // 事件落状态机：断档/屏障后下一个提交对 = 双路 IDR（预测）
-  SchedStep after = sched.on_frame_submit(3);
+  SchedStep after = sched.on_frame_submit(FrameIdx{3});
   CHECK(after.road_idr && after.wide_idr);
 
   // 帧 1 的迟到包（如 wide）静默丢弃，不重建已丢帧
-  s.submit_wide(1, 1, p, sizeof p, false);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{1}, p, sizeof p, false);
   CHECK(evs.size() == 2);
 
   // 双路 IDR 对（帧 3）重新开流 → 通了以后发的是帧 0、帧 3
@@ -405,7 +418,7 @@ static void test_sender_stall_finish() {
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
                  [&](const UplinkEventInfo& e) {
-                   evs.push_back({e.ev, e.frame_idx, e.conn_epoch});
+                   evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)});
                    if (e.ev == UplinkEvent::kStall) {
                      // 假死时刻突然可写、但只能短写：补发必须连续推进直到发完（不撕裂）
                      sock.mode = FakeSock::kWrite;
@@ -443,7 +456,7 @@ static void test_sender_stall_truncate() {
   uint64_t now = 0;
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, e.frame_idx, e.conn_epoch}); });
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
   s.step();
   evs.clear();
 
@@ -470,7 +483,7 @@ static void test_sender_reconnect_linklost() {
   uint64_t now = 0;
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, e.frame_idx, e.conn_epoch}); });
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
   s.step();
   CHECK(evs.size() == 1 && evs[0].ev == UplinkEvent::kNewConnection && evs[0].ep == 1);
 
@@ -501,11 +514,11 @@ static void test_sender_submit_while_down() {
   uint64_t now = 0;
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, e.frame_idx, e.conn_epoch}); });
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
   const uint8_t p[2] = {1, 2};
 
-  s.submit_road(0, 0, test_hdr(), p, sizeof p, true, true, true);  // 未连接 → 丢
-  s.submit_wide(0, 0, p, sizeof p, true);
+  s.submit_road(ConnEpoch{0}, FrameIdx{0}, test_hdr(), p, sizeof p, true, true, true);  // 未连接 → 丢
+  s.submit_wide(ConnEpoch{0}, FrameIdx{0}, p, sizeof p, true);
   CHECK(evs.empty());
   CHECK(s.step());
   s.step();
@@ -529,7 +542,7 @@ static void test_sender_partial_writes() {
   uint64_t now = 0;
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, e.frame_idx, e.conn_epoch}); });
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
   s.step();
 
   const uint8_t road[10] = {0};
@@ -549,7 +562,7 @@ static void test_sender_write_error() {
   uint64_t now = 0;
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, e.frame_idx, e.conn_epoch}); });
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
   s.step();
 
   sock.mode = FakeSock::kErr;
@@ -793,13 +806,13 @@ static void test_pair_kill_does_not_recover() {
   PM::Actions killed = matcher.push(true, {3, t0 + 100000000ULL, 3});
   CHECK(killed.kill_road && killed.road_dead.frame_id == 2);
   // 对照 main.cc::place_frame：只为统计/日志编号，不调用 sched.on_frame_dropped。
-  CHECK(indexer.index(killed.road_dead.timestamp_sof) == 1);
+  CHECK(indexer.index(killed.road_dead.timestamp_sof) == FrameIdx{1});
 
   PM::Actions next = matcher.push(false, {5003, t0 + 100070000ULL, 4});
   CHECK(next.pair);
-  const uint32_t next_idx = indexer.index(next.road.timestamp_sof);
-  CHECK(next_idx == 2);
-  SchedStep next_submit = sched.on_frame_submit(next_idx);
+  const FrameIdx next_idx = indexer.index(next.road.timestamp_sof);
+  CHECK(u32(next_idx) == 2);
+  SchedStep next_submit = sched.on_frame_submit(FrameIdx{next_idx});
   CHECK(!next_submit.any());  // 配对杀帧没有插入新序列/request
 }
 
@@ -919,8 +932,8 @@ static void test_pair_rate_mismatch_sim() {
 
 static OutMeta mk_om(uint32_t frame_id, uint32_t frame_idx) {
   OutMeta om;
-  om.frame_id = frame_id;
-  om.frame_idx = frame_idx;
+  om.frame_id = CamFrameId{frame_id};
+  om.frame_idx = FrameIdx{frame_idx};
   return om;
 }
 
@@ -933,13 +946,13 @@ static void test_meta_cache_clear_then_stale_take() {
   m.push(mk_om(200, 0));  // 新序列头对（seq0）
   m.push(mk_om(201, 1));
 
-  MetaCache::Result r = m.take(100);  // 旧输出迟到
+  MetaCache::Result r = m.take(CamFrameId{100});  // 旧输出迟到
   CHECK(r.st == MetaTake::kStaleMiss && r.dead.empty());
 
-  r = m.take(200);  // 头对必须还在
-  CHECK(r.st == MetaTake::kHit && r.om.frame_id == 200 && r.om.frame_idx == 0);
-  r = m.take(201);
-  CHECK(r.st == MetaTake::kHit && r.om.frame_id == 201);
+  r = m.take(CamFrameId{200});  // 头对必须还在
+  CHECK(r.st == MetaTake::kHit && r.om.frame_id == CamFrameId{200} && r.om.frame_idx == FrameIdx{0});
+  r = m.take(CamFrameId{201});
+  CHECK(r.st == MetaTake::kHit && r.om.frame_id == CamFrameId{201});
 }
 
 // clear 后尚无新提交就来旧输出：kStaleMiss（不是断档）；比 front 旧同理
@@ -947,11 +960,11 @@ static void test_meta_cache_stale_classification() {
   MetaCache m;
   m.push(mk_om(50, 3));
   m.clear();
-  CHECK(m.take(50).st == MetaTake::kStaleMiss);  // clear 后无新提交
+  CHECK(m.take(CamFrameId{50}).st == MetaTake::kStaleMiss);  // clear 后无新提交
   m.push(mk_om(60, 0));
-  CHECK(m.take(59).st == MetaTake::kStaleMiss);  // 比 front 旧 = 已清/已弹
-  CHECK(m.take(60).st == MetaTake::kHit);
-  CHECK(m.take(60).st == MetaTake::kStaleMiss);  // 已弹的迟到输出
+  CHECK(m.take(CamFrameId{59}).st == MetaTake::kStaleMiss);  // 比 front 旧 = 已清/已弹
+  CHECK(m.take(CamFrameId{60}).st == MetaTake::kHit);
+  CHECK(m.take(CamFrameId{60}).st == MetaTake::kStaleMiss);  // 已弹的迟到输出
 }
 
 // 命中前缀死条目 = 输出被吞（断档），随命中返回；查无且非旧 = kGapMiss（断档）
@@ -960,19 +973,19 @@ static void test_meta_cache_dead_prefix_and_gap() {
   m.push(mk_om(10, 0));
   m.push(mk_om(11, 1));
   m.push(mk_om(12, 2));
-  MetaCache::Result r = m.take(12);
-  CHECK(r.st == MetaTake::kHit && r.om.frame_id == 12);
-  CHECK(r.dead.size() == 2 && r.dead[0].frame_id == 10 && r.dead[1].frame_id == 11);
+  MetaCache::Result r = m.take(CamFrameId{12});
+  CHECK(r.st == MetaTake::kHit && r.om.frame_id == CamFrameId{12});
+  CHECK(r.dead.size() == 2 && r.dead[0].frame_id == CamFrameId{10} && r.dead[1].frame_id == CamFrameId{11});
 
   // 死条目自己的输出迟到：已弹 = kStaleMiss（不重复上报）
-  CHECK(m.take(10).st == MetaTake::kStaleMiss);
+  CHECK(m.take(CamFrameId{10}).st == MetaTake::kStaleMiss);
 
   // 队内比 front 新却查无 = 输出被吞 = 断档
   m.push(mk_om(20, 3));
-  CHECK(m.take(21).st == MetaTake::kGapMiss);
+  CHECK(m.take(CamFrameId{21}).st == MetaTake::kGapMiss);
   // 关键回归：断档 miss 不弹队，幸存条目还在
-  r = m.take(20);
-  CHECK(r.st == MetaTake::kHit && r.om.frame_id == 20);
+  r = m.take(CamFrameId{20});
+  CHECK(r.st == MetaTake::kHit && r.om.frame_id == CamFrameId{20});
 }
 
 // =====================================================================
@@ -985,22 +998,22 @@ static void test_head_barrier_p_pair_dropped() {
   uint64_t now = 0;
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, e.frame_idx, e.conn_epoch}); });
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
   s.step();
   evs.clear();
 
   const uint8_t p[2] = {1, 2};
   // P 对（帧 0）：预测非 IDR → 不开流，什么字节都不许出
-  s.submit_road(1, 0, test_hdr(), p, sizeof p, false, false, false);
-  s.submit_wide(1, 0, p, sizeof p, false);
+  s.submit_road(ConnEpoch{1}, FrameIdx{0}, test_hdr(), p, sizeof p, false, false, false);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{0}, p, sizeof p, false);
   s.step();
   s.step();
   CHECK(sock.written.empty());
   CHECK(evs.size() == 1 && evs[0].ev == UplinkEvent::kHeadBarrier && evs[0].idx == 0);
 
   // 预测双 IDR 但实测 P（request 没落上）→ 同样丢弃（实测才是开流条件）
-  s.submit_road(1, 1, test_hdr(), p, sizeof p, false, true, true);
-  s.submit_wide(1, 1, p, sizeof p, false);
+  s.submit_road(ConnEpoch{1}, FrameIdx{1}, test_hdr(), p, sizeof p, false, true, true);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{1}, p, sizeof p, false);
   s.step();
   CHECK(sock.written.empty());
   CHECK(evs.size() == 2 && evs[1].ev == UplinkEvent::kHeadBarrier && evs[1].idx == 1);
@@ -1018,7 +1031,7 @@ static void test_head_barrier_after_stream_gap() {
   uint64_t now = 0;
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, e.frame_idx, e.conn_epoch}); });
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
   s.step();
   evs.clear();
 
@@ -1028,8 +1041,8 @@ static void test_head_barrier_after_stream_gap() {
   CHECK(evs.size() == 1 && evs[0].ev == UplinkEvent::kFrameSent);
 
   // 门开着：中流 P 对正常放行（road 出包即发）
-  s.submit_road(1, 1, test_hdr(), p, sizeof p, false, false, false);
-  s.submit_wide(1, 1, p, sizeof p, false);
+  s.submit_road(ConnEpoch{1}, FrameIdx{1}, test_hdr(), p, sizeof p, false, false, false);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{1}, p, sizeof p, false);
   s.step();
   s.step();
   CHECK(evs.size() == 2 && evs[1].ev == UplinkEvent::kFrameSent && evs[1].idx == 1);
@@ -1038,8 +1051,8 @@ static void test_head_barrier_after_stream_gap() {
   // 主线上报断档（编码输出缺帧/段长超限）→ 关门
   s.notify_stream_gap();
   // 断档后紧跟的 P 对（帧 2）不得成为首帧：整对丢弃
-  s.submit_road(1, 2, test_hdr(), p, sizeof p, false, false, false);
-  s.submit_wide(1, 2, p, sizeof p, false);
+  s.submit_road(ConnEpoch{1}, FrameIdx{2}, test_hdr(), p, sizeof p, false, false, false);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{2}, p, sizeof p, false);
   s.step();
   s.step();
   CHECK(sock.written.size() == before);
@@ -1057,9 +1070,9 @@ static void test_sender_conn_epoch_rejects_stale() {
   uint64_t now = 0;
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, e.frame_idx, e.conn_epoch}); });
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
   s.step();  // 连接代号 1
-  CHECK(evs[0].ep == 1 && s.conn_epoch() == 1);
+  CHECK(evs[0].ep == 1 && s.conn_epoch() == ConnEpoch{1});
   evs.clear();
 
   const uint8_t p[2] = {1, 2};
@@ -1073,8 +1086,8 @@ static void test_sender_conn_epoch_rejects_stale() {
   const size_t before = sock.written.size();
 
   // 旧代号提交（重连窗口内旧连接的编码在途输出）→ 静默丢弃
-  s.submit_road(1, 5, test_hdr(), p, sizeof p, true, true, true);
-  s.submit_wide(1, 5, p, sizeof p, true);
+  s.submit_road(ConnEpoch{1}, FrameIdx{5}, test_hdr(), p, sizeof p, true, true, true);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{5}, p, sizeof p, true);
   CHECK(s.stale_submits() == 2);
   s.step();
   s.step();
@@ -1094,7 +1107,7 @@ static void test_sender_dropped_window_not_cross_connection() {
   uint64_t now = 0;
   std::vector<Ev> evs;
   UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, e.frame_idx, e.conn_epoch}); });
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
   s.step();  // 连接代号 1
   evs.clear();
 
@@ -1106,10 +1119,10 @@ static void test_sender_dropped_window_not_cross_connection() {
 
   // 旧连接制造 tombstone：帧 1 进排队槽被帧 2 覆盖（kDrop id 1），替代帧 2 是
   // P 对 → 序列头门丢弃（kHeadBarrier id 2）
-  s.submit_road(1, 1, test_hdr(), p, sizeof p, false, false, false);
-  s.submit_wide(1, 1, p, sizeof p, false);
-  s.submit_road(1, 2, test_hdr(), p, sizeof p, false, false, false);
-  s.submit_wide(1, 2, p, sizeof p, false);
+  s.submit_road(ConnEpoch{1}, FrameIdx{1}, test_hdr(), p, sizeof p, false, false, false);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{1}, p, sizeof p, false);
+  s.submit_road(ConnEpoch{1}, FrameIdx{2}, test_hdr(), p, sizeof p, false, false, false);
+  s.submit_wide(ConnEpoch{1}, FrameIdx{2}, p, sizeof p, false);
   CHECK(evs.size() == 2 && evs[0].ev == UplinkEvent::kDrop && evs[0].idx == 1 &&
         evs[1].ev == UplinkEvent::kHeadBarrier && evs[1].idx == 2);
 
@@ -1122,12 +1135,12 @@ static void test_sender_dropped_window_not_cross_connection() {
   evs.clear();
 
   // 新连接 frame_idx 重新编号：id 1/2 是正常新帧，不得被旧 tombstone 静默吃掉
-  s.submit_road(2, 1, test_hdr(), p, sizeof p, false, false, false);
-  s.submit_wide(2, 1, p, sizeof p, false);
+  s.submit_road(ConnEpoch{2}, FrameIdx{1}, test_hdr(), p, sizeof p, false, false, false);
+  s.submit_wide(ConnEpoch{2}, FrameIdx{1}, p, sizeof p, false);
   s.step();
   s.step();
-  s.submit_road(2, 2, test_hdr(), p, sizeof p, false, false, false);
-  s.submit_wide(2, 2, p, sizeof p, false);
+  s.submit_road(ConnEpoch{2}, FrameIdx{2}, test_hdr(), p, sizeof p, false, false, false);
+  s.submit_wide(ConnEpoch{2}, FrameIdx{2}, p, sizeof p, false);
   s.step();
   s.step();
   CHECK(s.stale_submits() == 0);
@@ -1143,6 +1156,7 @@ int main() {
   test_sched_gop();
   test_sched_drop();
   test_sched_drop_dedup();
+  test_sched_stream_gap_no_dedup();
   test_sched_submit_time_slot_hole();
   test_sched_sent_time_slot_hole();
   test_frame_indexer();
