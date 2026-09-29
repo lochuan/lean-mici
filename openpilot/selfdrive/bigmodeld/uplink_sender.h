@@ -111,8 +111,11 @@ class UplinkSender {
   uint64_t stale_submits() const;        // 旧连接代号的迟到提交（静默丢弃）
   ConnEpoch conn_epoch() const;      // 当前连接代号（kNewConnection 事件同值）
   // 发送段耗时样本（17 号）：进入在途 → 整帧写完（含等 wide 包与 TCP 背压），ms。
-  // 读写都在 mtx_ 内（事件回调持锁访问安全）。
-  const std::vector<double>& send_samples() const { return send_ms_; }
+  // 滑动窗口（容量 kSendSampleMax）；返回锁内拷贝，调用方勿持其他锁（锁序 sender.mtx 最先）。
+  std::vector<double> send_samples() const;
+  uint64_t frames_sent() const;      // 整帧发完计数（报表每千帧触发用）
+
+  static constexpr size_t kSendSampleMax = 4096;  // 发送段样本窗口上限
 
  private:
   struct OutFrame {
@@ -134,6 +137,8 @@ class UplinkSender {
   OutFrame* find_or_create_locked(FrameIdx frame_idx);
   void drop_connection_locked();
   void try_finish_inflight_locked();
+  // 整帧写完时记发送段样本 + 计数（17 号埋点；样本时点 = 写完那一刻，含写入耗时）
+  void record_send_sample_locked();
   // 序列头门：排队帧两路到齐即裁决——预测+实测双 IDR 开门，否则整对丢弃（kHeadBarrier）
   void resolve_head_gate_locked();
   // 已丢帧登记（残包静默丢弃，不重复上报）
@@ -164,7 +169,8 @@ class UplinkSender {
   uint64_t last_progress_ms_ = 0;
   uint64_t wide_idr_mismatches_ = 0;
   uint64_t stale_submits_ = 0;
-  std::vector<double> send_ms_;  // 发送段耗时样本（17 号，ms）
+  std::vector<double> send_ms_;  // 发送段耗时样本（17 号，ms，滑动窗口 kSendSampleMax）
+  uint64_t frames_sent_ = 0;     // 整帧发完计数
 
   // 已丢帧 frame_idx 小窗口（残包/迟到包静默丢弃，避免重复上报 kHeadBarrier）
   static constexpr int kDroppedWindow = 32;

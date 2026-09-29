@@ -110,7 +110,7 @@ clang++ -std=c++17 -O1 test_bigmodeld.cc frame_codec.cpp frame_meta.cpp \
 MetaCache（查不到不弹队、clean2 回归、miss 分类）、序列头门（开门条件/整对丢弃/断档后首帧双 IDR）、
 连接代号（重连窗口旧提交静默拒）、
 发送器（假 socket/假时钟：出包即发、覆盖丢弃、假死发完/截断、重连、kLinkLost 升级、迟到
-包静默丢、部分写不撕裂）、warp golden ≤1e-5、MetaProvider、ReplyTracker、frame_codec
+包静默丢、部分写不撕裂、发送段样本=写完时点/滑动窗口）、warp golden ≤1e-5、MetaProvider、ReplyTracker、frame_codec
 往返与坏输入。golden 表生成（输出粘进 test_bigmodeld.cc）：
 
 ```sh

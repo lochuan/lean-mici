@@ -144,7 +144,7 @@ void UplinkSender::try_finish_inflight_locked() {
   if (!has_inflight_) return;
   // 写得动就发完（含连续部分写，不撕裂），写不动/写错才截断（drop_connection_locked 清残帧）
   if (write_out_locked(inflight_, 0, false) == WriteState::kDone) {
-    send_ms_.push_back(double(now_() - inflight_.t_inflight_ms));  // 发送段样本（17 号）
+    record_send_sample_locked();
     FrameIdx idx = inflight_.frame_idx;
     has_inflight_ = false;
     emit_locked(UplinkEvent::kFrameSent, idx);
@@ -173,6 +173,16 @@ UplinkSender::WriteState UplinkSender::write_out_locked(OutFrame& f, uint64_t no
   }
 }
 
+void UplinkSender::record_send_sample_locked() {
+  // 样本时点 = 整帧写完那一刻（17 号口径：在途起点 → 整帧写完，写入耗时计入）
+  frames_sent_ += 1;
+  // ponytail: 满则丢前一半 ≈ 最近 2–4k 帧滑动窗口；要全量长跑精确分位再改蓄水池采样
+  if (send_ms_.size() >= kSendSampleMax) {
+    send_ms_.erase(send_ms_.begin(), send_ms_.begin() + send_ms_.size() / 2);
+  }
+  send_ms_.push_back(double(now_() - inflight_.t_inflight_ms));
+}
+
 bool UplinkSender::step() {
   uint64_t now = now_();
 
@@ -199,7 +209,7 @@ bool UplinkSender::step() {
       const size_t before = inflight_.sent1 + inflight_.sent2;
       WriteState ws = write_out_locked(inflight_, now, true);
       if (ws == WriteState::kDone) {
-        send_ms_.push_back(double(now - inflight_.t_inflight_ms));  // 发送段样本（17 号）
+        record_send_sample_locked();
         has_inflight_ = false;
         emit_locked(UplinkEvent::kFrameSent, idx);
         return true;
@@ -279,6 +289,16 @@ uint64_t UplinkSender::wide_idr_mismatches() const {
 uint64_t UplinkSender::stale_submits() const {
   std::lock_guard<std::mutex> lk(mtx_);
   return stale_submits_;
+}
+
+std::vector<double> UplinkSender::send_samples() const {
+  std::lock_guard<std::mutex> lk(mtx_);
+  return send_ms_;
+}
+
+uint64_t UplinkSender::frames_sent() const {
+  std::lock_guard<std::mutex> lk(mtx_);
+  return frames_sent_;
 }
 
 // ---- ReplyTracker ----

@@ -206,6 +206,7 @@ struct FakeSock : public UplinkSocket {
   int connect_calls = 0;
   Mode mode = kWrite;
   size_t max_write = (size_t)-1;  // 每次 write_some 最多写多少（模拟部分写）
+  std::function<void()> on_write;  // 每次成功写出后回调（推进假时钟模拟写入耗时）
   std::vector<uint8_t> written;
   bool closed = false;
 
@@ -220,6 +221,7 @@ struct FakeSock : public UplinkSocket {
     if (mode == kErr) return -1;
     size_t n = std::min(len, max_write);
     written.insert(written.end(), data, data + n);
+    if (on_write) on_write();
     return (int)n;
   }
   int read_some(uint8_t* data, size_t len) override {
@@ -573,6 +575,44 @@ static void test_sender_write_error() {
   sock.mode = FakeSock::kWrite;
   CHECK(s.step());
   CHECK(s.connected());
+}
+
+// 发送段耗时样本（17 号）：样本时点 = 整帧写完（写入耗时计入，不是 step 入口时点）；
+// 窗口有界（kSendSampleMax），frames_sent 照常累计
+static void test_sender_send_samples() {
+  FakeSock sock;
+  uint64_t now = 1000;
+  std::vector<Ev> evs;
+  UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
+                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
+  CHECK(s.step());  // 建连
+  CHECK(s.send_samples().empty() && s.frames_sent() == 0);
+
+  // 头对停在在途（写阻塞）：计时起点 = 1000
+  sock.mode = FakeSock::kBlock;
+  const uint8_t p[2] = {0xaa, 0xbb};
+  open_head(s, 1, 0, p, sizeof p, p, sizeof p);
+  CHECK(s.step());
+
+  // 写得动：每次 write_some 假时钟 +3 ms（chunk1/chunk2 各一次）→ 样本 = 6 ms。
+  // 完成时点若取自 step 入口（修复前），样本恒 0——这里断言 > 0 钉死口径
+  sock.mode = FakeSock::kWrite;
+  sock.on_write = [&] { now += 3; };
+  CHECK(s.step());
+  sock.on_write = nullptr;
+  CHECK(s.frames_sent() == 1);
+  std::vector<double> v = s.send_samples();
+  CHECK(v.size() == 1 && v[0] > 0.0);
+  CHECK_NEAR(v[0], 6.0, 1e-9);
+
+  // 窗口有界：灌 5000 帧后不超上限、也不至于清空
+  for (uint32_t i = 1; i <= 5000; i++) {
+    open_head(s, 1, i, p, sizeof p, p, sizeof p);
+    s.step();
+  }
+  CHECK(s.frames_sent() == 5001);
+  v = s.send_samples();
+  CHECK(v.size() <= UplinkSender::kSendSampleMax && v.size() > UplinkSender::kSendSampleMax / 2);
 }
 
 // =====================================================================
@@ -1170,6 +1210,7 @@ int main() {
   test_sender_submit_while_down();
   test_sender_partial_writes();
   test_sender_write_error();
+  test_sender_send_samples();
 
   test_reply_tracker();
 
