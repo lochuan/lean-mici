@@ -1,8 +1,23 @@
-# big_model 纯逻辑单测（04 号 C+D）：outputs[0:2066) 解析、L̂ 估计、交叉淡入。
+# big_model 纯逻辑单测（04 号 C+D）：outputs[0:2066) 解析、L̂ 估计、交叉淡入、bigModelReply schema。
 # 跑法：pytest openpilot/selfdrive/modeld/tests/test_big_model.py
 import numpy as np
 
 from openpilot.selfdrive.modeld.big_model import BIG_OUTPUT_SLICES, parse_big_outputs, LatencyEstimator, SourceBlender
+
+
+def test_big_model_reply_schema():
+  # C-1：custom.capnp 预留槽位改名 bigModelReply，字段与 BGM1 REPLY 线布局一一对应
+  import openpilot.cereal.messaging as messaging
+  msg = messaging.new_message('bigModelReply')
+  b = msg.bigModelReply
+  b.frameIdx = 7
+  b.tEof = 123456789
+  b.flags = 3
+  b.outputs = [0.5] * 2066
+  b.telemetry = [1, 2, 3, 4]
+  assert b.frameIdx == 7 and b.tEof == 123456789 and b.flags == 3
+  assert len(b.outputs) == 2066 and b.outputs[2065] == 0.5
+  assert list(b.telemetry) == [1, 2, 3, 4]
 
 
 def test_big_output_slices_cover_abi():

@@ -470,7 +470,13 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   }
 }
 
-struct CustomReserved10 @0xcb9fd56c7057593a {
+struct BigModelReply @0xcb9fd56c7057593a {
+  # 04 号：BGM1 REPLY → modeld 转交（字段与 REPLY 线布局一一对应，见 bigmodeld/frame_codec.h）
+  frameIdx @0 :UInt32;
+  tEof @1 :UInt64;
+  flags @2 :UInt16;
+  outputs @3 :List(Float32);   # outputs[0:2066)
+  telemetry @4 :List(UInt32);  # recv/prep/htp/total µs
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {

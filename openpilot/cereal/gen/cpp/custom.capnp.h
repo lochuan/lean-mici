@@ -845,15 +845,15 @@ struct ModelDataV2SP {
   };
 };
 
-struct CustomReserved10 {
-  CustomReserved10() = delete;
+struct BigModelReply {
+  BigModelReply() = delete;
 
   class Reader;
   class Builder;
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(cb9fd56c7057593a, 0, 0)
+    CAPNP_DECLARE_STRUCT_HEADER(cb9fd56c7057593a, 2, 2)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -4627,9 +4627,9 @@ private:
 };
 #endif  // !CAPNP_LITE
 
-class CustomReserved10::Reader {
+class BigModelReply::Reader {
 public:
-  typedef CustomReserved10 Reads;
+  typedef BigModelReply Reads;
 
   Reader() = default;
   inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
@@ -4644,6 +4644,18 @@ public:
   }
 #endif  // !CAPNP_LITE
 
+  inline  ::uint32_t getFrameIdx() const;
+
+  inline  ::uint64_t getTEof() const;
+
+  inline  ::uint16_t getFlags() const;
+
+  inline bool hasOutputs() const;
+  inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Reader getOutputs() const;
+
+  inline bool hasTelemetry() const;
+  inline  ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>::Reader getTelemetry() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -4656,9 +4668,9 @@ private:
   friend class ::capnp::Orphanage;
 };
 
-class CustomReserved10::Builder {
+class BigModelReply::Builder {
 public:
-  typedef CustomReserved10 Builds;
+  typedef BigModelReply Builds;
 
   Builder() = delete;  // Deleted to discourage incorrect usage.
                        // You can explicitly initialize to nullptr instead.
@@ -4672,6 +4684,31 @@ public:
   inline ::kj::StringTree toString() const { return asReader().toString(); }
 #endif  // !CAPNP_LITE
 
+  inline  ::uint32_t getFrameIdx();
+  inline void setFrameIdx( ::uint32_t value);
+
+  inline  ::uint64_t getTEof();
+  inline void setTEof( ::uint64_t value);
+
+  inline  ::uint16_t getFlags();
+  inline void setFlags( ::uint16_t value);
+
+  inline bool hasOutputs();
+  inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Builder getOutputs();
+  inline void setOutputs( ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setOutputs(::kj::ArrayPtr<const float> value);
+  inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Builder initOutputs(unsigned int size);
+  inline void adoptOutputs(::capnp::Orphan< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>> disownOutputs();
+
+  inline bool hasTelemetry();
+  inline  ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>::Builder getTelemetry();
+  inline void setTelemetry( ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setTelemetry(::kj::ArrayPtr<const  ::uint32_t> value);
+  inline  ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>::Builder initTelemetry(unsigned int size);
+  inline void adoptTelemetry(::capnp::Orphan< ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>> disownTelemetry();
+
 private:
   ::capnp::_::StructBuilder _builder;
   template <typename, ::capnp::Kind>
@@ -4682,9 +4719,9 @@ private:
 };
 
 #if !CAPNP_LITE
-class CustomReserved10::Pipeline {
+class BigModelReply::Pipeline {
 public:
-  typedef CustomReserved10 Pipelines;
+  typedef BigModelReply Pipelines;
 
   inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
   inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
@@ -8951,6 +8988,124 @@ inline bool ModelDataV2SP::Builder::getRightLaneChangeEdgeBlock() {
 inline void ModelDataV2SP::Builder::setRightLaneChangeEdgeBlock(bool value) {
   _builder.setDataField<bool>(
       ::capnp::bounded<17>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint32_t BigModelReply::Reader::getFrameIdx() const {
+  return _reader.getDataField< ::uint32_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint32_t BigModelReply::Builder::getFrameIdx() {
+  return _builder.getDataField< ::uint32_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void BigModelReply::Builder::setFrameIdx( ::uint32_t value) {
+  _builder.setDataField< ::uint32_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t BigModelReply::Reader::getTEof() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t BigModelReply::Builder::getTEof() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void BigModelReply::Builder::setTEof( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint16_t BigModelReply::Reader::getFlags() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t BigModelReply::Builder::getFlags() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void BigModelReply::Builder::setFlags( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool BigModelReply::Reader::hasOutputs() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool BigModelReply::Builder::hasOutputs() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Reader BigModelReply::Reader::getOutputs() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Builder BigModelReply::Builder::getOutputs() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void BigModelReply::Builder::setOutputs( ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline void BigModelReply::Builder::setOutputs(::kj::ArrayPtr<const float> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Builder BigModelReply::Builder::initOutputs(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void BigModelReply::Builder::adoptOutputs(
+    ::capnp::Orphan< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>> BigModelReply::Builder::disownOutputs() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool BigModelReply::Reader::hasTelemetry() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool BigModelReply::Builder::hasTelemetry() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>::Reader BigModelReply::Reader::getTelemetry() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>::Builder BigModelReply::Builder::getTelemetry() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void BigModelReply::Builder::setTelemetry( ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline void BigModelReply::Builder::setTelemetry(::kj::ArrayPtr<const  ::uint32_t> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>::Builder BigModelReply::Builder::initTelemetry(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void BigModelReply::Builder::adoptTelemetry(
+    ::capnp::Orphan< ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>> BigModelReply::Builder::disownTelemetry() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::uint32_t,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
 
 }  // namespace

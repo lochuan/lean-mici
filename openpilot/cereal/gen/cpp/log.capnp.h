@@ -3383,7 +3383,7 @@ struct Event {
     ALERT_DEBUG,
     ONROAD_EVENTS,
     TOUCH,
-    CUSTOM_RESERVED10,
+    BIG_MODEL_REPLY,
     CUSTOM_RESERVED11,
     CUSTOM_RESERVED12,
     CUSTOM_RESERVED13,
@@ -23962,9 +23962,9 @@ public:
   inline bool hasTouch() const;
   inline  ::capnp::List< ::cereal::Touch,  ::capnp::Kind::STRUCT>::Reader getTouch() const;
 
-  inline bool isCustomReserved10() const;
-  inline bool hasCustomReserved10() const;
-  inline  ::cereal::CustomReserved10::Reader getCustomReserved10() const;
+  inline bool isBigModelReply() const;
+  inline bool hasBigModelReply() const;
+  inline  ::cereal::BigModelReply::Reader getBigModelReply() const;
 
   inline bool isCustomReserved11() const;
   inline bool hasCustomReserved11() const;
@@ -25145,13 +25145,13 @@ public:
   inline void adoptTouch(::capnp::Orphan< ::capnp::List< ::cereal::Touch,  ::capnp::Kind::STRUCT>>&& value);
   inline ::capnp::Orphan< ::capnp::List< ::cereal::Touch,  ::capnp::Kind::STRUCT>> disownTouch();
 
-  inline bool isCustomReserved10();
-  inline bool hasCustomReserved10();
-  inline  ::cereal::CustomReserved10::Builder getCustomReserved10();
-  inline void setCustomReserved10( ::cereal::CustomReserved10::Reader value);
-  inline  ::cereal::CustomReserved10::Builder initCustomReserved10();
-  inline void adoptCustomReserved10(::capnp::Orphan< ::cereal::CustomReserved10>&& value);
-  inline ::capnp::Orphan< ::cereal::CustomReserved10> disownCustomReserved10();
+  inline bool isBigModelReply();
+  inline bool hasBigModelReply();
+  inline  ::cereal::BigModelReply::Builder getBigModelReply();
+  inline void setBigModelReply( ::cereal::BigModelReply::Reader value);
+  inline  ::cereal::BigModelReply::Builder initBigModelReply();
+  inline void adoptBigModelReply(::capnp::Orphan< ::cereal::BigModelReply>&& value);
+  inline ::capnp::Orphan< ::cereal::BigModelReply> disownBigModelReply();
 
   inline bool isCustomReserved11();
   inline bool hasCustomReserved11();
@@ -60549,57 +60549,57 @@ inline ::capnp::Orphan< ::capnp::List< ::cereal::Touch,  ::capnp::Kind::STRUCT>>
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 
-inline bool Event::Reader::isCustomReserved10() const {
-  return which() == Event::CUSTOM_RESERVED10;
+inline bool Event::Reader::isBigModelReply() const {
+  return which() == Event::BIG_MODEL_REPLY;
 }
-inline bool Event::Builder::isCustomReserved10() {
-  return which() == Event::CUSTOM_RESERVED10;
+inline bool Event::Builder::isBigModelReply() {
+  return which() == Event::BIG_MODEL_REPLY;
 }
-inline bool Event::Reader::hasCustomReserved10() const {
-  if (which() != Event::CUSTOM_RESERVED10) return false;
+inline bool Event::Reader::hasBigModelReply() const {
+  if (which() != Event::BIG_MODEL_REPLY) return false;
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline bool Event::Builder::hasCustomReserved10() {
-  if (which() != Event::CUSTOM_RESERVED10) return false;
+inline bool Event::Builder::hasBigModelReply() {
+  if (which() != Event::BIG_MODEL_REPLY) return false;
   return !_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline  ::cereal::CustomReserved10::Reader Event::Reader::getCustomReserved10() const {
-  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED10),
+inline  ::cereal::BigModelReply::Reader Event::Reader::getBigModelReply() const {
+  KJ_IREQUIRE((which() == Event::BIG_MODEL_REPLY),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved10>::get(_reader.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::BigModelReply>::get(_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline  ::cereal::CustomReserved10::Builder Event::Builder::getCustomReserved10() {
-  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED10),
+inline  ::cereal::BigModelReply::Builder Event::Builder::getBigModelReply() {
+  KJ_IREQUIRE((which() == Event::BIG_MODEL_REPLY),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved10>::get(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::BigModelReply>::get(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void Event::Builder::setCustomReserved10( ::cereal::CustomReserved10::Reader value) {
+inline void Event::Builder::setBigModelReply( ::cereal::BigModelReply::Reader value) {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED10);
-  ::capnp::_::PointerHelpers< ::cereal::CustomReserved10>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::BIG_MODEL_REPLY);
+  ::capnp::_::PointerHelpers< ::cereal::BigModelReply>::set(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), value);
 }
-inline  ::cereal::CustomReserved10::Builder Event::Builder::initCustomReserved10() {
+inline  ::cereal::BigModelReply::Builder Event::Builder::initBigModelReply() {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED10);
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved10>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::BIG_MODEL_REPLY);
+  return ::capnp::_::PointerHelpers< ::cereal::BigModelReply>::init(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void Event::Builder::adoptCustomReserved10(
-    ::capnp::Orphan< ::cereal::CustomReserved10>&& value) {
+inline void Event::Builder::adoptBigModelReply(
+    ::capnp::Orphan< ::cereal::BigModelReply>&& value) {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED10);
-  ::capnp::_::PointerHelpers< ::cereal::CustomReserved10>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::BIG_MODEL_REPLY);
+  ::capnp::_::PointerHelpers< ::cereal::BigModelReply>::adopt(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::cereal::CustomReserved10> Event::Builder::disownCustomReserved10() {
-  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED10),
+inline ::capnp::Orphan< ::cereal::BigModelReply> Event::Builder::disownBigModelReply() {
+  KJ_IREQUIRE((which() == Event::BIG_MODEL_REPLY),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved10>::disown(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::BigModelReply>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 

@@ -39,6 +39,7 @@
 #include "common/params.h"
 #include "common/timing.h"
 #include "common/util.h"
+#include "cereal/messaging/messaging.h"
 #include "system/loggerd/encoder/v4l_encoder.h"
 #include "system/loggerd/loggerd.h"
 
@@ -339,7 +340,19 @@ class Bigmodeld {
             break;
           }
           tracker_.on_reply(r);
-          // TODO(04 号)：outputs[0:2066) 与遥测经 msgq 转交 modeld
+          // 04 号 C：REPLY 经 msgq 转交 modeld（outputs[0:2066) 与遥测原样镜像，
+          // 逐帧都发——App 侧解码跳帧的全零 outputs 也发，落回小模型由 modeld 判）
+          MessageBuilder msg;
+          auto evt = msg.initEvent();
+          auto br = evt.initBigModelReply();
+          br.setFrameIdx(r.frame_idx);
+          br.setTEof(r.t_eof);
+          br.setFlags(r.flags);
+          auto outs = br.initOutputs(bgm1::kReplyOutputsCount);
+          for (size_t i = 0; i < bgm1::kReplyOutputsCount; i++) outs.set(i, r.outputs[i]);
+          auto tel = br.initTelemetry(bgm1::kReplyTelemetryCount);
+          for (size_t i = 0; i < bgm1::kReplyTelemetryCount; i++) tel.set(i, r.telemetry[i]);
+          pm_.send("bigModelReply", msg);
         } else {
           bgm1::ErrMsg e;
           if (bgm1::parse_err(buf.data(), need, &e) == bgm1::Err::kOk) {
@@ -647,6 +660,7 @@ class Bigmodeld {
   TcpSocket sock_;
   std::unique_ptr<UplinkSender> sender_;
   ReplyTracker tracker_;
+  PubMaster pm_{{"bigModelReply"}};  // 04 号 C：REPLY 经 msgq 转交 modeld
 
   std::mutex state_mtx_;
   FrameScheduler sched_;
