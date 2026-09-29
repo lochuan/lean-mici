@@ -462,6 +462,10 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   laneTurnDirection @0 :TurnDirection;
   leftLaneChangeEdgeBlock @1 :Bool;
   rightLaneChangeEdgeBlock @2 :Bool;
+  # 04 号 C-2：大模型输入元数据上行（bigmodeld 帧头 desire/action_t 的来源，
+  # 模型权威在 modeld，research/02 §5.5）
+  bigActionT @3 :List(Float32);  # [lat, long] 秒，chestnut 公式（research/02 §4）
+  desireClass @4 :UInt8;         # DH.desire 电平（log.Desire 索引），bigmodeld 生成 pulse 边沿
 
   enum TurnDirection {
     none @0;

@@ -20,6 +20,16 @@ def test_big_model_reply_schema():
   assert list(b.telemetry) == [1, 2, 3, 4]
 
 
+def test_model_data_v2sp_meta_schema():
+  # C-2：ModelDataV2SP 扩 bigActionT/desireClass（modeld → bigmodeld 元数据上行）
+  import openpilot.cereal.messaging as messaging
+  sp = messaging.new_message('modelDataV2SP').modelDataV2SP
+  sp.bigActionT = [0.125, 0.45]
+  sp.desireClass = 3
+  np.testing.assert_allclose(list(sp.bigActionT), [0.125, 0.45], rtol=1e-6)  # f32 往返
+  assert sp.desireClass == 3
+
+
 def test_big_output_slices_cover_abi():
   # MODEL_ABI §5：0-2066 无缝覆盖，hidden_state/pad 不在其中
   spans = sorted((s.start, s.stop) for s in BIG_OUTPUT_SLICES.values())

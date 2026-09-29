@@ -12,7 +12,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 | 文件 | 职责 |
 |---|---|
 | `frame_codec.{h,cpp}` | BGM1 线协议 FRAME/REPLY/ERR 编解码（与本仓库 `android/` 原样同源，勿改） |
-| `frame_meta.{h,cpp}` | 帧头元数据：warp 矩阵 C++ 复刻 + MetaProvider（标定喂 rpyCalib） |
+| `frame_meta.{h,cpp}` | 帧头元数据：warp 矩阵 C++ 复刻 + MetaProvider（标定喂 rpyCalib，modeld 喂 desire/action_t） |
 | `frame_scheduler.{h,cpp}` | I 帧/丢帧状态机（纯逻辑事件输出，调用方执行 request_keyframe） |
 | `meta_cache.h` | 编码输出查表（FIFO/路）：miss 分类（stale 静默 / gap=断档上报），查不到不弹队 |
 | `uplink_sender.{h,cpp}` | 发送/重连状态机（可注入 socket/时钟）+ ReplyTracker |

@@ -838,7 +838,7 @@ struct ModelDataV2SP {
 
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 1, 0)
+    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 1, 1)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -4564,6 +4564,11 @@ public:
 
   inline bool getRightLaneChangeEdgeBlock() const;
 
+  inline bool hasBigActionT() const;
+  inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Reader getBigActionT() const;
+
+  inline  ::uint8_t getDesireClass() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -4600,6 +4605,17 @@ public:
 
   inline bool getRightLaneChangeEdgeBlock();
   inline void setRightLaneChangeEdgeBlock(bool value);
+
+  inline bool hasBigActionT();
+  inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Builder getBigActionT();
+  inline void setBigActionT( ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setBigActionT(::kj::ArrayPtr<const float> value);
+  inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Builder initBigActionT(unsigned int size);
+  inline void adoptBigActionT(::capnp::Orphan< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>> disownBigActionT();
+
+  inline  ::uint8_t getDesireClass();
+  inline void setDesireClass( ::uint8_t value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -8988,6 +9004,58 @@ inline bool ModelDataV2SP::Builder::getRightLaneChangeEdgeBlock() {
 inline void ModelDataV2SP::Builder::setRightLaneChangeEdgeBlock(bool value) {
   _builder.setDataField<bool>(
       ::capnp::bounded<17>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool ModelDataV2SP::Reader::hasBigActionT() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool ModelDataV2SP::Builder::hasBigActionT() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Reader ModelDataV2SP::Reader::getBigActionT() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Builder ModelDataV2SP::Builder::getBigActionT() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void ModelDataV2SP::Builder::setBigActionT( ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline void ModelDataV2SP::Builder::setBigActionT(::kj::ArrayPtr<const float> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>::Builder ModelDataV2SP::Builder::initBigActionT(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void ModelDataV2SP::Builder::adoptBigActionT(
+    ::capnp::Orphan< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>> ModelDataV2SP::Builder::disownBigActionT() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<float,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline  ::uint8_t ModelDataV2SP::Reader::getDesireClass() const {
+  return _reader.getDataField< ::uint8_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint8_t ModelDataV2SP::Builder::getDesireClass() {
+  return _builder.getDataField< ::uint8_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void ModelDataV2SP::Builder::setDesireClass( ::uint8_t value) {
+  _builder.setDataField< ::uint8_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint32_t BigModelReply::Reader::getFrameIdx() const {

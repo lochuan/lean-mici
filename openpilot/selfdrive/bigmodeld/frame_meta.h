@@ -8,8 +8,9 @@
 //                       modeld.py:330,333 的 .astype(np.float32)）；
 //                       宿主 golden 对照 Python ≤1e-5（gen_warp_golden.py → test_bigmodeld.cc）
 //   traffic_convention = [1, 0]（lean modeld is_rhd=False 硬编码，modeld.py:321,336）
-//   desire[8]、action_t[2] 本票置零 —— TODO(04 号)：经 msgq 接 modeld 的 DesireHelper
-//     与 13 号延迟公式（权威在 modeld，本文件只留接缝）。
+//   desire[8] = modeld DesireHelper 电平（set_model_inputs 进）→ fill 转 pulse 边沿
+//     （MODEL_ABI §4.2：通道 0 恒 0、持续同 desire 只 pulse 一次）。
+//   action_t[2] = modeld chestnut 公式直通（13 号 / research/02 §4，权威在 modeld）。
 //
 // 纯逻辑（仅 std），宿主单测直接编译。
 
@@ -40,6 +41,10 @@ class MetaProvider {
   // extrinsicsCalibration.rpyCalib 更新时调用（任意线程）。
   void set_rpy(const float rpy[3]);
 
+  // modeld 上行元数据（04 号 C-2，modelDataV2SP）更新时调用（任意线程）：
+  // action_t = chestnut 公式（research/02 §4），desire_class = DH.desire 电平。
+  void set_model_inputs(const float action_t[2], uint8_t desire_class);
+
   // 生成一帧的头元数据。t_eof = road 帧 timestamp_eof（ns）。
   // 只填 t_eof/desire/traffic_convention/action_t/warp_*；flags/frame_idx/road_len/wide_len 归调用方。
   void fill(uint64_t t_eof, bgm1::FrameHeader* out) const;
@@ -51,4 +56,7 @@ class MetaProvider {
   float rpy_[3] = {0.f, 0.f, 0.f};
   float warp_road_[9] = {0};
   float warp_wide_[9] = {0};
+  float action_t_[2] = {0.f, 0.f};
+  uint8_t desire_class_ = 0;
+  mutable uint8_t prev_desire_class_ = 0;  // pulse 边沿 latch：每次 fill() 采样
 };

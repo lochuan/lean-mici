@@ -10,7 +10,7 @@
 // 线程与锁序（全文件统一，防死锁）：
 //   取帧×2（state_mtx：配对/状态机/索引 + 编码缓冲池）、编码器 dequeue×2（输出回调：
 //   meta 缓存 → sender.submit_*）、writer（sender.step）、REPLY reader（read_some →
-//   parse → ReplyTracker）、标定（SubMaster → MetaProvider.set_rpy）。
+//   parse → ReplyTracker）、标定/输入元数据（SubMaster → MetaProvider.set_rpy/set_model_inputs）。
 //   锁序：sender.mtx > state_mtx > {ev_mtx, meta 缓存, buf 池}（叶子锁，绝不反向嵌套）。
 //   sender 事件回调在其锁内触发 ⇒ 回调只记账 + 推事件队列（ev_mtx），状态机转移与
 //   request_keyframe 在下一次组帧前由 drain_events_locked() 按序执行（事件仍落在
@@ -368,17 +368,27 @@ class Bigmodeld {
     }
   }
 
-  // ===== 标定线程：extrinsicsCalibration.rpyCalib → warp =====
+  // ===== 标定/输入元数据线程：extrinsicsCalibration.rpyCalib + modelDataV2SP → 帧头 =====
   void calib_thread() {
-    SubMaster sm({"extrinsicsCalibration"});
+    SubMaster sm({"extrinsicsCalibration", "modelDataV2SP"});
     while (!do_exit) {
       sm.update(1000);
-      if (!sm.updated("extrinsicsCalibration")) continue;
-      auto c = sm["extrinsicsCalibration"].getExtrinsicsCalibration();
-      auto rpy = c.getRpyCalib();
-      if (rpy.size() == 3) {
-        float r[3] = {rpy[0], rpy[1], rpy[2]};
-        meta_.set_rpy(r);
+      if (sm.updated("extrinsicsCalibration")) {
+        auto c = sm["extrinsicsCalibration"].getExtrinsicsCalibration();
+        auto rpy = c.getRpyCalib();
+        if (rpy.size() == 3) {
+          float r[3] = {rpy[0], rpy[1], rpy[2]};
+          meta_.set_rpy(r);
+        }
+      }
+      // 04 号 C-2：modeld 权威元数据（电平采样，迟到 ≤2 帧按 04 号口径接受）
+      if (sm.updated("modelDataV2SP")) {
+        auto sp = sm["modelDataV2SP"].getModelDataV2SP();
+        auto at = sp.getBigActionT();
+        if (at.size() == 2) {
+          float a[2] = {at[0], at[1]};
+          meta_.set_model_inputs(a, sp.getDesireClass());
+        }
       }
     }
   }

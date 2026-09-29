@@ -39,6 +39,10 @@ SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
 LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
+# 04 号 C-2：大模型 action_t 用 chestnut 公式（bundle overrides 实测 lat=.1/long=.3，
+# research/02 §4），独立于上面的小模型口径（票面「小模型公式不变」）
+BIG_LAT_SMOOTH_SECONDS = 0.1
+BIG_LONG_SMOOTH_SECONDS = 0.3
 MIN_LAT_CONTROL_SPEED = 0.3
 
 
@@ -402,6 +406,12 @@ def main(demo=False):
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
+      # 04 号 C-2：大模型输入元数据上行（bigmodeld 帧头 desire/action_t 的来源）。
+      # action_t = chestnut 公式（lat 走 get_lat_delay，受 LagdToggle 控制；13 号/research/02 §4）；
+      # desireClass = DH.desire 电平，pulse 边沿由 bigmodeld 生成（msgq 电平采样不怕迟到漏沿）
+      mdv2sp_send.modelDataV2SP.bigActionT = [model.lat_delay + BIG_LAT_SMOOTH_SECONDS + frame_delay + action_delay,
+                                              CP.longitudinalActuatorDelay + BIG_LONG_SMOOTH_SECONDS + frame_delay + action_delay]
+      mdv2sp_send.modelDataV2SP.desireClass = DH.desire
 
       fill_driving_model_data(drivingdata_send, modelv2_send)
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, extrinsics_calibration_seen)

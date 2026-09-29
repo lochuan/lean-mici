@@ -116,14 +116,26 @@ void MetaProvider::set_rpy(const float rpy[3]) {
   recompute_locked();
 }
 
+void MetaProvider::set_model_inputs(const float action_t[2], uint8_t desire_class) {
+  std::lock_guard<std::mutex> lk(mtx_);
+  action_t_[0] = action_t[0];
+  action_t_[1] = action_t[1];
+  desire_class_ = desire_class;
+}
+
 void MetaProvider::fill(uint64_t t_eof, bgm1::FrameHeader* out) const {
   std::lock_guard<std::mutex> lk(mtx_);
   out->t_eof = t_eof;
-  for (int i = 0; i < 8; i++) out->desire[i] = 0.f;          // TODO(04 号)：modeld DesireHelper 经 msgq 接线
+  // desire 电平 → pulse 边沿（MODEL_ABI §4.2）：d!=0 且换值才 one-hot 一次，通道 0 恒 0。
+  // latch 每 fill 采样一次（fill=一帧模型执行输入，对齐上游 model.run() 内 prev_desire 语义）。
+  for (int i = 0; i < 8; i++) out->desire[i] = 0.f;
+  const uint8_t d = desire_class_;
+  if (d != 0 && d != prev_desire_class_ && d < 8) out->desire[d] = 1.f;
+  prev_desire_class_ = d;
   out->traffic_convention[0] = 1.f;                           // lean modeld is_rhd=False → [1, 0]
   out->traffic_convention[1] = 0.f;
-  out->action_t[0] = 0.f;                                     // TODO(04 号)：13 号延迟公式经 msgq 接线
-  out->action_t[1] = 0.f;
+  out->action_t[0] = action_t_[0];
+  out->action_t[1] = action_t_[1];
   std::memcpy(out->warp_road, warp_road_, sizeof warp_road_);
   std::memcpy(out->warp_wide, warp_wide_, sizeof warp_wide_);
 }

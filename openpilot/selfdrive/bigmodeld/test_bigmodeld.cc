@@ -825,6 +825,56 @@ static void test_meta_provider() {
   CHECK(h.t_eof == 43);
 }
 
+// 04 号 C-2：modeld 上行元数据（modelDataV2SP）经 MetaProvider 进帧头——
+// action_t 直通 + desire 电平→pulse 边沿（MODEL_ABI §4.2）
+static void test_meta_provider_model_inputs() {
+  MetaProvider mp;
+  bgm1::FrameHeader h;
+  std::memset(&h, 0x5a, sizeof h);
+
+  // action_t 从 modeld 直通（chestnut 公式在 modeld 侧算，本模块不推导）
+  const float at[2] = {0.125f, 0.45f};
+  mp.set_model_inputs(at, 3);
+  mp.fill(1, &h);
+  CHECK(h.action_t[0] == 0.125f && h.action_t[1] == 0.45f);
+
+  // 更新跟随
+  const float at2[2] = {0.2f, 0.5f};
+  mp.set_model_inputs(at2, 0);
+  mp.fill(2, &h);
+  CHECK(h.action_t[0] == 0.2f && h.action_t[1] == 0.5f);
+
+  // desire 电平 → pulse 边沿（MODEL_ABI §4.2：通道 0 恒 0、持续同 desire 只 pulse 一次）
+  MetaProvider mp2;
+  mp2.set_model_inputs(at, 3);
+  mp2.fill(10, &h);
+  CHECK(h.desire[3] == 1.f);
+  for (int i = 0; i < 8; i++) if (i != 3) CHECK(h.desire[i] == 0.f);
+
+  mp2.fill(11, &h);                       // 同 desire 持续 → 不再 pulse
+  for (int i = 0; i < 8; i++) CHECK(h.desire[i] == 0.f);
+
+  mp2.set_model_inputs(at, 0);            // 回 0 → 无 pulse
+  mp2.fill(12, &h);
+  for (int i = 0; i < 8; i++) CHECK(h.desire[i] == 0.f);
+
+  mp2.set_model_inputs(at, 3);            // 0→3 再现 → 再 pulse
+  mp2.fill(13, &h);
+  CHECK(h.desire[3] == 1.f);
+
+  mp2.set_model_inputs(at, 5);            // 3→5 直接切换 → pulse 到新通道
+  mp2.fill(14, &h);
+  CHECK(h.desire[5] == 1.f && h.desire[3] == 0.f);
+
+  mp2.set_model_inputs(at, 0);
+  mp2.fill(15, &h);
+  for (int i = 0; i < 8; i++) CHECK(h.desire[i] == 0.f);  // 通道 0 恒 0
+
+  mp2.set_model_inputs(at, 9);            // 越界电平（msgq 垃圾）→ 不写任何通道
+  mp2.fill(16, &h);
+  for (int i = 0; i < 8; i++) CHECK(h.desire[i] == 0.f);
+}
+
 // ---- 配对状态机（16 号诊断修复：按 timestamp_sof 配对，不按 frame_id）----
 using PM = bgm::PairMatcher<int>;
 
@@ -1219,6 +1269,7 @@ int main() {
 
   test_warp_golden();
   test_meta_provider();
+  test_meta_provider_model_inputs();
 
   test_pair_kill_does_not_recover();
   test_pair_off_fid_aligned_sof();
