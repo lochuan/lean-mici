@@ -134,6 +134,9 @@ class Parser:
     # Split models vary in hypothesis count per head, so infer it from the slice size.
     self.parse_mdn('plan', outs, in_N=0, out_N=0, out_shape=(ModelConstants.IDX_N, ModelConstants.PLAN_WIDTH), infer_mhp=True)
     self.parse_categorical_crossentropy('desire_state', outs, out_shape=(ModelConstants.DESIRE_PRED_WIDTH,))
+    if 'action' in outs:
+      # MODEL_ABI §5：action = μ[横向加速度, 纵向加速度] + logσ[2]（04 号 big 路径必有此 head）
+      self.parse_mdn('action', outs, in_N=0, out_N=0, out_shape=(2,))
     if 'desired_curvature' in outs:
       self.parse_mdn('desired_curvature', outs, in_N=0, out_N=0,
                      out_shape=(ModelConstants.DESIRED_CURV_WIDTH,), infer_mhp=True)

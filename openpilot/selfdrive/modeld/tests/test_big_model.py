@@ -1,0 +1,81 @@
+# big_model 纯逻辑单测（04 号 C+D）：outputs[0:2066) 解析、L̂ 估计、交叉淡入。
+# 跑法：pytest openpilot/selfdrive/modeld/tests/test_big_model.py
+import numpy as np
+
+from openpilot.selfdrive.modeld.big_model import BIG_OUTPUT_SLICES, parse_big_outputs, LatencyEstimator, SourceBlender
+
+
+def test_big_output_slices_cover_abi():
+  # MODEL_ABI §5：0-2066 无缝覆盖，hidden_state/pad 不在其中
+  spans = sorted((s.start, s.stop) for s in BIG_OUTPUT_SLICES.values())
+  assert spans[0][0] == 0 and spans[-1][1] == 2066
+  for (a0, a1), (b0, b1) in zip(spans, spans[1:]):
+    assert a1 == b0, f"slice gap/overlap at {a1} vs {b0}"
+
+
+def test_parse_big_outputs():
+  raw = np.zeros(2066, dtype=np.float32)
+  raw[2062:2064] = [1.5, -2.0]   # action μ = [横向加速度, 纵向加速度]
+  raw[2064:2066] = [0.0, np.log(2.)]  # action logσ
+  outs = parse_big_outputs(raw)
+
+  assert set(outs) == set(BIG_OUTPUT_SLICES) | {k + '_stds' for k in ('lane_lines', 'road_edges', 'pose',
+                                                                    'wide_from_device_euler', 'road_transform',
+                                                                    'plan', 'lead', 'action')}
+  assert outs['plan'].shape == (1, 33, 15) and outs['plan_stds'].shape == (1, 33, 15)
+  assert outs['lead'].shape == (1, 3, 6, 4) and outs['lead_stds'].shape == (1, 3, 6, 4)
+  assert outs['lane_lines'].shape == (1, 4, 33, 2)
+  assert outs['pose'].shape == (1, 6)
+  assert outs['action'].shape == (1, 2)
+  np.testing.assert_allclose(outs['action'][0], [1.5, -2.0])
+  np.testing.assert_allclose(outs['action_stds'][0], [1.0, 2.0], rtol=1e-6)
+  np.testing.assert_allclose(outs['desire_state'], 1. / 8.)   # softmax(0)
+  np.testing.assert_allclose(outs['meta'], 0.5)                # sigmoid(0)
+
+
+def test_latency_estimator():
+  est = LatencyEstimator()
+  assert est.value == 22.                 # 初值
+  assert est.update(50.) == 35.           # 中位 50 → 限幅上
+  est2 = LatencyEstimator()
+  assert est2.update(1.) == 15.           # 中位 1 → 限幅下
+  est3 = LatencyEstimator()
+  for v in (20., 21., 22.):
+    got = est3.update(v)
+  assert got == 21.                       # 滑动中位
+  for v in (30.,) * 100:
+    est3.update(v)                        # 窗口 100 帧滑出旧样本
+  assert est3.value == 30.
+
+
+def test_source_blender_passthrough():
+  small = {'plan': np.zeros(3, dtype=np.float32)}
+  b = SourceBlender(fade_frames=4)
+  assert b.step(small, None) is small          # w=0 直通小模型
+  big = {'plan': np.ones(3, dtype=np.float32)}
+  for _ in range(4):
+    b.step(small, big)
+  assert b.w == 1.0
+  assert b.step(small, big) is big             # w=1 直通大模型（稳定态不滤波）
+
+
+def test_source_blender_fade():
+  small = {'plan': np.zeros(3, dtype=np.float32), 'only_small': np.ones(2, dtype=np.float32)}
+  big = {'plan': np.ones(3, dtype=np.float32), 'only_big': np.ones(2, dtype=np.float32)}
+  b = SourceBlender(fade_frames=4)
+
+  out = b.step(small, big)                     # 淡入第 1 帧：w=0.25
+  assert b.w == 0.25
+  np.testing.assert_allclose(out['plan'], 0.25)
+  assert out['only_small'] is small['only_small']  # 腿里没有的键不淡
+
+  for _ in range(3):
+    b.step(small, big)                         # 到 w=1.0
+  out = b.step(small, None)                    # 兜底帧：w→0.75，腿 = hold 的 big
+  assert b.w == 0.75
+  np.testing.assert_allclose(out['plan'], 0.75)
+
+  for _ in range(3):
+    out = b.step(small, None)                  # 淡出到 w=0
+  assert b.w == 0.0
+  assert out is small
