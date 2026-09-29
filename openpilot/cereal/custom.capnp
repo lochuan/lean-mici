@@ -466,7 +466,8 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   # 模型权威在 modeld，research/02 §5.5）
   bigActionT @3 :List(Float32);  # [lat, long] 秒，chestnut 公式（research/02 §4）
   desireClass @4 :UInt8;         # DH.desire 电平（log.Desire 索引），bigmodeld 生成 pulse 边沿
-  bigLatencyMs @5 :Float32;      # C-3：L_n = 收帧时刻 − timestamp_eof（ms），0 = 本帧没等到
+  bigLatencyMs @5 :Float32;      # C-3：REPLY 到达 − timestamp_eof（ms），0 = 本帧没等到
+  cameraToModelMs @6 :Float32;   # 帧出图（timestamp_eof）→ modeld 收帧（ms），ADR-0001 的 L_n，喂 L̂
 
   enum TurnDirection {
     none @0;

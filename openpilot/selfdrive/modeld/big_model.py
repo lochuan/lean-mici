@@ -14,6 +14,14 @@ from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 
 BIG_OUTPUT_LEN = 2066
 
+# timestamp_eof 是内核 SOF_BOOT_TS（CLOCK_BOOTTIME）；与它比较的"现在"必须同钟，
+# time.monotonic 不含挂起时长，设备挂起过就整体偏移。macOS 无 BOOTTIME（同 common/timing.h）
+_CLOCK_BOOTTIME = getattr(time, 'CLOCK_BOOTTIME', time.CLOCK_MONOTONIC)
+
+
+def nanos_since_boot() -> int:
+  return time.clock_gettime_ns(_CLOCK_BOOTTIME)
+
 BIG_OUTPUT_SLICES: dict[str, slice] = {
   'lane_lines': slice(0, 528),
   'lane_lines_prob': slice(528, 536),
@@ -41,15 +49,16 @@ def parse_big_outputs(raw: np.ndarray) -> dict[str, np.ndarray]:
 class LatencyEstimator:
   """L̂：最近约 100 帧 L_n 的滑动中位，限幅 [15, 35] ms，初值 22（ADR-0001）。
 
-  L_n = modeld 收帧时刻 − timestamp_eof；每帧 L_n 由调用方进遥测。
+  L_n = modeld 收帧时刻 − timestamp_eof（相机帧出图 → 收帧，遥测字段 cameraToModelMs）；
+  每帧 L_n 由调用方进遥测。与 bigLatencyMs（REPLY 往返）是两个量，别混。
   """
   def __init__(self, window: int = 100, lo: float = 15., hi: float = 35., init: float = 22.):
     self._samples: deque[float] = deque(maxlen=window)
     self._lo, self._hi = lo, hi
     self.value = init
 
-  def update(self, ln_ms: float) -> float:
-    self._samples.append(ln_ms)
+  def update(self, camera_to_model_ms: float) -> float:
+    self._samples.append(camera_to_model_ms)
     self.value = float(min(max(median(self._samples), self._lo), self._hi))
     return self.value
 
@@ -87,7 +96,7 @@ class SourceBlender:
 class _Reply(NamedTuple):
   t_eof: int
   outputs: np.ndarray
-  ln_ms: float
+  eof_to_reply_ms: float
   arrival_ns: int
 
 
@@ -95,14 +104,13 @@ class BigReplyLatch:
   """bigModelReply 后台接收闩（04 号 C-3）。
 
   读线程独立于 model.run()：收帧即盖真实到达时刻并缓存最新一帧（按 tEof 匹配），
-  L_n = 到达时刻 − tEof 直接进 L̂（不被小模型执行遮挡，样本不删失）；主线程
+  到达 − tEof = REPLY 往返，只进 bigLatencyMs 遥测、不进 L̂（L̂ 在 modeld 收帧点喂）；主线程
   wait_for 要么零等待拿到已到的 REPLY，要么等 Condition 到 deadline。链路 alive_s
   内没回音就只捡不等，保 20 Hz 不塌（不 modeldLagging）；一有回音自恢复。
-  ponytail: 只缓存最新一帧（msgq 语义，不重试不补发），迟到旧帧只进 L̂ 不参与匹配。
+  ponytail: 只缓存最新一帧（msgq 语义，不重试不补发），迟到旧帧不参与匹配。
   """
-  def __init__(self, sm, latency: LatencyEstimator | None = None, alive_s: float = 2.0):
+  def __init__(self, sm, alive_s: float = 2.0):
     self._sm = sm
-    self.latency = latency if latency is not None else LatencyEstimator()
     self.alive_s = alive_s
     self._cv = threading.Condition()
     self._last: _Reply | None = None
@@ -110,10 +118,9 @@ class BigReplyLatch:
     threading.Thread(target=self._run, daemon=True).start()
 
   def _on_reply(self, t_eof: int, outputs: np.ndarray, arrival_ns: int) -> None:
-    ln_ms = (arrival_ns - t_eof) / 1e6
-    self.latency.update(ln_ms)
+    eof_to_reply_ms = (arrival_ns - t_eof) / 1e6
     with self._cv:
-      self._last = _Reply(t_eof, outputs, ln_ms, arrival_ns)
+      self._last = _Reply(t_eof, outputs, eof_to_reply_ms, arrival_ns)
       self._last_seen = time.monotonic()
       self._cv.notify_all()
 
@@ -125,22 +132,22 @@ class BigReplyLatch:
       r = self._sm['bigModelReply']
       if len(r.outputs) < BIG_OUTPUT_LEN:  # 畸形帧别让 modeld 崩在路上
         continue
-      self._on_reply(r.tEof, np.array(r.outputs[:BIG_OUTPUT_LEN], dtype=np.float32), time.monotonic_ns())
+      self._on_reply(r.tEof, np.array(r.outputs[:BIG_OUTPUT_LEN], dtype=np.float32), nanos_since_boot())
 
   def link_alive(self) -> bool:
     return time.monotonic() - self._last_seen < self.alive_s
 
   def wait_for(self, t_eof: int, deadline_ns: int) -> tuple[np.ndarray | None, float]:
     """要 tEof 匹配的当帧 REPLY：已到且按时立即返回（零等待），否则等到 deadline。
-    返回 (outputs[2066) f32, L_n ms)；超时或迟到 (None, 0.)。结果一到就发，不等截止。
+    返回 (outputs[2066) f32, REPLY 往返 ms)；超时或迟到 (None, 0.)。结果一到就发，不等截止。
     """
     with self._cv:
       while True:
         r = self._last
         if r is not None and r.t_eof == t_eof:
-          # 票面「按截止时刻择优」：迟到 REPLY（L_n 超预算）已在手也不用，落小模型兜底
-          return (r.outputs, r.ln_ms) if r.arrival_ns <= deadline_ns else (None, 0.)
-        now_ns = time.monotonic_ns()
+          # 票面「按截止时刻择优」：迟到 REPLY（往返超预算）已在手也不用，落小模型兜底
+          return (r.outputs, r.eof_to_reply_ms) if r.arrival_ns <= deadline_ns else (None, 0.)
+        now_ns = nanos_since_boot()
         if now_ns >= deadline_ns:
           return None, 0.
         self._cv.wait((deadline_ns - now_ns) / 1e9)

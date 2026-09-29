@@ -6,7 +6,17 @@ import time
 import numpy as np
 
 from openpilot.selfdrive.modeld.big_model import (BIG_OUTPUT_SLICES, parse_big_outputs, LatencyEstimator,
-                                                  SourceBlender, BigReplyLatch)
+                                                  SourceBlender, BigReplyLatch, nanos_since_boot)
+
+
+def test_nanos_since_boot_matches_timestamp_eof_clock():
+  # timestamp_eof = 内核 SOF_BOOT_TS（get_monotonic_boottime64 = CLOCK_BOOTTIME），
+  # 与它相减/比较的"现在"必须同一时钟，否则挂起累计量会混进 L_n 和截止
+  clock = getattr(time, 'CLOCK_BOOTTIME', time.CLOCK_MONOTONIC)  # macOS 无 BOOTTIME（同 common/timing.h）
+  a = time.clock_gettime_ns(clock)
+  now = nanos_since_boot()
+  b = time.clock_gettime_ns(clock)
+  assert a <= now <= b
 
 
 def test_big_model_reply_schema():
@@ -30,10 +40,12 @@ def test_model_data_v2sp_meta_schema():
   sp = messaging.new_message('modelDataV2SP').modelDataV2SP
   sp.bigActionT = [0.125, 0.45]
   sp.desireClass = 3
-  sp.bigLatencyMs = 33.5  # C-3：L_n = 收帧时刻 − timestamp_eof（0 = 本帧没等到）
+  sp.bigLatencyMs = 33.5  # C-3：REPLY 到达 − timestamp_eof（0 = 本帧没等到）；≠ L̂ 的 L_n
+  sp.cameraToModelMs = 22.5  # L_n = 收帧时刻 − timestamp_eof（ms），喂 L̂
   np.testing.assert_allclose(list(sp.bigActionT), [0.125, 0.45], rtol=1e-6)  # f32 往返
   assert sp.desireClass == 3
   assert sp.bigLatencyMs == 33.5
+  assert sp.cameraToModelMs == 22.5
 
 
 def test_big_output_slices_cover_abi():
@@ -123,32 +135,32 @@ class _FakeSM:
 
 def test_big_reply_latch():
   # C-3：读线程收帧即盖真实到达时刻（不被 model.run() 遮挡）、按 tEof 匹配、
-  # 已到且按时零等待取、超时/迟到兜底、迟到 Condition 唤醒、L_n 进 L̂、链路存活门
+  # 已到且按时零等待取、超时/迟到兜底、迟到 Condition 唤醒、链路存活门。
+  # REPLY 往返只进 bigLatencyMs 遥测，不进 L̂（L̂ = modeld 收帧延迟，ADR-0001）
   latch = BigReplyLatch(_FakeSM())
   raw = np.arange(2066, dtype=np.float32)
-  t_eof = time.monotonic_ns() - 30_000_000
+  t_eof = nanos_since_boot() - 30_000_000
 
   assert not latch.link_alive()                       # 从未见过 REPLY → 门关（只捡不等）
+  assert not hasattr(latch, 'latency')                # latch 不持有 L̂
 
   latch._on_reply(t_eof, raw, t_eof + 25_000_000)     # 到达 = eof+25 ms
   assert latch.link_alive()
-  assert latch.latency.value == 25.                   # L_n=25 ms 进 L̂（中位 25）
 
-  got, ln_ms = latch.wait_for(t_eof, time.monotonic_ns() + 10_000_000_000)
-  assert got is raw and ln_ms == 25.                  # 已到且按时：零等待取
+  got, eof_to_reply_ms = latch.wait_for(t_eof, nanos_since_boot() + 10_000_000_000)
+  assert got is raw and eof_to_reply_ms == 25.                  # 已到且按时：零等待取
 
-  got, ln_ms = latch.wait_for(t_eof + 1, time.monotonic_ns())
-  assert got is None and ln_ms == 0.                  # 不匹配 + 过期 → 兜底
+  got, eof_to_reply_ms = latch.wait_for(t_eof + 1, nanos_since_boot())
+  assert got is None and eof_to_reply_ms == 0.                  # 不匹配 + 过期 → 兜底
 
-  # 迟到 REPLY 已在手也不用（按截止时刻择优）；但 L_n=60 照样进 L̂
+  # 迟到 REPLY 已在手也不用（按截止时刻择优）
   late_eof = t_eof + 1_000_000
   latch._on_reply(late_eof, raw, late_eof + 60_000_000)          # 到达 = eof+60 ms
-  got, ln_ms = latch.wait_for(late_eof, late_eof + 40_000_000)   # deadline = eof+40 ms
-  assert got is None and ln_ms == 0.
-  assert latch.latency._samples[-1] == 60.
+  got, eof_to_reply_ms = latch.wait_for(late_eof, late_eof + 40_000_000)   # deadline = eof+40 ms
+  assert got is None and eof_to_reply_ms == 0.
 
-  threading.Timer(0.05, latch._on_reply, args=(t_eof + 2, raw, time.monotonic_ns())).start()
-  got, ln_ms = latch.wait_for(t_eof + 2, time.monotonic_ns() + 5_000_000_000)
+  threading.Timer(0.05, latch._on_reply, args=(t_eof + 2, raw, nanos_since_boot())).start()
+  got, eof_to_reply_ms = latch.wait_for(t_eof + 2, nanos_since_boot() + 5_000_000_000)
   assert got is raw                                   # 等 Condition，一到即醒
 
   latch.alive_s = 0.0
@@ -164,4 +176,14 @@ def test_modeld_c3_wiring_source():
   assert "BIG_WARMUP_FRAMES" in src, "modeld 重启后头 4 帧按超时帧（04 号票）"
   assert "np.any" in src, "REPLY outputs 全零 = 解码跳过帧，须落回小模型（14 号口径）"
   assert "modelV2.big = big_out is not None" in src
-  assert "bigLatencyMs" in src, "L_n 每帧进遥测（04 号票）"
+  assert "bigLatencyMs" in src, "REPLY 往返每帧进遥测（04 号票）"
+  # ADR-0001：L̂ 只喂 modeld 收帧时刻 − timestamp_eof（cameraToModelMs），截止用它；
+  # REPLY 往返不得进 L̂，每帧 L_n 进遥测
+  assert "camera_to_model_ms = (nanos_since_boot() - meta_main.timestamp_eof) / 1e6" in src
+  # 与 timestamp_eof 比较的"现在"全走 BOOTTIME（modeld 主循环 + latch）
+  assert "monotonic_ns" not in src
+  assert "monotonic_ns" not in inspect.getsource(BigReplyLatch)
+  assert "latency.update(camera_to_model_ms)" in src
+  assert "meta_main.timestamp_eof + int((latency.value + BIG_REPLY_GRACE_MS) * 1e6)" in src
+  assert "cameraToModelMs = camera_to_model_ms" in src
+  assert "latch.latency" not in src

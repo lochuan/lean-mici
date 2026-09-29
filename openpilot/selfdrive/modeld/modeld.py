@@ -24,7 +24,7 @@ from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
-from openpilot.selfdrive.modeld.big_model import parse_big_outputs, SourceBlender, BigReplyLatch
+from openpilot.selfdrive.modeld.big_model import parse_big_outputs, SourceBlender, BigReplyLatch, LatencyEstimator, nanos_since_boot
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, nv12_copy_size, MODELD_INPUTS
 from openpilot.selfdrive.modeld.fill_model_msg import (fill_model_msg, fill_driving_model_data, fill_pose_msg,
                                                        PublishState, get_curvature_from_output)
@@ -263,6 +263,7 @@ def main(demo=False):
   # 04 号 C-3：bigModelReply 独立订阅——latch 读线程收帧即盖到达时刻，主循环不碰 sm 的 updated 语义
   sm_big = SubMaster(["bigModelReply"])
   latch = BigReplyLatch(sm_big)
+  latency = LatencyEstimator()  # L̂：喂 modeld 收帧时刻 − timestamp_eof（ADR-0001），不喂 REPLY 往返
   blender = SourceBlender()
 
   publish_state = PublishState()
@@ -306,6 +307,8 @@ def main(demo=False):
     if buf_main is None:
       cloudlog.debug("vipc_client_main no frame")
       continue
+    camera_to_model_ms = (nanos_since_boot() - meta_main.timestamp_eof) / 1e6  # L_n（ADR-0001），进遥测 cameraToModelMs
+    latency.update(camera_to_model_ms)
 
     if use_extra_client:
       # Keep receiving extra frames until frame id matches main camera
@@ -392,13 +395,13 @@ def main(demo=False):
 
       # 04 号 C-3：等大模型 REPLY（截止 = timestamp_eof + L̂ + 48ms）。结果一到就发不等截止、
       # 不重试不补发；头 4 帧按超时帧（票面，不等不取）；链路没回音（存活门）就只捡已到的，
-      # 保 20Hz 不塌（不 modeldLagging）。L_n = latch 真实到达时刻 − timestamp_eof。
-      big_raw, ln_ms = None, 0.
+      # 保 20Hz 不塌（不 modeldLagging）。eof_to_reply_ms = REPLY 到达 − timestamp_eof（遥测，非 L̂）。
+      big_raw, eof_to_reply_ms = None, 0.
       if run_count > BIG_WARMUP_FRAMES:
-        deadline_ns = meta_main.timestamp_eof + int((latch.latency.value + BIG_REPLY_GRACE_MS) * 1e6)
+        deadline_ns = meta_main.timestamp_eof + int((latency.value + BIG_REPLY_GRACE_MS) * 1e6)
         if not latch.link_alive():
-          deadline_ns = time.monotonic_ns()
-        big_raw, ln_ms = latch.wait_for(meta_main.timestamp_eof, deadline_ns)
+          deadline_ns = nanos_since_boot()
+        big_raw, eof_to_reply_ms = latch.wait_for(meta_main.timestamp_eof, deadline_ns)
       if big_raw is not None and not np.any(big_raw):
         big_raw = None  # 全零 = App 侧解码跳过帧（14 号口径），同样落回小模型
       big_out = parse_big_outputs(big_raw) if big_raw is not None else None
@@ -454,7 +457,8 @@ def main(demo=False):
       # desireClass = DH.desire 电平，pulse 边沿由 bigmodeld 生成（msgq 电平采样不怕迟到漏沿）
       mdv2sp_send.modelDataV2SP.bigActionT = [big_lat_action_t, big_long_action_t]
       mdv2sp_send.modelDataV2SP.desireClass = DH.desire
-      mdv2sp_send.modelDataV2SP.bigLatencyMs = ln_ms
+      mdv2sp_send.modelDataV2SP.bigLatencyMs = eof_to_reply_ms
+      mdv2sp_send.modelDataV2SP.cameraToModelMs = camera_to_model_ms
 
       fill_driving_model_data(drivingdata_send, modelv2_send)
       fill_pose_msg(posenet_send, blended, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, extrinsics_calibration_seen)

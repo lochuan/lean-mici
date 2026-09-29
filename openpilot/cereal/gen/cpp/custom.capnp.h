@@ -838,7 +838,7 @@ struct ModelDataV2SP {
 
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 1, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 2, 1)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -4571,6 +4571,8 @@ public:
 
   inline float getBigLatencyMs() const;
 
+  inline float getCameraToModelMs() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -4621,6 +4623,9 @@ public:
 
   inline float getBigLatencyMs();
   inline void setBigLatencyMs(float value);
+
+  inline float getCameraToModelMs();
+  inline void setCameraToModelMs(float value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -9075,6 +9080,20 @@ inline float ModelDataV2SP::Builder::getBigLatencyMs() {
 inline void ModelDataV2SP::Builder::setBigLatencyMs(float value) {
   _builder.setDataField<float>(
       ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline float ModelDataV2SP::Reader::getCameraToModelMs() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline float ModelDataV2SP::Builder::getCameraToModelMs() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void ModelDataV2SP::Builder::setCameraToModelMs(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint32_t BigModelReply::Reader::getFrameIdx() const {
