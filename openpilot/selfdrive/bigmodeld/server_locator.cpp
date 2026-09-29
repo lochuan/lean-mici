@@ -106,11 +106,10 @@ bool detect_wifi_scope(SubnetScope* out) {
   return ok;
 }
 
-bool browse_avahi(ServerEndpoint* out, const SubnetScope& scope, int timeout_s) {
+bool browse_avahi(ServerEndpoint* out, const SubnetScope& scope) {
   if (scope.iface.empty()) return false;  // Wi-Fi 没起：发现范围为空
   // 不带 -t（-t 会在解析完前退出）；stdbuf -oL 保行缓冲，timeout 截杀不丢输出
-  std::string cmd = "timeout " + std::to_string(timeout_s) +
-                    " stdbuf -oL avahi-browse -rp _bigmodel._tcp 2>/dev/null";
+  std::string cmd = "timeout 3 stdbuf -oL avahi-browse -rp _bigmodel._tcp 2>/dev/null";
   FILE* p = popen(cmd.c_str(), "r");
   if (!p) return false;
 

@@ -828,6 +828,13 @@ static void test_frame_codec_roundtrip() {
   CHECK(bgm1::parse_hello(hbuf.data(), hbuf.size(), &h2) == bgm1::Err::kOk);
   CHECK(h2.instance_id == hello.instance_id && h2.max_frame == hello.max_frame);
   CHECK(bgm1::parse_hello(hbuf.data(), bgm1::kHelloWireSize - 1, &h2) == bgm1::Err::kTruncated);
+  // golden 逐字节钉死（android/tests/fixtures/hello_golden.bin 同一样例，跨仓库镜像互证）
+  static const uint8_t kHelloGolden[bgm1::kHelloWireSize] = {
+      0x42, 0x47, 0x4D, 0x31, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x10, 0x00, 0x00, 0x00, 0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01,
+      0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  };
+  CHECK(std::memcmp(hbuf.data(), kHelloGolden, bgm1::kHelloWireSize) == 0);
 }
 
 static void test_reply_err_roundtrip() {

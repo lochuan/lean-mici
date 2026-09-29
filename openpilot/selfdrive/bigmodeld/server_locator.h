@@ -86,6 +86,6 @@ class AvahiLocator : public ServerLocator {
 // 返回 false → 发现不到任何服务（发现范围为空）。
 bool detect_wifi_scope(SubnetScope* out);
 
-// 真发现：`timeout <s> avahi-browse -rp _bigmodel._tcp`（不带 -t：-t 会在解析完前退出；
-// stdbuf -oL 保行缓冲，SIGTERM 截杀不丢输出），取第一条范围内的 IPv4 记录。
-bool browse_avahi(ServerEndpoint* out, const SubnetScope& scope, int timeout_s = 3);
+// 真发现：`timeout 3 stdbuf -oL avahi-browse -rp _bigmodel._tcp`（不带 -t：-t 会在解析完前
+// 退出；stdbuf 保行缓冲，SIGTERM 截杀不丢输出），取第一条范围内的 IPv4 记录。
+bool browse_avahi(ServerEndpoint* out, const SubnetScope& scope);

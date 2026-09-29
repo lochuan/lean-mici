@@ -312,8 +312,7 @@ class Bigmodeld {
       tracker_.on_disconnect();
       sender_->notify_disconnect();
       hello_seen_ = false;
-      link_.on_connecting();
-      link_state_write();
+      link_mark_connecting();
       buf.clear();
     };
 
@@ -364,6 +363,7 @@ class Bigmodeld {
             break;
           }
           hello_seen_ = true;
+          max_segment_.store(h.max_frame, std::memory_order_relaxed);  // 段长上限以 HELLO 为准（spec）
           link_.on_hello(h.instance_id);
           link_state_write();
           LOGW("bigmodeld: HELLO instance_id=0x%llx max_frame=%u（%s）",
@@ -399,8 +399,7 @@ class Bigmodeld {
           }
           sender_->notify_disconnect();
           hello_seen_ = false;
-          link_.on_connecting();
-          link_state_write();
+          link_mark_connecting();
           buf.clear();
           break;
         }
@@ -583,19 +582,22 @@ class Bigmodeld {
     static Params params;
     params.putNonBlocking("BigmodelLinkState", link_.value());
   }
+  // 断连/重连中（等 HELLO 判 blip/restart）
+  void link_mark_connecting() {
+    link_.on_connecting();
+    link_state_write();
+  }
 
   // ---- sender 事件（sender.mtx 锁内回调：只记账 + 推队列 + 日志，不取 state_mtx）----
   void on_uplink_event(const UplinkEventInfo& e) {
     switch (e.ev) {
       case UplinkEvent::kNewConnection:
         LOGW("bigmodeld: 新连接（frame_idx 与 I 帧状态重置）");
-        link_.on_connecting();  // 06 号：等 HELLO 判 blip/restart
-        link_state_write();
+        link_mark_connecting();
         break;
       case UplinkEvent::kStall:
         LOGE("bigmodeld: 假死（≥200 ms 无进展）截断重连 frame_idx=%u", u32(e.frame_idx));
-        link_.on_connecting();
-        link_state_write();
+        link_mark_connecting();
         break;
       case UplinkEvent::kLinkLost:
         LOGE("bigmodeld: 连接丢失（连续重连失败，持续重试中）");
@@ -704,11 +706,12 @@ class Bigmodeld {
       len = c.au.size();
     }
 
-    // 段长超协议上限（spec「线协议」默认 1 MiB，服务端判 BAD_FRAME）：帧死亡，
-    // 不进发送路径（丢帧上报 + 新序列 + 序列头门关门，经事件队列按序落状态机）
-    if (len > bgm1::kDefaultMaxSegment) {
+    // 段长超协议上限（spec「线协议」= HELLO 的 max_frame，默认 1 MiB，服务端判 BAD_FRAME）：
+    // 帧死亡，不进发送路径（丢帧上报 + 新序列 + 序列头门关门，经事件队列按序落状态机）
+    const uint32_t max_seg = max_segment_.load(std::memory_order_relaxed);
+    if (len > max_seg) {
       LOGE("bigmodeld: %s 段长 %zu 超上限 %u，丢帧 frame_idx=%u",
-           sid == kRoad ? "road" : "wide", len, bgm1::kDefaultMaxSegment, u32(om.frame_idx));
+           sid == kRoad ? "road" : "wide", len, max_seg, u32(om.frame_idx));
       sender_->notify_stream_gap();
       std::lock_guard<std::mutex> lk(ev_mtx_);
       evs_.push_back({UplinkEvent::kDrop, om.frame_idx});
@@ -734,6 +737,7 @@ class Bigmodeld {
   // 06 号：链路状态（HELLO instance_id 对比 → blip/restart）→ Param "BigmodelLinkState"（07 号读）
   LinkStateTracker link_;
   bool hello_seen_ = false;       // 本连接已收 HELLO（reply 线程独占）
+  std::atomic<uint32_t> max_segment_{bgm1::kDefaultMaxSegment};  // 段长上限（HELLO 一到即更新）
   std::mutex link_param_mtx_;     // 串行化 Param 写（putNonBlocking 的 future 非线程安全）
 
   std::mutex state_mtx_;
