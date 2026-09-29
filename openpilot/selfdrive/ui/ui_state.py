@@ -196,8 +196,9 @@ class UIState(UIStateSP):
         self.status = UIStatus.DISENGAGED
         self.started_frame = self.sm.frame
         self.started_time = time.monotonic()
-        # 07 号：起新 onroad 会话，NPU 图标从「连接中」重新走（本次没连上就全程静默）
-        npu_icon_state.reset()
+      # 07 号：onroad/offroad 切换都回「连接中」——offroad 不留上趟的绿/橙；
+      # 本趟没连上就全程静默（小模型即默认）
+      npu_icon_state.reset()
 
       for callback in self._offroad_transition_callbacks:
         callback()

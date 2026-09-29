@@ -34,11 +34,11 @@ class NpuIconState:
     self.reset()
 
   def reset(self) -> None:
-    """回到「连接中」（onroad 起新会话时调）。"""
+    """回到「连接中」（onroad/offroad 切换时调）。"""
     self.state = NpuState.CONNECTING
     self._up_streak = 0
     self._down_streak = 0
-    self._orange_since = 0.0
+    self._prompt_due: float | None = None
     self._link_state = ""
 
   def on_frame(self, available: bool, link_state: str, now: float) -> None:
@@ -56,17 +56,19 @@ class NpuIconState:
     elif self.state is NpuState.ACTIVE:
       if self._down_streak >= HYSTERESIS_FRAMES:
         self.state = NpuState.FALLBACK
-        self._orange_since = now
+        self._prompt_due = now + PROMPT_AFTER_S  # 进橙武装一次提示
     else:  # FALLBACK
       if self._up_streak >= HYSTERESIS_FRAMES:
         self.state = NpuState.ACTIVE
+        if self._prompt_due is not None and now < self._prompt_due:
+          self._prompt_due = None  # 橙没撑到 10 s，不该提示
 
   def prompt_text(self, now: float) -> str | None:
-    """橙持续 [10 s, 15 s) 时返回提示文案第二行；窗口外 None（纯时间窗，每次进橙至多一次）。"""
-    if self.state is not NpuState.FALLBACK:
+    """进橙 10 s 后返回提示文案第二行，撑满 PROMPT_DURATION_S（到点即武装：
+    到点后回绿不打断显示）；窗口外 None。每次进橙至多一次。"""
+    if self._prompt_due is None or now < self._prompt_due:
       return None
-    dt = now - self._orange_since
-    if PROMPT_AFTER_S <= dt < PROMPT_AFTER_S + PROMPT_DURATION_S:
+    if now < self._prompt_due + PROMPT_DURATION_S:
       return PROMPT_REASONS.get(self._link_state, PROMPT_REASONS["connecting"])
     return None
 

@@ -60,7 +60,7 @@ def test_three_available_exit_fallback():
 
 
 def test_prompt_window_ten_seconds_once_per_entry():
-  t_enter = 1.0 + HYSTERESIS_FRAMES * DT  # 进橙时刻
+  t_enter = 1.0 + (HYSTERESIS_FRAMES - 1) * DT  # 第 3 帧不可用进橙的时刻
   st = replay(NpuIconState(), frames(True, "connected", 0.0, 5) + frames(False, "connected", 1.0, HYSTERESIS_FRAMES))
   assert st.state is NpuState.FALLBACK
   assert st.prompt_text(t_enter + PROMPT_AFTER_S - 0.1) is None
@@ -71,15 +71,37 @@ def test_prompt_window_ten_seconds_once_per_entry():
   st = replay(st, frames(True, "connected", 5.0, HYSTERESIS_FRAMES))
   st = replay(st, frames(False, "connected", 6.0, HYSTERESIS_FRAMES))
   assert st.state is NpuState.FALLBACK
-  assert st.prompt_text(6.0 + HYSTERESIS_FRAMES * DT + PROMPT_AFTER_S) is not None
+  assert st.prompt_text(6.0 + (HYSTERESIS_FRAMES - 1) * DT + PROMPT_AFTER_S) is not None
+
+
+def test_prompt_survives_recovery_after_due():
+  # 到点即武装：刚过 10 s 就回绿也撑满显示时长，不闪一下就没了
+  t_enter = 1.0 + (HYSTERESIS_FRAMES - 1) * DT
+  st = replay(NpuIconState(), frames(True, "connected", 0.0, 5) + frames(False, "connected", 1.0, HYSTERESIS_FRAMES))
+  t_due = t_enter + PROMPT_AFTER_S
+  st = replay(st, frames(True, "connected", t_due + 0.1, HYSTERESIS_FRAMES))
+  assert st.state is NpuState.ACTIVE
+  assert st.prompt_text(t_due + 0.5) is not None
+  assert st.prompt_text(t_due + PROMPT_DURATION_S) is None
+
+
+def test_no_prompt_if_orange_recovered_before_ten_seconds():
+  # 橙没撑到 10 s（回绿取消武装），不该弹
+  t_enter = 1.0 + (HYSTERESIS_FRAMES - 1) * DT
+  st = replay(NpuIconState(), frames(True, "connected", 0.0, 5) + frames(False, "connected", 1.0, HYSTERESIS_FRAMES))
+  st = replay(st, frames(True, "connected", 2.0, HYSTERESIS_FRAMES))
+  assert st.state is NpuState.ACTIVE
+  assert st.prompt_text(t_enter + PROMPT_AFTER_S) is None
+  assert st.prompt_text(100.0) is None
 
 
 def test_prompt_reason_texts_follow_link_state():
   # 06 号原因区分：blip=网络闪断 / restart=服务端重启 / lost=连接丢失
+  t_enter = 1.0 + (HYSTERESIS_FRAMES - 1) * DT
   for link, expect in (("blip", "网络闪断"), ("restart", "服务端重启"), ("lost", "连接丢失")):
     st = replay(NpuIconState(), frames(True, "connected", 0.0, 5) + frames(False, "connected", 1.0, HYSTERESIS_FRAMES))
-    st.on_frame(False, link, 10.0)  # 提示时刻的链路状态决定文案
-    text = st.prompt_text(st._orange_since + PROMPT_AFTER_S)
+    st.on_frame(False, link, t_enter + 5.0)  # 提示时刻前的链路状态决定文案
+    text = st.prompt_text(t_enter + PROMPT_AFTER_S)
     assert text is not None and expect in text, f"link={link}: {text}"
 
 
