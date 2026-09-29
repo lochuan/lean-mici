@@ -14,6 +14,7 @@ from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.hardware.usb import TYPEC_CC_ORIENTATION_PATH, get_usb_state, is_chestnut_usb_id, read_int
 
 from openpilot.selfdrive.ui.sunnypilot.ui_state import UIStateSP, DeviceSP
+from openpilot.selfdrive.ui.sunnypilot.npu_state import npu_icon_state
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
 PARAM_UPDATE_TIME = 1 / 5.0
@@ -76,6 +77,10 @@ class UIState(UIStateSP):
     self.is_release = False  # self.params.get_bool("IsReleaseBranch")
     self.experimental_mode: bool = self.params.get_bool("ExperimentalMode")
     self.experimental_mode_confirmed: bool = self.params.get_bool("ExperimentalModeConfirmed")
+    # 07 号：「远程大模型」开关 + 06 号链路状态（update_params 刷新）；
+    # get_bool 缺省键不回落注册默认，开关走 return_default（默认开）
+    self.bigmodel_enabled: bool = bool(self.params.get("BigmodelToggle", return_default=True))
+    self.bigmodel_link_state: str = self.params.get("BigmodelLinkState") or ""
     self.usb_connected: bool = False
     self.usb_connected_ts: float | None = None
     self.usb_disconnected_ts: float | None = None
@@ -163,6 +168,10 @@ class UIState(UIStateSP):
       for callback in self._on_body_changed_callbacks:
         callback()
 
+    # 07 号：NPU 图标状态机——每条 modelV2 帧 tick 一次（available = modelV2.big）
+    if self.bigmodel_enabled and self.sm.updated["modelV2"]:
+      npu_icon_state.on_frame(self.sm["modelV2"].big, self.bigmodel_link_state, time.monotonic())
+
   def _update_status(self) -> None:
     if self.started and self.sm.updated["selfdriveState"]:
       ss = self.sm["selfdriveState"]
@@ -187,6 +196,8 @@ class UIState(UIStateSP):
         self.status = UIStatus.DISENGAGED
         self.started_frame = self.sm.frame
         self.started_time = time.monotonic()
+        # 07 号：起新 onroad 会话，NPU 图标从「连接中」重新走（本次没连上就全程静默）
+        npu_icon_state.reset()
 
       for callback in self._offroad_transition_callbacks:
         callback()
@@ -208,6 +219,8 @@ class UIState(UIStateSP):
     self.is_metric = self.params.get_bool("IsMetric")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
     self.experimental_mode_confirmed = self.params.get_bool("ExperimentalModeConfirmed")
+    self.bigmodel_enabled = bool(self.params.get("BigmodelToggle", return_default=True))
+    self.bigmodel_link_state = self.params.get("BigmodelLinkState") or ""
     now = time.monotonic()
     if read_int(TYPEC_CC_ORIENTATION_PATH) != 0:
       self.usb_disconnected_ts = None

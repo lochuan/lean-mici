@@ -174,6 +174,8 @@ def test_modeld_c3_wiring_source():
   from openpilot.selfdrive.modeld import modeld
   src = inspect.getsource(modeld.main)
   assert "BIG_WARMUP_FRAMES" in src, "modeld 重启后头 4 帧按超时帧（04 号票）"
+  assert "if bigmodel_enabled and run_count > BIG_WARMUP_FRAMES:" in src, \
+    "「远程大模型」关 = 不等不取大模型 REPLY，逐帧小模型（07 号票）"
   assert "np.any" in src, "REPLY outputs 全零 = 解码跳过帧，须落回小模型（14 号口径）"
   assert "modelV2.big = big_out is not None" in src
   assert "bigLatencyMs" in src, "REPLY 往返每帧进遥测（04 号票）"
