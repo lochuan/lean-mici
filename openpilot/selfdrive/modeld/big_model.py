@@ -6,6 +6,7 @@ import threading
 import time
 from collections import deque
 from statistics import median
+from typing import NamedTuple
 
 import numpy as np
 
@@ -43,13 +44,13 @@ class LatencyEstimator:
   L_n = modeld 收帧时刻 − timestamp_eof；每帧 L_n 由调用方进遥测。
   """
   def __init__(self, window: int = 100, lo: float = 15., hi: float = 35., init: float = 22.):
-    self._s: deque[float] = deque(maxlen=window)
+    self._samples: deque[float] = deque(maxlen=window)
     self._lo, self._hi = lo, hi
     self.value = init
 
   def update(self, ln_ms: float) -> float:
-    self._s.append(ln_ms)
-    self.value = float(min(max(median(self._s), self._lo), self._hi))
+    self._samples.append(ln_ms)
+    self.value = float(min(max(median(self._samples), self._lo), self._hi))
     return self.value
 
 
@@ -83,6 +84,13 @@ class SourceBlender:
     return out
 
 
+class _Reply(NamedTuple):
+  t_eof: int
+  outputs: np.ndarray
+  ln_ms: float
+  arrival_ns: int
+
+
 class BigReplyLatch:
   """bigModelReply 后台接收闩（04 号 C-3）。
 
@@ -97,14 +105,15 @@ class BigReplyLatch:
     self.latency = latency if latency is not None else LatencyEstimator()
     self.alive_s = alive_s
     self._cv = threading.Condition()
-    self._last: tuple[int, np.ndarray, int] | None = None  # tEof, outputs, arrival_ns
+    self._last: _Reply | None = None
     self._last_seen = 0.0
     threading.Thread(target=self._run, daemon=True).start()
 
   def _on_reply(self, t_eof: int, outputs: np.ndarray, arrival_ns: int) -> None:
-    self.latency.update((arrival_ns - t_eof) / 1e6)
+    ln_ms = (arrival_ns - t_eof) / 1e6
+    self.latency.update(ln_ms)
     with self._cv:
-      self._last = (t_eof, outputs, arrival_ns)
+      self._last = _Reply(t_eof, outputs, ln_ms, arrival_ns)
       self._last_seen = time.monotonic()
       self._cv.notify_all()
 
@@ -121,14 +130,17 @@ class BigReplyLatch:
   def link_alive(self) -> bool:
     return time.monotonic() - self._last_seen < self.alive_s
 
-  def wait_for(self, t_eof: int, deadline_ns: int) -> tuple[np.ndarray | None, int]:
-    """要 tEof 匹配的当帧 REPLY：已到立即返回（零等待），否则等到 deadline。
-    返回 (outputs[2066) f32, arrival_ns)；超时 (None, 0)。结果一到就发，不等截止。"""
+  def wait_for(self, t_eof: int, deadline_ns: int) -> tuple[np.ndarray | None, float]:
+    """要 tEof 匹配的当帧 REPLY：已到且按时立即返回（零等待），否则等到 deadline。
+    返回 (outputs[2066) f32, L_n ms)；超时或迟到 (None, 0.)。结果一到就发，不等截止。
+    """
     with self._cv:
       while True:
-        if self._last is not None and self._last[0] == t_eof:
-          return self._last[1], self._last[2]
+        r = self._last
+        if r is not None and r.t_eof == t_eof:
+          # 票面「按截止时刻择优」：迟到 REPLY（L_n 超预算）已在手也不用，落小模型兜底
+          return (r.outputs, r.ln_ms) if r.arrival_ns <= deadline_ns else (None, 0.)
         now_ns = time.monotonic_ns()
         if now_ns >= deadline_ns:
-          return None, 0
+          return None, 0.
         self._cv.wait((deadline_ns - now_ns) / 1e9)

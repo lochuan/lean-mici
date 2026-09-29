@@ -123,6 +123,11 @@ void MetaProvider::set_model_inputs(const float action_t[2], uint8_t desire_clas
   desire_class_ = desire_class;
 }
 
+void MetaProvider::reset_desire_latch() {
+  std::lock_guard<std::mutex> lk(mtx_);
+  prev_desire_class_ = 0;
+}
+
 void MetaProvider::fill(uint64_t t_eof, bgm1::FrameHeader* out) const {
   std::lock_guard<std::mutex> lk(mtx_);
   out->t_eof = t_eof;

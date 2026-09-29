@@ -393,16 +393,15 @@ def main(demo=False):
       # 04 号 C-3：等大模型 REPLY（截止 = timestamp_eof + L̂ + 48ms）。结果一到就发不等截止、
       # 不重试不补发；头 4 帧按超时帧（票面，不等不取）；链路没回音（存活门）就只捡已到的，
       # 保 20Hz 不塌（不 modeldLagging）。L_n = latch 真实到达时刻 − timestamp_eof。
-      big_raw, arrival_ns = None, 0
+      big_raw, ln_ms = None, 0.
       if run_count > BIG_WARMUP_FRAMES:
         deadline_ns = meta_main.timestamp_eof + int((latch.latency.value + BIG_REPLY_GRACE_MS) * 1e6)
         if not latch.link_alive():
           deadline_ns = time.monotonic_ns()
-        big_raw, arrival_ns = latch.wait_for(meta_main.timestamp_eof, deadline_ns)
+        big_raw, ln_ms = latch.wait_for(meta_main.timestamp_eof, deadline_ns)
       if big_raw is not None and not np.any(big_raw):
         big_raw = None  # 全零 = App 侧解码跳过帧（14 号口径），同样落回小模型
       big_out = parse_big_outputs(big_raw) if big_raw is not None else None
-      ln_ms = (arrival_ns - meta_main.timestamp_eof) / 1e6 if arrival_ns else 0.
 
       # 无感切换：全头交叉淡入（兜底腿 hold 最近大模型输出）；action 共用同一 smooth 平滑链
       blended = blender.step(model_output, big_out)

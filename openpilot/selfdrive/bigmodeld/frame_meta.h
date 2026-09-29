@@ -45,6 +45,10 @@ class MetaProvider {
   // action_t = chestnut 公式（research/02 §4），desire_class = DH.desire 电平。
   void set_model_inputs(const float action_t[2], uint8_t desire_class);
 
+  // 新序列首帧组帧前调用（双路 IDR 恢复/重连 = App 侧 new_seq，bgm1_server.cpp）：
+  // MODEL_ABI §4.3 清 previousDesire，持续中的 desire 在新序列首帧重出 pulse。
+  void reset_desire_latch();
+
   // 生成一帧的头元数据。t_eof = road 帧 timestamp_eof（ns）。
   // 只填 t_eof/desire/traffic_convention/action_t/warp_*；flags/frame_idx/road_len/wide_len 归调用方。
   void fill(uint64_t t_eof, bgm1::FrameHeader* out) const;

@@ -123,10 +123,10 @@ class _FakeSM:
 
 def test_big_reply_latch():
   # C-3：读线程收帧即盖真实到达时刻（不被 model.run() 遮挡）、按 tEof 匹配、
-  # 已到零等待取、过期兜底、迟到 Condition 唤醒、L_n 进 L̂、链路存活门
+  # 已到且按时零等待取、超时/迟到兜底、迟到 Condition 唤醒、L_n 进 L̂、链路存活门
   latch = BigReplyLatch(_FakeSM())
   raw = np.arange(2066, dtype=np.float32)
-  t_eof = 1_000_000_000
+  t_eof = time.monotonic_ns() - 30_000_000
 
   assert not latch.link_alive()                       # 从未见过 REPLY → 门关（只捡不等）
 
@@ -134,14 +134,21 @@ def test_big_reply_latch():
   assert latch.link_alive()
   assert latch.latency.value == 25.                   # L_n=25 ms 进 L̂（中位 25）
 
-  got, arrival_ns = latch.wait_for(t_eof, time.monotonic_ns() + 10_000_000_000)
-  assert got is raw and arrival_ns == t_eof + 25_000_000   # 已到即取，不等 deadline
+  got, ln_ms = latch.wait_for(t_eof, time.monotonic_ns() + 10_000_000_000)
+  assert got is raw and ln_ms == 25.                  # 已到且按时：零等待取
 
-  got, arrival_ns = latch.wait_for(t_eof + 1, time.monotonic_ns())
-  assert got is None and arrival_ns == 0              # 不匹配 + 过期 → 兜底
+  got, ln_ms = latch.wait_for(t_eof + 1, time.monotonic_ns())
+  assert got is None and ln_ms == 0.                  # 不匹配 + 过期 → 兜底
 
-  threading.Timer(0.05, latch._on_reply, args=(t_eof + 2, raw, t_eof + 2)).start()
-  got, arrival_ns = latch.wait_for(t_eof + 2, time.monotonic_ns() + 5_000_000_000)
+  # 迟到 REPLY 已在手也不用（按截止时刻择优）；但 L_n=60 照样进 L̂
+  late_eof = t_eof + 1_000_000
+  latch._on_reply(late_eof, raw, late_eof + 60_000_000)          # 到达 = eof+60 ms
+  got, ln_ms = latch.wait_for(late_eof, late_eof + 40_000_000)   # deadline = eof+40 ms
+  assert got is None and ln_ms == 0.
+  assert latch.latency._samples[-1] == 60.
+
+  threading.Timer(0.05, latch._on_reply, args=(t_eof + 2, raw, time.monotonic_ns())).start()
+  got, ln_ms = latch.wait_for(t_eof + 2, time.monotonic_ns() + 5_000_000_000)
   assert got is raw                                   # 等 Condition，一到即醒
 
   latch.alive_s = 0.0

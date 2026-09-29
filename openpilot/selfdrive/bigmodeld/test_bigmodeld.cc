@@ -873,6 +873,17 @@ static void test_meta_provider_model_inputs() {
   mp2.set_model_inputs(at, 9);            // 越界电平（msgq 垃圾）→ 不写任何通道
   mp2.fill(16, &h);
   for (int i = 0; i < 8; i++) CHECK(h.desire[i] == 0.f);
+
+  // 新序列清 previousDesire（MODEL_ABI §4.3）：持续中的 desire 在新序列首帧重出 pulse
+  MetaProvider mp3;
+  mp3.set_model_inputs(at, 3);
+  mp3.fill(20, &h);
+  CHECK(h.desire[3] == 1.f);
+  mp3.fill(21, &h);
+  for (int i = 0; i < 8; i++) CHECK(h.desire[i] == 0.f);  // 持续同 desire 不再 pulse
+  mp3.reset_desire_latch();                               // 双路 IDR/重连 → 新序列
+  mp3.fill(22, &h);
+  CHECK(h.desire[3] == 1.f);                              // 重出 pulse（d→0→d）
 }
 
 // ---- 配对状态机（16 号诊断修复：按 timestamp_sof 配对，不按 frame_id）----

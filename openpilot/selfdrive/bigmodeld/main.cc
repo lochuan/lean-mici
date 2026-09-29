@@ -462,6 +462,10 @@ class Bigmodeld {
     // 且此时两路编码器必已就绪（成对即两路都已 init_encoder）
     SchedStep s = sched_.on_frame_submit(frame_idx);
     accumulate_requests_locked(s);
+    // 双路 request 同帧落点 = 本帧双路 IDR = App 侧新序列（bgm1_server.cpp new_seq：
+    // 连接首帧 || 中流双路 IDR 对）。MODEL_ABI §4.3：新序列清 previousDesire，
+    // 持续中的 desire 在新序列首帧重出 pulse（pulse 跟帧走，帧丢即丢，不重试不补发）。
+    const bool new_seq = need_req_road_ && need_req_wide_;
     if (need_req_road_) {
       ctx_[kRoad].enc->request_keyframe();
       need_req_road_ = false;
@@ -470,6 +474,7 @@ class Bigmodeld {
       ctx_[kWide].enc->request_keyframe();
       need_req_wide_ = false;
     }
+    if (new_seq) meta_.reset_desire_latch();
 
     update_bitrate_locked();
 
