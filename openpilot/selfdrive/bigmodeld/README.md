@@ -18,6 +18,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 | `uplink_sender.{h,cpp}` | 发送/重连状态机（可注入 socket/时钟）+ ReplyTracker |
 | `main.cc` | 进程组装：取帧/配对、V4L 编码、发送、REPLY 接收、标定线程 |
 | `gen_warp_golden.py` | warp golden 表生成（宿主测试对照 Python ≤1e-5） |
+| `server_locator.{h,cpp}` | 服务端定位（06 号）：手动 IP / 限 wlan0 子网的 mDNS 发现（avahi-browse） |
 | `test_bigmodeld.cc` | 宿主单测（无设备依赖，Mac/Linux 直接编译） |
 
 ## 实现口径
@@ -86,8 +87,10 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 8. **TODO(04 号)**：desire[8]/action_t[2] 现置零——权威在 modeld 的 DesireHelper 与 13 号
    延迟公式，经 msgq 接线；REPLY 的 outputs[0:2066) 与遥测同样留待 msgq 转交 modeld
    （ReplyTracker 只缓存最新 + 分段统计）。
-   另：BGM1 链路的 HELLO/AUTH/AUTH_OK 握手（spec.md:118-119）与 MAC 校验（05 号）不在
-   本票——现阶段直连参考服务端（bgm1_frame.py），鉴权/配对归 05/06 号。
+   另（06 号）：连接建立后服务端先发 HELLO（ver + instance_id + max_frame，无鉴权——
+   05 号握手/HMAC/配对已随 ADR-0003 撤销）；`instance_id` 区分服务端重启/网络闪断，
+   状态串写 Param `BigmodelLinkState`（07 号读）。连接目标 = 手动 IP（Params
+   `BigmodelServerHost` 非空）或 mDNS 自动发现（限 wlan0 子网，见 `server_locator.h`）。
 
 ## 构建
 
@@ -95,15 +98,17 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
   `system/loggerd/SConscript` 已 `Export('logger_lib')` 供本目录链接）。
 - **快速迭代**：可走 21 号先例 g++ 直构（`prototypes/21/venus/build.sh` 样板，
   `-I/data/openpilot -I…/openpilot -I…/msgq_repo`）。
-- CLI：`bigmodeld [--host HOST] [--port PORT] [--bitrate BPS]`，默认 `127.0.0.1:7070`
-  （`adb reverse` 验证用）、10'000'000 bps/路。
+- CLI：`bigmodeld [--host HOST|auto] [--port PORT] [--bitrate BPS]`；`--host` 缺省读
+  Params `BigmodelServerHost`（空 = mDNS 自动发现，限 wlan0 子网）。联调用
+  `--host 127.0.0.1`（`adb reverse`）、10'000'000 bps/路。
 
 ## 宿主测试（Mac/Linux，无设备依赖）
 
 ```sh
 cd openpilot/selfdrive/bigmodeld
 clang++ -std=c++17 -O1 test_bigmodeld.cc frame_codec.cpp frame_meta.cpp \
-        frame_scheduler.cpp uplink_sender.cpp -o /tmp/test_bigmodeld && /tmp/test_bigmodeld
+        frame_scheduler.cpp uplink_sender.cpp server_locator.cpp \
+        -o /tmp/test_bigmodeld && /tmp/test_bigmodeld
 ```
 
 覆盖：状态机全转移（GOP20/wide 晚 10 帧、发送侧显式丢弃恢复、配对失败/时间槽空洞不恢复、时间槽编号）、
@@ -111,7 +116,8 @@ MetaCache（查不到不弹队、clean2 回归、miss 分类）、序列头门�
 连接代号（重连窗口旧提交静默拒）、
 发送器（假 socket/假时钟：出包即发、覆盖丢弃、假死发完/截断、重连、kLinkLost 升级、迟到
 包静默丢、部分写不撕裂、发送段样本=写完时点/滑动窗口）、warp golden ≤1e-5、MetaProvider、ReplyTracker、frame_codec
-往返与坏输入。golden 表生成（输出粘进 test_bigmodeld.cc）：
+往返与坏输入（含 HELLO）、LinkStateTracker（instance 对比判 blip/restart）、
+avahi 行解析/子网范围/发现节流（06 号）。golden 表生成（输出粘进 test_bigmodeld.cc）：
 
 ```sh
 /Users/kevin/Documents/Projects/1b-model-qnn/.venv/bin/python \

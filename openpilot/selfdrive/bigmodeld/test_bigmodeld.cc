@@ -15,6 +15,7 @@
 #include "frame_scheduler.h"
 #include "meta_cache.h"
 #include "pair_matcher.h"
+#include "server_locator.h"
 #include "uplink_sender.h"
 
 // ---- 极简测试框架 ----
@@ -667,6 +668,110 @@ static void test_reply_tracker() {
 }
 
 // =====================================================================
+// LinkStateTracker（06 号）：HELLO instance_id 对比区分服务端重启/网络闪断，
+// 对外（Param "BigmodelLinkState"）报状态串：connecting/connected/blip/restart/lost
+// =====================================================================
+
+static void test_link_state() {
+  LinkStateTracker t;
+  CHECK(t.value() == "connecting");  // 起步 = 连接中
+
+  t.on_hello(0xA);
+  CHECK(t.value() == "connected");   // 首次见到 instance = 已连接
+
+  t.on_connecting();
+  CHECK(t.value() == "connecting");  // 断连重连中
+  t.on_hello(0xA);
+  CHECK(t.value() == "blip");        // 同 instance 重连 = 网络闪断
+
+  t.on_connecting();
+  t.on_hello(0xB);
+  CHECK(t.value() == "restart");     // instance 变了 = 服务端重启
+
+  t.on_connecting();
+  t.on_hello(0xB);
+  CHECK(t.value() == "blip");        // 重启后再断再连同 instance = 闪断
+
+  t.on_lost();
+  CHECK(t.value() == "lost");        // 连败升级「连接丢失」
+  t.on_hello(0xB);
+  CHECK(t.value() == "blip");        // lost 后连回同 instance 仍算闪断
+
+  t.on_connecting();
+  t.on_hello(0xC);
+  CHECK(t.value() == "restart");     // lost 后换 instance = 重启
+}
+
+// =====================================================================
+// 06 号：mDNS 发现（avahi-browse 行解析 + 发现节流策略）
+// =====================================================================
+
+static void test_avahi_parse() {
+  ServerEndpoint ep;
+  // avahi-browse -rpt 可解析行：=;iface;IPv4;name;type;domain;host;ip;port;txt...
+  CHECK(parse_avahi_browse_line(
+      "=;wlan0;IPv4;8e5-uuid;_bigmodel._tcp;local;8e5.local;172.20.10.2;7070;\"ver\"=\"1\";\"name\"=\"8E5\"",
+      &ep));
+  CHECK(ep.host == "172.20.10.2" && ep.port == 7070 && ep.name == "8e5-uuid" && ep.iface == "wlan0");
+  CHECK(!parse_avahi_browse_line("+;wlan0;IPv4;8e5;_bigmodel._tcp;local;8e5.local;172.20.10.2;7070", &ep));
+  CHECK(!parse_avahi_browse_line("=;wlan0;IPv6;8e5;_bigmodel._tcp;local;8e5.local;fe80::1;7070", &ep));
+  CHECK(!parse_avahi_browse_line("=;wlan0;IPv4;x;_http._tcp;local;x.local;1.2.3.4;80", &ep));
+  CHECK(!parse_avahi_browse_line("garbage", &ep));
+  CHECK(!parse_avahi_browse_line("=;wlan0;IPv4;8e5;_bigmodel._tcp;local;8e5.local;172.20.10.2", &ep));
+}
+
+static void test_avahi_scope() {
+  // 06 号：只在 C4 当前连接的 Wi-Fi 子网内发现——接口对、IP 落在 wlan0 子网内才收
+  SubnetScope scope;
+  scope.iface = "wlan0";
+  CHECK(parse_ipv4("172.20.10.2", &scope.local));
+  CHECK(parse_ipv4("255.255.255.0", &scope.mask));
+
+  ServerEndpoint e;
+  e.host = "172.20.10.9"; e.iface = "wlan0";
+  CHECK(in_scope(e, scope));            // 同接口同子网（手机热点）
+  e.host = "172.20.10.254";
+  CHECK(in_scope(e, scope));
+  e.host = "192.168.1.7";
+  CHECK(!in_scope(e, scope));           // 别的子网（家里路由/陈旧缓存）不收
+  e.host = "172.20.11.9";
+  CHECK(!in_scope(e, scope));           // 相邻子网不收
+  e.host = "172.20.10.9"; e.iface = "eth0";
+  CHECK(!in_scope(e, scope));           // 别的接口不收
+
+  CHECK(!parse_ipv4("garbage", &scope.local));
+  CHECK(!parse_ipv4("1.2.3", &scope.local));
+}
+
+static void test_avahi_locator() {
+  int browses = 0;
+  ServerEndpoint found{"10.0.0.5", 7070, "a"};
+  AvahiLocator loc([&](ServerEndpoint* out) { browses++; *out = found; return true; }, 3);
+  ServerEndpoint ep;
+  CHECK(loc.resolve(&ep) && ep.host == "10.0.0.5" && browses == 1);  // 首次现查
+  CHECK(loc.resolve(&ep) && browses == 1);                           // 缓存直连（闪断快速重连）
+  loc.on_connect_failure();
+  loc.on_connect_failure();
+  CHECK(loc.resolve(&ep) && browses == 1);                           // 连败 < 3 仍用缓存
+  loc.on_connect_failure();                                          // 第 3 次 = kLinkLost 升级点
+  CHECK(loc.resolve(&ep) && browses == 2);                           // 回到 mDNS 发现
+  found = {"10.0.0.9", 7070, "a"};
+  loc.on_connect_failure();
+  loc.on_connect_failure();
+  loc.on_connect_failure();
+  CHECK(loc.resolve(&ep) && ep.host == "10.0.0.9" && browses == 3);  // 手机换 IP 跟上
+
+  AvahiLocator none([&](ServerEndpoint*) { return false; }, 3);      // 热点没开/App 没跑
+  CHECK(!none.resolve(&ep));
+  CHECK(!none.resolve(&ep));                                         // 没缓存，持续重试
+
+  FixedLocator fix({"192.168.1.7", 7070, ""});                       // 手动 IP 兜底
+  CHECK(fix.resolve(&ep) && ep.host == "192.168.1.7" && ep.port == 7070);
+  fix.on_connect_failure();
+  CHECK(fix.resolve(&ep) && ep.host == "192.168.1.7");               // 手动恒给定值，不发现
+}
+
+// =====================================================================
 // frame_codec：往返 + 坏输入（冒烟）
 // =====================================================================
 
@@ -712,6 +817,17 @@ static void test_frame_codec_roundtrip() {
   bad = buf;
   bad[12] = 0xff; bad[13] = 0xff; bad[14] = 0xff; bad[15] = 0xff;
   CHECK(bgm1::parse_frame(bad.data(), bad.size(), &fv) == bgm1::Err::kLenTooLarge);
+
+  // HELLO 往返（06 号；同源副本守卫：与 android/ 的 frame_codec 同一实现）
+  bgm1::Hello hello;
+  hello.instance_id = 0x0123456789ABCDEFULL;
+  hello.max_frame = 1u << 20;
+  std::vector<uint8_t> hbuf(bgm1::kHelloWireSize);
+  CHECK(bgm1::pack_hello(hello, hbuf.data(), hbuf.size()) == bgm1::kHelloWireSize);
+  bgm1::Hello h2;
+  CHECK(bgm1::parse_hello(hbuf.data(), hbuf.size(), &h2) == bgm1::Err::kOk);
+  CHECK(h2.instance_id == hello.instance_id && h2.max_frame == hello.max_frame);
+  CHECK(bgm1::parse_hello(hbuf.data(), bgm1::kHelloWireSize - 1, &h2) == bgm1::Err::kTruncated);
 }
 
 static void test_reply_err_roundtrip() {
@@ -1274,6 +1390,10 @@ int main() {
   test_sender_send_samples();
 
   test_reply_tracker();
+  test_link_state();
+  test_avahi_parse();
+  test_avahi_scope();
+  test_avahi_locator();
 
   test_frame_codec_roundtrip();
   test_reply_err_roundtrip();

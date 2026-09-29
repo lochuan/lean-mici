@@ -45,6 +45,7 @@ constexpr uint8_t kVersion = 1;
 constexpr uint8_t kTypeFrame = 0x10;
 constexpr uint8_t kTypeReply = 0x11;
 constexpr uint8_t kTypeErr = 0x7F;
+constexpr uint8_t kTypeHello = 0x01;
 
 constexpr size_t kMsgHdrSize = 16;
 constexpr size_t kFrameHdrSize = 160;  // MsgHdr 16 + 扩展 144
@@ -174,5 +175,24 @@ size_t pack_err(const ErrMsg& e, uint8_t* out, size_t cap);
 
 // 解析完整 ERR（含长度校验；MAC 位本阶段不校验）。
 Err parse_err(const uint8_t* data, size_t size, ErrMsg* out);
+
+// ---- HELLO（type 0x01，06 号）：连接建立后服务端首条消息（无鉴权，ADR-0003）----
+// 线上布局：MsgHdr（type=0x01，frame_idx=0，len=16）‖ instance_id u64 ‖ max_frame u32 ‖
+// 保留 u32（置 0）‖ MAC（零），线长 48。instance_id 每次服务端启动随机，C4 用来区分
+// 服务端重启与网络闪断；max_frame = 每段码流上限（kDefaultMaxSegment 同义）。
+
+constexpr size_t kHelloPayloadSize = 16;
+constexpr size_t kHelloWireSize = kMsgHdrSize + kHelloPayloadSize + kMacSize;  // 48
+
+struct Hello {
+  uint64_t instance_id = 0;
+  uint32_t max_frame = kDefaultMaxSegment;
+};
+
+// 组完整 HELLO：MsgHdr ‖ payload ‖ MAC（零）。返回写入字节数，cap 不足返回 0。
+size_t pack_hello(const Hello& h, uint8_t* out, size_t cap);
+
+// 解析完整 HELLO（含长度校验；保留 u32 解析端忽略）。
+Err parse_hello(const uint8_t* data, size_t size, Hello* out);
 
 }  // namespace bgm1

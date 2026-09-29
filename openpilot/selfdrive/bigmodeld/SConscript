@@ -7,5 +7,6 @@ if arch != "comma_arm64":
 libs = [logger_lib, common, messaging, visionipc] + ffmpeg_libs + ['pthread', 'm', 'zstd']
 
 env.Program('bigmodeld',
-            ['main.cc', 'frame_codec.cpp', 'frame_meta.cpp', 'frame_scheduler.cpp', 'uplink_sender.cpp'],
+            ['main.cc', 'frame_codec.cpp', 'frame_meta.cpp', 'frame_scheduler.cpp',
+             'uplink_sender.cpp', 'server_locator.cpp'],
             LIBS=libs)

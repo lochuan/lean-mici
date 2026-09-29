@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "frame_codec.h"
@@ -222,4 +223,26 @@ class ReplyTracker {
   uint64_t zero_pair_ = 0;
   bgm1::ErrMsg last_err_ = {};
   bool has_err_ = false;
+};
+
+// ---- 链路状态记账（06 号）：对外报出连接状态与断开原因（Param "BigmodelLinkState"）----
+// 状态串（07 号 UI 文案按此映射）：
+//   connecting  连接中（起步/断连重连中）
+//   connected   已连接（首次见到该 instance_id）
+//   blip        网络闪断后已恢复（重连后 instance_id 相同）
+//   restart     服务端重启后已恢复（重连后 instance_id 变了）
+//   lost        连接丢失（连败升级 kLinkLost，仍在重试）
+// 纯逻辑 + 内部互斥（reply 线程喂 on_hello、发送事件线程喂其余）。
+class LinkStateTracker {
+ public:
+  void on_connecting();               // 断连/重连中
+  void on_hello(uint64_t instance_id);  // HELLO 到达：按 instance_id 对比判 blip/restart
+  void on_lost();                     // kLinkLost
+  std::string value() const;
+
+ private:
+  mutable std::mutex mtx_;
+  uint64_t last_instance_ = 0;
+  bool have_instance_ = false;
+  const char* state_ = "connecting";
 };

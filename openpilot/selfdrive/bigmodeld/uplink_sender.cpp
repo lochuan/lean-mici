@@ -325,3 +325,28 @@ void ReplyTracker::on_err(const bgm1::ErrMsg& e) {
 void ReplyTracker::on_disconnect() {
   // 断连只清「最新缓存」的时效性，统计保留（分段遥测跨连接累计）
 }
+
+// ---- LinkStateTracker（06 号）----
+
+void LinkStateTracker::on_connecting() {
+  std::lock_guard<std::mutex> lk(mtx_);
+  state_ = "connecting";
+}
+
+void LinkStateTracker::on_hello(uint64_t instance_id) {
+  std::lock_guard<std::mutex> lk(mtx_);
+  if (have_instance_) state_ = (instance_id == last_instance_) ? "blip" : "restart";
+  else state_ = "connected";
+  last_instance_ = instance_id;
+  have_instance_ = true;
+}
+
+void LinkStateTracker::on_lost() {
+  std::lock_guard<std::mutex> lk(mtx_);
+  state_ = "lost";
+}
+
+std::string LinkStateTracker::value() const {
+  std::lock_guard<std::mutex> lk(mtx_);
+  return state_;
+}

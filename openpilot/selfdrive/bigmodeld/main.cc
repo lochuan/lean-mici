@@ -48,6 +48,7 @@
 #include "frame_scheduler.h"
 #include "meta_cache.h"
 #include "pair_matcher.h"
+#include "server_locator.h"
 #include "uplink_sender.h"
 
 #ifndef MSG_NOSIGNAL
@@ -80,25 +81,37 @@ void setup_realtime(const char* who) {
 
 // ---- TCP 上行 socket（可注入接缝的系统实现）----
 // 非阻塞：write_some/read_some 语义对齐 UplinkSocket（>0 进展 / 0 会阻塞 / -1 错或 EOF）。
+// 连接目标由 ServerLocator 给（06 号：手动 IP / 限当前 Wi-Fi 子网的 mDNS 发现）；
+// 每次建连失败报 on_connect_failure（发现节流）。
 class TcpSocket : public UplinkSocket {
  public:
-  TcpSocket(std::string host, int port) : host_(std::move(host)), port_(port) {}
+  explicit TcpSocket(ServerLocator* loc) : loc_(loc) {}
   ~TcpSocket() override { close(); }
 
   bool connect(int timeout_ms) override {
     std::lock_guard<std::mutex> lk(mtx_);
     close_locked();
 
+    ServerEndpoint ep;
+    if (!loc_->resolve(&ep)) {
+      loc_->on_connect_failure();  // 没找到服务也算一次失败（持续重试）
+      return false;
+    }
+
     struct addrinfo hints = {}, *res = nullptr;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     char portstr[16];
-    std::snprintf(portstr, sizeof portstr, "%d", port_);
-    if (getaddrinfo(host_.c_str(), portstr, &hints, &res) != 0 || res == nullptr) return false;
+    std::snprintf(portstr, sizeof portstr, "%d", int(ep.port));
+    if (getaddrinfo(ep.host.c_str(), portstr, &hints, &res) != 0 || res == nullptr) {
+      loc_->on_connect_failure();
+      return false;
+    }
 
     int fd = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (fd < 0) {
       freeaddrinfo(res);
+      loc_->on_connect_failure();
       return false;
     }
     int fl = fcntl(fd, F_GETFL, 0);
@@ -109,17 +122,20 @@ class TcpSocket : public UplinkSocket {
     if (rc != 0) {
       if (errno != EINPROGRESS) {
         ::close(fd);
+        loc_->on_connect_failure();
         return false;
       }
       struct pollfd pfd = {.fd = fd, .events = POLLOUT, .revents = 0};
       if (poll(&pfd, 1, timeout_ms) <= 0) {
         ::close(fd);
+        loc_->on_connect_failure();
         return false;
       }
       int err = 0;
       socklen_t el = sizeof err;
       if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el) != 0 || err != 0) {
         ::close(fd);
+        loc_->on_connect_failure();
         return false;
       }
     }
@@ -163,8 +179,7 @@ class TcpSocket : public UplinkSocket {
 
   std::mutex mtx_;
   int fd_ = -1;
-  std::string host_;
-  int port_;
+  ServerLocator* loc_;
 };
 
 // ---- 编码缓冲池：VisionIPC 帧拷进 plane.length ≥ sizeimage 的自有缓冲（21 号坑）----
@@ -225,8 +240,8 @@ struct EncoderCtx {
 // ---- 主状态 ----
 class Bigmodeld {
  public:
-  Bigmodeld(std::string host, int port, int bitrate)
-      : sock_(std::move(host), port), bitrate_(bitrate), cur_bitrate_(bitrate) {
+  Bigmodeld(ServerLocator* loc, int bitrate)
+      : sock_(loc), bitrate_(bitrate), cur_bitrate_(bitrate) {
     sender_ = std::make_unique<UplinkSender>(
         &sock_, [] { return (uint64_t)millis_since_boot(); }, UplinkSenderConfig{},
         [this](const UplinkEventInfo& e) { on_uplink_event(e); });
@@ -296,11 +311,15 @@ class Bigmodeld {
       LOGE("bigmodeld: REPLY 流异常（%s），断连重连", why);
       tracker_.on_disconnect();
       sender_->notify_disconnect();
+      hello_seen_ = false;
+      link_.on_connecting();
+      link_state_write();
       buf.clear();
     };
 
     while (!do_exit) {
       if (!sender_->connected()) {
+        hello_seen_ = false;
         util::sleep_for(50);
         continue;
       }
@@ -317,12 +336,14 @@ class Bigmodeld {
       }
       buf.insert(buf.end(), tmp, tmp + n);
 
-      // MsgHdr 分流：REPLY/ERR 定长整条解析，坏流即断连重来
+      // MsgHdr 分流：HELLO/REPLY/ERR 定长整条解析，坏流即断连重来
       while (buf.size() >= bgm1::kMsgHdrSize) {
         const uint8_t type = buf[5];
         const uint32_t len = bgm1::read_u32_le(buf.data() + 12);
         size_t need = 0;
-        if (type == bgm1::kTypeReply && len == bgm1::kReplyPayloadSize) {
+        if (type == bgm1::kTypeHello && len == bgm1::kHelloPayloadSize) {
+          need = bgm1::kHelloWireSize;
+        } else if (type == bgm1::kTypeReply && len == bgm1::kReplyPayloadSize) {
           need = bgm1::kReplyWireSize;
         } else if (type == bgm1::kTypeErr && len == bgm1::kErrPayloadSize) {
           need = bgm1::kErrWireSize;
@@ -333,7 +354,24 @@ class Bigmodeld {
         }
         if (buf.size() < need) break;
 
-        if (type == bgm1::kTypeReply) {
+        if (type == bgm1::kTypeHello) {
+          // 06 号：HELLO 必须是连接首条消息且每连接仅一条（ver/instance_id/max_frame）
+          bgm1::Hello h;
+          bgm1::Err pe = hello_seen_ ? bgm1::Err::kBadType : bgm1::parse_hello(buf.data(), need, &h);
+          if (pe != bgm1::Err::kOk) {
+            LOGE("bigmodeld: HELLO 解析失败 err=%d", int(pe));
+            fail("HELLO 非法/重复");
+            break;
+          }
+          hello_seen_ = true;
+          link_.on_hello(h.instance_id);
+          link_state_write();
+          LOGW("bigmodeld: HELLO instance_id=0x%llx max_frame=%u（%s）",
+               (unsigned long long)h.instance_id, h.max_frame, link_.value().c_str());
+        } else if (!hello_seen_) {
+          fail("首条消息不是 HELLO");
+          break;
+        } else if (type == bgm1::kTypeReply) {
           bgm1::Reply r;
           if (bgm1::parse_reply(buf.data(), need, &r) != bgm1::Err::kOk) {
             fail("REPLY 解析失败");
@@ -360,6 +398,9 @@ class Bigmodeld {
             LOGE("bigmodeld: 服务端 ERR code=%u detail=%u frame_idx=%u", e.code, e.detail, e.frame_idx);
           }
           sender_->notify_disconnect();
+          hello_seen_ = false;
+          link_.on_connecting();
+          link_state_write();
           buf.clear();
           break;
         }
@@ -536,17 +577,30 @@ class Bigmodeld {
     LOGW("bigmodeld: 码率切换 %d bps", b);
   }
 
+  // 链路状态串写 Param（06 号；putNonBlocking 异步，future 竞态用锁串行化）
+  void link_state_write() {
+    std::lock_guard<std::mutex> lk(link_param_mtx_);
+    static Params params;
+    params.putNonBlocking("BigmodelLinkState", link_.value());
+  }
+
   // ---- sender 事件（sender.mtx 锁内回调：只记账 + 推队列 + 日志，不取 state_mtx）----
   void on_uplink_event(const UplinkEventInfo& e) {
     switch (e.ev) {
       case UplinkEvent::kNewConnection:
         LOGW("bigmodeld: 新连接（frame_idx 与 I 帧状态重置）");
+        link_.on_connecting();  // 06 号：等 HELLO 判 blip/restart
+        link_state_write();
         break;
       case UplinkEvent::kStall:
         LOGE("bigmodeld: 假死（≥200 ms 无进展）截断重连 frame_idx=%u", u32(e.frame_idx));
+        link_.on_connecting();
+        link_state_write();
         break;
       case UplinkEvent::kLinkLost:
         LOGE("bigmodeld: 连接丢失（连续重连失败，持续重试中）");
+        link_.on_lost();
+        link_state_write();
         break;
       case UplinkEvent::kDrop:
         LOGW("bigmodeld: 丢帧（发送队列覆盖/编码输出缺帧）frame_idx=%u", u32(e.frame_idx));
@@ -677,6 +731,11 @@ class Bigmodeld {
   ReplyTracker tracker_;
   PubMaster pm_{{"bigModelReply"}};  // 04 号 C：REPLY 经 msgq 转交 modeld
 
+  // 06 号：链路状态（HELLO instance_id 对比 → blip/restart）→ Param "BigmodelLinkState"（07 号读）
+  LinkStateTracker link_;
+  bool hello_seen_ = false;       // 本连接已收 HELLO（reply 线程独占）
+  std::mutex link_param_mtx_;     // 串行化 Param 写（putNonBlocking 的 future 非线程安全）
+
   std::mutex state_mtx_;
   FrameScheduler sched_;
   FrameIndexer indexer_;
@@ -698,13 +757,15 @@ class Bigmodeld {
 };
 
 void usage() {
-  fprintf(stderr, "usage: bigmodeld [--host HOST] [--port PORT] [--bitrate BPS]\n");
+  fprintf(stderr,
+          "usage: bigmodeld [--host HOST|auto] [--port PORT] [--bitrate BPS]\n"
+          "  --host 缺省读 Params \"BigmodelServerHost\"（空 = mDNS 自动发现，限 wlan0 子网）\n");
 }
 
 }  // namespace
 
 int main(int argc, char* argv[]) {
-  std::string host = "127.0.0.1";  // adb reverse 验证默认连本机
+  std::string host;  // --host：手动 IP / "auto"；缺省走 Params 与自动发现（06 号）
   int port = 7070;
   int bitrate = kDefaultBitrate;
 
@@ -735,9 +796,34 @@ int main(int argc, char* argv[]) {
     return 2;
   }
 
-  LOGW("bigmodeld: start host=%s port=%d bitrate=%d", host.c_str(), port, bitrate);
+  // 06 号连接目标：--host 显式给定优先（adb reverse/联调用）；否则读 Params
+  // "BigmodelServerHost"（07 号设置页写）：非空 = 手动 IP，空 = 自动发现（限 wlan0 子网）。
+  std::string fixed = host;
+  if (fixed.empty()) {
+    Params params;
+    fixed = params.get("BigmodelServerHost");
+    while (!fixed.empty() && fixed.back() == '\n') fixed.pop_back();
+  }
+  if (fixed == "auto") fixed.clear();
 
-  Bigmodeld bg(host, port, bitrate);
+  std::unique_ptr<ServerLocator> loc;
+  if (!fixed.empty()) {
+    ServerEndpoint ep;
+    ep.host = fixed;
+    ep.port = uint16_t(port);
+    loc = std::make_unique<FixedLocator>(ep);
+    LOGW("bigmodeld: start host=%s port=%d bitrate=%d（手动）", fixed.c_str(), port, bitrate);
+  } else {
+    // 发现范围每次现探测（Wi-Fi 断开/换网后范围跟着变）
+    loc = std::make_unique<AvahiLocator>([](ServerEndpoint* out) {
+      SubnetScope s;
+      if (!detect_wifi_scope(&s)) return false;  // Wi-Fi 没起：发现不到，持续重试
+      return browse_avahi(out, s);
+    });
+    LOGW("bigmodeld: start host=auto（mDNS 限 wlan0 子网）port=%d bitrate=%d", port, bitrate);
+  }
+
+  Bigmodeld bg(loc.get(), bitrate);
   std::vector<std::thread> ts;
   ts.emplace_back(&Bigmodeld::capture_thread, &bg, kRoad);
   ts.emplace_back(&Bigmodeld::capture_thread, &bg, kWide);

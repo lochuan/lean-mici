@@ -199,4 +199,29 @@ Err parse_err(const uint8_t* data, size_t size, ErrMsg* out) {
   return Err::kOk;
 }
 
+size_t pack_hello(const Hello& h, uint8_t* out, size_t cap) {
+  if (cap < kHelloWireSize) return 0;
+  std::memset(out, 0, kHelloWireSize);
+  put_msg_hdr(out, kTypeHello, 0, 0, uint32_t(kHelloPayloadSize));
+  put_u64(out + kMsgHdrSize, h.instance_id);
+  put_u32(out + kMsgHdrSize + 8, h.max_frame);
+  // 保留 u32 与尾部 16 B MAC 置零
+  return kHelloWireSize;
+}
+
+Err parse_hello(const uint8_t* data, size_t size, Hello* out) {
+  if (size < kHelloWireSize) return Err::kTruncated;
+  uint16_t flags;
+  uint32_t frame_idx, len;
+  Err err = parse_msg_hdr_typed(data, kTypeHello, &flags, &frame_idx, &len);
+  if (err != Err::kOk) return err;
+  if (len != kHelloPayloadSize || size != kHelloWireSize) return Err::kLenMismatch;
+
+  Hello h;
+  h.instance_id = get_u64(data + kMsgHdrSize);
+  h.max_frame = get_u32(data + kMsgHdrSize + 8);
+  if (out) *out = h;
+  return Err::kOk;
+}
+
 }  // namespace bgm1
