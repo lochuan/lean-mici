@@ -274,13 +274,13 @@ class Bigmodeld {
       const uint64_t k = sender_->frames_sent() / 1000;
       if (k > report_k) {
         report_k = k;
-        std::vector<double> v = sender_->send_samples();
-        std::sort(v.begin(), v.end());
+        std::vector<double> samples = sender_->send_samples();
+        std::sort(samples.begin(), samples.end());
         auto pct = [&](double p) {
-          return v.empty() ? 0.0 : v[std::min(v.size() - 1, (size_t)(v.size() * p))];
+          return samples.empty() ? 0.0 : samples[std::min(samples.size() - 1, (size_t)(samples.size() * p))];
         };
         LOGE("bigmodeld: 发送段 n=%zu p50=%.2f p90=%.2f p99=%.2f max=%.2f ms",
-             v.size(), pct(0.5), pct(0.9), pct(0.99), v.empty() ? 0.0 : v.back());
+             samples.size(), pct(0.5), pct(0.9), pct(0.99), samples.empty() ? 0.0 : samples.back());
       }
     }
   }
