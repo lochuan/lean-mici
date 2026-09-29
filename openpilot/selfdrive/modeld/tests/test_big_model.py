@@ -1,8 +1,12 @@
 # big_model 纯逻辑单测（04 号 C+D）：outputs[0:2066) 解析、L̂ 估计、交叉淡入、bigModelReply schema。
 # 跑法：pytest openpilot/selfdrive/modeld/tests/test_big_model.py
+import threading
+import time
+
 import numpy as np
 
-from openpilot.selfdrive.modeld.big_model import BIG_OUTPUT_SLICES, parse_big_outputs, LatencyEstimator, SourceBlender
+from openpilot.selfdrive.modeld.big_model import (BIG_OUTPUT_SLICES, parse_big_outputs, LatencyEstimator,
+                                                  SourceBlender, BigReplyLatch)
 
 
 def test_big_model_reply_schema():
@@ -26,8 +30,10 @@ def test_model_data_v2sp_meta_schema():
   sp = messaging.new_message('modelDataV2SP').modelDataV2SP
   sp.bigActionT = [0.125, 0.45]
   sp.desireClass = 3
+  sp.bigLatencyMs = 33.5  # C-3：L_n = 收帧时刻 − timestamp_eof（0 = 本帧没等到）
   np.testing.assert_allclose(list(sp.bigActionT), [0.125, 0.45], rtol=1e-6)  # f32 往返
   assert sp.desireClass == 3
+  assert sp.bigLatencyMs == 33.5
 
 
 def test_big_output_slices_cover_abi():
@@ -104,3 +110,51 @@ def test_source_blender_fade():
     out = b.step(small, None)                  # 淡出到 w=0
   assert b.w == 0.0
   assert out is small
+
+
+class _FakeSM:
+  """接缝假件：永不给消息，只让读线程空转（测试只测 _on_reply/wait_for 接缝）。"""
+  updated = {'bigModelReply': False}
+  def update(self, timeout=0.0):
+    time.sleep(min(timeout, 0.05))
+  def __getitem__(self, k):
+    raise KeyError(k)
+
+
+def test_big_reply_latch():
+  # C-3：读线程收帧即盖真实到达时刻（不被 model.run() 遮挡）、按 tEof 匹配、
+  # 已到零等待取、过期兜底、迟到 Condition 唤醒、L_n 进 L̂、链路存活门
+  latch = BigReplyLatch(_FakeSM())
+  raw = np.arange(2066, dtype=np.float32)
+  t_eof = 1_000_000_000
+
+  assert not latch.link_alive()                       # 从未见过 REPLY → 门关（只捡不等）
+
+  latch._on_reply(t_eof, raw, t_eof + 25_000_000)     # 到达 = eof+25 ms
+  assert latch.link_alive()
+  assert latch.latency.value == 25.                   # L_n=25 ms 进 L̂（中位 25）
+
+  got, arrival_ns = latch.wait_for(t_eof, time.monotonic_ns() + 10_000_000_000)
+  assert got is raw and arrival_ns == t_eof + 25_000_000   # 已到即取，不等 deadline
+
+  got, arrival_ns = latch.wait_for(t_eof + 1, time.monotonic_ns())
+  assert got is None and arrival_ns == 0              # 不匹配 + 过期 → 兜底
+
+  threading.Timer(0.05, latch._on_reply, args=(t_eof + 2, raw, t_eof + 2)).start()
+  got, arrival_ns = latch.wait_for(t_eof + 2, time.monotonic_ns() + 5_000_000_000)
+  assert got is raw                                   # 等 Condition，一到即醒
+
+  latch.alive_s = 0.0
+  assert not latch.link_alive()                       # 没回音 → 门关
+
+
+def test_modeld_c3_wiring_source():
+  """modeld 主循环需 QCOM GPU 无法宿主构造，照 test_is_run_model 手法锁票面不变量
+  （头 4 帧超时帧、全零兜底、modelV2.big、L_n 遥测）。接线一起改的话本测试会提醒更新。"""
+  import inspect
+  from openpilot.selfdrive.modeld import modeld
+  src = inspect.getsource(modeld.main)
+  assert "BIG_WARMUP_FRAMES" in src, "modeld 重启后头 4 帧按超时帧（04 号票）"
+  assert "np.any" in src, "REPLY outputs 全零 = 解码跳过帧，须落回小模型（14 号口径）"
+  assert "modelV2.big = big_out is not None" in src
+  assert "bigLatencyMs" in src, "L_n 每帧进遥测（04 号票）"

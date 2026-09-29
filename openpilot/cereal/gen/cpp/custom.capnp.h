@@ -4569,6 +4569,8 @@ public:
 
   inline  ::uint8_t getDesireClass() const;
 
+  inline float getBigLatencyMs() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -4616,6 +4618,9 @@ public:
 
   inline  ::uint8_t getDesireClass();
   inline void setDesireClass( ::uint8_t value);
+
+  inline float getBigLatencyMs();
+  inline void setBigLatencyMs(float value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -9056,6 +9061,20 @@ inline  ::uint8_t ModelDataV2SP::Builder::getDesireClass() {
 inline void ModelDataV2SP::Builder::setDesireClass( ::uint8_t value) {
   _builder.setDataField< ::uint8_t>(
       ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline float ModelDataV2SP::Reader::getBigLatencyMs() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline float ModelDataV2SP::Builder::getBigLatencyMs() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void ModelDataV2SP::Builder::setBigLatencyMs(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint32_t BigModelReply::Reader::getFrameIdx() const {
