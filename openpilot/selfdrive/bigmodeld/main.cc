@@ -515,8 +515,19 @@ class Bigmodeld {
       case UplinkEvent::kHeadBarrier:
         LOGW("bigmodeld: 序列头门丢弃（非双路 IDR 对不开流）frame_idx=%u", u32(e.frame_idx));
         break;
-      case UplinkEvent::kFrameSent:
+      case UplinkEvent::kFrameSent: {
+        // 发送段耗时报表（17 号）：每 1000 帧一行；样本 = 在途起点 → 整帧写完
+        if (++sent_events_ % 1000 == 0) {
+          std::vector<double> v = sender_->send_samples();
+          std::sort(v.begin(), v.end());
+          auto pct = [&](double p) {
+            return v.empty() ? 0.0 : v[std::min(v.size() - 1, (size_t)(v.size() * p))];
+          };
+          LOGE("bigmodeld: 发送段 n=%zu p50=%.2f p90=%.2f p99=%.2f max=%.2f ms",
+               v.size(), pct(0.5), pct(0.9), pct(0.99), v.empty() ? 0.0 : v.back());
+        }
         break;
+      }
     }
     std::lock_guard<std::mutex> lk(ev_mtx_);
     evs_.push_back(e);
@@ -648,6 +659,7 @@ class Bigmodeld {
 
   std::mutex ev_mtx_;
   std::vector<UplinkEventInfo> evs_;
+  int sent_events_ = 0;  // kFrameSent 计数（17 号发送段报表触发）
 
   EncoderCtx ctx_[2];
   int bitrate_;

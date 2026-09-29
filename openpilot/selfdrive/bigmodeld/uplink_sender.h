@@ -110,6 +110,9 @@ class UplinkSender {
   uint64_t wide_idr_mismatches() const;  // bit1 预测与 wide 包实际 keyframe 不符次数
   uint64_t stale_submits() const;        // 旧连接代号的迟到提交（静默丢弃）
   ConnEpoch conn_epoch() const;      // 当前连接代号（kNewConnection 事件同值）
+  // 发送段耗时样本（17 号）：进入在途 → 整帧写完（含等 wide 包与 TCP 背压），ms。
+  // 读写都在 mtx_ 内（事件回调持锁访问安全）。
+  const std::vector<double>& send_samples() const { return send_ms_; }
 
  private:
   struct OutFrame {
@@ -125,6 +128,7 @@ class UplinkSender {
     size_t sent1 = 0;
     size_t sent2 = 0;
     bool chunk1_done = false;
+    uint64_t t_inflight_ms = 0;  // 进入在途时刻（17 号发送段计时）
   };
 
   OutFrame* find_or_create_locked(FrameIdx frame_idx);
@@ -160,6 +164,7 @@ class UplinkSender {
   uint64_t last_progress_ms_ = 0;
   uint64_t wide_idr_mismatches_ = 0;
   uint64_t stale_submits_ = 0;
+  std::vector<double> send_ms_;  // 发送段耗时样本（17 号，ms）
 
   // 已丢帧 frame_idx 小窗口（残包/迟到包静默丢弃，避免重复上报 kHeadBarrier）
   static constexpr int kDroppedWindow = 32;

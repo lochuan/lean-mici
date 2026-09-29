@@ -144,6 +144,7 @@ void UplinkSender::try_finish_inflight_locked() {
   if (!has_inflight_) return;
   // 写得动就发完（含连续部分写，不撕裂），写不动/写错才截断（drop_connection_locked 清残帧）
   if (write_out_locked(inflight_, 0, false) == WriteState::kDone) {
+    send_ms_.push_back(double(now_() - inflight_.t_inflight_ms));  // 发送段样本（17 号）
     FrameIdx idx = inflight_.frame_idx;
     has_inflight_ = false;
     emit_locked(UplinkEvent::kFrameSent, idx);
@@ -189,6 +190,7 @@ bool UplinkSender::step() {
         has_queued_ = false;
         has_inflight_ = true;
         last_progress_ms_ = now;  // 新在途帧起点，空闲期不计入假死
+        inflight_.t_inflight_ms = now;  // 发送段计时起点（17 号）
         progress = true;
       }
       if (!has_inflight_) return progress;
@@ -197,6 +199,7 @@ bool UplinkSender::step() {
       const size_t before = inflight_.sent1 + inflight_.sent2;
       WriteState ws = write_out_locked(inflight_, now, true);
       if (ws == WriteState::kDone) {
+        send_ms_.push_back(double(now - inflight_.t_inflight_ms));  // 发送段样本（17 号）
         has_inflight_ = false;
         emit_locked(UplinkEvent::kFrameSent, idx);
         return true;
