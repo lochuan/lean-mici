@@ -8,11 +8,15 @@
 #
 # 用法: tools/release/publish_release_from_device.sh [--skip-tests]
 # 环境: DEVICE=comma@10.0.0.27 可覆盖
+#       SRC_BRANCH / RELEASE_BRANCH 透传给设备侧 device_release.sh
+#       （缺省 lean-master / lean-release；如 SRC_BRANCH=big-uplink RELEASE_BRANCH=big-release）
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 ROOT="$(cd "$DIR/../.." && pwd)"
 DEVICE="${DEVICE:-comma@10.0.0.27}"
+SRC_BRANCH="${SRC_BRANCH:-lean-master}"
+RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
 SKIP_TESTS=0
 [ "${1:-}" = "--skip-tests" ] && SKIP_TESTS=1
 
@@ -35,7 +39,7 @@ scp -q "$DIR/device_release.sh" "$DEVICE:/tmp/device_release.sh"
 echo "[-] 设备侧发布（nohup + 轮询；含 scons/键表门禁/schema 门禁/冒烟/打包）"
 # 清树：上一次发布/调试留下的同步状态会让前提检查（树必须干净）误判。
 # reset 绝不接管道（SIGPIPE 会掐死 reset，见 ADR 发布基建三连坑）。
-ssh "$DEVICE" 'cd /data/openpilot && git reset -q --hard HEAD 2>/dev/null; (setsid nohup bash /tmp/device_release.sh > /tmp/release.log 2>&1 & echo $! > /tmp/release.pid)'
+ssh "$DEVICE" 'cd /data/openpilot && git reset -q --hard HEAD 2>/dev/null; (setsid nohup env SRC_BRANCH='"$SRC_BRANCH"' RELEASE_BRANCH='"$RELEASE_BRANCH"' bash /tmp/device_release.sh > /tmp/release.log 2>&1 & echo $! > /tmp/release.pid)'
 while ssh -o ConnectTimeout=10 "$DEVICE" 'kill -0 "$(cat /tmp/release.pid)" 2>/dev/null'; do
   sleep 20
 done
@@ -46,18 +50,19 @@ if ! ssh "$DEVICE" 'grep -q "扁平树 stage 就绪" /tmp/release.log'; then
 fi
 
 echo "[-] 中继三步：取 relstage → push fork → 设备消费"
-git fetch "ssh://$DEVICE/data/relstage" +lean-release:refs/temp/device-release
+git fetch "ssh://$DEVICE/data/relstage" +"$RELEASE_BRANCH":refs/temp/device-release
 RELEASE_SHA=$(git rev-parse refs/temp/device-release)
 PUSHED=0
 for _ in 1 2 3; do
-  if git push -f fork refs/temp/device-release:lean-release; then
+  # 目标必须全限定：新分支（如 big-release）远端不存在时 git 拒绝 DWIM 猜名
+  if git push -f fork refs/temp/device-release:"refs/heads/$RELEASE_BRANCH"; then
     PUSHED=1
     break
   fi
   sleep 5
 done
 [ "$PUSHED" -eq 1 ] || { echo "推送 fork 失败（3 次）" >&2; exit 1; }
-ssh "$DEVICE" 'cd /data/openpilot && git fetch -q origin lean-release && git reset -q --hard FETCH_HEAD'
+ssh "$DEVICE" "cd /data/openpilot && git fetch -q origin $RELEASE_BRANCH && git checkout -q --force -B $RELEASE_BRANCH FETCH_HEAD"
 
 echo "[-] 重启 + 上机验证"
 ssh "$DEVICE" 'sudo systemctl restart comma'
@@ -71,5 +76,5 @@ assert services.SERVICE_LIST[\"eagleDebug\"].should_log is True
 print(\"[ok] eagleDebug 落盘开关\")
 '"
 
-echo "[ok] lean-release = ${RELEASE_SHA} 已部署（设备重启完成）"
+echo "[ok] $RELEASE_BRANCH = ${RELEASE_SHA} 已部署（设备重启完成）"
 echo "    冒烟门禁: EXPECT_COMMIT=$RELEASE_SHA ./tools/release/smoke_gate.sh"

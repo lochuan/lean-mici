@@ -476,7 +476,7 @@ class WifiManager:
       # Stale NEED_AUTH from a prior connection during network switching arrives with
       # prev_state=DISCONNECTED and must be ignored to avoid a false wrong-password callback.
       if self._wifi_state.ssid:
-        self._last_error = f"连接 {self._wifi_state.ssid} 失败：密码错误？"
+        self._last_error = f"Failed to connect to {self._wifi_state.ssid}: wrong password?"
         self._enqueue_callbacks(self._need_auth, self._wifi_state.ssid)
         self._set_connecting(None)
 
@@ -720,7 +720,7 @@ class WifiManager:
         # 失败要可见也要复位：只 _init_wifi_state 会被"保留 CONNECTING"守卫挡住，
         # 造成假连接中态卡死
         self._set_connecting(None)
-        self._last_error = f"连接 {ssid} 失败"
+        self._last_error = f"Failed to connect to {ssid}"
         self._init_wifi_state()
 
     threading.Thread(target=worker, daemon=True).start()

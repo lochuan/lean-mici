@@ -89,6 +89,7 @@ class TestConstants(unittest.TestCase):
       "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libqpOASES_e.so.3.1",
       "openpilot/selfdrive/locationd/models/generated/libcar.so",
       "openpilot/selfdrive/locationd/models/generated/libpose.so",
+      "openpilot/selfdrive/bigmodeld/bigmodeld",
       "openpilot/selfdrive/pandad/pandad",
       "openpilot/sunnypilot/selfdrive/locationd/locationd",
       "openpilot/sunnypilot/selfdrive/locationd/models/generated/liblive.so",
@@ -106,6 +107,7 @@ class TestConstants(unittest.TestCase):
       "site_scons",
       "openpilot/common",
       "openpilot/cereal",
+      "openpilot/selfdrive/bigmodeld",
       "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib",
       "openpilot/selfdrive/locationd/models/generated",
       "openpilot/selfdrive/pandad",
@@ -961,3 +963,44 @@ class TestFlatTreeGate(unittest.TestCase):
       )
       self.assertEqual(out.returncode, 1)
       self.assertIn("lib.so", out.stderr)
+
+  def test_check_flat_tree_cli_runs_outside_git_repo(self):
+    """门禁跑在 $STAGE（git init 之前的裸目录）：cwd 不在 git 仓库里。
+
+    2026-09-30 实录：main() 无条件 _repo_root()，check-flat-tree 根本不需要
+    git 仓库 → stage 门禁在真实发布里 traceback 拒发。CLI 从非仓库 cwd 跑必须
+    只按树判据给退出码，不得崩。
+    """
+    import sys as _sys
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td) / "stage"
+      root.mkdir()
+      (root / "tinygrad_repo").mkdir()
+      (root / "tinygrad_repo" / "TINYGRAD_PIN").write_text("a" * 40 + "\n")
+      out = subprocess.run(
+        [_sys.executable, str(MODULE_PATH), "check-flat-tree", str(root)],
+        capture_output=True, text=True, cwd=td,
+      )
+      self.assertEqual(out.returncode, 0, out.stderr)
+      self.assertNotIn("Traceback", out.stderr)
+
+
+class TestConsumeBranchWiring(unittest.TestCase):
+  """设备消费必须把 /data/openpilot 落在 $RELEASE_BRANCH 本地分支上。
+
+  裸 `git reset --hard FETCH_HEAD` 装完仍停在旧本地分支（lean-release）。
+  updated.py 的 OTA 目标分支 = 设备本地分支名，拿 GitHub 同名分支当「最新」：
+  发布只推 $RELEASE_BRANCH 时 GitHub lean-release 还是旧版 → updated 判定
+  「有更新」把设备降级（git clean 连 bigmodeld、面板文件都清掉），下次开机
+  生效。2026-09-30 实机踩坑（面板消失的真正根因）。
+  """
+
+  def test_consume_checks_out_release_branch(self):
+    sh = (REPO_ROOT / "tools/release/publish_release_from_device.sh").read_text()
+    self.assertIn("git checkout -q --force -B $RELEASE_BRANCH FETCH_HEAD", sh,
+                  "消费必须 checkout -B $RELEASE_BRANCH：设备要落在发布通道分支上")
+
+  def test_consume_must_not_bare_reset(self):
+    sh = (REPO_ROOT / "tools/release/publish_release_from_device.sh").read_text()
+    self.assertNotIn("git reset -q --hard FETCH_HEAD", sh,
+                     "裸 reset 会让设备留在旧本地分支，updated.py 按旧分支名把设备降级")

@@ -24,6 +24,7 @@ from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
+from openpilot.selfdrive.modeld.big_model import parse_big_outputs, SourceBlender, BigReplyLatch, LatencyEstimator, nanos_since_boot
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, nv12_copy_size, MODELD_INPUTS
 from openpilot.selfdrive.modeld.fill_model_msg import (fill_model_msg, fill_driving_model_data, fill_pose_msg,
                                                        PublishState, get_curvature_from_output)
@@ -39,6 +40,13 @@ SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
 LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
+# 04 号 C-2：大模型 action_t 用 chestnut 公式（bundle overrides 实测 lat=.1/long=.3，
+# research/02 §4），独立于上面的小模型口径（票面「小模型公式不变」）
+BIG_LAT_SMOOTH_SECONDS = 0.1
+BIG_LONG_SMOOTH_SECONDS = 0.3
+# 04 号 C-3：大模型 REPLY 截止 = timestamp_eof + L̂ + 48ms（ADR-0001），L̂ 滑动中位 [15,35] 初值 22
+BIG_REPLY_GRACE_MS = 48.
+BIG_WARMUP_FRAMES = 4  # modeld 重启后头 4 帧按超时帧（票面）
 MIN_LAT_CONTROL_SPEED = 0.3
 
 
@@ -252,9 +260,18 @@ def main(demo=False):
   pub_socks = ["modelV2", "drivingModelData", "cameraOdometry", "modelDataV2SP"]
   pm = PubMaster(pub_socks)
   sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "carControl", "lateralDelay", "eagleState"])
+  # 04 号 C-3：bigModelReply 独立订阅——latch 读线程收帧即盖到达时刻，主循环不碰 sm 的 updated 语义
+  sm_big = SubMaster(["bigModelReply"])
+  latch = BigReplyLatch(sm_big)
+  latency = LatencyEstimator()  # L̂：喂 modeld 收帧时刻 − timestamp_eof（ADR-0001），不喂 REPLY 往返
+  blender = SourceBlender()
 
   publish_state = PublishState()
   params = Params()
+  # 07 号：「远程大模型」开关（仅 offroad 可改，故启动读一次）；
+  # 关 = 完全 lean-master 行为：不等大模型 REPLY、不取结果，逐帧小模型。
+  # get_bool 缺省键不回落注册默认，故走 return_default（默认开）
+  bigmodel_enabled = bool(params.get("BigmodelToggle", return_default=True))
 
   # setup filter to track dropped frames
   frame_dropped_filter = FirstOrderFilter(0., 10., 1. / ModelConstants.MODEL_RUN_FREQ)
@@ -294,6 +311,8 @@ def main(demo=False):
     if buf_main is None:
       cloudlog.debug("vipc_client_main no frame")
       continue
+    camera_to_model_ms = (nanos_since_boot() - meta_main.timestamp_eof) / 1e6  # L_n（ADR-0001），进遥测 cameraToModelMs
+    latency.update(camera_to_model_ms)
 
     if use_extra_client:
       # Keep receiving extra frames until frame id matches main camera
@@ -356,6 +375,10 @@ def main(demo=False):
     action_delay = DT_MDL / 2 # middle of the interval between model output (current state) and next frame (expected state)
     lat_action_t = lat_delay + frame_delay + action_delay
     long_action_t = long_delay + frame_delay + action_delay
+    # 04 号 C-3：大路 action_t = chestnut 公式（lat 走 get_lat_delay，受 LagdToggle 控制），
+    # 与 mdv2sp.bigActionT 同一口径；小模型公式不变（票面不变量）
+    big_lat_action_t = model.lat_delay + BIG_LAT_SMOOTH_SECONDS + frame_delay + action_delay
+    big_long_action_t = CP.longitudinalActuatorDelay + BIG_LONG_SMOOTH_SECONDS + frame_delay + action_delay
     inputs: dict[str, np.ndarray] = {
       'desire_pulse': vec_desire,
       'traffic_convention': traffic_convention,
@@ -374,11 +397,42 @@ def main(demo=False):
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
 
-      action = model.get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego)
+      # 04 号 C-3：等大模型 REPLY（截止 = timestamp_eof + L̂ + 48ms）。结果一到就发不等截止、
+      # 不重试不补发；头 4 帧按超时帧（票面，不等不取）；链路没回音（存活门）就只捡已到的，
+      # 保 20Hz 不塌（不 modeldLagging）。eof_to_reply_ms = REPLY 到达 − timestamp_eof（遥测，非 L̂）。
+      big_raw, eof_to_reply_ms = None, 0.
+      if bigmodel_enabled and run_count > BIG_WARMUP_FRAMES:
+        deadline_ns = meta_main.timestamp_eof + int((latency.value + BIG_REPLY_GRACE_MS) * 1e6)
+        if not latch.link_alive():
+          deadline_ns = nanos_since_boot()
+        big_raw, eof_to_reply_ms = latch.wait_for(meta_main.timestamp_eof, deadline_ns)
+      if big_raw is not None and not np.any(big_raw):
+        big_raw = None  # 全零 = App 侧解码跳过帧（14 号口径），同样落回小模型
+      big_out = parse_big_outputs(big_raw) if big_raw is not None else None
+
+      # 无感切换：全头交叉淡入（兜底腿 hold 最近大模型输出）；action 共用同一 smooth 平滑链
+      blended = blender.step(model_output, big_out)
+      if SEND_RAW_PRED and 'raw_pred' not in blended:
+        blended = {**blended, 'raw_pred': model_output['raw_pred']}  # raw_pred 恒为小模型调试输出
+
+      action_small = model.get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego)
+      big_leg = big_out if big_out is not None else blender.big_last
+      if big_leg is not None and blender.w > 0.0:
+        # 两路各按自己的 action_t 算（大路 chestnut 口径），按 blender.w 插值后共用平滑链
+        big_action = model.get_action_from_model(big_leg, prev_action, big_lat_action_t, big_long_action_t, v_ego)
+        w = blender.w
+        action = log.ModelDataV2.Action(
+          desiredCurvature=(1. - w) * action_small.desiredCurvature + w * big_action.desiredCurvature,
+          desiredAcceleration=(1. - w) * action_small.desiredAcceleration + w * big_action.desiredAcceleration,
+          shouldStop=big_action.shouldStop if w >= 0.5 else action_small.shouldStop)
+      else:
+        action = action_small
       prev_action = action
-      fill_model_msg(modelv2_send, model_output, action,
+
+      fill_model_msg(modelv2_send, blended, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
                       frame_drop_ratio, meta_main.timestamp_eof, model_execution_time, extrinsics_calibration_seen)
+      modelv2_send.modelV2.big = big_out is not None
 
 
       desire_state = modelv2_send.modelV2.meta.desireState
@@ -402,9 +456,16 @@ def main(demo=False):
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
+      # 04 号 C-2：大模型输入元数据上行（bigmodeld 帧头 desire/action_t 的来源）。
+      # action_t = chestnut 公式（lat 走 get_lat_delay，受 LagdToggle 控制；13 号/research/02 §4）；
+      # desireClass = DH.desire 电平，pulse 边沿由 bigmodeld 生成（msgq 电平采样不怕迟到漏沿）
+      mdv2sp_send.modelDataV2SP.bigActionT = [big_lat_action_t, big_long_action_t]
+      mdv2sp_send.modelDataV2SP.desireClass = DH.desire
+      mdv2sp_send.modelDataV2SP.bigLatencyMs = eof_to_reply_ms
+      mdv2sp_send.modelDataV2SP.cameraToModelMs = camera_to_model_ms
 
       fill_driving_model_data(drivingdata_send, modelv2_send)
-      fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, extrinsics_calibration_seen)
+      fill_pose_msg(posenet_send, blended, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, extrinsics_calibration_seen)
       pm.send('modelV2', modelv2_send)
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)

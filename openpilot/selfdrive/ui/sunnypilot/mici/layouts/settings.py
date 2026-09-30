@@ -10,6 +10,7 @@ from openpilot.selfdrive.ui.mici.layouts.settings.device import DeviceLayoutMici
 from openpilot.selfdrive.ui.mici.widgets.button import BigCircleButton
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, BigDialog
 from openpilot.selfdrive.ui.sunnypilot.mici.layouts.lanlink import LanLinkLayoutMici
+from openpilot.selfdrive.ui.sunnypilot.mici.layouts.bigmodel import BigmodelLayoutMici
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr
@@ -35,6 +36,10 @@ class SettingsLayoutSP(OP.SettingsLayout):
     lanlink_btn = SettingsBigButton(tr("lanlink"), "", gui_app.texture("icons/link.png", 76, 56))
     lanlink_btn.set_click_callback(lambda: gui_app.push_widget(lanlink_panel))
 
+    # 07 号：远程大模型（开关 + 服务器地址）
+    bigmodel_btn = SettingsBigButton("Chipmunk", "", gui_app.texture("icons_mici/NPU.png", 76, 56))
+    bigmodel_btn.set_click_callback(lambda: gui_app.push_widget(BigmodelLayoutMici()))
+
 
     # onroad: enable button sits at the front (left of toggles)
     self._enable_offroad_btn_onroad = BigCircleButton(self.icon_offroad_enable, red=True)
@@ -53,6 +58,7 @@ class SettingsLayoutSP(OP.SettingsLayout):
     items = self._scroller._items.copy()
 
     items.insert(5, lanlink_btn)
+    items.insert(6, bigmodel_btn)
 
     # front slots (only one ever visible at a time): exit-always-offroad, then enable-onroad
     items.insert(0, self._enable_offroad_btn_onroad)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# device_release.sh — 在 comma 设备上发布 lean-release（扁平树，上游 sunnypilot 模型）。
+# device_release.sh — 在 comma 设备上发布扁平树 release（上游 sunnypilot 模型）。
 #
 # 发布树 = 本设备的构建树剥离后的运行时快照：
 #   * 产物在运行时路径（消费设备 git reset 即用，无需 overlay/编译）
@@ -10,7 +10,12 @@
 #   * 发布前 60s 冒烟：PASS 才准发布；EXIT trap 保证任何失败都恢复 comma 运行
 #
 # 用法（设备上）:  bash tools/release/device_release.sh
-# 产出: /data/relstage（扁平树 git 仓库，分支 lean-release），由 Mac 侧取走推送。
+# 产出: /data/relstage（扁平树 git 仓库，分支 $RELEASE_BRANCH），由 Mac 侧取走推送。
+#
+# 分支参数（环境变量，缺省 = 主线发版）:
+#   SRC_BRANCH     源分支（源内容与 gitlink pin 的权威），缺省 lean-master
+#   RELEASE_BRANCH 发布分支（relstage 单孤儿 commit 的分支名），缺省 lean-release
+# 例: SRC_BRANCH=big-uplink RELEASE_BRANCH=big-release bash tools/release/device_release.sh
 #
 # 壳样板只定义一次（fix/release-stages ①）：阶段开头 run_stage、已知失败话术
 # die、CPU 唤醒 wake_cpu_cores、fetch 重试 git_fetch_retry。新阶段请走这些
@@ -19,6 +24,9 @@ set -Eeuo pipefail   # -E：ERR trap 继承进阶段函数，统一失败话术�
 
 STAGE=/data/relstage
 SRC=/data/openpilot
+SRC_BRANCH="${SRC_BRANCH:-lean-master}"
+RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
+SRC_REF="origin/$SRC_BRANCH"
 
 CURRENT_STAGE=""
 
@@ -89,8 +97,8 @@ check_prereqs() {
 sync_sources() {
   # 设备到 GitHub 的 TLS 偶发握手失败（fake-IP 代理链路），重试 3 次。
   # 重试尽失败不直接拒：ref 验证行才是门（ref 可能是上轮 fetch 留下的）。
-  git_fetch_retry fetch origin lean-master:refs/remotes/origin/lean-master 2>/dev/null || true
-  git rev-parse -q --verify origin/lean-master >/dev/null || die "lean-master fetch 失败（3 次重试后）"
+  git_fetch_retry fetch origin "$SRC_BRANCH:refs/remotes/origin/$SRC_BRANCH" 2>/dev/null || true
+  git rev-parse -q --verify "$SRC_REF" >/dev/null || die "$SRC_BRANCH fetch 失败（3 次重试后）"
   # 白名单 = 产物路径（ARTIFACT_PATHS + data globs 的实际文件）——设备树有、lean-master
   # 没有的运行时产物是扁平模型的预期内容。
   # ls 失败（glob 无匹配，如消费态树没有 yolo pkl）必须吞掉——否则 for 循环 rc≠0，
@@ -100,7 +108,7 @@ sync_sources() {
     /usr/local/venv/bin/python /tmp/relhelper/release_lib.py flat-tree-entries
     for pat in $(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py data-artifact-globs); do ls "$pat" 2>/dev/null || true; done
   )
-  git checkout origin/lean-master -- .
+  git checkout "$SRC_REF" -- .
   # 镜像 lean-master 的删除：源里删掉的文件（功能移除）从设备树一并移除，
   # 否则发布树继续携带死代码。白名单（构建产物）不删——产物在 HEAD 里 tracked、
   # lean-master 没有，属于扁平模型的预期内容。
@@ -108,20 +116,20 @@ sync_sources() {
   # pipefail+set -e 会无声杀死整个发布。与 ls glob 空匹配同类坑，|| true 兜底。
   comm -23 \
     <(git ls-files | sort) \
-    <(git ls-tree -r --name-only origin/lean-master | sort) \
+    <(git ls-tree -r --name-only "$SRC_REF" | sort) \
     | { grep -vxF -f <(echo "$ART_EXPECT" | sort -u) || true; } \
     | xargs -r rm -f
-  AM_BAD=$(git diff --name-only --diff-filter=AM origin/lean-master | grep -vxF -f <(echo "$ART_EXPECT" | sort -u) || true)
+  AM_BAD=$(git diff --name-only --diff-filter=AM "$SRC_REF" | grep -vxF -f <(echo "$ART_EXPECT" | sort -u) || true)
   if [ -n "$AM_BAD" ]; then
     echo "$AM_BAD" | head -20 >&2
-    die "设备树同步 lean-master 后仍有非产物的新增/修改，拒绝发布（排查 .gitignore/权限）"
+    die "设备树同步 $SRC_BRANCH 后仍有非产物的新增/修改，拒绝发布（排查 .gitignore/权限）"
   fi
-  echo "[ok] 设备树源内容 ≡ origin/lean-master（+ 运行时产物）"
-  echo "[ok] 设备树 ≡ origin/lean-master（源内容）"
+  echo "[ok] 设备树源内容 ≡ $SRC_REF（+ 运行时产物）"
+  echo "[ok] 设备树 ≡ $SRC_REF（源内容）"
 }
 
 materialize_tinygrad() {
-  TG_SHA=$(git rev-parse origin/lean-master:tinygrad_repo)
+  TG_SHA=$(git rev-parse "$SRC_REF:tinygrad_repo")
   CUR_PIN="$(cat "$SRC/tinygrad_repo/TINYGRAD_PIN" 2>/dev/null || true)"
   if [ "$CUR_PIN" = "$TG_SHA" ]; then
     echo "[ok] tinygrad 已在 $TG_SHA"
@@ -147,7 +155,7 @@ PIN_DIR=/data/matpins
 materialize_repo() {
   local name="$1" url="$2" canary="$3"
   local sha pin cur
-  sha=$(git -C "$SRC" rev-parse "origin/lean-master:$name")
+  sha=$(git -C "$SRC" rev-parse "$SRC_REF:$name")
   pin="$PIN_DIR/${name}.sha"
   cur="$(cat "$pin" 2>/dev/null || true)"
   rm -f "$SRC/$name/.materialized_sha"   # 旧版 repo 内 pin 退役
@@ -202,7 +210,7 @@ compile_yolo_pkl() {
   YOLO_DIR="openpilot/selfdrive/eagled/models"
   YOLO_PKL="$SRC/$YOLO_DIR/yolo_tinygrad.pkl"
   YOLO_ONNX="$SRC/$YOLO_DIR/yolo26n-bdd7-fp32-384x640.onnx"
-  [ -f "$YOLO_ONNX" ] || die "yolo onnx 缺失：$YOLO_ONNX —— lean-master 应 tracked 此文件，前置同步步应已落盘"
+  [ -f "$YOLO_ONNX" ] || die "yolo onnx 缺失：$YOLO_ONNX —— $SRC_BRANCH 应 tracked 此文件，前置同步步应已落盘"
   YOLO_FP=$(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py fingerprint \
     --extra "yolo-pkl-v1" --extra "pin=$TG_SHA" \
     "$YOLO_ONNX" "$SRC/$YOLO_DIR/compile_yolo_onnx.py")
@@ -228,7 +236,7 @@ compile_driving_pkl() {
   MODEL_DIR="$SRC/openpilot/selfdrive/modeld"
   DRIVE_PKL="$MODEL_DIR/models/driving_tinygrad.pkl"
   DRIVE_ONNX="$MODEL_DIR/models/driving_supercombo.onnx"
-  [ -f "$DRIVE_ONNX" ] || die "driving onnx 缺失：$DRIVE_ONNX —— lean-master 应 tracked 此文件，前置同步步应已落盘"
+  [ -f "$DRIVE_ONNX" ] || die "driving onnx 缺失：$DRIVE_ONNX —— $SRC_BRANCH 应 tracked 此文件，前置同步步应已落盘"
   DRIVE_ARGS="--model-size 512x256 --camera-resolutions 1344x760 --frame-skip 4"
   DRIVE_FP=$(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py fingerprint \
     --extra "driving-pkl-v1" --extra "pin=$TG_SHA" --extra "$DRIVE_ARGS" \
@@ -327,7 +335,7 @@ assemble_stage() {
 stamp_tinygrad_pin_stage() {
   # pin 取自 lean-master 的 gitlink（ls-tree）——设备树可能是扁平消费者，
   # tinygrad_repo 无 .git，rev-parse 会穿透父仓库返回 release commit（垃圾 pin）
-  python3 - "$SRC" "$STAGE" "refs/remotes/origin/lean-master" <<'PYEOF'
+  python3 - "$SRC" "$STAGE" "refs/remotes/origin/$SRC_BRANCH" <<'PYEOF'
 import sys
 from pathlib import Path
 sys.path.insert(0, "/tmp/relhelper")
@@ -350,8 +358,8 @@ check_flat_tree() {
 
 commit_release() {
   DATETIME=$(date '+%Y-%m-%dT%H:%M:%S')
-  MASTER_SHA=$(git -C "$SRC" rev-parse origin/lean-master)
-  git init -q -b lean-release
+  SRC_SHA=$(git -C "$SRC" rev-parse "$SRC_REF")
+  git init -q -b "$RELEASE_BRANCH"
   git config user.name lochuan
   git config user.email lochuan@users.noreply.github.com
   # .overlay_init 是 updater 的运行时 overlay 标记（updated.py 管理、随更新周期
@@ -361,13 +369,13 @@ commit_release() {
   git -c core.compression=0 -c gc.auto=0 commit -m "openpilot v$VERSION lean release (device-built, flat)
 
 date: $DATETIME
-master commit: $MASTER_SHA
+source commit: $SRC_BRANCH@$SRC_SHA
 built on: comma device (smoke-verified before publish)"
 }
 
 run_stage "前提检查" check_prereqs
-run_stage "同步 lean-master 源内容到设备树（结构性防漂移：发布树 ≡ lean-master + 产物）" sync_sources
-run_stage "Materialize tinygrad at the lean-master gitlink" materialize_tinygrad
+run_stage "同步 $SRC_BRANCH 源内容到设备树（结构性防漂移：发布树 ≡ $SRC_BRANCH + 产物）" sync_sources
+run_stage "Materialize tinygrad at the $SRC_BRANCH gitlink" materialize_tinygrad
 run_stage "Materialize 构建 gitlink（msgq/rednose/panda；扁平树只带运行时子集）" materialize_gitlinks
 run_stage "全量重建 native 产物（ARTIFACT_PATHS）" rebuild_native
 run_stage "eagled YOLO pkl（输入指纹未变则跳过重编）" compile_yolo_pkl
@@ -384,5 +392,5 @@ run_stage "touch prebuilt（发布机构建已通过冒烟验证）" touch prebu
 VERSION=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' openpilot/sunnypilot/common/version.h | head -1)
 run_stage "组发布 commit: openpilot v$VERSION lean release (device-built, flat)" commit_release
 
-echo "[ok] 扁平树 stage 就绪: $STAGE（分支 lean-release, 单 commit），等 Mac 侧取走推送"
+echo "[ok] 扁平树 stage 就绪: $STAGE（分支 $RELEASE_BRANCH, 单 commit），等 Mac 侧取走推送"
 echo "    树大小: $(du -sh "$STAGE" | cut -f1)"

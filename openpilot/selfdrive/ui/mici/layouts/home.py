@@ -11,6 +11,7 @@ from openpilot.system.ui.widgets.icon_widget import IconWidget
 from openpilot.system.ui.widgets.label import UnifiedLabel, gui_label
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos, TextAlignment, TextAlignmentVertical
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.selfdrive.ui.sunnypilot.npu_state import NpuState, npu_icon_state
 from openpilot.common.version import RELEASE_BRANCHES
 
 HEAD_BUTTON_FONT_SIZE = 40
@@ -141,6 +142,10 @@ class MiciHomeLayout(Widget):
 
     self._experimental_icon = IconWidget("icons_mici/experimental_mode.png", (48, 48))
     self._usb_icon = IconWidget("icons_mici/usb.png", (62, 40))
+    # 07 号：NPU 图标三态（灰=连接中/绿=大模型控车中/橙=回退），三张同尺寸同槽位
+    self._npu_icon_grey = IconWidget("icons_mici/NPU.png", (54, 40))
+    self._npu_icon_green = IconWidget("icons_mici/NPU_GREEN.png", (54, 40))
+    self._npu_icon_orange = IconWidget("icons_mici/NPU_ORANGE.png", (54, 40))
     self._mic_icon = IconWidget("icons_mici/microphone.png", (32, 46))
     self._body_icon = IconWidget("icons_mici/body.png", (54, 37))
 
@@ -151,6 +156,9 @@ class MiciHomeLayout(Widget):
       NetworkIcon(),
       self._experimental_icon,
       self._usb_icon,
+      self._npu_icon_grey,
+      self._npu_icon_green,
+      self._npu_icon_orange,
       self._body_icon,
       self._mic_icon,
     ], spacing=18)
@@ -253,6 +261,12 @@ class MiciHomeLayout(Widget):
       self._usb_icon.set_visible(usb_connected and usb_unknown)
     else:
       self._usb_icon.set_visible(usb_connected and usb_unknown)
+    # 07 号：NPU 图标三态；「远程大模型」关闭时整体隐藏（行为同 lean-master）
+    npu_on = ui_state.bigmodel_enabled
+    npu_state = npu_icon_state.state
+    self._npu_icon_grey.set_visible(npu_on and npu_state is NpuState.CONNECTING)
+    self._npu_icon_green.set_visible(npu_on and npu_state is NpuState.ACTIVE)
+    self._npu_icon_orange.set_visible(npu_on and npu_state is NpuState.FALLBACK)
     self._mic_icon.set_visible(ui_state.recording_audio)
     self._body_icon.set_visible(bool(ui_state.is_body))
 

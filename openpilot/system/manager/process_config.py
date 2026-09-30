@@ -61,6 +61,11 @@ def eagle_run(started: bool, params: Params, CP: car.CarParams) -> bool:
   # 单独门控（eagled._refresh_params）——关避让不关态势
   return and_(only_onroad, iscar)(started, params, CP)
 
+def bigmodeld_run(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # 07 号：「远程大模型」关闭时不启动上行进程，行为同 lean-master；
+  # get_bool 缺省键不回落注册默认，故走 return_default（默认开）
+  return started and bool(params.get("BigmodelToggle", return_default=True))
+
 def or_(*fns):
   return lambda *args: operator.or_(*(fn(*args) for fn in fns))
 
@@ -79,6 +84,8 @@ procs = [
   PythonProcess("timed", "openpilot.system.timed", always_run, enabled=not PC),
 
   PythonProcess("modeld", "openpilot.selfdrive.modeld.modeld", only_onroad),
+  # C4 上行进程（16 号）：生命周期跟随 modeld，双路硬编经 TCP 上送；07 号起受「远程大模型」开关门控
+  NativeProcess("bigmodeld", "openpilot/selfdrive/bigmodeld", ["./bigmodeld"], bigmodeld_run),
 
   PythonProcess("sensord", "openpilot.system.sensord.sensord", only_onroad, enabled=not PC),
   PythonProcess("ui", "openpilot.selfdrive.ui.ui", always_run),
