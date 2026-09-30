@@ -241,13 +241,28 @@ CacheDir(cache_dir)
 Clean(["."], cache_dir)
 
 def prune_cache_dir(target=None, source=None, env=None):
-  cache_files = sorted((os.path.join(root, f) for root, _, files in os.walk(cache_dir) for f in files), key=os.path.getmtime)
-  cache_size = sum(os.path.getsize(f) for f in cache_files)
-  for f in cache_files:
+  # 并发安全（2026-09-30 发版在此打红）：快照期间别的 CachePush 会把 .tmp 改名成正式缓存名、
+  # 别的 prune 会删文件，快照里的名字随时消失——记账/删除都容错跳过；.tmp 是在途写入，不碰
+  cache_files = []
+  for root, _, files in os.walk(cache_dir):
+    for f in files:
+      if '.tmp' in f:
+        continue
+      p = os.path.join(root, f)
+      try:
+        cache_files.append((os.path.getmtime(p), os.path.getsize(p), p))
+      except OSError:
+        continue  # 刚被并发改名/删除
+  cache_files.sort()
+  cache_size = sum(sz for _, sz, _ in cache_files)
+  for _, sz, f in cache_files:
     if cache_size < cache_size_limit:
       break
-    cache_size -= os.path.getsize(f)
-    os.unlink(f)
+    try:
+      os.unlink(f)
+      cache_size -= sz
+    except OSError:
+      pass
 
 # ********** start building stuff **********
 
