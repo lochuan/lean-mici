@@ -131,6 +131,42 @@ def _ipv4_snapshot(profile: dict) -> dict:
   return out
 
 
+def snapshot(mgr, offroad: bool) -> dict:
+  """GET /api/wifi 的响应体：只读 WifiManager 的缓存状态，不碰 DBus。
+
+  缓存由 WifiManager 的 monitor/scan 线程按 NM 信号维护；连接页 1 Hz 轮询
+  走这条路径，请求侧不做任何初始化（每请求 ``_init_wifi_state(block=True)``
+  会把 DBus 阻塞摊到每次轮询上）。/api/connectivity 的 wifi 部分同用本函数。
+  """
+  networks = [
+    {
+      "ssid": n.ssid,
+      "rssi": n.strength,
+      "security": n.security_type.name if n.security_type is not None else "UNSUPPORTED",
+      "saved": getattr(mgr, "is_connection_saved", lambda s: False)(n.ssid),
+    }
+    for n in mgr.networks if not n.is_tethering
+  ]
+  connected = mgr.connected_ssid
+  # ponytail: ipv4 段仍每次现读 profile + 活动 IP4Config（2-3 个 DBus 属性读，非初始化）；
+  # 若 1 Hz 实测成为负担，在 WifiManager 里随 NM 信号缓存 ipv4 快照
+  ipv4 = mgr.get_ipv4_settings(connected) if connected else {"method": "auto", "addresses": [], "gateway": "", "dns": []}
+  return {
+    "available": True,
+    "offroad": offroad,
+    "connecting": mgr.connecting_to_ssid,
+    "connected": connected,
+    "ipv4": {
+      "method": str(ipv4.get("method", "auto")),
+      "addresses": ipv4.get("addresses", []),
+      "gateway": ipv4.get("gateway", ""),
+      "dns": ipv4.get("dns", []),
+    },
+    "networks": networks,
+    "error": mgr.last_error or "",
+  }
+
+
 def fallback_snapshot(error: Exception | str) -> dict:
   """NetworkManager 不可达时的降级快照：页面仍可渲染。"""
   return {

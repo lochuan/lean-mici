@@ -23,7 +23,9 @@ class FakeParams:
 
   _TYPES = {"LanLinkEnabled": "BOOL", "LanLinkParamsVersion": "INT", "TestToggle": "BOOL",
             # LanlinkApp.__init__ 读这三个组版本信息；设备上它们都存在
-            "Version": "STRING", "GitBranch": "STRING", "GitCommit": "STRING"}
+            "Version": "STRING", "GitBranch": "STRING", "GitCommit": "STRING",
+            # bluetooth 降级快照从 params 推导；设备上它们都存在
+            "BluetoothEnabled": "BOOL", "BluetoothAudioAddress": "STRING"}
 
   class _Type:
     def __init__(self, name: str):
@@ -62,6 +64,32 @@ class FakeParams:
     if key not in self._TYPES:
       raise UnknownKeyName(key)
     return key
+
+
+class FakeWifiManager:
+  """duck-type WifiManager：记录 _init_wifi_state 调用，验证读的是缓存。"""
+
+  class _Sec:
+    name = "WPA"
+
+  def __init__(self):
+    self.init_calls: list[bool] = []
+    self.networks = [
+      type("Net", (), {"ssid": "home", "strength": 70, "security_type": self._Sec(), "is_tethering": False})(),
+      type("Net", (), {"ssid": "weedle", "strength": 40, "security_type": None, "is_tethering": True})(),
+    ]
+    self.connected_ssid = "home"
+    self.connecting_to_ssid = None
+    self.last_error = ""
+
+  def _init_wifi_state(self, block: bool = True):
+    self.init_calls.append(block)
+
+  def is_connection_saved(self, ssid):
+    return True
+
+  def get_ipv4_settings(self, ssid):
+    return {"method": "auto", "addresses": ["10.0.0.2"], "gateway": "10.0.0.1", "dns": ["10.0.0.1"]}
 
 
 @pytest.fixture
@@ -170,6 +198,69 @@ class TestAvoidanceRoute:
     assert r.json == {"stale": True}
 
 
+class TestWifiCachedRead:
+  """Wi-Fi 状态读 WifiManager 缓存，不再每请求阻塞初始化（spec 54）。"""
+
+  def test_wifi_status_never_does_blocking_init(self, app):
+    fake = FakeWifiManager()
+    app.ctx.state._get_wifi = lambda: fake
+    _, r = app.test_client.get("/api/wifi")
+    assert r.status == 200
+    assert r.json["connected"] == "home"
+    assert [n["ssid"] for n in r.json["networks"]] == ["home"]
+    # 连接页 1 Hz 轮询，每请求 _init_wifi_state(block=True) 会把 DBus 阻塞摊到每次轮询上
+    assert fake.init_calls == [], "wifi 状态读取仍在走阻塞初始化"
+
+
+class TestConnectivityRoute:
+  """GET /api/connectivity：Wi-Fi + 蓝牙合并快照（连接页 2 请求 → 1）。"""
+
+  def test_bluetooth_daemon_error_still_returns_200(self, app, monkeypatch):
+    class BrokenClient:
+      def __init__(self, timeout=None):
+        pass
+
+      def status(self):
+        raise RuntimeError("bluetooth daemon unreachable")
+
+    monkeypatch.setattr(mod, "BluetoothClient", BrokenClient)
+    wifi = FakeWifiManager()
+    app.ctx.state._get_wifi = lambda: wifi
+
+    _, r = app.test_client.get("/api/connectivity")
+    assert r.status == 200, "蓝牙出错把整个接口拖成非 200"
+    # 蓝牙部分退化快照带 error；Wi-Fi 部分照常，且与 /api/wifi 同形同值
+    _, b = app.test_client.get("/api/bluetooth")
+    assert r.json["bluetooth"] == b.json
+    assert "unreachable" in r.json["bluetooth"]["error"]
+    _, w = app.test_client.get("/api/wifi")
+    assert r.json["wifi"] == w.json
+
+
+class TestBootstrapRoute:
+  """GET /api/bootstrap：进「车机」页一次请求拿全三份数据（spec 通信效率）。"""
+
+  def test_bootstrap_fields_match_the_original_endpoints(self, app):
+    _, r = app.test_client.get("/api/bootstrap")
+    assert r.status == 200
+    body = r.json
+
+    _, sui = app.test_client.get("/api/settings_ui")
+    _, par = app.test_client.get("/api/params/_all")
+    _, cap = app.test_client.get("/api/capabilities")
+    assert body["settings_ui"] == sui.json
+    assert body["params"] == par.json
+    assert body["capabilities"] == cap.json
+
+  def test_bootstrap_carries_params_version(self, app):
+    app.ctx.fake_params._v["LanLinkParamsVersion"] = 7
+    _, r = app.test_client.get("/api/bootstrap")
+    assert r.json["paramsVersion"] == "7"
+    # 与 /api/status 的 paramsVersion 同源同形：App 靠它判断是否重新 bootstrap
+    _, st = app.test_client.get("/api/status")
+    assert r.json["paramsVersion"] == st.json["paramsVersion"]
+
+
 class TestCalibrationRoutes:
   def test_start_conflict_returns_409(self, app):
     import threading
@@ -191,6 +282,18 @@ class TestCalibrationRoutes:
     assert r.status == 200
     assert r.json["running"] is False
     assert r.json["last_result"] is None
+
+  def test_status_carries_online_calibration_summary(self, app):
+    # 在线标定摘要并入安装偏移精修状态（App 精修卡 2 请求 → 1），原有字段不变
+    cal = {"calStatus": "calibrated", "calPerc": 100, "calValid": True, "visionGated": False}
+    app.ctx.state.avoidance.calibration_summary = lambda: dict(cal)
+    app.ctx.state.avoidance.snapshot = lambda: {"stale": False, **cal}
+    _, r = app.test_client.get("/api/calibration/status")
+    assert r.json["running"] is False
+    # 同形：与 /api/avoidance 里的标定摘要同键同值（同一份 extrinsicsCalibration 状态）
+    assert r.json["online"] == cal
+    _, a = app.test_client.get("/api/avoidance")
+    assert {k: a.json[k] for k in cal} == r.json["online"]
 
   def test_stop_returns_fit_result(self, app):
     from openpilot.selfdrive.eagled.calibrate import CalibPair
@@ -282,3 +385,19 @@ class TestServerConfig:
     monkeypatch.setattr(mod, "create_app", lambda *a, **k: calls.append(1))
     mod.main()
     assert calls == [], "served despite LanLinkEnabled=False"
+
+  def test_mdns_publisher_follows_the_daemon_lifecycle(self, monkeypatch):
+    # 起服务拉起 _lanlink._tcp 发布；退出一起结束（广播消失，App 不连死服务）
+    monkeypatch.setattr(mod, "Params", lambda: FakeParams({"LanLinkEnabled": True, "Version": "0.9.8"}))
+
+    class FakeApp:
+      def run(self, **kwargs):
+        pass
+
+    monkeypatch.setattr(mod, "create_app", lambda *a, **k: FakeApp())
+    started, stopped = [], []
+    monkeypatch.setattr(mod.mdns, "start", lambda *a, **k: started.append(a) or "PROC")
+    monkeypatch.setattr(mod.mdns, "stop", lambda proc: stopped.append(proc))
+    mod.main()
+    assert len(started) == 1, "启动时没有拉起 mDNS 发布"
+    assert stopped == ["PROC"], "退出时没有结束 mDNS 发布"

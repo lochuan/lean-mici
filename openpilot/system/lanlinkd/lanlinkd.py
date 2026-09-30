@@ -14,6 +14,7 @@ StatusCache / RadarCache 状态线程、WifiManager DBus 单例都是**进程内
 import asyncio
 import json
 import os
+import socket
 import threading
 
 from sanic import Sanic
@@ -27,6 +28,7 @@ from openpilot.common.hardware.hw import Paths
 from openpilot.sunnypilot.system.bluetooth import BluetoothClient
 from openpilot.system.lanlinkd import bluetooth_api
 from openpilot.system.lanlinkd import logs as logs_mod
+from openpilot.system.lanlinkd import mdns
 from openpilot.system.lanlinkd import params_api
 from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd import vehicle_api
@@ -140,42 +142,15 @@ class LanlinkApp:
         self._wifi_manager = WifiManager(manage_tethering=False)
       return self._wifi_manager
 
+  def _wifi_body(self) -> dict:
+    # 读缓存快照（wifi_api.snapshot），/api/wifi 与 /api/connectivity 共用这条路径
+    try:
+      return wifi_api.snapshot(self._get_wifi(), self.params.get_bool("IsOffroad"))
+    except Exception as exc:
+      return wifi_api.fallback_snapshot(exc)
+
   async def wifi_get(self, request: Request) -> HTTPResponse:
-    def worker():
-      try:
-        mgr = self._get_wifi()
-        # 自愈：lanlinkd 单例的 monitor 订阅可能错过最终状态（连接后就停了），
-        # 每次轮询都从 NM 现读一次真实 wifi state，防止 payload 卡在"连接中"
-        mgr._init_wifi_state(block=True)
-        networks = [
-          {
-            "ssid": n.ssid,
-            "rssi": n.strength,
-            "security": n.security_type.name if n.security_type is not None else "UNSUPPORTED",
-            "saved": getattr(mgr, "is_connection_saved", lambda s: False)(n.ssid),
-          }
-          for n in mgr.networks if not n.is_tethering
-        ]
-        connected = mgr.connected_ssid
-        ipv4 = mgr.get_ipv4_settings(connected) if connected else {"method": "auto", "addresses": [], "gateway": "", "dns": []}
-        return {
-          "available": True,
-          "offroad": self.params.get_bool("IsOffroad"),
-          "connecting": mgr.connecting_to_ssid,
-          "connected": connected,
-          "ipv4": {
-            "method": str(ipv4.get("method", "auto")),
-            "addresses": ipv4.get("addresses", []),
-            "gateway": ipv4.get("gateway", ""),
-            "dns": ipv4.get("dns", []),
-          },
-          "networks": networks,
-          "error": mgr.last_error or "",
-        }
-      except Exception as exc:
-        return wifi_api.fallback_snapshot(exc)
-    body = await asyncio.to_thread(worker)
-    return json_response(body)
+    return json_response(await asyncio.to_thread(self._wifi_body))
 
   async def wifi_operation(self, request: Request, operation: str) -> HTTPResponse:
     if operation not in wifi_api.OPERATIONS:
@@ -218,6 +193,16 @@ class LanlinkApp:
     code, body = await asyncio.to_thread(worker)
     return json_response(body, status=code)
 
+  # ---- connectivity（Wi-Fi + 蓝牙合并快照）----
+  async def connectivity(self, request: Request) -> HTTPResponse:
+    # 蓝牙 daemon 出错不拖垮整个接口：bluetooth 部分照 /api/bluetooth 的降级
+    # 快照带上 error，整体照样 200——连接页一方出错另一方照常显示。
+    wifi = await asyncio.to_thread(self._wifi_body)
+    _, bluetooth = await asyncio.to_thread(
+      bluetooth_api.status_payload, BluetoothClient(timeout=bluetooth_api.BLUETOOTH_TIMEOUT), self.params
+    )
+    return json_response({"wifi": wifi, "bluetooth": bluetooth})
+
   # ---- software (updater) ----
   async def software_get(self, request: Request) -> HTTPResponse:
     return json_response(software_api.status(self.params))
@@ -256,7 +241,19 @@ class LanlinkApp:
     return json_response(payload)
 
   async def calibration_status(self, request: Request) -> HTTPResponse:
-    return json_response(self.calibration.status())
+    body = self.calibration.status()
+    # 在线标定摘要并入：与 /api/avoidance 的标定摘要同形（共用 AvoidanceCache 的缓存）
+    body["online"] = self.avoidance.calibration_summary()
+    return json_response(body)
+
+  async def bootstrap(self, request: Request) -> HTTPResponse:
+    # 进「车机」页一次拿全三份数据：各字段与原接口同形（App 一次请求渲染首屏）
+    return json_response({
+      "settings_ui": self._settings(),
+      "params": params_api.read_all(self.params),
+      "capabilities": self.cache.capabilities(),
+      "paramsVersion": params_api.to_str(self.params.get(params_api.VERSION_KEY)),
+    })
 
   async def capabilities(self, request: Request) -> HTTPResponse:
     return json_response(self.cache.capabilities())
@@ -309,10 +306,12 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("GET", "/api/bluetooth", "bluetooth_get"),
   ("POST", "/api/bluetooth/<operation:str>", "bluetooth_operation"),
   ("GET", "/api/wifi", "wifi_get"),
+  ("GET", "/api/connectivity", "connectivity"),
   ("POST", "/api/wifi/<operation:str>", "wifi_operation"),
   ("GET", "/api/software", "software_get"),
   ("POST", "/api/software/<action:str>", "software_action"),
   ("GET", "/api/status", "status"),
+  ("GET", "/api/bootstrap", "bootstrap"),
   ("GET", "/api/avoidance", "avoidance_get"),
   ("POST", "/api/calibration/start", "calibration_start"),
   ("POST", "/api/calibration/stop", "calibration_stop"),
@@ -347,13 +346,21 @@ def create_app(name: str = "lanlinkd") -> Sanic:
 def main() -> None:
   # 默认关闭：仅当 UI（LanLinkEnabled）开启时提供服务。manager 已按 param 门控，
   # 这里再自保护一层，防其它启动链路误拉起（UI 关闭时立刻退出）
-  if not Params().get_bool("LanLinkEnabled"):
+  params = Params()
+  if not params.get_bool("LanLinkEnabled"):
     cloudlog.info("lanlinkd: LanLinkEnabled off, exiting")
     return
   cloudlog.info("lanlinkd starting on 0.0.0.0:8088")
-  # single_process=True 是必须的，不是调优：cache 状态线程 / WifiManager 单例
-  # 是进程内状态，多 worker 会各起一套互相打架。详见模块 docstring。
-  create_app().run(host="0.0.0.0", port=8088, single_process=True, motd=False)
+  # mDNS 发布跟随本进程生死：退出（含 SIGINT）时 finally 结束子进程，广播消失。
+  # 设备名 = hostname（AGNOS 上是 comma-<serial>）；TXT 带版本和设备名。
+  device_name = socket.gethostname()
+  mdns_proc = mdns.start(device_name, params_api.to_str(params.get("Version")) or "", device_name)
+  try:
+    # single_process=True 是必须的，不是调优：cache 状态线程 / WifiManager 单例
+    # 是进程内状态，多 worker 会各起一套互相打架。详见模块 docstring。
+    create_app().run(host="0.0.0.0", port=8088, single_process=True, motd=False)
+  finally:
+    mdns.stop(mdns_proc)
 
 
 if __name__ == "__main__":

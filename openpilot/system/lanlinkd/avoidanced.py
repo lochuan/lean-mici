@@ -79,6 +79,14 @@ class AvoidanceCache:
     # 且标定即使停更也仍然是有效信息，不该被 debug 的 staleness 抹掉。
     self._cal: dict = {"calStatus": "unknown", "calPerc": 0, "calValid": False, "visionGated": True}
 
+  def calibration_summary(self) -> dict:
+    """在线相机标定摘要（/api/avoidance 里的同名段），/api/calibration/status 的 online。
+
+    标定状态即使 eagleDebug 停更也仍有效，所以独立于 debug 的 staleness 单独缓存。
+    """
+    with self._lock:
+      return dict(self._cal)
+
   def run(self, exit_event: threading.Event) -> None:
     try:
       sm = messaging.SubMaster(['eagleDebug', 'extrinsicsCalibration'])
