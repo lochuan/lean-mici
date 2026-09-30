@@ -20,7 +20,7 @@ class BigmodelLayoutMici(NavScroller):
     super().__init__()
 
     self._toggle = BigToggle(text="Chipmunk",
-                             initial_state=bool(ui_state.params.get("BigmodelToggle", return_default=True)),
+                             initial_state=ui_state.params.get_bool("BigmodelToggle"),
                              toggle_callback=self._toggle_callback)
     self._toggle.set_enabled(lambda: ui_state.is_offroad())  # 仅 offroad 生效
 
@@ -34,7 +34,7 @@ class BigmodelLayoutMici(NavScroller):
 
   def _update_state(self):
     super()._update_state()
-    self._toggle.set_checked(bool(ui_state.params.get("BigmodelToggle", return_default=True)))
+    self._toggle.set_checked(ui_state.params.get_bool("BigmodelToggle"))
 
   @staticmethod
   def _toggle_callback(state: bool):

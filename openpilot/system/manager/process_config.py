@@ -62,9 +62,8 @@ def eagle_run(started: bool, params: Params, CP: car.CarParams) -> bool:
   return and_(only_onroad, iscar)(started, params, CP)
 
 def bigmodeld_run(started: bool, params: Params, CP: car.CarParams) -> bool:
-  # 07 号：「远程大模型」关闭时不启动上行进程，行为同 lean-master；
-  # get_bool 缺省键不回落注册默认，故走 return_default（默认开）
-  return started and bool(params.get("BigmodelToggle", return_default=True))
+  # 07 号：「远程大模型」关闭时不启动上行进程，行为同 lean-master；默认关（同 AdbEnabled）
+  return started and params.get_bool("BigmodelToggle")
 
 def or_(*fns):
   return lambda *args: operator.or_(*(fn(*args) for fn in fns))

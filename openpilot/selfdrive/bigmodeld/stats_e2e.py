@@ -93,7 +93,7 @@ def summarize(frames, pair_miss, elapsed_s, counts):
 def run(duration_s, interval_s):
   sm = messaging.SubMaster(["modelV2", "modelDataV2SP"])
   params = Params()
-  if not bool(params.get("BigmodelToggle", return_default=True)):
+  if not params.get_bool("BigmodelToggle"):
     print("警告：BigmodelToggle=off，modeld 不等 REPLY，全部帧将计 timeout", file=sys.stderr)
 
   frames, counts = [], {}

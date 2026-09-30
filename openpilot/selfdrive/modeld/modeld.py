@@ -270,8 +270,8 @@ def main(demo=False):
   params = Params()
   # 07 号：「远程大模型」开关（仅 offroad 可改，故启动读一次）；
   # 关 = 完全 lean-master 行为：不等大模型 REPLY、不取结果，逐帧小模型。
-  # get_bool 缺省键不回落注册默认，故走 return_default（默认开）
-  bigmodel_enabled = bool(params.get("BigmodelToggle", return_default=True))
+  # 默认关（同 AdbEnabled：注册无默认值，get_bool 缺省键返 False）
+  bigmodel_enabled = params.get_bool("BigmodelToggle")
 
   # setup filter to track dropped frames
   frame_dropped_filter = FirstOrderFilter(0., 10., 1. / ModelConstants.MODEL_RUN_FREQ)

@@ -1,6 +1,6 @@
 // bigmodeld：C4 上行进程（16 号）。生命周期跟随 modeld（process_config only_onroad）：
 //   camered VisionIPC 两路取帧 → 编码缓冲拷贝 → 按 frame_id 配对 → V4L 双路硬编
-//   （HEVC Main、VBR、无 B 帧、GOP 20、默认 10 Mb/s/路可调）→ 10 号布局组 FRAME
+//   （HEVC Main、VBR、无 B 帧、GOP 20、默认 5 Mb/s/路可调）→ 10 号布局组 FRAME
 //   经 TCP 发出（road 出包即发）；REPLY 独立线程收下解析记账。不落盘、不进 loggerd
 //   （设了编码输出回调 ⇒ 不建 PubMaster ⇒ loggerd 无编码数据）。
 //
@@ -61,7 +61,7 @@ namespace {
 
 constexpr int kFps = 20;
 constexpr int kGopSize = 20;
-constexpr int kDefaultBitrate = 10'000'000;  // 10 Mb/s/路（票面默认）
+constexpr int kDefaultBitrate = 5'000'000;  // 5 Mb/s/路（两路合计 10 Mb/s）
 // QBUF 要求 plane.length ≥ S_FMT sizeimage（1344×760 NV12 = 2,428,928 B，21 号 EINVAL 坑）
 constexpr size_t kNv12SizeImage = 2428928;
 constexpr int kEncPoolDepth = 6;   // 每路编码缓冲池（1 配对槽 + ≤5 在编码器在途）
@@ -255,6 +255,9 @@ class Bigmodeld {
     sender_ = std::make_unique<UplinkSender>(
         &sock_, [] { return (uint64_t)millis_since_boot(); }, UplinkSenderConfig{},
         [this](const UplinkEventInfo& e) { on_uplink_event(e); });
+    // 07 号：进程启动即写 connecting——BigmodelLinkState 保留上趟旧值，
+    // 不写则新一趟起步会读到上趟 connected 闪绿
+    link_mark_connecting();
   }
 
   // ===== 取帧/配对线程（×2）=====

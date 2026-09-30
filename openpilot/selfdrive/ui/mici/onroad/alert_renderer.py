@@ -15,7 +15,6 @@ from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.label import UnifiedLabel
 
 from openpilot.selfdrive.ui.sunnypilot.onroad.speed_limit import SpeedLimitAlertRenderer
-from openpilot.selfdrive.ui.sunnypilot.npu_state import npu_icon_state
 
 AlertSize = log.SelfdriveState.AlertSize
 AlertStatus = log.SelfdriveState.AlertStatus
@@ -146,11 +145,6 @@ class AlertRenderer(Widget, SpeedLimitAlertRenderer):
 
     # No alert if size is none
     if ss.alertSize == 0:
-      # 07 号：大模型回退 10s 一次提示（UI 本地横幅，不接 selfdrived alert）。
-      # 从未连上全静默不提示，见 npu_state。
-      reason = npu_icon_state.prompt_text(time.monotonic())
-      if reason is not None:
-        return Alert(text1="Chipmunk fallback", text2=reason, size=AlertSize.mid, status=AlertStatus.userPrompt)
       return None
 
     # Return current alert

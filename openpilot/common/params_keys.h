@@ -24,7 +24,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AvoidanceLaneStdMax", {PERSISTENT, FLOAT, "0.3"}},   // 车道线方差门上限
     {"LaneChangeNearZone", {PERSISTENT, FLOAT, "6.0"}},    // 变道近区硬拦距离 m
     {"BigmodelServerHost", {PERSISTENT | BACKUP, STRING, ""}},  // 06/07 号：手动 IP；空 = mDNS 自动发现
-    {"BigmodelToggle", {PERSISTENT | BACKUP, BOOL, "1"}},      // 07 号：「远程大模型」开关（仅 offroad 可改）
+    {"BigmodelToggle", {PERSISTENT | BACKUP, BOOL}},          // 07 号：「远程大模型」开关（仅 offroad 可改；默认关，同 AdbEnabled）
     {"BigmodelLinkState", {CLEAR_ON_MANAGER_START | DONT_LOG, STRING, ""}},  // 06 号：bigmodeld 写的链路状态串
     {"BluetoothAudioAddress", {PERSISTENT, STRING}},
     {"BluetoothAudioTestActive", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL}},
