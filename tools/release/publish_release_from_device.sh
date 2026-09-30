@@ -54,7 +54,8 @@ git fetch "ssh://$DEVICE/data/relstage" +"$RELEASE_BRANCH":refs/temp/device-rele
 RELEASE_SHA=$(git rev-parse refs/temp/device-release)
 PUSHED=0
 for _ in 1 2 3; do
-  if git push -f fork refs/temp/device-release:"$RELEASE_BRANCH"; then
+  # 目标必须全限定：新分支（如 big-release）远端不存在时 git 拒绝 DWIM 猜名
+  if git push -f fork refs/temp/device-release:"refs/heads/$RELEASE_BRANCH"; then
     PUSHED=1
     break
   fi
