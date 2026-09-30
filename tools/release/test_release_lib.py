@@ -96,10 +96,24 @@ class TestConstants(unittest.TestCase):
       "openpilot/system/camerad/camerad",
       "openpilot/system/loggerd/bootlog",
       "openpilot/system/loggerd/loggerd",
+      "panda/board/obj/bootstub.panda_h7.bin",
+      "panda/board/obj/panda_h7.bin.signed",
       "rednose_repo/rednose/helpers/ekf_sym_pyx.so",
     }
     self.assertEqual(set(ARTIFACT_PATHS), expected)
     self.assertEqual(len(ARTIFACT_PATHS), len(expected))
+
+  def test_panda_firmware_matches_pandad_runtime_expectation(self):
+    """pandad 运行时按 panda/python/constants.py 的 McuType.H7（app_fn/bootstub_fn）
+    读 panda/board/obj 两份固件：DFU 恢复读 bootstub、刷写/验签读 app.signed。
+    扁平树缺任何一个 → panda 进 DFU 后 pandad 没固件可刷，永久恢复不了
+    （2026-09-30 实机 4764 次 flash_and_connect 重试实录）。登记表与运行时
+    文件名必须同源——少登记 = 构建/白名单/先删后建三处全漏。"""
+    consts = (REPO_ROOT / "panda/python/constants.py").read_text()
+    for name in ("panda_h7.bin.signed", "bootstub.panda_h7.bin"):
+      self.assertIn(f'"{name}"', consts, f"constants.py 不再声明 {name}，登记表要跟着运行时走")
+      self.assertIn(f"panda/board/obj/{name}", ARTIFACT_PATHS,
+                    f"{name} 不在产物登记表：发布树会缺固件，panda DFU 恢复必挂")
 
   def test_native_input_paths_are_complete(self):
     expected = {

@@ -40,6 +40,11 @@ ARTIFACT_PATHS: tuple[str, ...] = (
   "openpilot/system/camerad/camerad",
   "openpilot/system/loggerd/bootlog",
   "openpilot/system/loggerd/loggerd",
+  # panda 固件（Cortex-M 裸机 .bin，非 ELF）：pandad 运行时按 McuType.H7 读
+  # board/obj 两份做 DFU 恢复与刷写验签——漏登记 = 发布树缺固件，panda 进
+  # DFU 后永久恢复不了。由根 SConstruct 的 panda/SConscript 构建（debug 证书）。
+  "panda/board/obj/bootstub.panda_h7.bin",
+  "panda/board/obj/panda_h7.bin.signed",
   "rednose_repo/rednose/helpers/ekf_sym_pyx.so",
 )
 
