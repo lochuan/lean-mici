@@ -62,7 +62,7 @@ for _ in 1 2 3; do
   sleep 5
 done
 [ "$PUSHED" -eq 1 ] || { echo "推送 fork 失败（3 次）" >&2; exit 1; }
-ssh "$DEVICE" "cd /data/openpilot && git fetch -q origin $RELEASE_BRANCH && git reset -q --hard FETCH_HEAD"
+ssh "$DEVICE" "cd /data/openpilot && git fetch -q origin $RELEASE_BRANCH && git checkout -q --force -B $RELEASE_BRANCH FETCH_HEAD"
 
 echo "[-] 重启 + 上机验证"
 ssh "$DEVICE" 'sudo systemctl restart comma'
