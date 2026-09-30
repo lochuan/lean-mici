@@ -37,7 +37,7 @@ class SettingsLayoutSP(OP.SettingsLayout):
     lanlink_btn.set_click_callback(lambda: gui_app.push_widget(lanlink_panel))
 
     # 07 号：远程大模型（开关 + 服务器地址）
-    bigmodel_btn = SettingsBigButton("远程大模型", "", gui_app.texture("icons_mici/NPU.png", 76, 56))
+    bigmodel_btn = SettingsBigButton("Chipmunk", "", gui_app.texture("icons_mici/NPU.png", 76, 56))
     bigmodel_btn.set_click_callback(lambda: gui_app.push_widget(BigmodelLayoutMici()))
 
 

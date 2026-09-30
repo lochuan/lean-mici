@@ -14,12 +14,13 @@ HYSTERESIS_FRAMES = 3      # 进橙 N = 回绿 M = 3
 PROMPT_AFTER_S = 10.0      # 橙持续多久弹提示
 PROMPT_DURATION_S = 5.0    # 提示显示时长
 
+# C4 端 UI 一律 ASCII 文案（中文字体缺字形渲染成问号，用户拍板 2026-09-30）
 PROMPT_REASONS = {
-  "blip": "网络闪断，恢复中",
-  "restart": "服务端重启，恢复中",
-  "lost": "连接丢失，重连中",
-  "connecting": "正在重连",
-  "connected": "结果超时，已切小模型",
+  "blip": "Network blip, recovering",
+  "restart": "Server restarted, recovering",
+  "lost": "Connection lost, reconnecting",
+  "connecting": "Reconnecting",
+  "connected": "Timed out, using small model",
 }
 
 

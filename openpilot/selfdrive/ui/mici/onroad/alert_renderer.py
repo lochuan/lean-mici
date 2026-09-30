@@ -150,7 +150,7 @@ class AlertRenderer(Widget, SpeedLimitAlertRenderer):
       # 从未连上全静默不提示，见 npu_state。
       reason = npu_icon_state.prompt_text(time.monotonic())
       if reason is not None:
-        return Alert(text1="大模型回退", text2=reason, size=AlertSize.mid, status=AlertStatus.userPrompt)
+        return Alert(text1="Chipmunk fallback", text2=reason, size=AlertSize.mid, status=AlertStatus.userPrompt)
       return None
 
     # Return current alert

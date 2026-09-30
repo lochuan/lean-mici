@@ -8,7 +8,7 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets.scroller import NavScroller
 
-HOST_AUTO_TEXT = "自动发现"
+HOST_AUTO_TEXT = "Auto-discover"
 
 
 def _host_display(host: str) -> str:
@@ -19,12 +19,12 @@ class BigmodelLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
 
-    self._toggle = BigToggle(text="远程大模型",
+    self._toggle = BigToggle(text="Chipmunk",
                              initial_state=bool(ui_state.params.get("BigmodelToggle", return_default=True)),
                              toggle_callback=self._toggle_callback)
     self._toggle.set_enabled(lambda: ui_state.is_offroad())  # 仅 offroad 生效
 
-    self._host_btn = BigButton("服务器地址", _host_display(ui_state.params.get("BigmodelServerHost") or ""))
+    self._host_btn = BigButton("Server address", _host_display(ui_state.params.get("BigmodelServerHost") or ""))
     self._host_btn.set_click_callback(self._edit_host)
 
     self._scroller.add_widgets([
@@ -43,7 +43,7 @@ class BigmodelLayoutMici(NavScroller):
 
   def _edit_host(self):
     current = ui_state.params.get("BigmodelServerHost") or ""
-    dlg = BigInputDialog("服务器地址（留空=自动发现）", current, minimum_length=0, confirm_callback=self._set_host)
+    dlg = BigInputDialog("Server address (empty = auto-discover)", current, minimum_length=0, confirm_callback=self._set_host)
     gui_app.push_widget(dlg)
 
   def _set_host(self, host: str):

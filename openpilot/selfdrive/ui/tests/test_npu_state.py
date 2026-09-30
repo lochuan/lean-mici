@@ -5,7 +5,7 @@
 #   - 从未连上全静默：灰态没有通往橙色的转移，不弹提示（小模型即默认）。
 #   - 只有曾绿后回退才进橙；橙持续 ≥10 s 弹一次提示，每次进橙至多一次。
 from openpilot.selfdrive.ui.sunnypilot.npu_state import (
-  HYSTERESIS_FRAMES, PROMPT_AFTER_S, PROMPT_DURATION_S, NpuIconState, NpuState,
+  HYSTERESIS_FRAMES, PROMPT_AFTER_S, PROMPT_DURATION_S, PROMPT_REASONS, NpuIconState, NpuState,
 )
 
 DT = 0.05  # 20 Hz 模型帧
@@ -96,13 +96,13 @@ def test_no_prompt_if_orange_recovered_before_ten_seconds():
 
 
 def test_prompt_reason_texts_follow_link_state():
-  # 06 号原因区分：blip=网络闪断 / restart=服务端重启 / lost=连接丢失
+  # 06 号原因区分：blip/restart/lost 各有文案；文案随 PROMPT_REASONS 走，测试只锁映射
   t_enter = 1.0 + (HYSTERESIS_FRAMES - 1) * DT
-  for link, expect in (("blip", "网络闪断"), ("restart", "服务端重启"), ("lost", "连接丢失")):
+  for link in ("blip", "restart", "lost"):
     st = replay(NpuIconState(), frames(True, "connected", 0.0, 5) + frames(False, "connected", 1.0, HYSTERESIS_FRAMES))
     st.on_frame(False, link, t_enter + 5.0)  # 提示时刻前的链路状态决定文案
     text = st.prompt_text(t_enter + PROMPT_AFTER_S)
-    assert text is not None and expect in text, f"link={link}: {text}"
+    assert text == PROMPT_REASONS[link], f"link={link}: {text}"
 
 
 def test_reset_back_to_connecting():
