@@ -623,10 +623,11 @@ def main() -> int:
   overlay_parser.add_argument("worktree")
 
   args = parser.parse_args()
-  repo_root = _repo_root()
+  # _repo_root() 只在需要 git 仓库的命令里取：门禁类命令跑在 $STAGE（git init 之前
+  # 的裸目录，2026-09-30 实录拒发），无条件取会在那里崩。
 
   if args.command == "hash":
-    print(compute_native_hash(repo_root, args.commit))
+    print(compute_native_hash(_repo_root(), args.commit))
     return 0
 
   if args.command == "artifact-paths":
@@ -692,7 +693,7 @@ def main() -> int:
     return 0
 
   if args.command == "validate-artifacts":
-    prebuilt_root = repo_root / PREBUILT_DIR
+    prebuilt_root = _repo_root() / PREBUILT_DIR
     manifest_path = prebuilt_root / MANIFEST_NAME
     try:
       manifest = read_manifest(manifest_path)
@@ -717,7 +718,7 @@ def main() -> int:
     return 1 if failed else 0
 
   if args.command == "write-manifest":
-    prebuilt_root = repo_root / PREBUILT_DIR
+    prebuilt_root = _repo_root() / PREBUILT_DIR
     write_manifest(
       prebuilt_root,
       args.source_commit,
@@ -728,7 +729,7 @@ def main() -> int:
     return 0
 
   if args.command == "overlay":
-    ok, reason = overlay_prebuilt(repo_root, Path(args.worktree))
+    ok, reason = overlay_prebuilt(_repo_root(), Path(args.worktree))
     if not ok:
       print(reason, file=sys.stderr)
       return 1

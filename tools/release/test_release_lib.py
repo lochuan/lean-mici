@@ -963,3 +963,23 @@ class TestFlatTreeGate(unittest.TestCase):
       )
       self.assertEqual(out.returncode, 1)
       self.assertIn("lib.so", out.stderr)
+
+  def test_check_flat_tree_cli_runs_outside_git_repo(self):
+    """门禁跑在 $STAGE（git init 之前的裸目录）：cwd 不在 git 仓库里。
+
+    2026-09-30 实录：main() 无条件 _repo_root()，check-flat-tree 根本不需要
+    git 仓库 → stage 门禁在真实发布里 traceback 拒发。CLI 从非仓库 cwd 跑必须
+    只按树判据给退出码，不得崩。
+    """
+    import sys as _sys
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td) / "stage"
+      root.mkdir()
+      (root / "tinygrad_repo").mkdir()
+      (root / "tinygrad_repo" / "TINYGRAD_PIN").write_text("a" * 40 + "\n")
+      out = subprocess.run(
+        [_sys.executable, str(MODULE_PATH), "check-flat-tree", str(root)],
+        capture_output=True, text=True, cwd=td,
+      )
+      self.assertEqual(out.returncode, 0, out.stderr)
+      self.assertNotIn("Traceback", out.stderr)
