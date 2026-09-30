@@ -1,0 +1,10 @@
+# The pkl is recompiled per release on the build device (tools/release/
+# device_release.sh), same pipeline as the built-in driving model — never
+# commit it: it embeds tinygrad JIT kernels for one exact revision and goes
+# stale on every tinygrad bump. The ONNX source IS committed (weights are
+# pin-stable) as the build input; regenerate the pkl with
+# compile_yolo_onnx.py.
+yolo_tinygrad.pkl
+yolo_tinygrad.pkl.chunk*
+yolo_tinygrad.pkl.tinygrad_pin
+*.onnx.data

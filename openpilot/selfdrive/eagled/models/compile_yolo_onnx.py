@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Compile a YOLO ONNX into a tinygrad pkl in openpilot's own OOB format.
+
+Mirrors ``modeld/compile_modeld.py`` (the production path used for the driving
+model): ONNX -> OnnxRunner -> TinyJit(prune) -> ``dump_oob``. The saved pkl is
+loaded back by ``yolo_detector.TinygradRunner`` with modeld's ``load_oob``; it
+does NOT use tinygrad's examples ``compile_onnx.py`` artifact format.
+
+Why not upstream's compile_onnx.py: its captured ``run`` re-lowers through the
+OnnxRunner whenever input-buffer identity changes, and on this QAT ONNX that
+intermittently rebuilds a graph with a symbolic split dim (crash). Our format
+captures a plain TinyJit with concrete shapes; modeld runs the same path at
+20Hz on this device without issues.
+
+Usage (run ON the device; QCOM is the deployment target):
+
+    cd /tmp && DEV=QCOM:IR3 IMAGE=1 FLOAT16=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 \
+        PARALLEL=0 PYTHONPATH=<tinygrad-at-submodule-rev>:/data/openpilot \
+        python3 compile_yolo_onnx.py model.onnx model.pkl [--input-name images]
+
+``DEV=QCOM:IR3`` selects tinygrad's Mesa NIR -> freedreno ir3 renderer instead of
+the default ``QCOM:CL``, which compiles OpenCL C through Qualcomm's proprietary
+LLVM blob. That blob aborts on this model's conv kernels
+("Custom lowering code for this instruction is not implemented yet: 150",
+QGPUISelLowering.cpp:1285), which is why IMAGE=1 was long believed impossible
+here. IR3 has no such limit and, unlike ``QCOMCLRenderer`` -- whose
+``supported_dtypes`` gates half behind ``IMAGE && FLOAT16`` -- supports fp16
+unconditionally. Measured on comma 4 (mici, Adreno 630), 384x640:
+
+    QCOM:CL, no IMAGE (old)   290.6 ms p50   out (1, 11, 5040)  <- 7-class!
+    QCOM:IR3 + IMAGE=1 + fp16  67.9 ms p50   out (1, 12, 5040)     8-class
+
+Requires ``tinymesa`` (already present in AGNOS's venv; tinygrad pins
+``tinymesa==25.2.7.2``). IR3 is gated to a630 only. Numerically validated against
+the tinygrad CPU backend on road frames: identical detection counts, 17/17 class
+match, box IoU >= 0.989, confidence delta <= 0.013.
+
+WARNING: run this from a directory OTHER than /data/openpilot. That tree contains
+a ``tinygrad -> tinygrad_repo/tinygrad`` symlink, and python puts the cwd (for
+``-c``) or the script dir ahead of PYTHONPATH, so a stale in-tree tinygrad can
+silently shadow the one you selected -- which then fails to load the pkl with
+"CallInfo.__init__() takes from 1 to 6 positional arguments but 7 were given".
+
+Do NOT pass ``NOLOCALS=1``: it is a no-op in this tinygrad tree.
+
+DEV=CPU can be used for a local smoke test (no QCOM backend).
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+
+from tinygrad import Context, Device, Tensor
+from tinygrad.engine.jit import TinyJit
+from tinygrad.nn.onnx import OnnxRunner
+
+from openpilot.selfdrive.modeld.helpers import dump_oob
+
+
+def main() -> int:
+  parser = argparse.ArgumentParser()
+  parser.add_argument("onnx", type=Path)
+  parser.add_argument("output", type=Path)
+  parser.add_argument("--input-name", default="images")
+  parser.add_argument("--output-name", default="output0")
+  args = parser.parse_args()
+
+  runner = OnnxRunner(str(args.onnx))
+  graph_inputs = runner.graph_inputs
+  if args.input_name not in graph_inputs:
+    print(f"input {args.input_name!r} not in graph inputs {list(graph_inputs)}", file=sys.stderr)
+    return 1
+  spec = graph_inputs[args.input_name]
+  print(f"input {args.input_name} {spec.shape} {spec.dtype}")
+
+  # Capture input realized on the deployment device (QCOM on-device, CPU here).
+  # TinyJit._prepare_jit_inputs calls .realize() on the input; a device-NPY
+  # tensor has no renderer, so the input must live on Device.DEFAULT.
+  inp = Tensor.zeros(*spec.shape, dtype=spec.dtype, device=Device.DEFAULT).realize()
+
+  @TinyJit(prune=True)
+  def run(x: Tensor) -> Tensor:
+    return next(iter(runner({args.input_name: x}).values()))
+
+  # Warm up / capture, then validate the JIT reproduces the eager output.
+  with Context(DEBUG=0):
+    out = run(inp)
+    Device[Device.DEFAULT].synchronize()
+    expected = np.array(out.numpy(), copy=True)
+  for _ in range(2):
+    np.testing.assert_array_equal(run(inp).numpy(), expected)
+
+  args.output.parent.mkdir(parents=True, exist_ok=True)
+  with open(args.output, "wb") as f:
+    dump_oob(run, f)
+  # Record the tinygrad revision the kernels were compiled against; the runtime
+  # checks this sidecar before unpickling (positional pickle contract).
+  from openpilot.sunnypilot.models.pin import write_pkl_pin
+  from openpilot.sunnypilot.models.tinygrad_ref import get_tinygrad_ref
+  device_ref = get_tinygrad_ref()
+  if device_ref:
+    write_pkl_pin(args.output, device_ref)
+    print(f"recorded tinygrad pin {device_ref[:12]}")
+  print(f"wrote {args.output} ({args.output.stat().st_size/1e6:.1f} MB) inputs={spec.shape}")
+  return 0
+
+
+if __name__ == "__main__":
+  raise SystemExit(main())
