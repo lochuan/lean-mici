@@ -94,7 +94,7 @@ _services: dict[str, tuple] = {
   "carStateSP": (True, 100., 10),
   "liveMapDataSP": (True, 1., 1),
   "modelDataV2SP": (True, 20., None, QueueSize.BIG),
-  "bigModelReply": (True, 0., None, QueueSize.BIG),  # 04 号：App REPLY 转交（逐帧遥测，E 片分析用）
+  "bigModelReply": (False, 0., None, QueueSize.BIG),  # 04 号：App REPLY 转交 modeld，不记录 rlog
   "liveLocationKalman": (True, 20.),
 
   # debug

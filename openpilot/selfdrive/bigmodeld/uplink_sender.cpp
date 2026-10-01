@@ -80,7 +80,6 @@ void UplinkSender::submit_road(ConnEpoch conn_epoch, FrameIdx frame_idx, const b
   // 断连期间的帧静默丢弃（重连即新序列，frame_idx 归零）；旧连接代号的迟到提交
   // 同样静默丢弃（18 号 #2：不得把旧 frame_idx 混进新连接）
   if (!connected_ || conn_epoch != conn_epoch_) {
-    if (connected_) stale_submits_++;
     return;
   }
 
@@ -108,18 +107,11 @@ void UplinkSender::submit_wide(ConnEpoch conn_epoch, FrameIdx frame_idx, const u
                                size_t wide_len, bool wide_actual_idr) {
   std::lock_guard<std::mutex> lk(mtx_);
   if (!connected_ || conn_epoch != conn_epoch_) {
-    if (connected_) stale_submits_++;
     return;
   }
 
   OutFrame* f = find_or_create_locked(frame_idx);
   if (f == nullptr || f->has_wide) return;
-  if (wide_actual_idr != f->wide_idr_predicted) {
-    // bit1 策略预测与实际不符：协议上只允许欠报（预测 0 实际 IDR 无害），
-    // 误报（预测 1 实际 P 帧）会让服务端判 BAD_FRAME——真机验证「I 帧位置符合策略」兜底
-    wide_idr_mismatches_++;
-  }
-
   f->chunk2.resize(sizeof(uint32_t) + wide_len + bgm1::kMacSize);
   put_u32_le(f->chunk2.data(), (uint32_t)wide_len);
   std::memcpy(f->chunk2.data() + sizeof(uint32_t), wide, wide_len);
@@ -144,7 +136,6 @@ void UplinkSender::try_finish_inflight_locked() {
   if (!has_inflight_) return;
   // 写得动就发完（含连续部分写，不撕裂），写不动/写错才截断（drop_connection_locked 清残帧）
   if (write_out_locked(inflight_, 0, false) == WriteState::kDone) {
-    record_send_sample_locked();
     FrameIdx idx = inflight_.frame_idx;
     has_inflight_ = false;
     emit_locked(UplinkEvent::kFrameSent, idx);
@@ -173,16 +164,6 @@ UplinkSender::WriteState UplinkSender::write_out_locked(OutFrame& f, uint64_t no
   }
 }
 
-void UplinkSender::record_send_sample_locked() {
-  // 样本时点 = 整帧写完那一刻（17 号口径：在途起点 → 整帧写完，写入耗时计入）
-  frames_sent_ += 1;
-  // ponytail: 满则丢前一半 ≈ 最近 2–4k 帧滑动窗口；要全量长跑精确分位再改蓄水池采样
-  if (send_ms_.size() >= kSendSampleMax) {
-    send_ms_.erase(send_ms_.begin(), send_ms_.begin() + send_ms_.size() / 2);
-  }
-  send_ms_.push_back(double(now_() - inflight_.t_inflight_ms));
-}
-
 bool UplinkSender::step() {
   uint64_t now = now_();
 
@@ -200,7 +181,6 @@ bool UplinkSender::step() {
         has_queued_ = false;
         has_inflight_ = true;
         last_progress_ms_ = now;  // 新在途帧起点，空闲期不计入假死
-        inflight_.t_inflight_ms = now;  // 发送段计时起点（17 号）
         progress = true;
       }
       if (!has_inflight_) return progress;
@@ -209,7 +189,6 @@ bool UplinkSender::step() {
       const size_t before = inflight_.sent1 + inflight_.sent2;
       WriteState ws = write_out_locked(inflight_, now, true);
       if (ws == WriteState::kDone) {
-        record_send_sample_locked();
         has_inflight_ = false;
         emit_locked(UplinkEvent::kFrameSent, idx);
         return true;
@@ -274,56 +253,6 @@ bool UplinkSender::connected() const {
 ConnEpoch UplinkSender::conn_epoch() const {
   std::lock_guard<std::mutex> lk(mtx_);
   return conn_epoch_;
-}
-
-int UplinkSender::connect_failures() const {
-  std::lock_guard<std::mutex> lk(mtx_);
-  return connect_failures_;
-}
-
-uint64_t UplinkSender::wide_idr_mismatches() const {
-  std::lock_guard<std::mutex> lk(mtx_);
-  return wide_idr_mismatches_;
-}
-
-uint64_t UplinkSender::stale_submits() const {
-  std::lock_guard<std::mutex> lk(mtx_);
-  return stale_submits_;
-}
-
-std::vector<double> UplinkSender::send_samples() const {
-  std::lock_guard<std::mutex> lk(mtx_);
-  return send_ms_;
-}
-
-uint64_t UplinkSender::frames_sent() const {
-  std::lock_guard<std::mutex> lk(mtx_);
-  return frames_sent_;
-}
-
-// ---- ReplyTracker ----
-
-const char* ReplyTracker::segment_name(int i) {
-  static const char* kNames[kSegments] = {"srv_recv_us", "srv_prep_us", "srv_htp_us", "srv_total_us"};
-  return (i >= 0 && i < kSegments) ? kNames[i] : "?";
-}
-
-void ReplyTracker::on_reply(const bgm1::Reply& r) {
-  latest_ = r;
-  has_reply_ = true;
-  replies_++;
-  if (r.seq_reset()) seq_reset_++;
-  if (r.zero_pair()) zero_pair_++;
-  for (int i = 0; i < kSegments; i++) segments_[i].add(r.telemetry[i]);
-}
-
-void ReplyTracker::on_err(const bgm1::ErrMsg& e) {
-  last_err_ = e;
-  has_err_ = true;
-}
-
-void ReplyTracker::on_disconnect() {
-  // 断连只清「最新缓存」的时效性，统计保留（分段遥测跨连接累计）
 }
 
 // ---- LinkStateTracker（06 号）----

@@ -1,7 +1,7 @@
 // bigmodeld：C4 上行进程（16 号）。生命周期跟随 modeld（process_config only_onroad）：
 //   camered VisionIPC 两路取帧 → 编码缓冲拷贝 → 按 frame_id 配对 → V4L 双路硬编
 //   （HEVC Main、VBR、无 B 帧、GOP 20、默认 5 Mb/s/路可调）→ 10 号布局组 FRAME
-//   经 TCP 发出（road 出包即发）；REPLY 独立线程收下解析记账。不落盘、不进 loggerd
+//   经 TCP 发出（road 出包即发）；REPLY 独立线程收下解析并转交 modeld。不落盘、不进 loggerd
 //   （设了编码输出回调 ⇒ 不建 PubMaster ⇒ loggerd 无编码数据）。
 //
 // 实现口径见本目录 README「实现口径」；纯逻辑在 frame_scheduler / uplink_sender /
@@ -10,7 +10,7 @@
 // 线程与锁序（全文件统一，防死锁）：
 //   取帧×2（state_mtx：配对/状态机/索引 + 编码缓冲池）、编码器 dequeue×2（输出回调：
 //   meta 缓存 → sender.submit_*）、writer（sender.step）、REPLY reader（read_some →
-//   parse → ReplyTracker）、标定/输入元数据（SubMaster → MetaProvider.set_rpy/set_model_inputs）。
+//   parse → msgq）、标定/输入元数据（SubMaster → MetaProvider.set_rpy/set_model_inputs）。
 //   锁序：sender.mtx > state_mtx > {ev_mtx, meta 缓存, buf 池, seg 样本}（叶子锁，绝不反向嵌套）。
 //   sender 事件回调在其锁内触发 ⇒ 回调只记账 + 推事件队列（ev_mtx），状态机转移与
 //   request_keyframe 在下一次组帧前由 drain_events_locked() 按序执行（事件仍落在
@@ -69,16 +69,6 @@ constexpr int kSchedFifoPrio = 53;
 const std::vector<int> kCpuAffinity = {3};  // 仿 encoderd.cc:216；EINVAL（离线核）容忍
 
 enum StreamId { kRoad = 0, kWide = 1 };
-
-// 分段耗时报表（04-E）：writer 线程每千帧一行，锁外统计（同 17 号发送段手法）
-void log_seg(const char* what, std::vector<double> samples) {
-  std::sort(samples.begin(), samples.end());
-  auto pct = [&](double p) {
-    return samples.empty() ? 0.0 : samples[std::min(samples.size() - 1, (size_t)(samples.size() * p))];
-  };
-  LOGE("bigmodeld: %s n=%zu p50=%.2f p90=%.2f p99=%.2f max=%.2f ms",
-       what, samples.size(), pct(0.5), pct(0.9), pct(0.99), samples.empty() ? 0.0 : samples.back());
-}
 
 void setup_realtime(const char* who) {
   if (util::set_realtime_priority(kSchedFifoPrio) != 0) {
@@ -283,12 +273,10 @@ class Bigmodeld {
         if (buf == nullptr) continue;
         // 上游覆盖/滞后（缓冲被新帧顶掉）：不进编码器；后续 SOF 可形成时间槽空洞
         if (buf->get_frame_id() != extra.frame_id) continue;
-        const uint64_t t_recv_ns = nanos_since_boot();  // 取帧段/编码段计时起点（04-E）
-
         // 拷进编码缓冲后立即可放回 VisionIPC 缓冲（配对等待不占上游缓冲）
         VisionBuf* dst = ctx_[sid].pool.acquire();
         std::memcpy(dst->addr, buf->addr, std::min(buf->len, ctx_[sid].pool.len()));
-        place_frame(sid, extra, dst, t_recv_ns);
+        place_frame(sid, extra, dst);
       }
     }
   }
@@ -296,29 +284,8 @@ class Bigmodeld {
   // ===== 发送线程 =====
   void writer_thread() {
     setup_realtime("bgm_writer");
-    uint64_t report_k = 0;
     while (!do_exit) {
       if (!sender_->step()) util::sleep_for(2);
-      // 分段耗时报表（17 号发送段 + 04-E 取帧/编码段）：每 1000 帧一行；
-      // 样本口径见 record_seg_samples / UplinkSender::send_samples。
-      // 统计放这里 = sender 锁外（事件回调只记账+入队，见 on_uplink_event 头注）
-      const uint64_t k = sender_->frames_sent() / 1000;
-      if (k > report_k) {
-        report_k = k;
-        log_seg("发送段", sender_->send_samples());
-        std::vector<double> fetch[2], enc[2];
-        {
-          std::lock_guard<std::mutex> lk(seg_mtx_);
-          for (int s = 0; s < 2; s++) {
-            fetch[s] = fetch_ms_[s];
-            enc[s] = enc_ms_[s];
-          }
-        }
-        log_seg("取帧段 road（eof→recv）", fetch[kRoad]);
-        log_seg("取帧段 wide（eof→recv）", fetch[kWide]);
-        log_seg("编码段 road（recv→出包）", enc[kRoad]);
-        log_seg("编码段 wide（recv→出包）", enc[kWide]);
-      }
     }
   }
 
@@ -330,7 +297,6 @@ class Bigmodeld {
     // 坏流/EOF/ERR 统一收尾：记断连 + 走重连路径 + 清半包缓冲（16 号 code-review：Duplicated Code）
     auto fail = [&](const char* why) {
       LOGE("bigmodeld: REPLY 流异常（%s），断连重连", why);
-      tracker_.on_disconnect();
       sender_->notify_disconnect();
       hello_seen_ = false;
       link_mark_connecting();
@@ -398,7 +364,6 @@ class Bigmodeld {
             fail("REPLY 解析失败");
             break;
           }
-          tracker_.on_reply(r);
           // 04 号 C：REPLY 经 msgq 转交 modeld（outputs[0:2066) 与遥测原样镜像，
           // 逐帧都发——App 侧解码跳帧的全零 outputs 也发，落回小模型由 modeld 判）
           MessageBuilder msg;
@@ -415,7 +380,6 @@ class Bigmodeld {
         } else {
           bgm1::ErrMsg e;
           if (bgm1::parse_err(buf.data(), need, &e) == bgm1::Err::kOk) {
-            tracker_.on_err(e);
             LOGE("bigmodeld: 服务端 ERR code=%u detail=%u frame_idx=%u", e.code, e.detail, e.frame_idx);
           }
           sender_->notify_disconnect();
@@ -459,7 +423,6 @@ class Bigmodeld {
   struct Slot {
     VisionIpcBufExtra extra = {};
     VisionBuf* buf = nullptr;
-    uint64_t t_recv_ns = 0;  // VisionIPC recv 返回时刻（04-E 分段埋点）
   };
 
   void init_encoder(StreamId sid, const VisionBuf& bi) {
@@ -494,12 +457,12 @@ class Bigmodeld {
   // 配对键 = timestamp_sof 邻近（见 pair_matcher.h：真机实测两路 frame_id 是各自
   // 独立的出帧计数器、持续漂移，不能作配对键）。配对死亡只计数/日志，不上报调度器；
   // road 死亡帧的 SOF 仍参与时间槽编号，wide 死亡帧不参与编号。
-  void place_frame(StreamId sid, const VisionIpcBufExtra& extra, VisionBuf* buf, uint64_t t_recv_ns) {
+  void place_frame(StreamId sid, const VisionIpcBufExtra& extra, VisionBuf* buf) {
     std::lock_guard<std::mutex> lk(state_mtx_);
     drain_events_locked();
 
     const bool is_road = (sid == kRoad);
-    bgm::PairMatcher<Slot>::Frame f{extra.frame_id, extra.timestamp_sof, Slot{extra, buf, t_recv_ns}};
+    bgm::PairMatcher<Slot>::Frame f{extra.frame_id, extra.timestamp_sof, Slot{extra, buf}};
     bgm::PairMatcher<Slot>::Actions a = matcher_.push(is_road, f);
 
     if (a.kill_road) {
@@ -551,13 +514,11 @@ class Bigmodeld {
     om.road_idr_pred = s.road_idr;
     om.wide_idr_pred = s.wide_idr;
     om.hdr = hdr;
-    om.t_recv_ns = road.t_recv_ns;
     ctx_[kRoad].meta.push(om);
     om.hdr = {};
     // 查表键 = 各路自己的 frame_id（on_encoded 按本路 extra.frame_id 取回；两路
     // frame_id 计数器漂移，不能混用同一个键）
     om.frame_id = CamFrameId{wide.extra.frame_id};
-    om.t_recv_ns = wide.t_recv_ns;
     ctx_[kWide].meta.push(om);
 
     // 两路同时提交编码；缓冲由 input_done_callback 归还池
@@ -568,13 +529,9 @@ class Bigmodeld {
   void account_pair_drop_locked(bool is_road, const bgm::PairMatcher<Slot>::Frame& dead) {
     if (is_road) {
       const FrameIdx frame_idx = indexer_.index(dead.timestamp_sof);
-      const uint64_t count = ++pair_drop_road_count_;
-      LOGW("bigmodeld: 配对缺帧（road，仅记账）frame_id=%u frame_idx=%u count=%llu",
-           dead.frame_id, u32(frame_idx), (unsigned long long)count);
+      LOGW("bigmodeld: 配对缺帧（road）frame_id=%u frame_idx=%u", dead.frame_id, u32(frame_idx));
     } else {
-      const uint64_t count = ++pair_drop_wide_count_;
-      LOGW("bigmodeld: 配对缺帧（wide，仅记账）frame_id=%u count=%llu",
-           dead.frame_id, (unsigned long long)count);
+      LOGW("bigmodeld: 配对缺帧（wide）frame_id=%u", dead.frame_id);
     }
   }
 
@@ -742,9 +699,6 @@ class Bigmodeld {
       return;
     }
 
-    // 04-E 分段埋点：取帧段（eof→recv）+ 编码段（recv→出包，含拷贝/配对等待/V4L）
-    record_seg_samples(sid, om.t_recv_ns, extra.timestamp_eof);
-
     if (sid == kRoad) {
       // bit0 = road 实际 keyframe 位（精确）、bit1 = wide IDR 策略预测
       sender_->submit_road(om.conn_epoch, om.frame_idx, om.hdr, data, len,
@@ -754,26 +708,10 @@ class Bigmodeld {
     }
   }
 
-  // 分段耗时样本（04-E）：滑窗 kSegSampleMax 折半擦除（同发送段手法）；样本跨连接累计。
-  void record_seg_samples(StreamId sid, uint64_t t_recv_ns, uint64_t t_eof_ns) {
-    if (t_recv_ns == 0) return;  // 旧版 OutMeta（无埋点）兜底
-    const uint64_t now_ns = nanos_since_boot();
-    const double fetch_ms = double(t_recv_ns - t_eof_ns) / 1e6;
-    const double enc_ms = double(now_ns - t_recv_ns) / 1e6;
-    std::lock_guard<std::mutex> lk(seg_mtx_);
-    auto push = [](std::vector<double>& v, double x) {
-      if (v.size() >= kSegSampleMax) v.erase(v.begin(), v.begin() + v.size() / 2);
-      v.push_back(x);
-    };
-    push(fetch_ms_[sid], fetch_ms);
-    push(enc_ms_[sid], enc_ms);
-  }
-
   // ---- 成员（锁序：sender_ > state_mtx_ > {ev_mtx_, MetaCache, BufPool}）----
   MetaProvider meta_;
   TcpSocket sock_;
   std::unique_ptr<UplinkSender> sender_;
-  ReplyTracker tracker_;
   PubMaster pm_{{"bigModelReply"}};  // 04 号 C：REPLY 经 msgq 转交 modeld
 
   // 06 号：链路状态（HELLO instance_id 对比 → blip/restart）→ Param "BigmodelLinkState"（07 号读）
@@ -786,14 +724,7 @@ class Bigmodeld {
   FrameScheduler sched_;
   FrameIndexer indexer_;
   bgm::PairMatcher<Slot> matcher_;
-  uint64_t pair_drop_road_count_ = 0;
-  uint64_t pair_drop_wide_count_ = 0;
 
-  // 04-E 分段样本（叶子锁：on_encoded 两条 dequeue 线程写、writer 线程读）
-  static constexpr size_t kSegSampleMax = 4096;
-  std::mutex seg_mtx_;
-  std::vector<double> fetch_ms_[2];  // 取帧段（eof→recv，ms，滑窗）
-  std::vector<double> enc_ms_[2];    // 编码段（recv→出包，ms，滑窗）
   bool need_req_road_ = false;  // 事件累积的 request_keyframe，组帧前统一 flush
   bool need_req_wide_ = false;
   // 连接代号（sender 建连次数，kNewConnection 事件带出）：组帧时 stamp 进 OutMeta，

@@ -15,7 +15,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 | `frame_meta.{h,cpp}` | 帧头元数据：warp 矩阵 C++ 复刻 + MetaProvider（标定喂 rpyCalib，modeld 喂 desire/action_t） |
 | `frame_scheduler.{h,cpp}` | I 帧/丢帧状态机（纯逻辑事件输出，调用方执行 request_keyframe） |
 | `meta_cache.h` | 编码输出查表（FIFO/路）：miss 分类（stale 静默 / gap=断档上报），查不到不弹队 |
-| `uplink_sender.{h,cpp}` | 发送/重连状态机（可注入 socket/时钟）+ ReplyTracker |
+| `uplink_sender.{h,cpp}` | 发送/重连状态机（可注入 socket/时钟） |
 | `main.cc` | 进程组装：取帧/配对、V4L 编码、发送、REPLY 接收、标定线程 |
 | `gen_warp_golden.py` | warp golden 表生成（宿主测试对照 Python ≤1e-5） |
 | `server_locator.{h,cpp}` | 服务端定位（06 号）：手动 IP / 限 wlan0 子网的 mDNS 发现（avahi-browse） |
@@ -46,7 +46,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
    实测双 IDR」对，不合格整对丢弃报 `kHeadBarrier`（调用方补 request），头对在排队槽
    等 wide 实测；断档后首帧恒为双路 IDR 对，服务端判据简化为「中流双路 IDR = 新序列」。
    **连接代号（18 号 #2）**：`conn_epoch` 每次建连 +1 随 `kNewConnection` 带出，
-   submit_* 带调用方代号、不符静默拒（`stale_submits` 计数）——重连窗口旧连接的
+    submit_* 带调用方代号、不符即静默拒——重连窗口旧连接的
    编码在途输出不得混进新连接（污染 frame_idx 编号）。假死=对在途帧 ≥200 ms
    无进展（写阻塞或 wide 缺失）→ 尝试发完在途帧（含连续部分写，不撕裂）否则截断 → 重连，
    报 kStall。重连每次 connect 1 s 超时，连败 3 次报 kLinkLost，之后持续重试、成功复位；
@@ -70,7 +70,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
    （checklist 项自动满足）。可调码率：Params "BigmodelEncoderBitrate"（仿
    `encoderd.cc:54-60` 每帧读）+ `--bitrate` 初值。
 6. **线程/锁序**（`main.cc` 头注）：2 取帧/配对（state_mtx）+ writer（sender.step）+
-   REPLY reader（MsgHdr 分流 parse_reply/parse_err → ReplyTracker，EOF/ERR →
+    REPLY reader（MsgHdr 分流 parse_reply/parse_err，EOF/ERR →
    notify_disconnect）+ 标定（SubMaster(["extrinsicsCalibration"]) → MetaProvider.set_rpy）。
    锁序 sender.mtx > state_mtx > 叶子锁（ev 队列/meta 缓存/buf 池）。sender 事件回调在其
    锁内只记账+入队，状态机转移与 request_keyframe 在下一次组帧前按序执行（落点不变且
@@ -86,8 +86,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
    `kGapMiss`（输出被吞=码流断档，上报新序列 + `notify_stream_gap()` 关门），
    命中前缀死条目同断档一并上报。口径详见 `meta_cache.h` 头注释。
 8. **TODO(04 号)**：desire[8]/action_t[2] 现置零——权威在 modeld 的 DesireHelper 与 13 号
-   延迟公式，经 msgq 接线；REPLY 的 outputs[0:2066) 与遥测同样留待 msgq 转交 modeld
-   （ReplyTracker 只缓存最新 + 分段统计）。
+   延迟公式，待经 msgq 接线；REPLY 的 outputs[0:2066) 与遥测已直接经 msgq 转交 modeld。
    另（06 号）：连接建立后服务端先发 HELLO（ver + instance_id + max_frame，无鉴权——
    05 号握手/HMAC/配对已随 ADR-0003 撤销）；`instance_id` 区分服务端重启/网络闪断，
    状态串写 Param `BigmodelLinkState`（07 号读）。连接目标 = 手动 IP（Params
@@ -116,7 +115,7 @@ clang++ -std=c++17 -O1 test_bigmodeld.cc frame_codec.cpp frame_meta.cpp \
 MetaCache（查不到不弹队、clean2 回归、miss 分类）、序列头门（开门条件/整对丢弃/断档后首帧双 IDR）、
 连接代号（重连窗口旧提交静默拒）、
 发送器（假 socket/假时钟：出包即发、覆盖丢弃、假死发完/截断、重连、kLinkLost 升级、迟到
-包静默丢、部分写不撕裂、发送段样本=写完时点/滑动窗口）、warp golden ≤1e-5、MetaProvider、ReplyTracker、frame_codec
+包静默丢、部分写不撕裂）、warp golden ≤1e-5、MetaProvider、frame_codec
 往返与坏输入（含 HELLO）、LinkStateTracker（instance 对比判 blip/restart）、
 avahi 行解析/子网范围/发现节流（06 号）。golden 表生成（输出粘进 test_bigmodeld.cc）：
 

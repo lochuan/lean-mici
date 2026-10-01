@@ -327,16 +327,6 @@ static void test_sender_flags() {
   CHECK(bgm1::parse_frame_header(sock.written.data(), &h) == bgm1::Err::kOk);
   CHECK(h.flags == (bgm1::kFlagRoadIdr | bgm1::kFlagWideIdr));
   CHECK(h.frame_idx == 7);
-  CHECK(s.wide_idr_mismatches() == 0);
-
-  // 预测 1 实际 0（误报风险）→ 计数
-  s.submit_road(ConnEpoch{1}, FrameIdx{8}, test_hdr(), p, sizeof p, false, false, true);
-  s.submit_wide(ConnEpoch{1}, FrameIdx{8}, p, sizeof p, false);
-  CHECK(s.wide_idr_mismatches() == 1);
-  // 预测 0 实际 1（欠报无害）→ 也计数（口径：不符即计）
-  s.submit_road(ConnEpoch{1}, FrameIdx{9}, test_hdr(), p, sizeof p, false, false, false);
-  s.submit_wide(ConnEpoch{1}, FrameIdx{9}, p, sizeof p, true);
-  CHECK(s.wide_idr_mismatches() == 2);
 }
 
 // 在途槽 + 排队槽：排队只留最新，新包覆盖 = 丢旧包；门开着丢 = kDrop（断档）→
@@ -497,10 +487,9 @@ static void test_sender_reconnect_linklost() {
   sock.connect_ok = false;
   CHECK(!s.step());
   CHECK(!s.step());
-  CHECK(evs.size() == 1 && s.connect_failures() == 2);
+  CHECK(evs.size() == 1);  // 前两次失败未升级
   CHECK(!s.step());  // 第 3 次失败 → 升级「连接丢失」
   CHECK(evs.size() == 2 && evs[1].ev == UplinkEvent::kLinkLost);
-  CHECK(s.connect_failures() == 3);
 
   CHECK(!s.step());  // 之后继续重试，不重复升级
   CHECK(evs.size() == 2);
@@ -508,7 +497,7 @@ static void test_sender_reconnect_linklost() {
   sock.connect_ok = true;
   CHECK(s.step());
   CHECK(evs.size() == 3 && evs[2].ev == UplinkEvent::kNewConnection && evs[2].ep == 2);
-  CHECK(s.connect_failures() == 0 && s.connected());
+  CHECK(s.connected());
 }
 
 // 断连/未连接：submit_* 静默丢（不阻塞编码回调），队列不带进新连接
@@ -576,95 +565,6 @@ static void test_sender_write_error() {
   sock.mode = FakeSock::kWrite;
   CHECK(s.step());
   CHECK(s.connected());
-}
-
-// 发送段耗时样本（17 号）：样本时点 = 整帧写完（写入耗时计入，不是 step 入口时点）；
-// 窗口有界（kSendSampleMax），frames_sent 照常累计
-static void test_sender_send_samples() {
-  FakeSock sock;
-  uint64_t now = 1000;
-  std::vector<Ev> evs;
-  UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{},
-                 [&](const UplinkEventInfo& e) { evs.push_back({e.ev, u32(e.frame_idx), u32(e.conn_epoch)}); });
-  CHECK(s.step());  // 建连
-  CHECK(s.send_samples().empty() && s.frames_sent() == 0);
-
-  // 头对停在在途（写阻塞）：计时起点 = 1000
-  sock.mode = FakeSock::kBlock;
-  const uint8_t p[2] = {0xaa, 0xbb};
-  open_head(s, 1, 0, p, sizeof p, p, sizeof p);
-  CHECK(s.step());
-
-  // 写得动：每次 write_some 假时钟 +3 ms（chunk1/chunk2 各一次）→ 样本 = 6 ms。
-  // 完成时点若取自 step 入口（修复前），样本恒 0——这里断言 > 0 钉死口径
-  sock.mode = FakeSock::kWrite;
-  sock.on_write = [&] { now += 3; };
-  CHECK(s.step());
-  sock.on_write = nullptr;
-  CHECK(s.frames_sent() == 1);
-  std::vector<double> v = s.send_samples();
-  CHECK(v.size() == 1 && v[0] > 0.0);
-  CHECK_NEAR(v[0], 6.0, 1e-9);
-
-  // 窗口有界：灌 5000 帧后不超上限、也不至于清空
-  for (uint32_t i = 1; i <= 5000; i++) {
-    open_head(s, 1, i, p, sizeof p, p, sizeof p);
-    s.step();
-  }
-  CHECK(s.frames_sent() == 5001);
-  v = s.send_samples();
-  CHECK(v.size() <= UplinkSender::kSendSampleMax && v.size() > UplinkSender::kSendSampleMax / 2);
-}
-
-// =====================================================================
-// ReplyTracker：REPLY/ERR 记账
-// =====================================================================
-
-static void test_reply_tracker() {
-  ReplyTracker t;
-  CHECK(!t.has_reply());
-
-  bgm1::Reply r;
-  r.frame_idx = 5;
-  r.t_eof = 42;
-  r.flags = bgm1::kFlagSeqReset;
-  r.outputs[0] = 1.5f;
-  r.outputs[bgm1::kReplyOutputsCount - 1] = -2.f;
-  r.telemetry[0] = 100;
-  r.telemetry[1] = 200;
-  r.telemetry[2] = 300;
-  r.telemetry[3] = 600;
-  t.on_reply(r);
-
-  r.telemetry[0] = 300;
-  r.telemetry[3] = 1000;
-  r.flags = bgm1::kFlagZeroPair;
-  t.on_reply(r);
-
-  CHECK(t.replies() == 2);
-  CHECK(t.seq_reset() == 1 && t.zero_pair() == 1);
-  CHECK(t.has_reply() && t.latest().frame_idx == 5 && t.latest().t_eof == 42);
-  CHECK_NEAR(t.latest().outputs[0], 1.5, 1e-6);
-  CHECK_NEAR(t.latest().outputs[bgm1::kReplyOutputsCount - 1], -2.0, 1e-6);
-
-  const ReplyTracker::SegmentStats& s0 = t.segment(0);
-  CHECK(s0.count == 2 && s0.min_us == 100 && s0.max_us == 300);
-  CHECK_NEAR(s0.mean_us(), 200.0, 1e-9);
-  const ReplyTracker::SegmentStats& s3 = t.segment(3);
-  CHECK(s3.count == 2 && s3.min_us == 600 && s3.max_us == 1000);
-  CHECK_NEAR(s3.mean_us(), 800.0, 1e-9);
-  CHECK(std::string(ReplyTracker::segment_name(0)) == "srv_recv_us");
-  CHECK(std::string(ReplyTracker::segment_name(3)) == "srv_total_us");
-
-  CHECK(!t.has_err());
-  bgm1::ErrMsg e;
-  e.code = bgm1::kErrPairMismatch;
-  e.detail = 9;
-  e.frame_idx = 3;
-  t.on_err(e);
-  CHECK(t.has_err() && t.last_err().code == bgm1::kErrPairMismatch && t.last_err().detail == 9);
-  t.on_disconnect();  // 统计保留
-  CHECK(t.replies() == 2 && t.has_reply());
 }
 
 // =====================================================================
@@ -1312,7 +1212,6 @@ static void test_sender_conn_epoch_rejects_stale() {
   // 旧代号提交（重连窗口内旧连接的编码在途输出）→ 静默丢弃
   s.submit_road(ConnEpoch{1}, FrameIdx{5}, test_hdr(), p, sizeof p, true, true, true);
   s.submit_wide(ConnEpoch{1}, FrameIdx{5}, p, sizeof p, true);
-  CHECK(s.stale_submits() == 2);
   s.step();
   s.step();
   CHECK(sock.written.size() == before);  // 帧 5 不得进新连接
@@ -1367,7 +1266,6 @@ static void test_sender_dropped_window_not_cross_connection() {
   s.submit_wide(ConnEpoch{2}, FrameIdx{2}, p, sizeof p, false);
   s.step();
   s.step();
-  CHECK(s.stale_submits() == 0);
   bool sent1 = false, sent2 = false;
   for (auto& e : evs) {
     if (e.ev == UplinkEvent::kFrameSent && e.idx == 1) sent1 = true;
@@ -1394,9 +1292,6 @@ int main() {
   test_sender_submit_while_down();
   test_sender_partial_writes();
   test_sender_write_error();
-  test_sender_send_samples();
-
-  test_reply_tracker();
   test_link_state();
   test_avahi_parse();
   test_avahi_scope();

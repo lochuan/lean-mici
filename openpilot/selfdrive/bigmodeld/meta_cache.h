@@ -31,7 +31,6 @@ struct OutMeta {
   ConnEpoch conn_epoch{};   // 连接代号（sender 建连次数）：迟到旧连接输出在 submit 侧拒绝
   bool road_idr_pred = false;  // 本帧 IDR 预测（FRAME 头 bit0 用实际位，此处供序列头门）
   bool wide_idr_pred = false;  // FRAME 头 bit1（预测；只许欠报不许误报）
-  uint64_t t_recv_ns = 0;   // 本路 VisionIPC recv 返回时刻（04-E 分段埋点：取帧段/编码段）
   bgm1::FrameHeader hdr;
 };
 
