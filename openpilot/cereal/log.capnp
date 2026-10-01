@@ -572,6 +572,9 @@ struct PandaState @0xa7649e2575e4591e {
   controlsAllowedLateral @38 :Bool;
   controlsAllowedLongitudinal @39 :Bool;
 
+  nmiReset @40 :Bool;
+  hardfaultReset @41 :Bool;
+
   enum FaultStatus {
     none @0;
     faultTemp @1;
