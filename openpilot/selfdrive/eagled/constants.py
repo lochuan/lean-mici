@@ -12,13 +12,14 @@ L_LOOKAHEAD = 35.0   # m, preview distance used for the curvature bias
 D_MAX = 50.0         # m, proximity ramp far distance
 Y_GATE = 2.5         # m, |yRel| gate: only same-lane-ish targets trigger
 D_GATE = 40.0        # m, near-trigger distance (spec §3)
-# 本车道半宽(m)。|yRel| 小于此值的目标不作为避让目标:0.35m 的偏置绕不开
+# 本车道半宽(m)。|yRel| 小于此值的目标不作为避让目标:默认幅度(0.35m)绕不开
 # 本车道内的障碍(比如抛锚车),只是白占横向空间,而且 _sign(0.0)=1 会让正
 # 前方目标固定往右让 —— 方向是任意的。留给驾驶员接管。
 OWN_LANE_HALF_WIDTH = 1.2
 
 # Offset limits (m)
-MAX_OFFSET_FREE = 0.35  # no adjacent-vehicle constraint
+MAX_OFFSET_FREE = 0.35  # no adjacent-vehicle constraint;幅度旋钮默认值
+MAX_OFFSET_HARD = 1.0   # 可调硬顶:AvoidanceMaxLateralOffset 滑杆与钳制上限
 EDGE_CLEAR_MIN = 0.6    # m, minimum road-edge clearance
 
 # --- C9: 每侧横向预算 -------------------------------------------------------------
@@ -125,6 +126,13 @@ ASSOC_MAX_DBEARING = 0.035
 ASSOC_MAX_DRANGE_M = 2.0
 
 
+# Temporal filtering / hysteresis (s)
+DT_5HZ = 0.2
+LOWPASS_TAU_S = 0.5
+ENTER_HOLD_S = 0.5
+EXIT_HOLD_S = 1.0
+
+
 # --- Params 可覆盖的调参表 ---------------------------------------------------------
 # (param 键 -> (常量名, 编译期默认, 钳制范围))。eagled 1Hz 刷新时按 Params
 # 重绑本模块属性:键缺失/空值恢复编译期默认。gate_target/side_pictures 等
@@ -135,6 +143,11 @@ _PARAM_OVERRIDABLE: dict[str, tuple[str, float, float, float]] = {
   "AvoidanceEgoHalfWidth":  ("EGO_HALF_WIDTH", EGO_HALF_WIDTH, 0.5, 1.5),
   "AvoidanceLaneProbMin":   ("LANE_PROB_MIN", LANE_PROB_MIN, 0.3, 0.95),
   "AvoidanceLaneStdMax":    ("LANE_STD_MAX", LANE_STD_MAX, 0.05, 1.0),
+  "AvoidanceEdgeClearMin":  ("EDGE_CLEAR_MIN", EDGE_CLEAR_MIN, 0.1, 1.5),
+  "AvoidanceEdgeStdMax":    ("EDGE_STD_MAX", EDGE_STD_MAX, 0.05, 1.0),
+  "AvoidanceEnterHold":     ("ENTER_HOLD_S", ENTER_HOLD_S, 0.0, 3.0),
+  "AvoidanceExitHold":      ("EXIT_HOLD_S", EXIT_HOLD_S, 0.0, 5.0),
+  "AvoidanceBiasTau":       ("LOWPASS_TAU_S", LOWPASS_TAU_S, 0.05, 2.0),
   "LaneChangeNearZone":     ("LANE_CHANGE_NEAR_D", LANE_CHANGE_NEAR_D, 0.0, 20.0),
 }
 
@@ -167,12 +180,6 @@ STATIC_SPEED_THRESH = 1.0
 # Speed envelope (m/s) — spec §3 suggests 30-120 kph
 V_EGO_MIN = 8.0
 V_EGO_MAX = 33.0
-
-# Temporal filtering / hysteresis (s)
-DT_5HZ = 0.2
-LOWPASS_TAU_S = 0.5
-ENTER_HOLD_S = 0.5
-EXIT_HOLD_S = 1.0
 
 # lateralManeuverPlan 的消费端新鲜度门（fix/stream-gate 后阈值登记在
 # common.stream_gate.MAX_AGE_S，此处不再常量重复）。

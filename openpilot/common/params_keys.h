@@ -22,6 +22,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AvoidanceEgoHalfWidth", {PERSISTENT, FLOAT, "0.9"}},  // 自车半宽 m（eagled 预算折算）
     {"AvoidanceLaneProbMin", {PERSISTENT, FLOAT, "0.6"}},   // 车道线置信门下限
     {"AvoidanceLaneStdMax", {PERSISTENT, FLOAT, "0.3"}},   // 车道线方差门上限
+    {"AvoidanceEdgeClearMin", {PERSISTENT, FLOAT, "0.6"}}, // 路沿净空下限 m（eagled 避让门）
+    {"AvoidanceEdgeStdMax", {PERSISTENT, FLOAT, "0.35"}},  // 路沿方差门上限（eagled C7 置信门）
+    {"AvoidanceEnterHold", {PERSISTENT, FLOAT, "0.5"}},    // 避让进入滞回 s（目标持续在场才进入）
+    {"AvoidanceExitHold", {PERSISTENT, FLOAT, "1.0"}},     // 避让退出滞回 s（目标消失后保持）
+    {"AvoidanceBiasTau", {PERSISTENT, FLOAT, "0.5"}},      // 避让偏置平滑时间常数 s
     {"LaneChangeNearZone", {PERSISTENT, FLOAT, "6.0"}},    // 变道近区硬拦距离 m
     {"BigmodelServerHost", {PERSISTENT | BACKUP, STRING, ""}},  // 06/07 号：手动 IP；空 = mDNS 自动发现
     {"BigmodelToggle", {PERSISTENT | BACKUP, BOOL}},          // 07 号：「远程大模型」开关（仅 offroad 可改；默认关，同 AdbEnabled）

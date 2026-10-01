@@ -110,7 +110,7 @@ class EagleDaemon:
     except Exception:
       value = None
     if value is not None:
-      self.max_offset = float(np.clip(float(value), 0.0, C.MAX_OFFSET_FREE))
+      self.max_offset = float(np.clip(float(value), 0.0, C.MAX_OFFSET_HARD))
 
   def update(self, now: float) -> None:
     self._refresh_params(now)

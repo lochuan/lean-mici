@@ -231,6 +231,17 @@ def _step(p, now, targets, **kwargs):
   return p.update(model_curvature=0.01, targets=targets, now=now, **kwargs)
 
 
+class _OverrideParams:
+  """最小 Params 假件:只支持 get,供 apply_param_overrides 的覆盖测试。
+  注意勿与本文件后半 EagleDaemon 用的 _FakeParams 混名。"""
+
+  def __init__(self, values):
+    self._values = values
+
+  def get(self, key, block=False, return_default=False):
+    return self._values.get(key)
+
+
 def test_planner_enter_hysteresis():
   p = _planner()
   _, valid0 = _step(p, 0.0, [_right_target()])
@@ -316,6 +327,71 @@ def test_planner_edge_std_gate_none_keeps_historical_behavior():
                          road_edges=[_Edge(-1.8)], now=C.ENTER_HOLD_S + 0.01)
   assert valid
   assert curv > 0.01
+
+
+def test_max_offset_knob_scales_the_ramp():
+  """幅度旋钮等比缩放期望偏移:默认 0.35 行为不变,抬到 0.7 后斜坡翻倍。"""
+  # dRel=20 -> proximity=0.6;desire = K_GAIN * (knob/0.35) * w * 0.6
+  p = _planner()
+  _step(p, 0.0, [_right_target(dRel=20.0)])
+  _step(p, C.ENTER_HOLD_S + 0.01, [_right_target(dRel=20.0)])
+  assert p.last_state["yDes"] == pytest.approx(0.5 * 0.6)          # 默认旋钮:因子 1,旧行为
+
+  p = _planner()
+  _step(p, 0.0, [_right_target(dRel=20.0)], max_offset=0.7)
+  _step(p, C.ENTER_HOLD_S + 0.01, [_right_target(dRel=20.0)], max_offset=0.7)
+  assert p.last_state["yDes"] == pytest.approx(0.5 * (0.7 / 0.35) * 0.6)   # 斜坡翻倍
+
+
+def test_edge_gates_read_param_overrides_at_call_time():
+  """防'按值导入吃不到覆盖'静默失效:EDGE_CLEAR_MIN/EDGE_STD_MAX 的 Params
+  覆盖必须实时到达 planner 的净空门/C7 置信门。"""
+  try:
+    p = _planner()
+    _step(p, 0.0, [_right_target()])
+    # 默认净空门 0.6:左沿 0.5m 拦下
+    _, valid = _step(p, C.ENTER_HOLD_S + 0.01, [_right_target()], road_edges=[_Edge(-0.5)])
+    assert not valid
+    # 覆盖放宽到 0.4 -> 放行
+    C.apply_param_overrides(_OverrideParams({"AvoidanceEdgeClearMin": "0.4"}))
+    _, valid = _step(p, C.ENTER_HOLD_S + 0.02, [_right_target()], road_edges=[_Edge(-0.5)])
+    assert valid
+    # 默认方差门 0.35:std 0.4 拦下;覆盖放宽到 0.5 -> 放行
+    C.apply_param_overrides(_OverrideParams({"AvoidanceEdgeStdMax": "0.5"}))
+    p2 = _planner()
+    _step(p2, 0.0, [_right_target()])
+    _, valid = _step(p2, C.ENTER_HOLD_S + 0.01, [_right_target()],
+                     road_edges=[_Edge(-1.8)], road_edge_stds=[0.4, 0.1])
+    assert valid
+  finally:
+    C.apply_param_overrides(_OverrideParams({}))   # 不污染其他测试
+
+
+def test_time_constants_read_param_overrides_at_call_time():
+  """ENTER/EXIT_HOLD_S 与 LOWPASS_TAU_S 的 Params 覆盖必须实时到达 planner。"""
+  try:
+    # 进入滞回拉到 2.0s:1.0s 时仍未激活
+    C.apply_param_overrides(_OverrideParams({"AvoidanceEnterHold": "2.0"}))
+    p = _planner()
+    _step(p, 0.0, [_right_target()])
+    _, valid = _step(p, 1.0, [_right_target()])
+    assert not valid
+
+    # 平滑常数 0.05:首帧偏置 = alpha * yDes,alpha = dt/(tau+dt) = 0.2/0.25
+    C.apply_param_overrides(_OverrideParams({"AvoidanceBiasTau": "0.05"}))
+    p2 = _planner()
+    _step(p2, 0.0, [_right_target()])
+    curv, valid = _step(p2, C.ENTER_HOLD_S + 0.01, [_right_target()])
+    assert valid
+    alpha = C.DT_5HZ / (0.05 + C.DT_5HZ)
+    assert curv == pytest.approx(0.01 + 2.0 * alpha * 0.35 / C.L_LOOKAHEAD ** 2)
+
+    # 退出滞回设 0:目标消失一帧即失效(默认 1.0s 时还会保持)
+    C.apply_param_overrides(_OverrideParams({"AvoidanceExitHold": "0.0"}))
+    _, gone = _step(p2, C.ENTER_HOLD_S + 0.02 + C.DT_5HZ, [])
+    assert not gone
+  finally:
+    C.apply_param_overrides(_OverrideParams({}))   # 不污染其他测试
 
 
 def test_planner_clearance_is_direction_aware():

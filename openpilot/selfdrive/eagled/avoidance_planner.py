@@ -26,14 +26,18 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.eagled.perception import (  # noqa: F401  (compat re-export)
   RadarPoint, Target, _in_gate, _sign, fuse_targets, radar_point_key,
 )
-from openpilot.selfdrive.eagled.constants import (BUDGET_UNCONSTRAINED, D_MAX, DT_5HZ, EDGE_CLEAR_MIN,
-                                                  EDGE_STD_MAX, ENTER_HOLD_S, EXIT_HOLD_S, K_GAIN,
-                                                  L_LOOKAHEAD, LOWPASS_TAU_S, MAX_OFFSET_FREE,
+from openpilot.selfdrive.eagled import constants as C
+from openpilot.selfdrive.eagled.constants import (BUDGET_UNCONSTRAINED, D_MAX, DT_5HZ, K_GAIN,
+                                                  L_LOOKAHEAD, MAX_OFFSET_FREE,
                                                   V_EGO_MAX, V_EGO_MIN)
 
 
-def _best_target(targets: Iterable[Target], max_offset: float) -> tuple[Target, float] | None:
+def _best_target(targets: Iterable[Target], max_offset: float, ramp_scale: float = 1.0) -> tuple[Target, float] | None:
   """Highest-desire in-gate target, and its magnitude capped to ``max_offset``.
+
+  ``ramp_scale`` scales the desire ramp with the user amplitude knob (see
+  ``plan``); it is uniform across targets in one call, so the ranking below
+  is unaffected.
 
   Ranking uses the UNCAPPED desire on purpose. Ranking by the capped magnitude
   makes target selection depend on ``max_offset``: once a squeezed cap (budget
@@ -55,7 +59,10 @@ def _best_target(targets: Iterable[Target], max_offset: float) -> tuple[Target, 
     if not target.in_gate:
       continue
     proximity = max(0.0, 1.0 - target.dRel / D_MAX)
-    desire = K_GAIN * target.w * proximity
+    # 期望偏移按旋钮幅度等比缩放(设计点 K_GAIN=0.5m @ MAX_OFFSET_FREE=0.35m)。
+    # 旋钮=默认 0.35 时 ramp_scale=1,行为逐位不变;旋钮抬到 1m 时近距 VRU 真
+    # 让到 1m(否则斜坡天然 ≤0.5m,滑杆上半段是死区)。
+    desire = K_GAIN * ramp_scale * target.w * proximity
     if desire > 0.0 and (best is None or desire > best[1]):
       best = (target, desire)
   if best is None:
@@ -68,17 +75,20 @@ def _avoid_direction(targets: Iterable[Target], max_offset: float = MAX_OFFSET_F
   return 0 if best is None else -_sign(best[0].yRel)
 
 
-def plan(targets: Iterable[Target], max_offset: float = MAX_OFFSET_FREE) -> float:
+def plan(targets: Iterable[Target], max_offset: float = MAX_OFFSET_FREE, ramp_scale: float = 1.0) -> float:
   """Desired lateral offset (m) for the nearest in-gate target, signed.
 
   ``max_offset`` must already carry the C9 budget verdict — update() folds
   ``budget_<bias side>`` into it before calling. plan() itself is budget-blind:
-  it only ranks threats and caps by the offset it was given.
+  it only ranks threats and caps by the offset it was given. ``ramp_scale``
+  scales the desire ramp with the user amplitude knob (update() passes
+  ``max_offset / MAX_OFFSET_FREE``) so the knob is meaningful over its whole
+  range; direct callers keep the unscaled historical ramp.
   """
   targets = tuple(targets)
   if not targets:
     return 0.0
-  best = _best_target(targets, max_offset)
+  best = _best_target(targets, max_offset, ramp_scale)
   if best is None:
     return 0.0
   return -_sign(best[0].yRel) * best[1]
@@ -116,7 +126,7 @@ class AvoidancePlanner:
     self.reset()
 
   def reset(self) -> None:
-    self._bias = FirstOrderFilter(0.0, LOWPASS_TAU_S, DT_5HZ)
+    self._bias = FirstOrderFilter(0.0, C.LOWPASS_TAU_S, DT_5HZ)
     self._active = False
     self._enter_since: float | None = None
     self._last_target_t: float | None = None
@@ -150,6 +160,8 @@ class AvoidancePlanner:
     left/right" stacked on top of it is unpredictable.
     """
     now = self._clock() if now is None else now
+    # Params 覆盖刷新:平滑常数改了就地重算 alpha(保留当前状态值)。
+    self._bias.update_alpha(C.LOWPASS_TAU_S)
     targets = tuple(targets)
     budget_left = BUDGET_UNCONSTRAINED if budget_left is None else budget_left
     budget_right = BUDGET_UNCONSTRAINED if budget_right is None else budget_right
@@ -162,7 +174,7 @@ class AvoidancePlanner:
     # 避让,不可把车往看不清的边沿外推（净空被高估是危险失效方向）。
     if direction != 0 and road_edge_stds is not None and len(road_edge_stds) > 1:
       edge_std = float(road_edge_stds[0 if direction > 0 else 1])   # roadEdges[0]=左,[1]=右
-      if edge_std > EDGE_STD_MAX:
+      if edge_std > C.EDGE_STD_MAX:
         clearance = 0.0
     # C9:偏置侧预算折进本帧生效上限（bsm_same 的禁止语义 = 该侧预算 0,自然覆盖）。
     eff_offset = max_offset
@@ -170,7 +182,7 @@ class AvoidancePlanner:
       eff_offset = min(eff_offset, budget_left)
     elif direction < 0:
       eff_offset = min(eff_offset, budget_right)
-    y_des = plan(targets, max_offset=eff_offset)
+    y_des = plan(targets, max_offset=eff_offset, ramp_scale=max_offset / MAX_OFFSET_FREE)
 
     # Hysteresis tracks target presence, NOT the budget-capped response: with
     # presence keyed to the unbudgeted offset, a BSM flicker only zeroes the
@@ -181,17 +193,17 @@ class AvoidancePlanner:
       if self._enter_since is None:
         self._enter_since = now
       self._last_target_t = now
-      if self._active or (now - self._enter_since) >= ENTER_HOLD_S:
+      if self._active or (now - self._enter_since) >= C.ENTER_HOLD_S:
         self._active = True
     else:
       self._enter_since = None
-      if self._active and self._last_target_t is not None and (now - self._last_target_t) >= EXIT_HOLD_S:
+      if self._active and self._last_target_t is not None and (now - self._last_target_t) >= C.EXIT_HOLD_S:
         self._active = False
 
     gated = (enabled and lat_active and not steering_pressed
              and not lane_change_active
              and V_EGO_MIN <= v_ego <= V_EGO_MAX
-             and clearance >= EDGE_CLEAR_MIN)
+             and clearance >= C.EDGE_CLEAR_MIN)
     if not (gated and self._active):
       bias = float(self._bias.update(0.0))
       self.last_state = {
