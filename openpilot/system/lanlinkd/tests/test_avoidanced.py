@@ -269,3 +269,44 @@ def test_snapshot_lanes_is_none_without_model_v2(publisher):
   finally:
     exit_event.set()
     t.join(timeout=2)
+
+
+def test_snapshot_maneuver_fields_none_without_car_and_model():
+  cache = avoidanced.AvoidanceCache(FakeParams())
+  assert cache._maneuver_fields(_StubSm(seen=False), {}) == {"avoidBlockReason": None, "laneChange": None}
+
+
+class _StubSm(dict):
+  def __init__(self, seen):
+    super().__init__()
+    self.seen = {s: seen for s in ('carState', 'modelV2', 'modelDataV2SP')}
+
+
+def test_cache_reports_lane_change_block_reason_from_real_messages():
+  pm = messaging.PubMaster(['eagleDebug', 'carState', 'modelV2', 'modelDataV2SP'])
+  cache, exit_event, t = _start_cache()
+  try:
+    for _ in range(30):
+      cs = messaging.new_message('carState')
+      cs.carState.leftBlinker = True
+      cs.carState.leftBlindspot = True
+      cs.carState.vEgo = 20.0
+      pm.send('carState', cs)
+      mv = messaging.new_message('modelV2')
+      mv.modelV2.meta.laneChangeState = 'preLaneChange'
+      mv.modelV2.meta.laneChangeDirection = 'left'
+      pm.send('modelV2', mv)
+      pm.send('modelDataV2SP', messaging.new_message('modelDataV2SP'))
+      _publish_debug(pm)
+      time.sleep(0.1)
+      if (cache.snapshot().get("laneChange") or {}).get("blockReason"):
+        break
+    snap = cache.snapshot()
+  finally:
+    exit_event.set()
+    t.join(timeout=2)
+
+  lc = snap["laneChange"]
+  assert lc["state"] == "preLaneChange" and lc["direction"] == "left"
+  assert lc["blockReason"] == "blindspot"
+  assert snap["avoidBlockReason"] is None   # 测试帧 valid=True 且 maxOffset>0：避让正在执行

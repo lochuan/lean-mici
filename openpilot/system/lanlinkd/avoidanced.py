@@ -26,7 +26,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.model_geometry import read_camera_to_front
 from openpilot.common.stream_gate import StreamStatus, stream_status
 from openpilot.selfdrive.eagled.projection import calibrated_geometry_from_msg
-from openpilot.system.lanlinkd import lanes as lanes_mod
+from openpilot.system.lanlinkd import lanes as lanes_mod, maneuver_status
 
 
 def _target(t) -> dict:
@@ -87,9 +87,28 @@ class AvoidanceCache:
     with self._lock:
       return dict(self._cal)
 
+  def _maneuver_fields(self, sm, snap: dict) -> dict:
+    """避让/变道拦截原因；carState/modelV2/modelDataV2SP 任一没收到 -> 都为 None。"""
+    if not all(sm.seen[s] for s in ('carState', 'modelV2', 'modelDataV2SP')):
+      return {"avoidBlockReason": None, "laneChange": None}
+    cs, meta, sp = sm['carState'], sm['modelV2'].meta, sm['modelDataV2SP']
+    lane_change_state = str(meta.laneChangeState)
+    car = {k: (float(getattr(cs, k)) if k == "vEgo" else bool(getattr(cs, k)))
+           for k in ("leftBlinker", "rightBlinker", "leftBlindspot", "rightBlindspot",
+                     "brakePressed", "steeringPressed", "vEgo")}
+    alc_mode = int(self._params.get("AutoLaneChangeTimer") or 0)
+    return {
+      "avoidBlockReason": maneuver_status.avoid_block_reason(
+        snap, self._params.get_bool("AvoidanceEnabled"), car["steeringPressed"], lane_change_state),
+      "laneChange": maneuver_status.lane_change_status(
+        lane_change_state, str(meta.laneChangeDirection), car,
+        (bool(sp.leftLaneChangeEdgeBlock), bool(sp.rightLaneChangeEdgeBlock)),
+        (snap["changeClearLeft"], snap["changeClearRight"]), alc_mode),
+    }
+
   def run(self, exit_event: threading.Event) -> None:
     try:
-      sm = messaging.SubMaster(['eagleDebug', 'extrinsicsCalibration'])
+      sm = messaging.SubMaster(['eagleDebug', 'extrinsicsCalibration', 'carState', 'modelV2', 'modelDataV2SP'])
     except Exception:
       cloudlog.exception("lanlink avoidanced: SubMaster init failed")
       return
@@ -128,6 +147,7 @@ class AvoidanceCache:
           "changeClearRight": bool(dbg.changeClearRight),
           "targets": [_target(t) for t in dbg.targets],
         }
+        snap.update(self._maneuver_fields(sm, snap))
       except Exception:
         cloudlog.exception("lanlink avoidanced: snapshot build failed")
         continue
