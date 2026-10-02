@@ -166,9 +166,9 @@ def change_clear(targets: Iterable, geo: LaneGeometry | None, v_ego: float) -> t
   """
   if not lane_trusted(geo):
     return "unknown", "unknown"
-  nearby = [target for target in targets if target.dRel > 0.0]
+  ahead = [target for target in targets if target.dRel > 0.0]
   return tuple("blocked" if any(_in_target_lane(target.dRel, target.yRel, geo, side) and _blocks_lane_change(target, v_ego)
-                                for target in nearby) else "clear" for side in (1, -1))
+                                for target in ahead) else "clear" for side in (1, -1))
 
 
 HOLD_MATCH_TOLERANCE = 3.0   # m, 可见目标 dRel 落在保持记录这一拍推算走过的区间(±此值)内,视为同一目标
@@ -187,8 +187,10 @@ class _Hold:
 def _remaining_gap(side: int, line_distance: float, d_rel: float, geo: LaneGeometry, offset: float) -> float:
   """自车在车道内偏移 offset(左正)时,与 side 侧邻道目标车身的横向间隙(m)。
 
-  间隙 = 线距 + (本车道半宽 - 自车半宽) - side·offset;车道取目标 dRel 处,按直道近似。
+  间隙 = 线距 + (本车道半宽 - 自车半宽) - side·offset;车道取目标 dRel 处。
+  offset 传速率限制前的偏移目标,爬坡期不会误报。
   """
+  # ponytail: 按直道近似,弯道里邻道目标处的车道中心会偏,路测有误报再沿车道线积分
   half_lane = (float(np.interp(d_rel, geo.left_x, geo.left_y)) - float(np.interp(d_rel, geo.right_x, geo.right_y))) / 2.0
   return line_distance + half_lane - C.EGO_HALF_WIDTH - side * offset
 
