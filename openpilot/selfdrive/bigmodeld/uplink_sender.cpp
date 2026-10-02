@@ -101,6 +101,8 @@ void UplinkSender::submit_road(ConnEpoch conn_epoch, FrameIdx frame_idx, const b
   f->road_idr_predicted = road_idr_predicted;
   f->wide_idr_predicted = wide_idr_predicted;
   resolve_head_gate_locked();
+  work_pending_ = true;
+  work_cv_.notify_one();
 }
 
 void UplinkSender::submit_wide(ConnEpoch conn_epoch, FrameIdx frame_idx, const uint8_t* wide,
@@ -119,6 +121,15 @@ void UplinkSender::submit_wide(ConnEpoch conn_epoch, FrameIdx frame_idx, const u
   f->has_wide = true;
   f->wide_idr_actual = wide_actual_idr;
   resolve_head_gate_locked();
+  work_pending_ = true;
+  work_cv_.notify_one();
+}
+
+bool UplinkSender::wait_for_work(int timeout_ms) {
+  std::unique_lock<std::mutex> lk(mtx_);
+  const bool woke = work_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms), [this] { return work_pending_; });
+  work_pending_ = false;
+  return woke;
 }
 
 void UplinkSender::drop_connection_locked() {

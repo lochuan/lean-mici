@@ -169,6 +169,19 @@ class TcpSocket : public UplinkSocket {
     close_locked();
   }
 
+  // 可读即返回（REPLY 到达即醒，不睡满轮询周期）；poll 在锁外，免得挡住发送线程。
+  // 期间 fd 被并发关闭只会让 poll 提前返回，调用方随后 read_some 自会报错重连。
+  void wait_readable(int timeout_ms) {
+    int fd;
+    {
+      std::lock_guard<std::mutex> lk(mtx_);
+      fd = fd_;
+    }
+    if (fd < 0) return;
+    struct pollfd pfd = {.fd = fd, .events = POLLIN, .revents = 0};
+    poll(&pfd, 1, timeout_ms);
+  }
+
  private:
   void close_locked() {
     if (fd_ >= 0) {
@@ -285,7 +298,7 @@ class Bigmodeld {
   void writer_thread() {
     setup_realtime("bgm_writer");
     while (!do_exit) {
-      if (!sender_->step()) util::sleep_for(2);
+      if (!sender_->step()) sender_->wait_for_work(2);
     }
   }
 
@@ -317,7 +330,7 @@ class Bigmodeld {
         continue;
       }
       if (n == 0) {
-        util::sleep_for(2);
+        sock_.wait_readable(2);
         continue;
       }
       buf.insert(buf.end(), tmp, tmp + n);

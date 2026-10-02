@@ -35,6 +35,7 @@
 // notify_disconnect()/notify_stream_gap() 由编码回调/REPLY 线程调；内部互斥。
 // 事件回调在锁内触发（调用方不得回调进本类）。
 
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -97,6 +98,10 @@ class UplinkSender {
   // 发送循环单步（发送线程）；返回本次是否有进展（无进展时调用方可以小睡）。
   bool step();
 
+  // step() 无进展时发送线程在此等：有 submit_* 即返回 true，否则 timeout_ms 后 false
+  //（超时兜底 socket 写阻塞/假死计时这类无提交的推进）。
+  bool wait_for_work(int timeout_ms);
+
   // 读侧发现断连/EOF/ERR（REPLY 接收线程）→ 走重连路径。
   void notify_disconnect();
 
@@ -145,6 +150,8 @@ class UplinkSender {
   EventFn on_event_;
 
   mutable std::mutex mtx_;
+  std::condition_variable work_cv_;
+  bool work_pending_ = false;  // submit_* 置位、wait_for_work 消费
   bool connected_ = false;
   ConnEpoch conn_epoch_{};  // 每次建连 +1（kNewConnection 事件带出）
   bool stream_open_ = false;  // 序列头门：已发出合格双路 IDR 对

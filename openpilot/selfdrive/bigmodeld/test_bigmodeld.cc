@@ -4,10 +4,12 @@
 //           frame_scheduler.cpp uplink_sender.cpp -o /tmp/test_bigmodeld && /tmp/test_bigmodeld
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "frame_codec.h"
@@ -549,6 +551,30 @@ static void test_sender_partial_writes() {
 }
 
 // 写错误 → 重连
+// 发送线程空闲等待：提交即唤醒（不睡满轮询周期），无提交则超时
+static void test_sender_wait_for_work_wakes_on_submit() {
+  using namespace std::chrono;
+  FakeSock sock;
+  uint64_t now = 0;
+  UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{}, nullptr);
+  s.step();
+  CHECK(!s.wait_for_work(1));
+
+  const uint8_t p[3] = {1, 2, 3};
+  std::thread submitter([&] {
+    std::this_thread::sleep_for(milliseconds(20));
+    s.submit_road(s.conn_epoch(), FrameIdx{0}, test_hdr(), p, sizeof p, true, true, true);
+  });
+  const auto t0 = steady_clock::now();
+  CHECK(s.wait_for_work(2000));
+  CHECK(steady_clock::now() - t0 < milliseconds(1000));
+  submitter.join();
+  CHECK(!s.wait_for_work(0));  // 唤醒已消费
+
+  s.submit_wide(s.conn_epoch(), FrameIdx{0}, p, sizeof p, true);  // 等待前已提交也不丢
+  CHECK(s.wait_for_work(0));
+}
+
 static void test_sender_write_error() {
   FakeSock sock;
   uint64_t now = 0;
@@ -1292,6 +1318,7 @@ int main() {
   test_sender_submit_while_down();
   test_sender_partial_writes();
   test_sender_write_error();
+  test_sender_wait_for_work_wakes_on_submit();
   test_link_state();
   test_avahi_parse();
   test_avahi_scope();
