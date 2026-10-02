@@ -170,6 +170,20 @@ class TestConstants(unittest.TestCase):
 
 
 class TestSourceSyncPlan(unittest.TestCase):
+  def test_pkl_inputs_fp_survives_source_sync(self):
+    with tempfile.TemporaryDirectory() as td:
+      repo = Path(td)
+      fps = [
+        "openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl.inputs_fp",
+        "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.inputs_fp",
+      ]
+      for fp in fps:
+        (repo / fp).parent.mkdir(parents=True, exist_ok=True)
+        (repo / fp).write_text("x")
+      allowed = release_lib.source_sync_allowlist(repo)
+      plan = plan_source_sync(device_paths=set(fps), source_paths=set(), changed_paths=set(), allowed_paths=allowed)
+      self.assertEqual(plan.delete_paths, ())
+
   def test_plan_deletes_stale_sources_and_allows_runtime_artifacts(self):
     plan = plan_source_sync(
       device_paths={"keep.py", "removed.py", "runtime.so", "flat-link", "changed.py"},

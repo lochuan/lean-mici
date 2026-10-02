@@ -61,6 +61,10 @@ DATA_ARTIFACT_GLOBS: tuple[str, ...] = (
   # tinygrad revision the kernels were built against and must ship with it.
   "openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl",
   "openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl.tinygrad_pin",
+  # pkl 输入指纹旁路文件：随发布树落到设备后成为已跟踪文件，下次源同步
+  # 若不在白名单会被当作过期文件删掉，pkl 缓存永远不命中、每次重编。
+  "openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl.inputs_fp",
+  "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.inputs_fp",
 )
 
 # Build inputs that can invalidate the native artifact set.
