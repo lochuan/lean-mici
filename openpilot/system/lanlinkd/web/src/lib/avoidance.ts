@@ -2,8 +2,7 @@
  *
  * 与 radar.ts 同款分工：可测的判定逻辑全抽在这里，AvoidanceView.vue
  * 只做渲染。方向语义（review 裁定）：
- *  - yDes > 0 = 向左偏（与 yRel 左正同号），箭头按 yDes 符号画；
- *  - direction = 障碍物侧（+1 = 障碍在右），只做侧别标识，不画箭头。
+ *  - yDes > 0 = 向左偏（与 yRel 左正同号），箭头按 yDes 符号画。
  */
 import { clamp, lateralX, type RadarViewBox } from "./radar";
 
@@ -79,16 +78,6 @@ export function offsetArrow(yDes: number, vb: RadarViewBox, egoX: number): Arrow
   return { x1: egoX, x2: lateralX(y, vb), yDes: y };
 }
 
-// ---- 障碍侧标识 ----
-
-/** direction：-1 左 / 0 无 / 1 右（障碍物侧，不用于画箭头） */
-export function obstacleSide(direction: number | undefined): string {
-  if (direction === undefined) return "—";
-  if (direction > 0) return "障碍在右";
-  if (direction < 0) return "障碍在左";
-  return "—";
-}
-
 // ---- 雷达↔视觉配对 ----
 
 export interface Pairable {
@@ -117,21 +106,6 @@ export function pairMembers<T extends Pairable>(targets: T[]): Array<{ vision: T
 }
 
 // ---- 状态条数值格式化 ----
-
-/** 后端用 999.0 表示 inf 路沿余量 */
-export const EDGE_CLEARANCE_INF = 999.0;
-
-export function fmtEdgeClearance(v: number | undefined): string {
-  if (v === undefined || !Number.isFinite(v) || v >= EDGE_CLEARANCE_INF) return "—";
-  return `${v.toFixed(2)} m`;
-}
-
-/** 预算哨兵同款（999 = 该侧无侧向约束） */
-export function fmtBudget(v: number | undefined): string {
-  if (v === undefined || !Number.isFinite(v)) return "—";
-  if (v >= EDGE_CLEARANCE_INF) return "∞";
-  return `${v.toFixed(2)} m`;
-}
 
 /** C2 车道归属：-1 左邻 / 0 本道或重叠 / +1 右邻。用于目标悬浮与状态条。 */
 export function laneLabel(lane: number | undefined): string {

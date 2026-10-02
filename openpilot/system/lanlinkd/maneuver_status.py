@@ -1,9 +1,10 @@
 """避让/变道「没执行的原因」复算（纯函数，输入全是已读出的值）。
 
-不改 capnp、不改 desire_helper：按 avoidance_planner.update 的 gated 条件和
+不改 capnp、不改 desire_helper：按 lane_offset.LaneOffsetPlanner.update 的生效门和
 desire_helper.update 的 preLaneChange 门控顺序，用公开消息字段复算。
 近似项（desire_helper 内部状态未发布）：brake / waiting / notArmed。
 """
+from openpilot.common.constants import CV
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.controls.lib.desire_helper import LANE_CHANGE_SPEED_MIN
 
@@ -23,12 +24,8 @@ def avoid_block_reason(dbg: dict, avoidance_enabled: bool, steering_pressed: boo
     return "steering"
   if lane_change_state != "off":
     return "laneChange"
-  if not C.V_EGO_MIN <= dbg.get("vEgo", 0.0) <= C.V_EGO_MAX:
+  if not C.V_EGO_MIN_KPH * CV.KPH_TO_MS <= dbg.get("vEgo", 0.0) <= C.V_EGO_MAX:
     return "speed"
-  if dbg.get("edgeClearance", 999.0) < C.EDGE_CLEAR_MIN:
-    return "edge"
-  if dbg.get("maxOffset", 0.0) <= 0.0:
-    return "budget"
   return "unknown"
 
 

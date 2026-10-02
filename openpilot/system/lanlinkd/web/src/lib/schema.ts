@@ -165,12 +165,11 @@ export interface EagleTarget {
   vRel: number; // m/s，雷达点才有，视觉目标 0
   cls: string; // person/bicycle/motorcycle/car；雷达点 ""
   conf: number; // YOLO conf，雷达点 0
-  weight: number; // planner 权重（VRU 1.0 / car 0.6）
   matched: boolean; // 雷达↔视觉关联上
-  inGate: boolean; // 三级门控判决（tier 1 车道线相对 / tier 2 路径相对 / tier 3 固定带）
   vision: boolean; // true=YOLO 投影目标；false=雷达点
   pairId: number;
-  lane: number; // C2 车道归属：-1 左邻 / 0 本道或重叠 / +1 右邻（分类未参与时 0）
+  lane: number; // 车道归属：-1 左邻 / 0 本道或重叠 / +1 右邻（车道线不可信时 0）
+  pressure: number; // 单目标侧向压力 0~1
 }
 
 export interface AvoidanceSnapshot {
@@ -178,25 +177,20 @@ export interface AvoidanceSnapshot {
   logMonoTime?: number;
   valid?: boolean;
   active?: boolean;
-  direction?: number;
   yDes?: number; // 期望横向偏移 m，左正
-  bias?: number; // 曲率偏置 1/m
-  maxOffset?: number; // 预算折算后的本帧生效上限 m
+  maxOffset?: number; // 贴线上限 m
   bsmLeft?: boolean;
   bsmRight?: boolean;
   vEgo?: number; // m/s
   nRadar?: number;
   nVision?: number;
   nAssociated?: number;
-  edgeClearance?: number; // 避让侧路沿余量 m；inf 时后端发 999.0
   canError?: boolean; // radarTracks.errors.canError（随 debug 透传）
   radarUnavailable?: boolean; // radarTracks.errors.radarUnavailableTemporary
   targets?: EagleTarget[];
-  // C2/C7/C9 新增字段——旧后端不发时 undefined，UI 必须容忍
-  laneLeftValid?: boolean; // 本道左边界线置信（tier 1 该侧可用）
+  // 新增字段——旧后端不发时 undefined，UI 必须容忍
+  laneLeftValid?: boolean; // 本道左边界线置信
   laneRightValid?: boolean; // 本道右边界线置信
-  budgetLeft?: number; // 左侧横向预算 m；999.0 = 无侧向约束
-  budgetRight?: number; // 右侧横向预算 m
   changeClearLeft?: boolean; // 目标道（左）变道清空（时间投影）
   changeClearRight?: boolean; // 目标道（右）变道清空
 

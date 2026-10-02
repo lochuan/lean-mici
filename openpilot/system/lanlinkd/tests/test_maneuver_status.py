@@ -3,7 +3,7 @@ import pytest
 
 from openpilot.system.lanlinkd.maneuver_status import avoid_block_reason, lane_change_status
 
-DBG = {"active": True, "valid": False, "maxOffset": 0.5, "vEgo": 20.0, "edgeClearance": 999.0}
+DBG = {"active": True, "valid": False, "maxOffset": 0.5, "vEgo": 20.0}
 
 
 def _avoid(dbg=None, enabled=True, steering=False, lc="off"):
@@ -21,8 +21,6 @@ def test_avoid_none_when_inactive_or_executing():
   ({"lc": "laneChangeStarting"}, "laneChange"),
   ({"dbg": {"vEgo": 3.0}}, "speed"),
   ({"dbg": {"vEgo": 40.0}}, "speed"),
-  ({"dbg": {"edgeClearance": 0.2}}, "edge"),
-  ({"dbg": {"maxOffset": 0.0}}, "budget"),
   ({}, "unknown"),
 ])
 def test_avoid_reasons(kwargs, expected):

@@ -90,8 +90,8 @@ DEV=CPU works for a local smoke test (no QCOM backend).
 
 - `cls` ∈ the 8 classes above; `conf` comes from `AvoidanceMinConfidence`
   (default 0.4), NMS IoU 0.45 per class.
-- Planner weights (avoidance_planner): VRU person/rider/bicycle/motorcycle/tricycle = 1.0,
-  vehicles car/bus/truck = 0.6.
+- Trigger line distance (lane_offset): VRU person/rider/bicycle/motorcycle/tricycle use
+  `TRIGGER_LINE_DISTANCE_VRU`, vehicles car/bus/truck use `TRIGGER_LINE_DISTANCE_VEHICLE`.
 
 ## Latency budget
 

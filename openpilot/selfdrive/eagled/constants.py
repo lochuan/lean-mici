@@ -1,40 +1,14 @@
-"""Tunable constants for the 5Hz lateral avoidance planner.
+"""Tunable constants for the 5Hz in-lane avoidance planner and perception.
 
-Values mirror the design doc (``2026-09-18-yolo-eagled-design.md`` §3) and the
-Task 5 brief. Everything that shapes the bias lives here so Params can override
-the limits without touching planner logic.
+Everything that shapes the lane offset lives here so Params can override the
+limits without touching planner logic.
 """
 
 from openpilot.common.model_geometry import CAMERA_TO_FRONT_DEFAULT
 
-# Geometry / gate
-L_LOOKAHEAD = 35.0   # m, preview distance used for the curvature bias
-D_MAX = 50.0         # m, proximity ramp far distance
-Y_GATE = 2.5         # m, |yRel| gate: only same-lane-ish targets trigger
-D_GATE = 40.0        # m, near-trigger distance (spec §3)
-# 本车道半宽(m)。|yRel| 小于此值的目标不作为避让目标:默认幅度(0.35m)绕不开
-# 本车道内的障碍(比如抛锚车),只是白占横向空间,而且 _sign(0.0)=1 会让正
-# 前方目标固定往右让 —— 方向是任意的。留给驾驶员接管。
-OWN_LANE_HALF_WIDTH = 1.2
-
-# Offset limits (m)
-MAX_OFFSET_FREE = 0.35  # no adjacent-vehicle constraint;幅度旋钮默认值
-MAX_OFFSET_HARD = 1.0   # 可调硬顶:AvoidanceMaxLateralOffset 滑杆与钳制上限
-EDGE_CLEAR_MIN = 0.6    # m, minimum road-edge clearance
-
-# --- C9: 每侧横向预算 -------------------------------------------------------------
-# budget = 该侧可用的横向偏置量(m)。连续量,替代旧的 bsm_same(禁止)/
-# bsm_opposite(限幅 0.12) 三档离散门控:
-#   BSM 报警      -> 0(布尔量无距离,保守禁止)
-#   侧向目标存在  -> min over objects (|yRel| - 该目标半宽) - EGO_HALF_WIDTH - SIDE_MARGIN
-#   否则          -> BUDGET_UNCONSTRAINED(该侧无侧向约束)
-# 消费端:避让 bias ≤ 偏置侧 budget;变道(未来 desire_helper)starting 需
-# budget ≥ 整车道宽。路沿约束走独立的 EDGE_CLEAR_MIN 门,不混进预算。
-EGO_HALF_WIDTH = 0.9          # 自车半宽 m(Toyota B 级 SUV 量级)
-SIDE_MARGIN = 0.3              # 偏置后要求保留的最小侧向间隙 m
-SIDE_MAX_Y = 4.5               # 参与侧向约束的最大 |yRel| m(一个邻道全覆盖)
-SIDE_WINDOW_D = 60.0           # 参与侧向约束的纵向窗口 m(威胁交互 ≤40m + 余量)
-BUDGET_UNCONSTRAINED = 999.0   # 与 edgeClearance 的 inf→999.0 哨兵同风格
+# Geometry
+L_LOOKAHEAD = 35.0   # m, preview distance for the lane-offset closed loop and the cap's lane-width scan
+EGO_HALF_WIDTH = 0.9  # 自车半宽 m(Toyota B 级 SUV 量级)
 
 # 变道放行的时间投影(carrotpilot 语义):侧车 LEAD_TIME 秒后位置 vs 我们
 # EGO_TIME 秒后位置,对方多跑 1 秒是安全裕量。"远而快"的侧车因此放行;
@@ -60,23 +34,14 @@ DEFAULT_HALF_WIDTH_M = 0.50   # 无类别(纯雷达未关联)目标的保守半�
 
 
 def class_half_width(cls) -> float:
-  """类别 -> 车身半宽(m),未知/缺失按 DEFAULT_HALF_WIDTH_M。与 class_weight 同理:
-  唯一实现,分类、debug 遥测都走这里。"""
+  """类别 -> 车身半宽(m),未知/缺失按 DEFAULT_HALF_WIDTH_M。唯一实现,压力、变道清空、debug 遥测都走这里。"""
   return CLASS_HALF_WIDTHS_M.get(cls, DEFAULT_HALF_WIDTH_M)
 
 
 # --- C7: 感知置信门控 -------------------------------------------------------------
-# StarPilot lane_centering.py 同款参考值;每个依赖模型几何的门控同时检查该几何的
-# 不确定度 —— 数据不确定就回退/禁止,而不是全信。
-
-# lane-relative 分类置信: 本道两侧边界线都要概率够高、方差够低才可信。
+# StarPilot lane_centering.py 同款参考值: 车道线概率够高、方差够低才可信。
 LANE_PROB_MIN = 0.6    # laneLineProbs 门槛(StarPilot _MIN_LANE_PROB)
 LANE_STD_MAX = 0.3     # laneLineStds 上限(StarPilot _MAX_LANE_STD)
-# path-relative 回退置信: position.yStd 在目标前视点的插值上限
-# (StarPilot _E2E_MAX_PATH_STD)。
-PATH_STD_MAX = 0.35
-# 路沿门控置信: roadEdgeStds 超过此值的边不参与净空判断(该侧视为无净空)。
-EDGE_STD_MAX = 0.35
 
 
 # --- 车道内避让(CONTEXT.md):压力 -> 车道内偏移 ---------------------------------------
@@ -143,28 +108,18 @@ ASSOC_MAX_DBEARING = 0.035
 ASSOC_MAX_DRANGE_M = 2.0
 
 
-# Temporal filtering / hysteresis (s)
 DT_5HZ = 0.2
-LOWPASS_TAU_S = 0.5
-ENTER_HOLD_S = 0.5
-EXIT_HOLD_S = 1.0
 
 
 # --- Params 可覆盖的调参表 ---------------------------------------------------------
 # (param 键 -> (常量名, 编译期默认, 钳制范围))。eagled 1Hz 刷新时按 Params
-# 重绑本模块属性:键缺失/空值恢复编译期默认。gate_target/side_pictures 等
+# 重绑本模块属性:键缺失/空值恢复编译期默认。lane_offset 等
 # 纯函数通过 ``C.*`` 在调用时取值,零签名改动即可吃到覆盖。lanlink 设置面板
 # 里这些键的 stepper 直接驱动本机制。
 _PARAM_OVERRIDABLE: dict[str, tuple[str, float, float, float]] = {
-  "AvoidanceSideMargin":    ("SIDE_MARGIN", SIDE_MARGIN, 0.05, 1.0),
   "AvoidanceEgoHalfWidth":  ("EGO_HALF_WIDTH", EGO_HALF_WIDTH, 0.5, 1.5),
   "AvoidanceLaneProbMin":   ("LANE_PROB_MIN", LANE_PROB_MIN, 0.3, 0.95),
   "AvoidanceLaneStdMax":    ("LANE_STD_MAX", LANE_STD_MAX, 0.05, 1.0),
-  "AvoidanceEdgeClearMin":  ("EDGE_CLEAR_MIN", EDGE_CLEAR_MIN, 0.1, 1.5),
-  "AvoidanceEdgeStdMax":    ("EDGE_STD_MAX", EDGE_STD_MAX, 0.05, 1.0),
-  "AvoidanceEnterHold":     ("ENTER_HOLD_S", ENTER_HOLD_S, 0.0, 3.0),
-  "AvoidanceExitHold":      ("EXIT_HOLD_S", EXIT_HOLD_S, 0.0, 5.0),
-  "AvoidanceBiasTau":       ("LOWPASS_TAU_S", LOWPASS_TAU_S, 0.05, 2.0),
   "LaneChangeNearZone":     ("LANE_CHANGE_NEAR_D", LANE_CHANGE_NEAR_D, 0.0, 20.0),
   "AvoidanceLaneEdgeMargin":   ("LANE_EDGE_MARGIN", LANE_EDGE_MARGIN, 0.05, 0.5),
   "AvoidanceVruTriggerLineDistance":    ("TRIGGER_LINE_DISTANCE_VRU", TRIGGER_LINE_DISTANCE_VRU, 0.2, 3.0),
@@ -192,10 +147,6 @@ def apply_param_overrides(params) -> None:
     value = default if raw in (None, b"", "") else float(raw)
     globals()[name] = min(max(value, lo), hi)
 
-# Target weighting: y_des = -sign(yRel) * min(max_offset, K * w_cls * proximity)
-K_GAIN = 0.5
-VRU_WEIGHT = 1.0      # person / rider / bicycle / motorcycle / tricycle
-VEHICLE_WEIGHT = 0.6  # car / bus / truck
 
 # 对地速度低于此值判为静止(m/s)。静止雷达目标必须有视觉关联确认才保留:
 # 护栏、桥墩的对地速度是 0,但抛锚车、路口停车也是 0。单纯的速度门会把静止
@@ -203,22 +154,8 @@ VEHICLE_WEIGHT = 0.6  # car / bus / truck
 # 车报成 car,不会把护栏报成 car/person)。
 STATIC_SPEED_THRESH = 1.0
 
-# Speed envelope (m/s) — spec §3 suggests 30-120 kph
-V_EGO_MIN = 8.0
+# 车速上限 m/s(下限见 V_EGO_MIN_KPH)
 V_EGO_MAX = 33.0
 
-# lateralManeuverPlan 的消费端新鲜度门（fix/stream-gate 后阈值登记在
-# common.stream_gate.MAX_AGE_S，此处不再常量重复）。
-
-# YOLO classes treated as vulnerable road users (higher avoidance weight)
+# YOLO classes treated as vulnerable road users (wider trigger line distance)
 VRU_CLASSES = frozenset({"person", "rider", "bicycle", "motorcycle", "tricycle"})
-
-
-def class_weight(cls) -> float:
-  """类别 -> 避让权重(VRU > vehicle),未知/缺失类别按 vehicle。
-
-  唯一实现,不许再内联 ``VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT``:
-  planner、projection 和 debug 遥测都必须走这里 —— 各写一份的拷贝曾让 debug
-  上报的权重和 planner 实际使用的不一致(本分支修掉过的遥测 bug)。
-  """
-  return VRU_WEIGHT if cls in VRU_CLASSES else VEHICLE_WEIGHT

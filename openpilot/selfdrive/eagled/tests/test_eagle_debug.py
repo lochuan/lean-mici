@@ -39,7 +39,7 @@ def test_debug_targets_radar_and_vision_with_matching_pair_ids():
   # One radar point and one YOLO box at the same spot: both carry matched=True
   # and the same non-zero pairId; nothing else gets a pair.
   person = _box_at(20.0, -1.8, cls="person", conf=0.8)
-  far_car = _box_at(60.0, 0.0, cls="car", conf=0.9)  # outside the planner gate
+  far_car = _box_at(60.0, 0.0, cls="car", conf=0.9)  # vision-only, unmatched
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
                        detector=_FakeDetector(detections=[person, far_car]),
                        radar_points=[(20.0, -1.8)])
@@ -50,55 +50,32 @@ def test_debug_targets_radar_and_vision_with_matching_pair_ids():
   vision_t = [t for t in dbg.targets if t.vision]
   assert len(radar_t) == 1 and len(vision_t) == 2
 
-  # radar side: vision-confirmed as person -> the vision class and the VRU
-  # weight the planner actually used (not the old hardcoded vehicle default);
-  # has vRel, matched to pair 1
+  # radar side: vision-confirmed as person -> takes the vision class; matched to pair 1
   rt = [t for t in radar_t if t.dRel == pytest.approx(20.0)][0]
   assert rt.cls == "person" and rt.vision is False and rt.matched is True
-  assert rt.pairId == 1 and rt.inGate is True
-  assert rt.weight == pytest.approx(C.VRU_WEIGHT)
+  assert rt.pairId == 1
 
-  # vision side: person matched (pair 1); far car unmatched (pairId 0, not in gate)
-  vt = [t for t in vision_t if t.inGate][0]
-  assert vt.cls == "person" and vt.vision is True and vt.matched is True
+  # vision side: person matched (pair 1); far car unmatched (pairId 0)
+  vt = [t for t in vision_t if t.matched][0]
+  assert vt.cls == "person" and vt.vision is True
   assert vt.pairId == 1 and vt.conf == pytest.approx(0.8)
-  assert vt.weight == pytest.approx(C.VRU_WEIGHT)
-  out = [t for t in vision_t if not t.inGate][0]
-  assert out.cls == "car" and out.matched is False and out.pairId == 0 and out.inGate is False
+  out = [t for t in vision_t if not t.matched][0]
+  assert out.cls == "car" and out.pairId == 0
 
   assert dbg.nRadar == 1 and dbg.nVision == 2 and dbg.nAssociated == 1
   assert dbg.vEgo == pytest.approx(20.0)
 
 
-def test_debug_radar_weight_matches_planner_weight_when_vision_confirmed():
-  """A vision-confirmed VRU radar point is planned with the VRU weight
-  (fuse_targets takes the vision class) — the debug row must report THAT
-  weight, not the hardcoded vehicle default. Telemetry that disagrees with the
-  action is how bugs stay invisible in shadow logs."""
-  person = _box_at(20.0, -1.8, cls="person", conf=0.8)
-  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
-                       detector=_FakeDetector(detections=[person]),
-                       radar_points=[(20.0, -1.8)])
-  daemon.update(0.0)
-  dbg = _debug_msgs(pm)[-1].eagleDebug
-  rt = [t for t in dbg.targets if not t.vision][0]
-  assert rt.matched is True
-  assert rt.cls == "person"
-  assert rt.weight == pytest.approx(C.VRU_WEIGHT)
-
-
-def test_debug_counts_and_gate_flags_radar_only():
-  # Radar-only degrade path still publishes debug with correct counts/gates.
+def test_debug_counts_radar_only():
+  # Radar-only degrade path still publishes debug with correct counts.
   near, far = (8.0, -1.8), (80.0, 0.0)
   daemon, pm = _daemon(camera=_FakeCamera(), radar_points=[near, far])
   daemon.update(0.0)
   dbg = _debug_msgs(pm)[-1].eagleDebug
   assert dbg.nRadar == 2 and dbg.nVision == 0 and dbg.nAssociated == 0
-  gates = {bool(t.inGate) for t in dbg.targets}
-  assert gates == {True, False}
   assert all(not t.vision for t in dbg.targets)
   assert all(t.pairId == 0 and not t.matched for t in dbg.targets)
-  assert dbg.valid is False  # planner not yet active (hysteresis)
+  assert dbg.valid is False  # no lane geometry, planner inactive
 
 
 def test_debug_carries_decision_state():
@@ -112,7 +89,6 @@ def test_debug_carries_decision_state():
   assert dbg.laneOffsetTarget > 0.0           # 右侧目标 → 向左偏
   assert dbg.offsetCap == pytest.approx(0.70)
   assert dbg.inactiveReason == ""
-  assert dbg.edgeClearance == 999.0           # 路沿门已删,恒发哨兵值
 
 
 def test_debug_bsm_flags_from_car_state():
@@ -151,14 +127,15 @@ def test_state_service_is_5hz_and_not_logged():
   assert svc.should_log is False
 
 
-def test_state_published_every_frame_with_ingate_targets_only():
-  # One in-gate radar+vision pair and one out-of-gate far car: eagleState
-  # carries the in-gate row(s) only — the picture, not the raw telemetry.
-  person = _box_at(20.0, -1.8, cls="person", conf=0.8)
-  far_car = _box_at(60.0, 0.0, cls="car", conf=0.9)  # outside the planner gate
+def test_state_published_every_frame_with_adjacent_lane_targets_only():
+  # One adjacent-lane radar+vision pair and one in-lane far car: eagleState
+  # carries the adjacent-lane row(s) only — the picture, not the raw telemetry.
+  person = _box_at(20.0, PERSON_Y, cls="person", conf=0.8)
+  far_car = _box_at(60.0, 0.0, cls="car", conf=0.9)  # vision-only, unmatched, in own lane
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
                        detector=_FakeDetector(detections=[person, far_car]),
-                       radar_points=[(20.0, -1.8)])
+                       radar_points=[(20.0, PERSON_Y)])
+  _add_standard_lane(daemon)
   daemon.update(0.0)
   daemon.update(C.DT_5HZ)
   states = _state_msgs(pm)
@@ -167,7 +144,7 @@ def test_state_published_every_frame_with_ingate_targets_only():
   st = states[-1].eagleState
   assert st.nRadar == 1 and st.nVision == 2 and st.nAssociated == 1
   assert st.vEgo == pytest.approx(20.0)
-  assert all(t.inGate for t in st.targets)      # out-of-gate far car filtered out
+  assert all(t.lane != 0 for t in st.targets)   # in-lane far car filtered out
   assert len(st.targets) == 2                   # the radar point + its matched vision row
   assert st.targets[0].vision is False and st.targets[1].vision is True
 
@@ -212,7 +189,7 @@ def _lane_aware_model_v2():
 
 
 def test_streams_publish_lane_geometry_flags_and_lane_labels():
-  # 邻道压线车（yRel=2.6,固定带上界 2.5 外）:tier 1 按车道线判进,lane=-1,
+  # 压线的左邻道车(yRel=2.6,半宽 0.9,左线 1.75 → 线距 -0.05):lane=-1,
   # 双侧置信标志透传到两条流。
   model_v2 = _lane_aware_model_v2()
   car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
@@ -227,69 +204,41 @@ def test_streams_publish_lane_geometry_flags_and_lane_labels():
   dbg = _debug_msgs(pm)[-1].eagleDebug
   assert st.laneLeftValid is True and st.laneRightValid is True
   assert dbg.laneLeftValid is True and dbg.laneRightValid is True
-  assert len(st.targets) == 2                      # 雷达行 + 视觉行,都已 tier 1 判进
+  assert len(st.targets) == 2                      # 雷达行 + 视觉行
   assert st.targets[0].lane == -1 and st.targets[1].lane == -1
-  # 遥测与行动同源:这个固定带外的目标真的进了计划（tier 1 侵入语义生效）
-  assert dbg.targets[0].inGate is True and dbg.targets[0].lane == -1
+  assert dbg.targets[0].lane == -1 and dbg.targets[0].lineDistance == pytest.approx(-0.05, abs=0.01)
 
 
 def test_streams_publish_false_flags_when_geometry_unavailable():
-  # daemon 测试桩形态的 modelV2（无车道线字段）:geo=None,双侧 False,lane 走
-  # 固定带符号。
+  # daemon 测试桩形态的 modelV2（无车道线字段）:geo=None,双侧 False,
+  # 目标无车道归属、线距哨兵 999。
   daemon, pm = _daemon(radar_points=[(20.0, -1.8)])
   daemon.update(0.0)
   st = _state_msgs(pm)[-1].eagleState
   dbg = _debug_msgs(pm)[-1].eagleDebug
   assert st.laneLeftValid is False and st.laneRightValid is False
   assert dbg.laneLeftValid is False and dbg.laneRightValid is False
-  assert st.targets[0].lane == 1                   # 固定带:右侧目标 lane=+1
+  assert len(st.targets) == 0
+  assert dbg.targets[0].lane == 0 and dbg.targets[0].lineDistance == 999.0
 
 
-# --- C9: budget + sideLead publication --------------------------------------------
+# --- 变道清空发布 ------------------------------------------------------------------
 
 
-def test_budgets_and_side_leads_published():
-  # 左侧邻道目标(|yRel|=2.6,无视觉类别 -> 默认半宽 0.5)
-  # -> budget_left = 2.6-0.5-0.9-0.3 = 0.9。
-  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
-                 meta=_NS(laneChangeState="off"))
-  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
-  radar = _NS(points=[_NS(dRel=20.0, yRel=-1.8, vRel=0.0),      # 右侧威胁(带内)
-                      _NS(dRel=18.0, yRel=2.6, vRel=0.0)],       # 左侧邻道目标(带外,进预算)
-              errors=_NS(canError=False, radarUnavailableTemporary=False))
-  pm = _FakePubMaster()
-  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=True))
+def test_change_clear_states_published_on_both_streams():
+  # 左邻道车慢于自车(vRel=-10):4s 后仍追不上自车 3s 后位置 → 左 blocked,右 clear;
+  # 旧 Bool 字段 blocked → False。
+  daemon, pm = _daemon(radar_points=[(20.0, 3.5)])
+  _add_standard_lane(daemon)
   daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
-
-  st = _state_msgs(pm)[-1].eagleState
-  dbg = _debug_msgs(pm)[-1].eagleDebug
-  assert st.budgetLeft == pytest.approx(0.9)
-  # 右侧威胁(|yRel|=1.8,默认半宽 0.5)也约束右侧预算: 1.8-0.5-0.9-0.3 = 0.1
-  assert st.budgetRight == pytest.approx(0.1)
-  assert dbg.budgetLeft == pytest.approx(0.9) and dbg.budgetRight == pytest.approx(0.1)
-  # 变道清空:两个目标都是同速远车(≥18m,vLead=vEgo),时间投影都放行
-  assert st.changeClearLeft is True and st.changeClearRight is True
-  assert dbg.changeClearLeft is True and dbg.changeClearRight is True
-  assert st.sideLeadLeft.valid is True and st.sideLeadLeft.cls == ""    # 无视觉类别 -> 默认半宽
-  assert st.sideLeadLeft.edgeDist == pytest.approx(2.6 - 0.5)
-  assert st.sideLeadLeft.vRel == pytest.approx(0.0)
-  # 右侧约束 lead 就是那个威胁本身
-  assert st.sideLeadRight.valid is True and st.sideLeadRight.edgeDist == pytest.approx(1.3)
+  for msg in (_state_msgs(pm)[-1].eagleState, _debug_msgs(pm)[-1].eagleDebug):
+    assert msg.changeClearLeftState == "blocked" and msg.changeClearRightState == "clear"
+    assert msg.changeClearLeft is False and msg.changeClearRight is True
 
 
-def test_bsm_maps_to_zero_budget_without_a_lead():
-  # BSM 左 -> budget_left 0,lead 无可指
-  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
-                 meta=_NS(laneChangeState="off"))
-  car_state = _NS(vEgo=20.0, leftBlindspot=True, rightBlindspot=False, steeringPressed=False)
-  radar = _NS(points=[_NS(dRel=20.0, yRel=-1.8, vRel=0.0)],
-              errors=_NS(canError=False, radarUnavailableTemporary=False))
-  pm = _FakePubMaster()
-  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=True))
+def test_change_clear_unknown_without_trusted_lane():
+  daemon, pm = _daemon(radar_points=[(20.0, 3.5)])
   daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
   st = _state_msgs(pm)[-1].eagleState
-  assert st.budgetLeft == 0.0 and st.sideLeadLeft.valid is False
-  # BSM 不在 eagled 的变道清空里(desire_helper 自己否决),这里只看车道线确认的目标车道
-  assert st.changeClearLeft is True and st.changeClearRight is True
+  assert st.changeClearLeftState == "unknown" and st.changeClearRightState == "unknown"
+  assert st.changeClearLeft is True and st.changeClearRight is True   # 旧 Bool:未知按不拦

@@ -7,8 +7,7 @@
  *  实/虚线由 eagleDebug 的 laneLeft/RightValid（eagled C7 门结论）裁决；
  *  外侧线透明度随 prob；路沿粗琥珀线；邻道底色按变道清空/BSM 着色。
  *
- *  方向语义：yDes > 0 = 向左偏（与 yRel 左正同号），箭头按 yDes 符号画；
- *  direction = 障碍物侧（+1 = 障碍在右），只做侧别标识。
+ *  方向语义：yDes > 0 = 向左偏（与 yRel 左正同号），箭头按 yDes 符号画。
  *  降级链：快照 stale → "等待数据"占位；lanes 为 null → 不画车道层。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
@@ -18,10 +17,7 @@ import {
   CLS_FILL,
   CLS_LABEL,
   avoidanceStatus,
-  fmtBudget,
-  fmtEdgeClearance,
   laneLabel,
-  obstacleSide,
   offsetArrow,
   targetCls,
   type TargetCls,
@@ -160,8 +156,6 @@ const adjacentRightFill = computed(() => adjacentFillClass(bsmRight.value, chang
 
 const laneLeftValid = computed(() => !avStale.value && av.value?.laneLeftValid === true);
 const laneRightValid = computed(() => !avStale.value && av.value?.laneRightValid === true);
-const budgetLeft = computed(() => (avStale.value ? undefined : av.value?.budgetLeft));
-const budgetRight = computed(() => (avStale.value ? undefined : av.value?.budgetRight));
 
 // 视觉路径被标定门关掉时目标会恒为 0。不解释的话这看起来像视觉坏了，而实际
 // 上是 eagled 有意关掉的：地平面投影的距离对 pitch 极度敏感（40m 处 0.5°
@@ -212,17 +206,11 @@ const fmtYDes = computed(() => {
   const v = planner.value?.yDes;
   return v === undefined ? "—" : `${v.toFixed(2)} m`;
 });
-const fmtBias = computed(() => {
-  const v = planner.value?.bias;
-  return v === undefined || !Number.isFinite(v) ? "—" : v.toFixed(3);
-});
 const vEgoKmh = computed(() => {
   const v = planner.value?.vEgo;
   return v === undefined || !Number.isFinite(v) ? "—" : (v * 3.6).toFixed(0);
 });
-const edgeClearance = computed(() => fmtEdgeClearance(planner.value?.edgeClearance));
 const targetCount = computed(() => av.value?.nVision ?? 0);
-const sideLabel = computed(() => obstacleSide(av.value?.direction));
 
 const tickY = (d: number) => rangeY(d, VB);
 const gridX = (y: number) => lateralX(y, VB);
@@ -238,7 +226,6 @@ const gridX = (y: number) => lateralX(y, VB);
       <Badge v-else-if="planner" :kind="status.badge">{{ status.label }}</Badge>
       <Badge v-if="canError" kind="danger">CAN 错误</Badge>
       <Badge v-if="radarUnavailable" kind="warn">雷达暂不可用</Badge>
-      <Badge v-if="!avStale && sideLabel !== '—'" kind="muted">{{ sideLabel }}</Badge>
 
       <!-- 图例：目标类别色 + 路沿 -->
       <div class="ml-auto flex items-center gap-3 text-[11px] text-sl-text-3">
@@ -374,21 +361,21 @@ const gridX = (y: number) => lateralX(y, VB);
               class="text-sl-warn" stroke-width="1" stroke-dasharray="1 5" />
       </g>
 
-      <!-- 目标：类别定形（car 矩形/person 圆/bike 窄条），inGate 红描边 -->
+      <!-- 目标：类别定形（car 矩形/person 圆/bike 窄条），侧向压力 > 0 红描边 -->
       <g v-if="!avStale">
-        <g v-for="(v, i) in displayTargets" :key="`v${i}`" :opacity="v.t.inGate ? 1 : 0.4">
+        <g v-for="(v, i) in displayTargets" :key="`v${i}`" :opacity="v.t.pressure > 0 ? 1 : 0.4">
           <rect
             v-if="v.shape.kind === 'rect'"
             :x="v.pos.x - v.shape.wPx / 2" :y="v.pos.y - v.shape.hPx / 2"
             :width="v.shape.wPx" :height="v.shape.hPx" rx="4"
-            :class="[CLS_FILL[v.cls], v.t.inGate ? 'stroke-sl-danger' : 'stroke-sl-bg']"
-            :stroke-width="v.t.inGate ? 2.5 : 1.5"
+            :class="[CLS_FILL[v.cls], v.t.pressure > 0 ? 'stroke-sl-danger' : 'stroke-sl-bg']"
+            :stroke-width="v.t.pressure > 0 ? 2.5 : 1.5"
           />
           <circle
             v-else
             :cx="v.pos.x" :cy="v.pos.y" :r="v.shape.wPx / 2"
-            :class="[CLS_FILL[v.cls], v.t.inGate ? 'stroke-sl-danger' : 'stroke-sl-bg']"
-            :stroke-width="v.t.inGate ? 2.5 : 1.5"
+            :class="[CLS_FILL[v.cls], v.t.pressure > 0 ? 'stroke-sl-danger' : 'stroke-sl-bg']"
+            :stroke-width="v.t.pressure > 0 ? 2.5 : 1.5"
           />
           <title>{{ CLS_LABEL[v.cls] }}  conf {{ (v.t.conf * 100).toFixed(0) }}%  dRel {{ v.t.dRel.toFixed(1) }}m  yRel {{ v.t.yRel.toFixed(2) }}m  {{ laneLabel(v.t.lane) }}</title>
         </g>
@@ -452,24 +439,19 @@ const gridX = (y: number) => lateralX(y, VB);
     >
       <Badge :kind="status.badge">{{ status.label }}</Badge>
       <span>yDes <span class="sl-tabular">{{ fmtYDes }}</span></span>
-      <span>bias <span class="sl-tabular">{{ fmtBias }} 1/m</span></span>
       <Badge :kind="bsmLeft ? 'warn' : 'muted'">BSM 左</Badge>
       <Badge :kind="bsmRight ? 'warn' : 'muted'">BSM 右</Badge>
       <span class="text-sl-text-3">目标 <span class="sl-tabular">{{ targetCount }}</span></span>
       <Badge v-if="visionGated" kind="warn" :title="visionGatedWhy">视觉已关</Badge>
       <span>vEgo <span class="sl-tabular">{{ vEgoKmh }} km/h</span></span>
-      <span>路沿余量 <span class="sl-tabular">{{ edgeClearance }}</span></span>
       <span
         class="text-sl-text-3"
-        title="本道边界线置信（laneLineProbs/Stds 过门）:该侧可信时目标按车道线相对判定,不可信时回退路径相对"
+        title="本道边界线置信（laneLineProbs/Stds 过门）:两侧都可信才执行车道内避让"
       >
         车道线
         <Badge :kind="laneLeftValid ? 'accent' : 'muted'">L</Badge>
         <Badge :kind="laneRightValid ? 'accent' : 'muted'">R</Badge>
       </span>
-      <span
-        title="每侧横向预算:BSM 报警为 0,侧向目标按车身间隙折算;避让偏置 ≤ 偏置侧预算"
-      >预算 <span class="sl-tabular">L {{ fmtBudget(budgetLeft) }}</span> · <span class="sl-tabular">R {{ fmtBudget(budgetRight) }}</span></span>
       <span
         title="目标道变道清空（eagled 时间投影:近区/速度未知/投影冲突即拦,远而快的侧车放行）"
       >变道

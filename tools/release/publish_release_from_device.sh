@@ -69,7 +69,7 @@ ssh "$DEVICE" 'sudo systemctl restart comma'
 sleep 40
 ssh "$DEVICE" "cd /data/openpilot && PYTHONPATH=/data/openpilot /usr/local/venv/bin/python -W ignore -c '
 from openpilot.common.params import Params
-Params().check_key(\"AvoidanceSideMargin\")
+Params().check_key(\"AvoidanceLaneEdgeMargin\")
 print(\"[ok] params 键抽查\")
 from openpilot.cereal import services
 assert services.SERVICE_LIST[\"eagleDebug\"].should_log is True

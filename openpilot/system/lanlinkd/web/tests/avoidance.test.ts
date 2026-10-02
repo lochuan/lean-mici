@@ -1,12 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CLS_FILL,
-  EDGE_CLEARANCE_INF,
   avoidanceStatus,
-  fmtBudget,
-  fmtEdgeClearance,
   laneLabel,
-  obstacleSide,
   offsetArrow,
   pairMembers,
   targetCls,
@@ -87,15 +83,6 @@ describe("offsetArrow", () => {
   });
 });
 
-describe("obstacleSide", () => {
-  it("labels the obstacle side only (+1 = obstacle on right)", () => {
-    expect(obstacleSide(1)).toBe("障碍在右");
-    expect(obstacleSide(-1)).toBe("障碍在左");
-    expect(obstacleSide(0)).toBe("—");
-    expect(obstacleSide(undefined)).toBe("—");
-  });
-});
-
 describe("pairMembers", () => {
   const t = (over: { vision: boolean; matched: boolean; pairId: number }) => over;
 
@@ -113,23 +100,6 @@ describe("pairMembers", () => {
   it("ignores unmatched and single-sided entries", () => {
     expect(pairMembers([{ vision: true, matched: true, pairId: 5 }])).toHaveLength(0);
     expect(pairMembers([{ vision: true, matched: false, pairId: 5 }])).toHaveLength(0);
-  });
-});
-
-describe("fmtEdgeClearance", () => {
-  it("formats meters and hides the inf sentinel", () => {
-    expect(fmtEdgeClearance(1.25)).toBe("1.25 m");
-    expect(fmtEdgeClearance(EDGE_CLEARANCE_INF)).toBe("—");
-    expect(fmtEdgeClearance(undefined)).toBe("—");
-  });
-});
-
-describe("fmtBudget", () => {
-  it("formats meters and collapses the unconstrained sentinel", () => {
-    expect(fmtBudget(0.9)).toBe("0.90 m");
-    expect(fmtBudget(0)).toBe("0.00 m");
-    expect(fmtBudget(999.0)).toBe("\u221e"); // 无侧向约束
-    expect(fmtBudget(undefined)).toBe("\u2014");
   });
 });
 

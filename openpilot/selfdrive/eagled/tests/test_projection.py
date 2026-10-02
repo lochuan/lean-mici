@@ -114,16 +114,14 @@ def _project_dets(dets, meta=None, **kwargs):
   return project_detections(dets, **kwargs)
 
 
-def test_project_detections_schema_and_weights():
+def test_project_detections_schema():
   meta = roi_meta_for(1344, 760)
   dets = [_det(300, 300, 340, 360, cls="person", conf=0.8),
           _det(100, 180, 140, 200, cls="car", conf=0.7)]
   out = _project_dets(dets, meta=meta)
   assert len(out) == 2
-  assert set(out[0]) == {"dRel", "yRel", "cls", "conf", "w", "bearing", "dRelSource", "boxHeightPx"}
-  assert out[0]["w"] == C.VRU_WEIGHT
+  assert set(out[0]) == {"dRel", "yRel", "cls", "conf", "bearing", "dRelSource", "boxHeightPx"}
   assert out[0]["cls"] == "person" and out[0]["conf"] == 0.8
-  assert out[1]["w"] == C.VEHICLE_WEIGHT
 
 
 def test_project_detections_uses_full_frame_pixels():

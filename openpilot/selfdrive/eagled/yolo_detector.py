@@ -33,8 +33,7 @@ DEFAULT_IOU_THRESHOLD = 0.45
 # cost ~50%. Re-check onroad before raising the daemon rate.
 DEFAULT_FPS = 5.0
 
-# BDD8 class id -> name. The whole output head is emitted; everything maps to a
-# planner weight (VRU vs vehicle) in avoidance_planner.
+# BDD8 class id -> name. The whole output head is emitted.
 CLASS_NAMES = {0: "person", 1: "rider", 2: "car", 3: "bus", 4: "truck", 5: "bicycle", 6: "motorcycle", 7: "tricycle"}
 
 

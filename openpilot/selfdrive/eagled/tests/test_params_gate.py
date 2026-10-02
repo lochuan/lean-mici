@@ -22,13 +22,13 @@ def test_avoidance_params_registered():
   keys = (OPENPILOT / "common/params_keys.h").read_text()
   assert '"AvoidanceEnabled"' in keys
   assert '"AvoidanceMinConfidence"' in keys
-  assert '"AvoidanceMaxLateralOffset"' in keys
-  # C9+ 可调参（lanlink stepper 驱动 constants.apply_param_overrides）
-  for key in ("AvoidanceSideMargin", "AvoidanceEgoHalfWidth", "AvoidanceLaneProbMin",
-              "AvoidanceLaneStdMax", "AvoidanceEdgeClearMin", "AvoidanceEdgeStdMax",
-              "AvoidanceEnterHold", "AvoidanceExitHold", "AvoidanceBiasTau",
-              "LaneChangeNearZone"):
+  # 可调参（lanlink stepper 驱动 constants.apply_param_overrides）
+  for key in ("AvoidanceEgoHalfWidth", "AvoidanceLaneProbMin", "AvoidanceLaneStdMax", "LaneChangeNearZone"):
     assert f'"{key}"' in keys, key
+  # 旧避让体系的调参键已删除
+  for key in ("AvoidanceMaxLateralOffset", "AvoidanceSideMargin", "AvoidanceEdgeClearMin", "AvoidanceEdgeStdMax",
+              "AvoidanceEnterHold", "AvoidanceExitHold", "AvoidanceBiasTau"):
+    assert f'"{key}"' not in keys, key
 
 
 def test_param_overrides_apply_and_restore():
@@ -44,16 +44,13 @@ def test_param_overrides_apply_and_restore():
 
   defaults = {name: getattr(C, name) for _, (name, _, _, _) in C._PARAM_OVERRIDABLE.items()}
   try:
-    C.apply_param_overrides(_Params({"AvoidanceSideMargin": "0.8", "LaneChangeNearZone": "99",
-                                     "AvoidanceEdgeClearMin": "2.0", "AvoidanceEdgeStdMax": "0.4",
-                                     "AvoidanceEnterHold": "9"}))
-    assert C.SIDE_MARGIN == pytest.approx(0.8)
+    C.apply_param_overrides(_Params({"AvoidanceEgoHalfWidth": "1.0", "LaneChangeNearZone": "99",
+                                     "AvoidanceLaneStdMax": "9"}))
+    assert C.EGO_HALF_WIDTH == pytest.approx(1.0)
     assert C.LANE_CHANGE_NEAR_D == pytest.approx(20.0)   # 钳到 hi=20
-    assert C.EDGE_CLEAR_MIN == pytest.approx(1.5)        # 钳到 hi=1.5
-    assert C.EDGE_STD_MAX == pytest.approx(0.4)
-    assert C.ENTER_HOLD_S == pytest.approx(3.0)          # 钳到 hi=3
+    assert C.LANE_STD_MAX == pytest.approx(1.0)          # 钳到 hi=1.0
     # 其余无键项恢复编译期默认
-    assert C.EGO_HALF_WIDTH == pytest.approx(defaults["EGO_HALF_WIDTH"])
+    assert C.LANE_PROB_MIN == pytest.approx(defaults["LANE_PROB_MIN"])
     # 全空 -> 全部恢复
     C.apply_param_overrides(_Params({}))
     for name, value in defaults.items():
@@ -72,8 +69,7 @@ def test_avoidance_param_types_and_flags():
   enabled = _param_attrs("AvoidanceEnabled")
   assert enabled[1] == "BOOL"
   assert "PERSISTENT" in enabled[0] and "BACKUP" in enabled[0]
-  for key in ("AvoidanceMaxLateralOffset", "AvoidanceMinConfidence",
-              "AvoidanceEdgeClearMin", "AvoidanceEdgeStdMax"):
+  for key in ("AvoidanceMinConfidence",):
     attrs = _param_attrs(key)
     assert attrs[1] == "FLOAT"
     assert "PERSISTENT" in attrs[0]

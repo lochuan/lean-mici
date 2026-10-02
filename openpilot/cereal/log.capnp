@@ -1219,14 +1219,12 @@ struct DriverAssistance {
 }
 
 struct LateralManeuverPlan {
-  desiredCurvatureDEPRECATED @0 :Float32;  # 开环偏置时代的全量曲率,已停用
-  curvatureBiasDEPRECATED @1 :Float32;     # 开环曲率偏置,已停用
   # m,车道内偏移(CONTEXT.md):自车中心相对本车道中心的期望横向位置,左正。
   # controlsd 用当拍车道线闭环并按贴线上限再钳一次(ADR 0001)。
   # envelope valid=false 时 controlsd 用纯模型曲率。
-  desiredLaneOffset @2 :Float32;
+  desiredLaneOffset @0 :Float32;
   # 侵入目标使偏移目标下的剩余横向间隙 < 贴线余量(CONTEXT.md「间隙不足提醒」);仅避让生效时置位。
-  gapInsufficient @3 :Bool;
+  gapInsufficient @1 :Bool;
 }
 
 struct EagleTarget {
@@ -1235,96 +1233,72 @@ struct EagleTarget {
   vRel @2 :Float32;      # 雷达点才有，视觉目标 0
   cls @3 :Text;          # person/bicycle/motorcycle/car；雷达点 ""
   conf @4 :Float32;      # YOLO conf；雷达点 0
-  weight @5 :Float32;    # planner 权重（VRU 1.0 / car 0.6）
-  matched @6 :Bool;      # 雷达↔视觉关联上
-  inGate @7 :Bool;       # planner 门内（dRel≤40, |yRel|≤2.5）
-  vision @8 :Bool;       # true=YOLO 投影目标；false=雷达点
-  pairId @9 :UInt16;     # 0=未配对；配对双方共享同 id（递增分配）
-  lane @10 :Int8;        # C2 车道归属：-1 左邻 / 0 本道或重叠 / +1 右邻（分类未参与时 0）
-  lineDistance @11 :Float32;  # 线距 m：车身近缘到本车道线，侵入为负；非邻道目标/车道线不可信发 999.0
-  pressure @12 :Float32; # 单目标侧向压力 0~1
+  matched @5 :Bool;      # 雷达↔视觉关联上
+  vision @6 :Bool;       # true=YOLO 投影目标；false=雷达点
+  pairId @7 :UInt16;     # 0=未配对；配对双方共享同 id（递增分配）
+  lane @8 :Int8;         # 车道归属：-1 左邻 / 0 本道或重叠 / +1 右邻（车道线不可信时 0）
+  lineDistance @9 :Float32;   # 线距 m：车身近缘到本车道线，侵入为负；非邻道目标/车道线不可信发 999.0
+  pressure @10 :Float32; # 单目标侧向压力 0~1
 }
 
 struct EagleDebug {
   valid @0 :Bool;        # planner 本帧 valid
-  active @1 :Bool;       # 迟滞后避让激活中
-  direction @2 :Int8;    # -1 左 / 0 无 / 1 右
-  yDes @3 :Float32;      # 期望横向偏移 m
-  bias @4 :Float32;      # 曲率偏置 1/m
-  maxOffset @5 :Float32; # BSM 门控后的本帧生效上限 m
-  bsmLeft @6 :Bool;
-  bsmRight @7 :Bool;
-  vEgo @8 :Float32;
-  nRadar @9 :UInt16;
-  nVision @10 :UInt16;
-  nAssociated @11 :UInt16;
-  edgeClearance @12 :Float32;  # 避让侧路沿余量 m；inf 时发 999.0
-  targets @13 :List(EagleTarget);
-  canError @14 :Bool;         # radarTracks.errors.canError
-  radarUnavailable @15 :Bool; # radarTracks.errors.radarUnavailableTemporary
-  laneLeftValid @16 :Bool;    # C7：本道左边界线置信（probs/stds 过门）
-  laneRightValid @17 :Bool;   # C7：本道右边界线置信
-  budgetLeft @18 :Float32;     # C9：左侧横向预算 m；999.0 = 无侧向约束
-  budgetRight @19 :Float32;    # C9：右侧横向预算 m；999.0 = 无侧向约束
-  changeClearLeft @20 :Bool;   # C9+：目标道（左）变道清空（时间投影放行远快侧车）
-  changeClearRight @21 :Bool;  # C9+：目标道（右）变道清空
-  pressureLeft @22 :Float32;   # 左侧侧向压力 0~1
-  pressureRight @23 :Float32;  # 右侧侧向压力 0~1
-  laneOffsetTarget @24 :Float32;  # 车道内偏移目标 m（左正，已过速率限制）
-  offsetCap @25 :Float32;      # 贴线上限 m
-  inactiveReason @26 :Text;    # 不生效原因；"" = 生效门全通
-  holdingTargets @27 :UInt8;   # 并行保持中（已离开视野、按推算保留压力）的目标数
-  changeClearLeftState @28 :EagleState.ChangeClear;   # 同 EagleState；旧 Bool 里 unknown 与 clear 不可分，故另发
-  changeClearRightState @29 :EagleState.ChangeClear;
+  active @1 :Bool;       # 避让生效中(同 valid,待 07 合并)
+  yDes @2 :Float32;      # 车道内偏移目标 m(同 laneOffsetTarget,待 07 删除)
+  maxOffset @3 :Float32; # 贴线上限 m(同 offsetCap,待 07 删除)
+  bsmLeft @4 :Bool;
+  bsmRight @5 :Bool;
+  vEgo @6 :Float32;
+  nRadar @7 :UInt16;
+  nVision @8 :UInt16;
+  nAssociated @9 :UInt16;
+  targets @10 :List(EagleTarget);
+  canError @11 :Bool;         # radarTracks.errors.canError
+  radarUnavailable @12 :Bool; # radarTracks.errors.radarUnavailableTemporary
+  laneLeftValid @13 :Bool;    # C7：本道左边界线置信（probs/stds 过门）
+  laneRightValid @14 :Bool;   # C7：本道右边界线置信
+  changeClearLeft @15 :Bool;   # 目标道（左）变道清空;旧 Bool,未知按不拦
+  changeClearRight @16 :Bool;  # 目标道（右）变道清空
+  pressureLeft @17 :Float32;   # 左侧侧向压力 0~1
+  pressureRight @18 :Float32;  # 右侧侧向压力 0~1
+  laneOffsetTarget @19 :Float32;  # 车道内偏移目标 m（左正，已过速率限制）
+  offsetCap @20 :Float32;      # 贴线上限 m
+  inactiveReason @21 :Text;    # 不生效原因；"" = 生效门全通
+  holdingTargets @22 :UInt8;   # 并行保持中（已离开视野、按推算保留压力）的目标数
+  changeClearLeftState @23 :EagleState.ChangeClear;   # 同 EagleState；旧 Bool 里 unknown 与 clear 不可分，故另发
+  changeClearRightState @24 :EagleState.ChangeClear;
 }
 
 struct EagleState {
-  # eagled 感知层态势骨架：本帧融合目标与侧向输入快照。骨架期与 EagleDebug
-  # 同源（复用 EagleTarget）；后续能力（车道归属 C2、每侧最近目标/预算 C3/C9、
-  # 对向检测 C4、vLat C5、几何质量 C7）只加字段——capnp 加字段向后兼容。
+  # eagled 感知层态势：本帧融合的邻道目标与侧向输入快照，及变道清空判定。
   # 消费者：desire_helper(modeld, 变道门控)、lanlink UI；lateralManeuverPlan
-  # 仍是避让执行输出，与本消息分工：eagleState=看，lateralManeuverPlan=动。
-  targets @0 :List(EagleTarget);  # in-gate 融合目标
+  # 是避让执行输出，与本消息分工：eagleState=看，lateralManeuverPlan=动。
+  targets @0 :List(EagleTarget);  # 邻道融合目标(lane != 0)
   bsmLeft @1 :Bool;
   bsmRight @2 :Bool;
   vEgo @3 :Float32;
-  edgeClearance @4 :Float32;      # 避让侧路沿净空 m；inf 时发 999.0
-  nRadar @5 :UInt16;
-  nVision @6 :UInt16;
-  nAssociated @7 :UInt16;
-  canError @8 :Bool;              # radarTracks.errors.canError
-  radarUnavailable @9 :Bool;      # radarTracks.errors.radarUnavailableTemporary
-  laneLeftValid @10 :Bool;        # C7：本道左边界线置信（tier 1 可用性）
-  laneRightValid @11 :Bool;       # C7：本道右边界线置信
-  sideLeadLeft @12 :EagleSideLead;   # C9：左侧最紧约束目标（valid=false 即无）
-  sideLeadRight @13 :EagleSideLead;  # C9：右侧最紧约束目标
-  budgetLeft @14 :Float32;        # C9：左侧横向预算 m；999.0 = 无侧向约束
-  budgetRight @15 :Float32;       # C9：右侧横向预算 m；999.0 = 无侧向约束
-  changeClearLeft @16 :Bool;      # 兼容旧消费者：未知按不拦；新消费者读 changeClearLeftState
-  changeClearRight @17 :Bool;     # 兼容旧消费者，同上
-  pressureLeft @18 :Float32;      # 左侧侧向压力 0~1
-  pressureRight @19 :Float32;     # 右侧侧向压力 0~1
-  laneOffsetTarget @20 :Float32;  # 车道内偏移目标 m（左正，已过速率限制）
-  offsetCap @21 :Float32;         # 贴线上限 m
-  inactiveReason @22 :Text;       # 不生效原因；"" = 生效门全通
-  changeClearLeftState @23 :ChangeClear;   # 目标车道（左）变道清空：车道线确认目标车道；本车道线不可信 = unknown
-  changeClearRightState @24 :ChangeClear;
+  nRadar @4 :UInt16;
+  nVision @5 :UInt16;
+  nAssociated @6 :UInt16;
+  canError @7 :Bool;              # radarTracks.errors.canError
+  radarUnavailable @8 :Bool;      # radarTracks.errors.radarUnavailableTemporary
+  laneLeftValid @9 :Bool;         # C7：本道左边界线置信
+  laneRightValid @10 :Bool;       # C7：本道右边界线置信
+  changeClearLeft @11 :Bool;      # 兼容旧消费者：未知按不拦；新消费者读 changeClearLeftState
+  changeClearRight @12 :Bool;     # 兼容旧消费者，同上
+  pressureLeft @13 :Float32;      # 左侧侧向压力 0~1
+  pressureRight @14 :Float32;     # 右侧侧向压力 0~1
+  laneOffsetTarget @15 :Float32;  # 车道内偏移目标 m（左正，已过速率限制）
+  offsetCap @16 :Float32;         # 贴线上限 m
+  inactiveReason @17 :Text;       # 不生效原因；"" = 生效门全通
+  changeClearLeftState @18 :ChangeClear;   # 目标车道（左）变道清空：车道线确认目标车道；本车道线不可信 = unknown
+  changeClearRightState @19 :ChangeClear;
 
   enum ChangeClear {
     unknown @0;   # 本车道线不可信，无法判定；消费者不参与门控（回退 BSM + relc）
     clear @1;
     blocked @2;
   }
-}
-
-struct EagleSideLead {
-  # C9：折算出该侧预算的最紧约束目标。BSM 强制预算 0 时无目标可指（布尔报警）。
-  valid @0 :Bool;
-  dRel @1 :Float32;     # m
-  yRel @2 :Float32;     # m，左正带符号
-  vRel @3 :Float32;     # m/s（视觉目标 0）
-  edgeDist @4 :Float32; # 近缘横向距离 m = |yRel| - 类别半宽
-  cls @5 :Text;         # 视觉类别；纯雷达未关联为 ""
 }
 
 struct LongitudinalPlan @0xe00b5b3eba12876c {

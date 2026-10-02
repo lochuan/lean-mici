@@ -586,126 +586,14 @@
        "details": "YOLO 检测置信度低于此值的目标不参与避让。远距 VRU 的置信度受相机 ROI 影响：当前 ROI 把整帧压进 640×384，40m 行人只剩约 9 像素，检出多在 0.06-0.24 区间，建议 0.10-0.15 起步配合时序平滑；默认 0.15。"
       },
       {
-       "key": "AvoidanceMaxLateralOffset",
-       "widget": "option",
-       "title": "最大横向避让偏移",
-       "min": 0,
-       "max": 1.0,
-       "step": 0.05,
-       "unit": "m",
-       "details": "最大横向避让偏移（硬顶 1.0m，默认 0.35m）。实际幅度还会被该侧横向预算动态压缩：侧向目标越近预算越小，BSM 同侧报警时预算为 0 完全禁止向该侧偏移；远离占用侧则不受限。设为 0 即完全不产生偏移。幅度越大对感知误检越敏感，建议路测逐级上调。默认 0.35m。"
-      },
-      {
-       "key": "AvoidanceSideMargin",
-       "widget": "option",
-       "title": "避让侧向余量",
-       "min": 0.05,
-       "max": 1.0,
-       "step": 0.05,
-       "unit": "m",
-       "details": "避让偏过去之后，要求与该侧目标（车/人）保留的最小车身净空。例：左侧邻车边缘离本车中心线 1.3m、本车半宽 0.9m、余量 0.3m，则向左最多让 0.1m（1.3−0.9−0.3）。觉得避让时和旁边挨得太近就调大；觉得避让幅度小、很少触发就调小。",
-       "enablement": [
-        {
-         "type": "param",
-         "key": "AvoidanceEnabled",
-         "equals": true
-        }
-       ]
-      },
-      {
-       "key": "AvoidanceEdgeClearMin",
-       "widget": "option",
-       "title": "路沿净空下限",
-       "min": 0.1,
-       "max": 1.5,
-       "step": 0.05,
-       "unit": "m",
-       "details": "避让方向那一侧的路沿必须留出的最小净空。该侧路沿比这更近就放弃避让（宁可不避，也不把车往路沿推）。避让总被路沿取消就调小；想离路沿更远才避让就调大。默认 0.6m。",
-       "enablement": [
-        {
-         "type": "param",
-         "key": "AvoidanceEnabled",
-         "equals": true
-        }
-       ]
-      },
-      {
-       "key": "AvoidanceEdgeStdMax",
-       "widget": "option",
-       "title": "路沿方差上限",
-       "min": 0.05,
-       "max": 1.0,
-       "step": 0.05,
-       "unit": "",
-       "details": "模型对避让侧路沿位置估计的不确定度（方差）上限。超过此值视为看不清该侧路沿，按无净空处理、不避让。路沿模糊（雨雪、接缝、逆光）导致避让频繁误取消时调大（更信任模型）；调小更保守。默认 0.35。",
-       "enablement": [
-        {
-         "type": "param",
-         "key": "AvoidanceEnabled",
-         "equals": true
-        }
-       ]
-      },
-      {
-       "key": "AvoidanceEnterHold",
-       "widget": "option",
-       "title": "避让进入滞回",
-       "min": 0,
-       "max": 3.0,
-       "step": 0.1,
-       "unit": "s",
-       "details": "目标出现后需要持续这么多秒才开始避让，防单帧误检触发。调小响应更快；调大更抗误检，但贴近目标的紧急避让也会推迟同样时间。设为 0 立即进入。默认 0.5s。",
-       "enablement": [
-        {
-         "type": "param",
-         "key": "AvoidanceEnabled",
-         "equals": true
-        }
-       ]
-      },
-      {
-       "key": "AvoidanceExitHold",
-       "widget": "option",
-       "title": "避让退出滞回",
-       "min": 0,
-       "max": 5.0,
-       "step": 0.1,
-       "unit": "s",
-       "details": "目标消失后继续保持避让这么多秒才退出，防检测闪烁导致避让反复进出。调大更平顺；调小退出更及时。设为 0 立即退出。默认 1.0s。",
-       "enablement": [
-        {
-         "type": "param",
-         "key": "AvoidanceEnabled",
-         "equals": true
-        }
-       ]
-      },
-      {
-       "key": "AvoidanceBiasTau",
-       "widget": "option",
-       "title": "避让平滑时间常数",
-       "min": 0.05,
-       "max": 2.0,
-       "step": 0.05,
-       "unit": "s",
-       "details": "避让偏置建立与撤销的平滑时间常数。调大避让起收更柔顺但到位更慢；调小更跟手。默认 0.5s。",
-       "enablement": [
-        {
-         "type": "param",
-         "key": "AvoidanceEnabled",
-         "equals": true
-        }
-       ]
-      },
-      {
        "key": "AvoidanceEgoHalfWidth",
        "widget": "option",
-       "title": "自车半宽（预算折算）",
+       "title": "自车半宽",
        "min": 0.5,
        "max": 1.5,
        "step": 0.05,
        "unit": "m",
-       "details": "用于横向预算的车身半宽。按实车宽度设置（含后视镜外缘的一半略小）。",
+       "details": "用于车道内贴线上限的车身半宽。按实车宽度设置（含后视镜外缘的一半略小）。",
        "enablement": [
         {
          "type": "param",

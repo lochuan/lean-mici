@@ -1,38 +1,37 @@
 # eagled
 
-5Hz lateral-situation perception layer, plus its first consumer: lateral
-avoidance. The perception core fuses radar tracks with a YOLO VRU detector
-into the per-frame target picture, computes continuous per-side lateral
-budgets from it (C9), and the avoidance planner gates that picture
-(budget / road-edge / speed / lane-change) to produce a small curvature bias
-added on top of the model curvature, published on the existing
-`lateralManeuverPlan` hook. controlsd only consumes it when
-`AvoidanceEnabled` is on and the message envelope `valid` flag is set;
+5Hz lateral-situation perception layer, plus its first consumer: in-lane
+avoidance. The perception core fuses radar tracks with a YOLO detector into the
+per-frame target picture; `lane_offset.LaneOffsetPlanner` turns adjacent-lane
+targets into side pressures and a lane offset target (m, left positive),
+published as `lateralManeuverPlan.desiredLaneOffset` every frame. controlsd
+closes the loop on the current frame's lane lines (clamped to the lane-edge
+cap) when `AvoidanceEnabled` is on and the envelope `valid` flag is set;
 otherwise it falls back to the raw model curvature, which is also what an
 invalid frame carries.
 
 Perception runs whenever the device is onroad in a car (`eagle_run` in
-process_config); `AvoidanceEnabled` gates only the avoidance actuation, in
-process — turning avoidance off never turns the eagle's eyes off.
+process_config); `AvoidanceEnabled` gates only the avoidance actuation and the
+vision chain (camera + YOLO) — with it off the core degrades to radar-only and
+all streams keep publishing.
 
 ## Streams
 
 | stream | role |
 |---|---|
-| `eagleState` | formal perception picture (in-gate fused targets, side inputs, geometry, sensor health) — for consumers; desire_helper (modeld, lane-change gating) is the planned second one |
-| `eagleDebug` | raw detection/association telemetry + planner decision snapshot — lanlink UI and calibration only, never a control input |
-| `lateralManeuverPlan` | avoidance actuation (`model + 2·bias/L²`), upstream hook consumed by controlsd's `fuse_curvature` |
+| `eagleState` | formal perception picture (adjacent-lane fused targets, side inputs, lane-change clearance, geometry, sensor health) — for consumers; desire_helper (modeld) reads the clearance |
+| `eagleDebug` | raw detection/association telemetry + planner decision snapshot — lanlink UI and calibration only, never a control input; logged to rlog |
+| `lateralManeuverPlan` | `desiredLaneOffset` + `gapInsufficient`, consumed by controlsd (offset loop) and selfdrived (gap-insufficient alert) |
 
 | piece | file |
 |---|---|
 | 5Hz process, three-stream publish + `valid` flag | `eagled.py` |
-| perception core: fusion chain, lazy camera/YOLO lifecycle, radar-only degrade; fusion primitives + three-tier gate + side budgets (`Target`/`gate_target`/`fuse_objects`/`side_pictures`) | `perception.py` |
-| planner: gates, budget folding, low-pass, hysteresis (decision layer) | `avoidance_planner.py` |
+| perception core: fusion chain, lazy camera/YOLO lifecycle, radar-only degrade (`Target`/`fuse_objects`) | `perception.py` |
+| lane geometry, side pressure, offset planner, lane-change clearance, controlsd closed-loop correction | `lane_offset.py` |
 | camera feed: visionipc -> NV12 -> RGB -> bottom ROI 640x384 | `camera_stream.py` |
 | box bottom-centre -> car-frame ground point + ROI inverse mapping | `projection.py` |
-| radar<->vision nearest-neighbour association (shared with shadow) | `association.py` |
-| tunables (offset caps, gates, weights, speed, camera mount) | `constants.py` |
-| offline shadow harness (proxy vision, or detector-injected fused path) | `shadow.py` |
+| radar<->vision nearest-neighbour association | `association.py` |
+| tunables (Params-overridable table in `_PARAM_OVERRIDABLE`) | `constants.py` |
 | online calibration collector (pairId residuals -> constant increments) | `calibrate.py` |
 | YOLO detector shell + build recipe | `yolo_detector.py`, `models/README.md` |
 
@@ -43,176 +42,55 @@ process — turning avoidance off never turns the eagle's eyes off.
 aligned to the radar's front-bumper origin via `CAMERA_TO_FRONT`) ->
 `associate()` (matched detections are absorbed by their radar point, unmatched
 ones — typically VRUs the radar missed — stay independent) ->
-`fuse_targets(radar.points, fused)` -> planner. Without camerad or without the
-YOLO pkl the daemon logs the reason once and degrades to radar-only.
+`fuse_objects(radar.points, fused)` -> planner. Static radar points (ground
+speed below `STATIC_SPEED_THRESH`) are dropped unless a vision detection
+confirms them — guardrails and bridge piers must not move the car. Without
+camerad or without the YOLO pkl the daemon logs the reason once and degrades
+to radar-only.
 
-Threat in/out decisions go through `gate_target`'s three tiers (C2+C7), the
-single source of truth shared by the planner input and the telemetry rows:
+## In-lane avoidance
 
-1. **lane-relative** — trusted ego boundaries (`laneLineProbs >= 0.6`,
-   `laneLineStds <= 0.3`, per side): a target is a threat when its body edge
-   (center +/- class half-width) crosses the boundary interpolated at its
-   distance. The parked-car-intrusion semantics; curve-correct.
-2. **path-relative** — worn/missing lines on that side but `position.yStd`
-   `<= 0.35` at the target distance: the historical band applied relative to
-   the model path instead of the car frame.
-3. **fixed band** — no trusted model geometry: the historical
-   `|yRel| ∈ [1.2, 2.5]` band. Behavior-identical to the pre-C2 gate.
+All geometry is the model's lane lines in the vehicle frame (`lane_geometry`,
+y left positive). Both ego lane lines must pass the confidence gate
+(`LANE_PROB_MIN` / `LANE_STD_MAX`), otherwise the planner is inactive
+(`inactiveReason = lane_untrusted`).
 
-All tiers additionally require `|yRel| >= OWN_LANE_HALF_WIDTH` — a centered
-lead is a longitudinal problem, left to the driver. The road-edge gate also
-honors `roadEdgeStds`: an uncertain edge on the bias side counts as zero
-clearance (C7, conservative direction).
+- **Line distance** — lateral distance from the near body edge of a target
+  outside the ego lane (center +/- class half-width) to the ego lane line,
+  interpolated at the target's `dRel`; negative = intruding.
+- **Pressure** — `clamp((trigger - line_distance) / trigger, 0, 1)`; trigger is
+  `TRIGGER_LINE_DISTANCE_VRU` / `TRIGGER_LINE_DISTANCE_VEHICLE` by class.
+  Only targets within `TRIGGER_RANGE_MAX` and a time-to-arrival
+  (`dRel / approach speed`) within `TIME_WINDOW_S` count. Vision-only targets
+  have unknown speed: approach speed assumes `VISION_TARGET_SPEED`.
+  Per side, the maximum over targets.
+- **Parallel hold** — a target that leaves view inside the window keeps its
+  last pressure until the dead-reckoned ego has passed it (+ `HOLD_PASS_MARGIN`)
+  or `HOLD_MAX_S` expires.
+- **Offset target** = lane-edge cap x (right pressure - left pressure); cap =
+  lane half width - `EGO_HALF_WIDTH` - `LANE_EDGE_MARGIN` (0 when negative).
+  Rate-limited by `OFFSET_RATE`.
+- **Gap insufficient** — an intruding target whose lateral gap to the ego body
+  at the offset target is below `LANE_EDGE_MARGIN`; raises the
+  `gapInsufficient` warning in selfdrived.
+- **Active gates** — `AvoidanceEnabled`, lateral active, hands off the wheel,
+  not lane-changing, `V_EGO_MIN_KPH` <= speed <= `V_EGO_MAX`.
 
-**Per-side lateral budget (C9)**: `side_pictures` folds every fused object
-(in-gate threats AND adjacent-lane traffic — the latter is by definition out
-of the threat gate, yet exactly what constrains lateral movement) into
-`budget_left/right`: BSM alert -> 0; otherwise the minimum over side objects
-of `( |yRel| - class half-width ) - EGO_HALF_WIDTH - SIDE_MARGIN`; no
-constraint -> `BUDGET_UNCONSTRAINED` (999.0). The planner folds the budget
-of the side it biases TOWARD into the offset cap; moving away from an
-occupied side is physically safe and no longer capped (the old discrete
-bsm_opposite 0.12 cap is superseded). Hysteresis tracks target presence,
-not the budget-capped response, so a BSM flicker only zeroes the bias for
-its duration instead of resetting the state machine.
+controlsd re-derives the cap on the current frame's lane lines, clamps the
+target, and adds `2 * error / L_LOOKAHEAD^2` to the model curvature where
+`error = target - (model path offset from lane center at L_LOOKAHEAD)`.
+Untrusted current lane lines, stale/invalid plan or `AvoidanceEnabled` off ->
+raw model curvature.
 
-**Lane-change clearance (C9+)**: `side_pictures` also emits
-`changeClearLeft/Right` — the lane-change consumer's gate (desire_helper in
-modeld), computed over the same per-side object window with carrotpilot's
-time projection: a side car clears unless it is in the near zone
-(`dRel <= LANE_CHANGE_NEAR_D`), has unknown speed (vision-only objects —
-vRel None; radar-missed bicycles must not relax the gate), or projects to
-conflict (side car's `LANE_CHANGE_LEAD_TIME_S` position <= ego's
-`LANE_CHANGE_EGO_TIME_S` position — the 4s/3s asymmetry gives the other car
-one extra second of margin). Far-and-fast side cars clear; oncoming traffic
-collapses the projection and never clears. BSM keeps the rear quarter. Both
-budgets and clearance flags publish on `eagleState`.
-
-## P0 shadow (record only, never publish)
-
-`AvoidanceEnabled` defaults to **off**. With it off, `shadow.py` replays the
-planner over a route and records what it *would* have done without sending
-anything — the "bias vs projection alignment" check from the design doc §4.
-Run it over 30 min of representative driving before enabling anything:
-
-```bash
-python -m openpilot.selfdrive.eagled.shadow <route> --out /tmp/shadow
-# -> /tmp/shadow/shadow.csv        (per-frame bias / association / jerk / latency)
-# -> /tmp/shadow/shadow_summary.json
-```
-
-The summary is graded against the P0 thresholds. A single global residual
-threshold is physically unreachable beyond ~10 m: the ground-plane projection's
-dRel sensitivity to pitch would demand 0.203° pitch accuracy at 10 m, 0.051° at
-20 m and 0.013° at 40 m for a 0.30 m p95, while vehicle pitch swings ~1° under
-braking and openpilot's own calibration lands in the 0.1–0.2° range. Grading is
-therefore **banded by distance**; beyond 25 m only the bearing residual is
-graded — bearing is what a monocular camera actually measures well (independent
-of pitch and the ground-plane assumption):
-
-| 距离档 | 距离残差 p95 | 关联率 |
-|---|---|---|
-| ≤ 10m | < 0.40m | > 0.85 |
-| 10–25m | < 1.2m | > 0.75 |
-| 25–40m | 不作距离判据(方位角残差 < 0.6°) | > 0.60 |
-
-**关联率定义(写死):** `被匹配的视觉检测数 / 落在雷达视野内且 D_GATE 以内的视觉检测数`。
-分母排除雷达物理上看不到的目标(雷达 FOV 外或 D_GATE 以外),否则指标衡量的
-是雷达覆盖范围而不是视觉质量;互斥匹配保证比率 ≤ 1。注意 `shadow.py` 的
-replay 汇总目前仍以全部雷达目标为分母(见其源码 NOTE),上表定义是设备端 P0
-采集的目标口径。
-
-其余判据(不分档):max lateral jerk < 5.0 m/s³(`drive_helpers.MAX_LATERAL_JERK`);
-p95 planner latency < 200 ms(5Hz budget,planner only;measure the full process
-on-device)。`pass` 还要求 **execution_closure** 达标(见三层验证 layer ②:
-每个激活段的 closure ratio 与目标 yRel 实际漂移量)。
-
-`pass` is false when a graded metric is out of range. `insufficient_data` is true
-when the route had no in-gate radar targets (association cannot be judged). An
-empty distance band reports `pass: None` — 没有数据的档位不视为通过,否则门限
-会在静默中失去把关作用。
-
-### 阴性场景集(不该触发)
-
-P0 不仅要证明"该避让时避让",还要证明"不该触发时不触发"。以下场景在 shadow
-记录里必须逐一 review(预期 ~0 触发;`shadow.csv` 里 valid 且非零 bias 且无
-关联目标的帧即疑似误触发):
-
-1. 对向车道来车(对向目标 yRel 大、接近快,容易扫进门限)
-2. 匝道汇入 / 分流(横向相对运动大,方位角变化快)
-3. 雨天路面反光(雷达杂波与视觉误检叠加)
-4. 隧道出入口(标定与曝光最不稳)
-5. 过减速带 / 坑洼(瞬时 pitch 剧变,地平面投影距离跳变)
-6. **上下坡** —— 地平面假设在坡道上直接失效,必须单列
-
-### Vision metrics need calibration first
-
-未标定时视觉路径整体 gate off:`eagled._detect` 在 `extrinsicsCalibration`
-未达 `calibrated` 时直接 `_degrade("calibration")` 并返回空,投影根本不运行。
-所以 P0 的视觉相关指标(关联率、距离/方位角残差、分档表)必须在
-`extrinsicsCalibration` 达到 `calibrated` 之后才开始采集;此前采集的帧只有
-雷达侧数据,不能计入视觉判据。
-
-Recorded per frame: model curvature, planner curvature, `valid`, `y_des` (m),
-radar/vision/associated counts, lateral residual, latency, jerk. Use
-`shadow.csv` to eyeball false triggers: a false trigger is a `valid` frame with
-a non-zero bias and zero radar↔vision association. On the proxy path that means
-a radar ghost; on the fused path it also flags legitimate vision-only biases (a
-VRU the radar missed), so review the frames instead of reading the count as
-failures.
-
-### Vision side: proxy or fused path
-
-The shadow harness has two vision sides:
-
-- **Default — `modelV2.leadsV3` proxy.** Route logs carry no camera frames and
-  no YOLO boxes, so a replay grades radar↔model-lead agreement. This is what
-  `python -m openpilot.selfdrive.eagled.shadow <route>` runs.
-- **Injected detector — real fused path.** `ShadowEvaluator(detector=...)`
-  runs the daemon chain per frame: `detector.infer(roi)` →
-  `project_detections()` (ground-plane projection, `CAMERA_TO_FRONT`-aligned)
-  → `association.associate()` (2 m/1 m daemon gates) → `fuse_targets()`;
-  `n_vision` then counts projected detections. Frames must carry synthetic
-  camera data (`roi_frame`/`roi_meta`/`intrinsics`) — tests only; route logs
-  cannot produce them.
-
-The real P0 run is the **eagled daemon on the device** (real camera, real
-YOLO pkl) with metrics collected over lanlink/CSV; the replay tool grades
-offline planner metrics (bias, jerk, latency) on route logs.
-
-## Device acceptance checklist (P0)
-
-Everything below runs on the comma 4 (mici) with `AvoidanceEnabled` **off** — nothing
-publishes until P1.
-
-1. **Compile the YOLO pkl on-device, on 12V.** Mici powers CPU 4-7 down unless
-   12V is on, and the compile needs CPU 4:
-   ```bash
-   openpilot/selfdrive/eagled/models/compile_yolo.sh   # -> models/yolo_tinygrad.pkl
-   ```
-2. **YOLO inference + ROI latency < 120 ms.** Measure per `models/README.md` §4
-   (`DEV=QCOM`, 20 runs, report min/median). Over budget: drop ROI
-   resolution/fps before anything else.
-3. **Hand-calibrate only `CAMERA_TO_FRONT`.** Pitch/yaw/roll come from
-   openpilot's live `extrinsicsCalibration` and the projection no longer reads
-   `CAMERA_PITCH`/`CAMERA_YAW` — never patch them into constants. The one
-   quantity live calibration does not provide is the longitudinal camera→bumper
-   mount offset: initial values live in `constants.py` (`CAMERA_HEIGHT` 1.2 m,
-   `CAMERA_TO_FRONT` 1.5 m) and the full workflow is the
-   [Calibration & physical-realism verification](#calibration--physical-realism-verification-标定与物理真实性验证)
-   section below. Accept when `calibrate.py`'s **banded** verdict passes
-   (distance p95 per band, bearing p95 < 0.6° past 25 m; exit 0).
-4. **30 min real-route shadow.** Run the daemon for ≥30 min of representative
-   driving and grade the lanlink/CSV telemetry against the **banded** P0
-   thresholds above (distance p95 / bearing / association rate per band), the
-   `execution_closure` metrics, and false triggers reviewed in the per-frame
-   records (expect ~0, including the negative-scenario list). Max lateral
-   jerk < 5.0 m/s³.
-5. **P1 release conditions** — only after 1-4 pass: enable `AvoidanceEnabled`
-   for straight, daytime driving with `AvoidanceMaxLateralOffset` capped at
-   **0.25 m**; confirm the jerk limit is never exceeded (everything still
-   passes `clip_curvature`) and that any takeover immediately drops the bias
-   (`steeringPressed` gate + the 1 s freshness gate).
+**Lane-change clearance** (`change_clear`, published as
+`changeClearLeft/RightState` on both streams): only forward targets whose
+center lies in the target lane count (ego lane line to the next lane line;
+width-estimated when the outer line is unconfident). A target blocks when it is
+inside `LANE_CHANGE_NEAR_D`, has unknown speed, or its position
+`LANE_CHANGE_LEAD_TIME_S` ahead is not beyond the ego's `LANE_CHANGE_EGO_TIME_S`
+position (the 4s/3s asymmetry gives the other car one extra second of margin).
+Untrusted ego lane lines -> `unknown`, and desire_helper falls back to BSM +
+road-edge checks.
 
 ## Calibration & physical-realism verification (标定与物理真实性验证)
 
@@ -220,13 +98,29 @@ The radar is the metric ground truth in the car frame (factory calibrated). The
 daemon's `eagleDebug` stream stamps every associated radar↔vision pair with
 a shared `pairId`, which gives the same object's position from both sources.
 
-**Division of labour (Task 7):** pitch/yaw/roll are openpilot's job — the
-projection takes them from live `extrinsicsCalibration`
-(`projection.CalibratedGeometry`) and no longer reads `CAMERA_PITCH`/
-`CAMERA_YAW`, so manually fitting them here would produce numbers nothing
-consumes and invite "correcting" a calibration openpilot maintains
-continuously. The only quantity live calibration cannot provide is the
-longitudinal camera→bumper mount offset, so that is all this tool fits.
+**Division of labour:** pitch/yaw/roll are openpilot's job — the projection
+takes them from live `extrinsicsCalibration` (`projection.CalibratedGeometry`)
+and does not read `CAMERA_PITCH`/`CAMERA_YAW`, so manually fitting them here
+would produce numbers nothing consumes. The only quantity live calibration
+cannot provide is the longitudinal camera→bumper mount offset, so that is all
+this tool fits. The vision path is gated off until `extrinsicsCalibration`
+reports `calibrated` (`PerceptionCore.detect` degrades with reason
+`calibration`), so vision metrics can only be collected after that.
+
+A single global residual threshold is physically unreachable beyond ~10 m: the
+ground-plane projection's dRel sensitivity to pitch would demand 0.203° pitch
+accuracy at 10 m, 0.051° at 20 m and 0.013° at 40 m for a 0.30 m p95, while
+vehicle pitch swings ~1° under braking. Grading is therefore **banded by
+distance**; beyond 25 m only the bearing residual is graded — bearing is what a
+monocular camera actually measures well:
+
+| 距离档 | 距离残差 p95 | 关联率 |
+|---|---|---|
+| ≤ 10m | < 0.40m | > 0.85 |
+| 10–25m | < 1.2m | > 0.75 |
+| 25–40m | 不作距离判据(方位角残差 < 0.6°) | > 0.60 |
+
+An empty band reports `pass: None` — a band with no data is not a pass.
 
 ### Online calibration (`calibrate.py`)
 
@@ -246,13 +140,11 @@ Params `CameraToFront`，下一帧生效，无需重编（票 #7）。防呆：�
 
 Workflow:
 
-1. Turn `AvoidanceEnabled` on so the eagled process runs at all — the
-   process itself is gated on the param (`avoidance_run` in
-   `process_config.py`: onroad + car + param). Calibration does **not** require
+1. Turn `AvoidanceEnabled` on so the vision chain runs (the eagled process
+   itself runs whenever onroad in a car). Calibration does **not** require
    avoidance manoeuvres: `eagleDebug`, including the pairId-matched
-   targets, is published every frame the daemon runs, regardless of planner
-   validity or bias — but the vision side only runs once `extrinsicsCalibration`
-   reports `calibrated` (see [above](#vision-metrics-need-calibration-first)).
+   targets, is published every frame regardless of planner validity — but the
+   vision side only runs once `extrinsicsCalibration` reports `calibrated`.
    Drive with real lead vehicles ahead at **varied distances** so all three
    bands get pairs; 2-10 minutes is plenty.
 2. Run `calibrate` while driving (or over a recorded `eagleDebug` session).
@@ -268,8 +160,7 @@ Workflow:
      **distance-growing** lateral residual (`e_y` slope = `−Δyaw`) → yaw error:
      both are `extrinsicsCalibration`'s job — the tool warns and tells you to
      re-collect after it reports `calibrated`;
-   - the **banded residual table** (≤10 m / 10–25 m / 25–40 m, see the P0
-     criteria above) grades the post-correction residuals; empty bands report
+   - the **banded residual table** (≤10 m / 10–25 m / 25–40 m, see the band table above) grades the post-correction residuals; empty bands report
      `pass: None` and are listed as a coverage warning.
 3. The tool writes the new value to Params `CameraToFront` itself (consumers
    pick it up next frame, no rebuild) — but only when the save guard passes:
@@ -286,6 +177,7 @@ The report shows pair count, vEgo range, forward residual p95 before/after the
 table, warnings, the banded pass/fail verdict, and the current → proposed
 `CameraToFront` value.
 
+
 ### Static tape-measure spot check (静态卷尺抽查)
 
 Before trusting the online fit, sanity-check the projection against physically
@@ -294,7 +186,7 @@ measured positions:
 1. Place a large cardboard box or corner reflector at a known distance ahead
    (tape-measure from the front bumper, e.g. 10 m / 20 m / 30 m) and a known
    lateral offset (tape from car centreline, e.g. ±1 m, keep |yRel| ≤ 2.5 m so
-   it stays in-gate).
+   it stays in the radar/camera overlap).
 2. Park with the target visible, run the daemon, and read the target's
    `dRel`/`yRel` from `eagleDebug` (lanlink bird's-eye view or a log tap).
 3. Compare against the tape values: a constant dRel error → `CAMERA_TO_FRONT`
@@ -305,49 +197,9 @@ measured positions:
    This cross-checks the online fit with independent ground truth and catches
    gross mount errors the regression could absorb.
 
-### Three-layer physical-realism verification (三层物理真实性验证)
-
-| layer | what it proves | tool / metric | gate |
-|---|---|---|---|
-| ① Perception | the vision projection agrees with the radar truth | `calibrate.py` banded verdict (distance p95 per band; bearing p95 < 0.6° past 25 m) | perception |
-| ② Execution | the plan actually moves the car as commanded | `shadow.py` `execution_closure` metrics (below) | execution |
-| ③ Final | end-to-end behaviour is correct on video | record a run, review the lanlink avoidance view against the road | final acceptance |
-
-Layer ② in detail — `shadow.py` extends its summary with an
-`execution_closure` field (also printed per segment in the terminal). Per
-activation segment it records:
-
-- **target yRel drift** — nearest in-gate target's `yRel`, segment end minus
-  start: the object the avoidance pushes away from should actually recede
-  laterally;
-- **yDes mean** — the executed (post-low-pass) offset command over the segment;
-  the summary also carries `y_des_cmd_mean_m`, the raw pre-low-pass command;
-- **road-edge clearance change** on the avoidance side: the manoeuvre must not
-  eat into the `EDGE_CLEAR_MIN` margin (shadow records use `None` for "no edge
-  visible" where the daemon's `eagleDebug` message sends `999.0` for the
-  same condition — don't compare the two directly);
-- **closure ratio** — displacement integrated from the executed curvature bias
-  (`∫∫ v²·(curvature − model_curvature) dt²`, post-low-pass: what the plan
-  actually bends) vs the displacement the **raw** pre-low-pass command implies
-  (`∫∫ v²·2·yDes_cmd/L² dt²`). Both terms share the left-positive y convention;
-  the ratio (executed / commanded) deliberately compares the executed plan
-  against the raw command: in shadow replay the gap is the low-pass lag
-  (→ 1 for steady segments); on device, computing the same metric from
-  telemetry curvature closes the loop on the real vehicle response
-  (actual displacement ≈ `max_offset` when avoidance activates).
-
-```bash
-python -m openpilot.selfdrive.eagled.shadow <route> --out /tmp/shadow
-# summary JSON now carries "execution_closure"; main() also prints a
-# per-segment block to the terminal
-```
 
 ### Known limitations (已知限制)
 
-- **Segment target drift can switch objects**: the per-segment yRel drift tracks
-  whichever in-gate target is nearest each frame — if the nearest target changes
-  mid-segment, the drift mixes two objects' motion and is not a single-object
-  closure signal.
 - **Lateral intercept aliases mount offset with the Δyaw·CAMERA_TO_FRONT cross
   term**: the yaw rotation acts about the camera origin (`d_r + CAMERA_TO_FRONT`)
   while the diagnostic regression basis uses bumper-frame `d_r`, so part of a
@@ -360,11 +212,9 @@ python -m openpilot.selfdrive.eagled.shadow <route> --out /tmp/shadow
   shift, so with pitch contamination the suggestion carries a pitch-dependent
   component. The contamination warning fires in that case — re-collect after
   `extrinsicsCalibration` converges instead of pasting.
-- **Curvature double integral ignores initial lateral velocity**: the measured
-  displacement assumes zero lateral velocity at segment start, so it is relative
-  to the segment-start state, not absolute.
 
-## P0 concerns (deferred limitations)
+
+## Deferred limitations
 
 - **ROI inverse mapping omits the half-pixel centre term** (`u_full = u·scale`
   instead of `(u+0.5)·scale − 0.5`): ~0.5 px systematic bias, equivalent to a
@@ -375,33 +225,6 @@ python -m openpilot.selfdrive.eagled.shadow <route> --out /tmp/shadow
 - **`_degrade("camera")` reason aliasing**: one bucket covers both "no camerad
   stream" and "no fresh frame this tick"; log-once keeps it harmless,
   diagnostics only.
-- **`nearest_pairs` is not one-to-one**: two radar points can each match the
-  same detection, inflating the shadow `n_associated` (the daemon does not
-  consume that count). Greedy nearest-neighbour limitation, bounded by the
-  gates.
-- **No per-tick fusion-stat export yet**: the daemon computes association
-  counts per tick but publishes only the plan; the lanlink/CSV tap for
-  checklist item 4 is part of P0 device bring-up.
-- **Shadow metric semantics differ from the daemon path**: the shadow
-  association metric gates at 3.0 m / 1.5 m while the daemon absorbs
-  detections at 2.0 m / 1.0 m, and `n_vision` counts all projected detections
-  unfiltered whereas `n_radar` counts only in-gate radar targets. The
-  association rate is therefore optimistic as a P0 gate signal, and its
-  denominator (all radar targets) is not yet the P0 definition written above
-  (vision detections within the radar FOV and `D_GATE`); when reviewing
-  `shadow.csv` false triggers, read the counts against these definitions, not
-  the daemon's tighter gates.
-
-## P1 small open
-
-After the device checklist passes: enable `AvoidanceEnabled` for straight,
-daytime driving with `AvoidanceMaxLateralOffset` capped at 0.25 m (checklist
-item 5). Everything still passes through `clip_curvature`, so the jerk/accel
-limits hold by construction; the P1 run confirms it on the car.
-
-```bash
-pytest openpilot/selfdrive/eagled/ openpilot/selfdrive/controls/tests/ -q
-```
 
 ## Replay
 

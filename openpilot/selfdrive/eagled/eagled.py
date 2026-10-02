@@ -48,7 +48,7 @@ from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.camera_stream import CameraStream
 from openpilot.selfdrive.eagled.device_health import DeviceHealth
 from openpilot.selfdrive.eagled.lane_offset import LaneOffsetPlanner, OffsetDecision, approach_speed, change_clear, lane_trusted, target_pressure
-from openpilot.selfdrive.eagled.perception import PerceptionCore, PerceptionFrame, VisionWorker, gate_target, radar_point_counts, radar_point_key
+from openpilot.selfdrive.eagled.perception import PerceptionCore, PerceptionFrame, VisionWorker, radar_point_counts, radar_point_key
 from openpilot.selfdrive.eagled.yolo_detector import DEFAULT_FPS
 
 PARAMS_REFRESH_PERIOD = 1.0  # s
@@ -77,7 +77,7 @@ class EagleDaemon:
     self._last_params_t = -PARAMS_REFRESH_PERIOD
 
   # The camera/YOLO lifecycle lives on the perception core; these read-only
-  # views keep the historical daemon surface (tests, shadow tooling) working.
+  # views keep the historical daemon surface (tests) working.
   @property
   def camera(self):
     return self.perception.camera
@@ -162,61 +162,70 @@ class EagleDaemon:
     msg.valid = decision.valid and bool(self.sm.valid['modelV2'])
     self.pm.send('lateralManeuverPlan', msg)
 
-  def _target_rows(self, frame: PerceptionFrame, v_ego: float) -> list[tuple[bool, dict]]:
-    """One row per radar point and per detection: (in_gate, serialized fields).
+  def _target_rows(self, frame: PerceptionFrame, v_ego: float) -> list[dict]:
+    """One row per radar point and per detection (serialized fields).
 
     Shared by both publishers so eagleState and eagleDebug can never disagree
-    about what was seen. The in/out verdict goes through the SAME
-    ``gate_target`` that fed fuse_targets this frame — telemetry that
-    re-derives its own gate would silently disagree with lane-relative mode.
-    Association pairs reference this frame's radar/detection objects, so match
-    them back by identity to stamp the shared pairId on both sides. Radar
-    identity must go through radar_point_key: this list is a fresh capnp
-    re-iteration, so id() would never match the pairs' objects (vision dicts
-    are plain Python objects, id() is stable for them).
+    about what was seen. Lane label, line distance and pressure come from the
+    SAME ``target_pressure`` the planner used; points the fusion dropped
+    (unconfirmed static) carry pressure 0. Association pairs reference this
+    frame's radar/detection objects, so match them back by identity to stamp the
+    shared pairId on both sides. Radar identity must go through radar_point_key:
+    this list is a fresh capnp re-iteration, so id() would never match the
+    pairs' objects (vision dicts are plain Python objects, id() is stable for
+    them).
     """
     radar_pair_ids = {radar_point_key(p[0]): p[2] for p in frame.pairs}
     vision_pair_ids = {id(p[1]): p[2] for p in frame.pairs}
     geo = frame.lane_geo
 
-    def distance_pressure(d_rel, y_rel, cls, v_rel, counts=True):
-      # 线距/压力与规划同源(target_pressure);被融合丢弃的点(静止未确认)压力为 0
+    def lane_and_pressure(d_rel, y_rel, cls, v_rel, counts=True):
+      # lane: -1 左邻 / 0 本道或车道线不可信 / +1 右邻(与 target_pressure 的侧相反)
       if not lane_trusted(geo):
-        return 999.0, 0.0
+        return 0, 999.0, 0.0
       side, line_distance, pressure = target_pressure(d_rel, y_rel, cls, geo, approach_speed(v_rel, v_ego))
-      return (line_distance if side else 999.0), (pressure if counts else 0.0)
+      return -side, (line_distance if side else 999.0), (pressure if counts else 0.0)
 
-    rows: list[tuple[bool, dict]] = []
+    rows: list[dict] = []
     for point in frame.radar_points:
       key = radar_point_key(point)
-      # Same weight the planner used: a vision-confirmed radar point takes the
-      # vision class weight (fuse_targets), not the vehicle default.
+      # a vision-confirmed radar point takes the vision class
       cls = frame.vision_cls_by_key.get(key)
-      in_gate, lane = gate_target(float(point.dRel), float(point.yRel), cls, frame.lane_geo)
-      line_distance, pressure = distance_pressure(float(point.dRel), float(point.yRel), cls, float(point.vRel),
-                                   radar_point_counts(point, v_ego, frame.confirmed_keys))
-      rows.append((in_gate, {
+      lane, line_distance, pressure = lane_and_pressure(float(point.dRel), float(point.yRel), cls, float(point.vRel),
+                                                        radar_point_counts(point, v_ego, frame.confirmed_keys))
+      rows.append({
         "dRel": float(point.dRel), "yRel": float(point.yRel), "vRel": float(point.vRel),
         "cls": cls or "", "conf": 0.0,
-        "weight": C.class_weight(cls),
-        "matched": key in radar_pair_ids, "inGate": in_gate, "vision": False,
+        "matched": key in radar_pair_ids, "vision": False,
         "pairId": radar_pair_ids.get(key, 0),
         "lane": lane, "lineDistance": line_distance, "pressure": pressure,
-      }))
+      })
     for det in frame.detections:
       cls = det.get("cls")
-      in_gate, lane = gate_target(float(det["dRel"]), float(det["yRel"]), cls, frame.lane_geo)
-      weight = C.class_weight(cls)
-      line_distance, pressure = distance_pressure(float(det["dRel"]), float(det["yRel"]), cls, None)
-      rows.append((in_gate, {
+      lane, line_distance, pressure = lane_and_pressure(float(det["dRel"]), float(det["yRel"]), cls, None)
+      rows.append({
         "dRel": float(det["dRel"]), "yRel": float(det["yRel"]), "vRel": 0.0,
         "cls": cls or "", "conf": float(det.get("conf", 1.0)),
-        "weight": weight,
-        "matched": id(det) in vision_pair_ids, "inGate": in_gate, "vision": True,
+        "matched": id(det) in vision_pair_ids, "vision": True,
         "pairId": vision_pair_ids.get(id(det), 0),
         "lane": lane, "lineDistance": line_distance, "pressure": pressure,
-      }))
+      })
     return rows
+
+  @staticmethod
+  def _write_targets(msg_targets, rows: list[dict]) -> None:
+    for out, t in zip(msg_targets, rows, strict=True):
+      out.dRel = t["dRel"]
+      out.yRel = t["yRel"]
+      out.vRel = t["vRel"]
+      out.cls = t["cls"]
+      out.conf = t["conf"]
+      out.matched = t["matched"]
+      out.vision = t["vision"]
+      out.pairId = t["pairId"]
+      out.lane = t["lane"]
+      out.lineDistance = t["lineDistance"]
+      out.pressure = t["pressure"]
 
   def _publish_debug(self, frame: PerceptionFrame, car_state, decision: OffsetDecision, change_clear_states: tuple[str, str], radar_errors=None) -> None:
     """Build and publish the fused eagleDebug snapshot for this frame.
@@ -230,7 +239,7 @@ class EagleDaemon:
     dbg = msg.eagleDebug
     dbg.valid = decision.valid
     dbg.active = decision.valid
-    # 旧字段经新语义继续喂 lanlink(票 06 改展示后随票 05 停用)
+    # 旧字段经新语义继续喂 lanlink(票 06 改展示、票 07 删除)
     dbg.yDes = float(decision.offset)
     dbg.maxOffset = float(decision.cap)
     dbg.pressureLeft = float(decision.pressure_left)
@@ -245,34 +254,17 @@ class EagleDaemon:
     dbg.nRadar = len(frame.radar_points)
     dbg.nVision = len(frame.detections)
     dbg.nAssociated = int(frame.n_associated)
-    dbg.edgeClearance = 999.0
     dbg.canError = bool(radar_errors.canError) if radar_errors is not None else False
     dbg.radarUnavailable = bool(radar_errors.radarUnavailableTemporary) if radar_errors is not None else False
     geo = frame.lane_geo
     dbg.laneLeftValid = bool(geo.left_valid) if geo is not None else False
     dbg.laneRightValid = bool(geo.right_valid) if geo is not None else False
-    dbg.budgetLeft = float(frame.left.budget)
-    dbg.budgetRight = float(frame.right.budget)
     dbg.changeClearLeft = change_clear_states[0] != "blocked"      # 旧 Bool 字段:未知按不拦(消费者本来就是 None 不参与)
     dbg.changeClearRight = change_clear_states[1] != "blocked"
     dbg.changeClearLeftState = change_clear_states[0]
     dbg.changeClearRightState = change_clear_states[1]
     rows = self._target_rows(frame, car_state.vEgo)
-    tgts = dbg.init('targets', len(rows))
-    for i, (in_gate, t) in enumerate(rows):
-      tgts[i].dRel = t["dRel"]
-      tgts[i].yRel = t["yRel"]
-      tgts[i].vRel = t["vRel"]
-      tgts[i].cls = t["cls"]
-      tgts[i].conf = t["conf"]
-      tgts[i].weight = t["weight"]
-      tgts[i].matched = t["matched"]
-      tgts[i].inGate = in_gate
-      tgts[i].vision = t["vision"]
-      tgts[i].pairId = t["pairId"]
-      tgts[i].lane = t["lane"]
-      tgts[i].lineDistance = t["lineDistance"]
-      tgts[i].pressure = t["pressure"]
+    self._write_targets(dbg.init('targets', len(rows)), rows)
     msg.valid = True
     self.pm.send('eagleDebug', msg)
 
@@ -280,8 +272,8 @@ class EagleDaemon:
     """Publish eagleState: the formal per-frame perception picture.
 
     Same data as eagleDebug minus the debug-only noise (decision snapshot,
-    pair ids, out-of-gate rows): in-gate fused targets, side inputs (BSM),
-    geometry and sensor health. This is the stream future consumers
+    pair ids): adjacent-lane fused targets, side inputs (BSM), geometry and
+    sensor health. This is the stream future consumers
     (desire_helper in modeld) subscribe to; the envelope ``valid`` is always
     true — the picture is an observation, planner validity lives in the plan.
     """
@@ -290,7 +282,6 @@ class EagleDaemon:
     st.bsmLeft = bool(car_state.leftBlindspot)
     st.bsmRight = bool(car_state.rightBlindspot)
     st.vEgo = float(car_state.vEgo)
-    st.edgeClearance = 999.0
     st.nRadar = len(frame.radar_points)
     st.nVision = len(frame.detections)
     st.nAssociated = int(frame.n_associated)
@@ -299,8 +290,6 @@ class EagleDaemon:
     geo = frame.lane_geo
     st.laneLeftValid = bool(geo.left_valid) if geo is not None else False
     st.laneRightValid = bool(geo.right_valid) if geo is not None else False
-    st.budgetLeft = frame.left.budget
-    st.budgetRight = frame.right.budget
     st.changeClearLeft = change_clear_states[0] != "blocked"       # 旧 Bool 字段,保留兼容
     st.changeClearRight = change_clear_states[1] != "blocked"
     st.changeClearLeftState = change_clear_states[0]
@@ -310,31 +299,8 @@ class EagleDaemon:
     st.laneOffsetTarget = float(decision.offset)
     st.offsetCap = float(decision.cap)
     st.inactiveReason = decision.reason
-    for field, picture in ((st.sideLeadLeft, frame.left), (st.sideLeadRight, frame.right)):
-      lead = picture.lead
-      field.valid = lead is not None
-      if lead is not None:
-        field.dRel = lead.dRel
-        field.yRel = lead.yRel
-        field.vRel = lead.vRel if lead.vRel is not None else 0.0
-        field.edgeDist = abs(lead.yRel) - C.class_half_width(lead.cls)
-        field.cls = lead.cls or ""
-    rows = [t for in_gate, t in self._target_rows(frame, car_state.vEgo) if in_gate]
-    tgts = st.init('targets', len(rows))
-    for i, t in enumerate(rows):
-      tgts[i].dRel = t["dRel"]
-      tgts[i].yRel = t["yRel"]
-      tgts[i].vRel = t["vRel"]
-      tgts[i].cls = t["cls"]
-      tgts[i].conf = t["conf"]
-      tgts[i].weight = t["weight"]
-      tgts[i].matched = t["matched"]
-      tgts[i].inGate = True
-      tgts[i].vision = t["vision"]
-      tgts[i].pairId = t["pairId"]
-      tgts[i].lane = t["lane"]
-      tgts[i].lineDistance = t["lineDistance"]
-      tgts[i].pressure = t["pressure"]
+    rows = [t for t in self._target_rows(frame, car_state.vEgo) if t["lane"] != 0]
+    self._write_targets(st.init('targets', len(rows)), rows)
     msg.valid = True
     self.pm.send('eagleState', msg)
 

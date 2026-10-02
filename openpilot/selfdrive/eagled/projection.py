@@ -20,7 +20,7 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from openpilot.selfdrive.eagled.constants import CAMERA_PITCH, CAMERA_YAW, ROI_HORIZON_MARGIN, ROI_MODE, ROI_MODE_NATIVE, class_weight
+from openpilot.selfdrive.eagled.constants import CAMERA_PITCH, CAMERA_YAW, ROI_HORIZON_MARGIN, ROI_MODE, ROI_MODE_NATIVE
 from openpilot.selfdrive.eagled.ranging import is_truncated
 from openpilot.selfdrive.eagled.yolo_detector import INPUT_H, INPUT_W
 
@@ -33,7 +33,7 @@ class RoiMeta:
   scale_v: float   # full-frame px per ROI px, vertical
   offset_v: float  # full-frame row of the ROI top edge
   # NOTE: appended with a default on purpose. RoiMeta is built positionally in
-  # tests/test_shadow.py and tests/test_daemon_fusion.py; inserting a field
+  # tests/test_daemon_fusion.py; inserting a field
   # ahead of offset_v would silently shift those arguments.
   offset_u: float = 0.0  # full-frame column of the ROI left edge
 
@@ -159,12 +159,12 @@ def project_detections(dets: Iterable[dict] | None, fx: float, fy: float, cx: fl
                        roll: float = 0.0, *, camera_to_front: float,
                        roi_meta: RoiMeta | None = None,
                        frame_height: float | None = None) -> list[dict]:
-  """YOLO ROI boxes -> car-frame detections for ``fuse_targets`` / ``associate``.
+  """YOLO ROI boxes -> car-frame detections for ``fuse_objects`` / ``associate``.
 
   Each box's bottom-centre is inverse-mapped from ROI pixels to full-frame
   pixels (projection must use full-frame coordinates, not ROI coords), then
   projected onto the ground plane. Boxes whose ray never reaches the ground are
-  dropped. ``w`` is the planner class weight (VRU > vehicle).
+  dropped.
 
   ``bearing`` is the horizontal bearing about the FRONT-BUMPER origin,
   ``atan2(-yRel, dRel)`` on the projected car-frame point — the SAME origin and
@@ -198,7 +198,6 @@ def project_detections(dets: Iterable[dict] | None, fx: float, fy: float, cx: fl
       "yRel": point["yRel"],
       "cls": cls,
       "conf": float(det.get("conf", 1.0)),
-      "w": class_weight(cls),
       # 保险杠原点方位角(与雷达同参照),从投影后的车体坐标推出 —— 不要改回像素列。
       "bearing": math.atan2(-point["yRel"], point["dRel"]),
       "dRelSource": "ground",

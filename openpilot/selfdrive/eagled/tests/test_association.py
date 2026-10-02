@@ -1,4 +1,4 @@
-"""Tests for radar <-> vision association on bearing (core shared with the shadow harness)."""
+"""Tests for radar <-> vision association on bearing ."""
 
 import math
 
@@ -6,7 +6,7 @@ import pytest
 
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.association import associate, nearest_pairs_by_bearing
-from openpilot.selfdrive.eagled.avoidance_planner import _in_gate, fuse_targets
+from openpilot.selfdrive.eagled.perception import fuse_objects
 from openpilot.selfdrive.eagled.projection import project_detections
 
 FY = 425.25
@@ -23,7 +23,7 @@ def _det(bearing, cls="person", h_px=40.0, conf=0.6):
 
 
 class VO:
-  """Object-style vision side: shadow.py passes VisionObject(x, y), not dicts."""
+  """Object-style vision side: non-dict objects carrying x/y, not dicts."""
 
   def __init__(self, x, y, cls=None, box_height_px=None):
     self.x, self.y = x, y
@@ -112,7 +112,7 @@ def test_matched_pair_carries_the_vision_class():
 # --- object-style (non-dict) vision input -------------------------------------
 
 def test_object_style_vision_matches_via_derived_bearing():
-  """shadow.py 传的是 VisionObject(x, y) 冻结数据类: 方位角必须能从对象自身的
+  """对象侧(VisionObject(x, y) 冻结数据类): 方位角必须能从对象自身的
   度量坐标推出(atan2(-y, x)), 不能走 dict 下标。旧实现用 _object_xy 兼容两种
   形态, 重写时丢掉了这个双态支持 —— 这里钉死它不能再次悄悄退化。"""
   radar = [R(20.0, -1.0)]
@@ -169,7 +169,7 @@ def test_nearest_pairs_by_bearing_pair_shape():
 
 def _box_at(d_rel, y_rel, cls="person", conf=0.9):
   """全帧框:底中心反投影到保险杠系 (d_rel, y_rel),框高使框高测距也返回 d_rel
-  (保险杠系)—— 与 test_daemon_fusion / test_shadow 的同名 helper 同一约定。"""
+  (保险杠系)—— 与 test_daemon_fusion 的同名 helper 同一约定。"""
   d_cam = d_rel + C.CAMERA_TO_FRONT
   v = CY + FY * C.CAMERA_HEIGHT / d_cam
   u = CX - FX * y_rel / d_cam
@@ -182,19 +182,19 @@ def _project(box):
                             camera_to_front=C.CAMERA_TO_FRONT)
 
 
-def test_vision_only_close_vru_survives_the_own_lane_gate():
-  """5m、横向 1.5m 的 vision-only 行人必须落在 own-lane 门(1.2m)之外。
+def test_vision_only_close_vru_keeps_bumper_frame_lateral_offset():
+  """5m、横向 1.5m 的 vision-only 行人必须保持 yRel=1.5m 并进入融合目标。
 
   相机原点方位角配保险杠系距离会把 yRel 缩小 d/(d+CAMERA_TO_FRONT) 倍:
-  1.5m 被缩到 ~1.15m,掉进 own-lane 门,避让整条丢失。"""
+  1.5m 被缩到 ~1.15m,近距行人的线距被低估。"""
   n, fused, pairs = associate([], _project(_box_at(5.0, 1.5)), fy=FY, camera_to_front=C.CAMERA_TO_FRONT)
   assert n == 0 and pairs == []
   assert len(fused) == 1
   assert fused[0]["yRel"] == pytest.approx(1.5, rel=1e-3)
   assert fused[0]["dRel"] == pytest.approx(5.0, rel=1e-3)
-  targets = fuse_targets([], fused, v_ego=20.0)
-  assert len(targets) == 1              # own-lane 门不得吞掉它
-  assert _in_gate(targets[0].dRel, targets[0].yRel)
+  targets = fuse_objects([], fused, v_ego=20.0)
+  assert len(targets) == 1
+  assert targets[0].yRel == pytest.approx(1.5, rel=1e-3)
 
 
 def test_short_range_large_offset_pair_matches():

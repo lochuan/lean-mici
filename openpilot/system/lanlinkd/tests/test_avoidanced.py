@@ -16,32 +16,27 @@ def _publish_debug(pm: messaging.PubMaster, valid: bool = True) -> None:
   dbg = msg.eagleDebug
   dbg.valid = True
   dbg.active = True
-  dbg.direction = 1
   dbg.yDes = 0.3
-  dbg.bias = 0.01
   dbg.maxOffset = 0.35
   dbg.bsmRight = True
   dbg.vEgo = 25.0
   dbg.nRadar = 1
   dbg.nVision = 1
   dbg.nAssociated = 1
-  dbg.edgeClearance = 999.0
   dbg.canError = False
   dbg.radarUnavailable = True
   dbg.laneLeftValid = True
   dbg.laneRightValid = False
-  dbg.budgetLeft = 0.9
-  dbg.budgetRight = 999.0
   dbg.changeClearLeft = True
   dbg.changeClearRight = False
   tgts = dbg.init('targets', 2)
   tgts[0].dRel, tgts[0].yRel, tgts[0].vRel = 20.0, -1.0, 1.5
-  tgts[0].matched, tgts[0].inGate, tgts[0].pairId = True, True, 1
+  tgts[0].matched, tgts[0].pairId = True, 1
   tgts[0].lane = 1
   tgts[1].dRel, tgts[1].yRel = 25.0, -1.2
   tgts[1].cls, tgts[1].conf, tgts[1].vision = "person", 0.9, True
-  tgts[1].matched, tgts[1].inGate, tgts[1].pairId = True, True, 1
-  tgts[1].weight = 1.0
+  tgts[1].matched, tgts[1].pairId = True, 1
+  tgts[1].pressure = 0.5
   tgts[1].lane = 1
   pm.send('eagleDebug', msg)
 
@@ -78,25 +73,22 @@ def test_cache_captures_published_debug(publisher):
   assert snap["logMonoTime"] > 0
   assert snap["valid"] is True
   assert snap["active"] is True
-  assert snap["direction"] == 1
   assert snap["yDes"] == pytest.approx(0.3)
   assert snap["maxOffset"] == pytest.approx(0.35)
   assert snap["bsmRight"] is True
   assert snap["vEgo"] == pytest.approx(25.0)
-  assert snap["edgeClearance"] == pytest.approx(999.0)
   assert snap["canError"] is False
   assert snap["radarUnavailable"] is True
-  # C2/C9 新字段透传
+  # 新字段透传
   assert snap["laneLeftValid"] is True and snap["laneRightValid"] is False
-  assert snap["budgetLeft"] == pytest.approx(0.9)
-  assert snap["budgetRight"] == pytest.approx(999.0)
   assert snap["changeClearLeft"] is True and snap["changeClearRight"] is False
   assert (snap["nRadar"], snap["nVision"], snap["nAssociated"]) == (1, 1, 1)
   assert len(snap["targets"]) == 2
   radar_t, vision_t = snap["targets"]
   assert vision_t["cls"] == "person" and vision_t["vision"] is True
   assert radar_t["vision"] is False and radar_t["vRel"] == pytest.approx(1.5)
-  assert vision_t["lane"] == radar_t["lane"] == 1   # C2 车道归属随目标透传
+  assert vision_t["lane"] == radar_t["lane"] == 1   # 车道归属随目标透传
+  assert vision_t["pressure"] == pytest.approx(0.5)
   # 配对双方共享同一 pairId
   assert vision_t["pairId"] == radar_t["pairId"] == 1
 

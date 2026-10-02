@@ -179,11 +179,11 @@ class TestAvoidanceRoute:
     fake = {
       "stale": False,
       "logMonoTime": 42,
-      "valid": True, "active": True, "direction": 1, "yDes": 0.2, "bias": 0.1,
+      "valid": True, "active": True, "yDes": 0.2,
       "maxOffset": 0.35, "bsmLeft": False, "bsmRight": False, "vEgo": 20.0,
-      "nRadar": 1, "nVision": 1, "nAssociated": 1, "edgeClearance": 999.0,
+      "nRadar": 1, "nVision": 1, "nAssociated": 1,
       "targets": [{"dRel": 20.0, "yRel": -1.0, "vRel": 0.0, "cls": "", "conf": 0.0,
-                   "weight": 0.6, "matched": True, "inGate": True, "vision": False, "pairId": 1}],
+                   "matched": True, "vision": False, "pairId": 1}],
     }
     app.ctx.state.avoidance.snapshot = lambda: fake
     _, r = app.test_client.get("/api/avoidance")

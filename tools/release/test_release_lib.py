@@ -707,7 +707,7 @@ class TestParamsKeyGate(unittest.TestCase):
   HEADER_SAMPLE = """
   // comment with {"NotAKey", {PERSISTENT, BOOL}} inside
   {"AvoidanceEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
-  {"AvoidanceSideMargin", {PERSISTENT, FLOAT, "0.3"}},
+  {"AvoidanceLaneEdgeMargin", {PERSISTENT, FLOAT, "0.3"}},
   {"AvoidanceEgoHalfWidth", {PERSISTENT, FLOAT, "0.9"}},  // trailing comment
   {"AvoidanceLaneProbMin", {PERSISTENT, FLOAT, "0.6"}},
   {"AvoidanceLaneStdMax", {PERSISTENT, FLOAT, "0.3"}},
@@ -716,7 +716,7 @@ class TestParamsKeyGate(unittest.TestCase):
   def test_parses_every_key_line_ignoring_comments(self):
     keys = release_lib.params_keys_from_header(self.HEADER_SAMPLE)
     self.assertEqual(keys, [
-      "AvoidanceEnabled", "AvoidanceSideMargin", "AvoidanceEgoHalfWidth",
+      "AvoidanceEnabled", "AvoidanceLaneEdgeMargin", "AvoidanceEgoHalfWidth",
       "AvoidanceLaneProbMin", "AvoidanceLaneStdMax",
     ])
 
@@ -725,7 +725,7 @@ class TestParamsKeyGate(unittest.TestCase):
     header = REPO_ROOT / "openpilot/common/params_keys.h"
     keys = release_lib.params_keys_from_header(header.read_text())
     self.assertIn("AvoidanceEnabled", keys)
-    self.assertIn("AvoidanceSideMargin", keys)
+    self.assertIn("AvoidanceLaneEdgeMargin", keys)
     self.assertIn("LaneChangeNearZone", keys)
     self.assertGreater(len(keys), 100)
 

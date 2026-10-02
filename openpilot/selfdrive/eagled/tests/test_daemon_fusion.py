@@ -180,7 +180,7 @@ def test_daemon_associated_detection_not_double_counted():
 def test_daemon_confirms_static_radar_across_reiteration():
   """设备形态回归钉:radar.points 每次迭代产出新包装对象(模拟 pycapnp)。
 
-  associate 在内部物化一份点对象,fuse_targets 再迭代 radar.points 拿到的是
+  associate 在内部物化一份点对象,fuse_objects 再迭代 radar.points 拿到的是
   全新等价对象 —— 确认键必须跟 trackId 走。键逻辑退回 id() 时,静止点会被
   当成未确认的杂波丢掉,本测试变红。"""
   class _ReiteratedPoints:

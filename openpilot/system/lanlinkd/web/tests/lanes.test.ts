@@ -35,12 +35,11 @@ const tgt = (over: Partial<EagleTarget>): EagleTarget => ({
   vRel: 0,
   cls: "",
   conf: 0,
-  weight: 0,
   matched: false,
-  inGate: false,
   vision: false,
   pairId: 0,
   lane: 0,
+  pressure: 0,
   ...over,
 });
 
