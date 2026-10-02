@@ -151,11 +151,11 @@ def _in_target_lane(d_rel: float, y_rel: float, geo: LaneGeometry, side: int) ->
   return outer <= y_rel < right
 
 
-def _blocks_lane_change(t, v_ego: float) -> bool:
+def _blocks_lane_change(target, v_ego: float) -> bool:
   """近区硬拦;速度未知不放宽;时间投影(目标 LEAD_TIME 秒后位置 ≤ 自车 EGO_TIME 秒后位置,carrotpilot 4s/3s)。"""
-  if t.dRel <= C.LANE_CHANGE_NEAR_D or t.vRel is None:
+  if target.dRel <= C.LANE_CHANGE_NEAR_D or target.vRel is None:
     return True
-  return t.dRel + (t.vRel + v_ego) * C.LANE_CHANGE_LEAD_TIME_S <= v_ego * C.LANE_CHANGE_EGO_TIME_S
+  return target.dRel + (target.vRel + v_ego) * C.LANE_CHANGE_LEAD_TIME_S <= v_ego * C.LANE_CHANGE_EGO_TIME_S
 
 
 def change_clear(targets: Iterable, geo: LaneGeometry | None, v_ego: float) -> tuple[str, str]:
@@ -166,9 +166,9 @@ def change_clear(targets: Iterable, geo: LaneGeometry | None, v_ego: float) -> t
   """
   if not lane_trusted(geo):
     return "unknown", "unknown"
-  nearby = [t for t in targets if t.dRel > 0.0]
-  return tuple("blocked" if any(_in_target_lane(t.dRel, t.yRel, geo, side) and _blocks_lane_change(t, v_ego)
-                                for t in nearby) else "clear" for side in (1, -1))
+  nearby = [target for target in targets if target.dRel > 0.0]
+  return tuple("blocked" if any(_in_target_lane(target.dRel, target.yRel, geo, side) and _blocks_lane_change(target, v_ego)
+                                for target in nearby) else "clear" for side in (1, -1))
 
 
 HOLD_MATCH_TOLERANCE = 3.0   # m, 可见目标 dRel 落在保持记录这一拍推算走过的区间(±此值)内,视为同一目标

@@ -379,6 +379,7 @@ def test_trusted_outer_line_is_used_instead_of_inference():
 
 
 def test_untrusted_ego_lane_line_makes_clear_unknown_but_legacy_bool_does_not_block():
-  _, _, state = _run([(5.0, 3.5, 30.0)], frames=1, probs=(0.9, 0.3))
+  _, debug, state = _run([(5.0, 3.5, 30.0)], frames=1, probs=(0.9, 0.3))
   assert str(state.changeClearLeftState) == "unknown" and str(state.changeClearRightState) == "unknown"
+  assert str(debug.changeClearLeftState) == "unknown" and str(debug.changeClearRightState) == "unknown"
   assert state.changeClearLeft is True and state.changeClearRight is True

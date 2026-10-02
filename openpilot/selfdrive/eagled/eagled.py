@@ -152,9 +152,9 @@ class EagleDaemon:
     # modelV2 failed validation the plan is never published as valid; we keep
     # sending (instead of skipping) to preserve the every-frame freshness
     # invariant in controlsd.
-    clear = change_clear(frame.objects, frame.lane_geo, car_state.vEgo)
-    self._publish_debug(frame, car_state, decision, clear, radar_errors=radar.errors)
-    self._publish_state(frame, car_state, decision, clear, radar_errors=radar.errors)
+    change_clear_states = change_clear(frame.objects, frame.lane_geo, car_state.vEgo)
+    self._publish_debug(frame, car_state, decision, change_clear_states, radar_errors=radar.errors)
+    self._publish_state(frame, car_state, decision, change_clear_states, radar_errors=radar.errors)
 
     msg = messaging.new_message('lateralManeuverPlan')
     msg.lateralManeuverPlan.desiredLaneOffset = float(decision.offset)
@@ -217,7 +217,7 @@ class EagleDaemon:
       }))
     return rows
 
-  def _publish_debug(self, frame: PerceptionFrame, car_state, decision: OffsetDecision, clear: tuple[str, str], radar_errors=None) -> None:
+  def _publish_debug(self, frame: PerceptionFrame, car_state, decision: OffsetDecision, change_clear_states: tuple[str, str], radar_errors=None) -> None:
     """Build and publish the fused eagleDebug snapshot for this frame.
 
     Sent every frame regardless of planner validity: the message envelope
@@ -252,8 +252,10 @@ class EagleDaemon:
     dbg.laneRightValid = bool(geo.right_valid) if geo is not None else False
     dbg.budgetLeft = float(frame.left.budget)
     dbg.budgetRight = float(frame.right.budget)
-    dbg.changeClearLeft = clear[0] != "blocked"      # 旧 Bool 字段:未知按不拦(消费者本来就是 None 不参与)
-    dbg.changeClearRight = clear[1] != "blocked"
+    dbg.changeClearLeft = change_clear_states[0] != "blocked"      # 旧 Bool 字段:未知按不拦(消费者本来就是 None 不参与)
+    dbg.changeClearRight = change_clear_states[1] != "blocked"
+    dbg.changeClearLeftState = change_clear_states[0]
+    dbg.changeClearRightState = change_clear_states[1]
     rows = self._target_rows(frame, car_state.vEgo)
     tgts = dbg.init('targets', len(rows))
     for i, (in_gate, t) in enumerate(rows):
@@ -273,7 +275,7 @@ class EagleDaemon:
     msg.valid = True
     self.pm.send('eagleDebug', msg)
 
-  def _publish_state(self, frame: PerceptionFrame, car_state, decision: OffsetDecision, clear: tuple[str, str], radar_errors=None) -> None:
+  def _publish_state(self, frame: PerceptionFrame, car_state, decision: OffsetDecision, change_clear_states: tuple[str, str], radar_errors=None) -> None:
     """Publish eagleState: the formal per-frame perception picture.
 
     Same data as eagleDebug minus the debug-only noise (decision snapshot,
@@ -298,10 +300,10 @@ class EagleDaemon:
     st.laneRightValid = bool(geo.right_valid) if geo is not None else False
     st.budgetLeft = frame.left.budget
     st.budgetRight = frame.right.budget
-    st.changeClearLeft = clear[0] != "blocked"       # 旧 Bool 字段,保留兼容
-    st.changeClearRight = clear[1] != "blocked"
-    st.changeClearLeftState = clear[0]
-    st.changeClearRightState = clear[1]
+    st.changeClearLeft = change_clear_states[0] != "blocked"       # 旧 Bool 字段,保留兼容
+    st.changeClearRight = change_clear_states[1] != "blocked"
+    st.changeClearLeftState = change_clear_states[0]
+    st.changeClearRightState = change_clear_states[1]
     st.pressureLeft = float(decision.pressure_left)
     st.pressureRight = float(decision.pressure_right)
     st.laneOffsetTarget = float(decision.offset)

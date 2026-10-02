@@ -1272,6 +1272,8 @@ struct EagleDebug {
   offsetCap @25 :Float32;      # 贴线上限 m
   inactiveReason @26 :Text;    # 不生效原因；"" = 生效门全通
   holdingTargets @27 :UInt8;   # 并行保持中（已离开视野、按推算保留压力）的目标数
+  changeClearLeftState @28 :EagleState.ChangeClear;   # 同 EagleState；旧 Bool 里 unknown 与 clear 不可分，故另发
+  changeClearRightState @29 :EagleState.ChangeClear;
 }
 
 struct EagleState {
