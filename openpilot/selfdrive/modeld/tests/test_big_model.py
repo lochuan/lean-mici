@@ -2,11 +2,12 @@
 # 跑法：pytest openpilot/selfdrive/modeld/tests/test_big_model.py
 import threading
 import time
+from types import SimpleNamespace
 
 import numpy as np
 
 from openpilot.selfdrive.modeld.big_model import (BIG_OUTPUT_SLICES, parse_big_outputs, LatencyEstimator,
-                                                  SourceBlender, BigReplyLatch, nanos_since_boot)
+                                                  SourceBlender, BigReplyLatch, nanos_since_boot, select_frame)
 
 
 def test_nanos_since_boot_matches_timestamp_eof_clock():
@@ -167,6 +168,71 @@ def test_big_reply_latch():
   assert not latch.link_alive()                       # 没回音 → 门关
 
 
+class _FakeReplySelector:
+  def __init__(self, *, alive, result):
+    self.alive = alive
+    self.result = result
+    self.waited = []
+
+  def link_alive(self):
+    return self.alive
+
+  def wait_for(self, t_eof, deadline_ns):
+    self.waited.append((t_eof, deadline_ns))
+    return self.result
+
+
+def test_select_frame_obeys_warmup_enable_and_link_gates():
+  latch = _FakeReplySelector(alive=True, result=(np.ones(2), 25.))
+  small = {"plan": np.array([2.], dtype=np.float32)}
+  blender = SourceBlender(fade_frames=2)
+  action_calls = []
+
+  def action_for(output, lat_t, long_t):
+    action_calls.append((output, lat_t, long_t))
+    value = float(output["plan"][0])
+    return SimpleNamespace(desiredCurvature=value, desiredAcceleration=-value, shouldStop=value < 1.5)
+
+  def select(enabled, run_count):
+    return select_frame(
+      small, latch=latch, enabled=enabled, run_count=run_count, timestamp_eof=1_000_000_000,
+      latency_ms=22., grace_ms=48., warmup_frames=4, current_time_ns=lambda: 9_000_000_000, blender=blender,
+      action_for=action_for, small_action_t=(0.1, 0.2), big_action_t=(0.3, 0.4),
+      parse_outputs=lambda raw: {"plan": np.array([raw[0]], dtype=np.float32)})
+
+  first = select(enabled=True, run_count=4)
+  second = select(enabled=False, run_count=5)
+  assert latch.waited == []
+  assert first.big_output is None and first.eof_to_reply_ms == 0.
+  assert second.big_output is None and second.model_output is small
+
+  selected = select(enabled=True, run_count=5)
+  assert latch.waited == [(1_000_000_000, 1_070_000_000)]
+  assert selected.big_output["plan"][0] == 1.
+  np.testing.assert_allclose(selected.model_output["plan"], [1.5])
+  assert selected.eof_to_reply_ms == 25.
+  assert selected.desired_curvature == 1.5 and selected.desired_acceleration == -1.5
+  assert selected.should_stop is True  # weight=.5 selects the big-model stop bit
+  assert action_calls[-2][1:] == (0.1, 0.2) and action_calls[-1][1:] == (0.3, 0.4)
+
+  latch.alive = False
+  select(enabled=True, run_count=5)
+  assert latch.waited[-1] == (1_000_000_000, 9_000_000_000)
+
+
+def test_select_frame_rejects_zero_reply():
+  latch = _FakeReplySelector(alive=True, result=(np.zeros(2066, dtype=np.float32), 12.))
+  small = {"plan": np.array([1.], dtype=np.float32)}
+  frame = select_frame(small, latch=latch, enabled=True, run_count=5, timestamp_eof=1, latency_ms=22.,
+                       grace_ms=48., warmup_frames=4, current_time_ns=lambda: 10, blender=SourceBlender(),
+                       action_for=lambda *_: SimpleNamespace(desiredCurvature=0., desiredAcceleration=0.,
+                                                            shouldStop=False),
+                       small_action_t=(0., 0.), big_action_t=(0., 0.),
+                       parse_outputs=lambda raw: {"plan": raw})
+  assert frame.big_output is None and frame.eof_to_reply_ms == 12.
+  assert frame.model_output is small
+
+
 def test_modeld_c3_wiring_source():
   """modeld 主循环需 QCOM GPU 无法宿主构造，照 test_is_run_model 手法锁票面不变量
   （头 4 帧超时帧、全零兜底、modelV2.big、L_n 遥测）。接线一起改的话本测试会提醒更新。"""
@@ -174,9 +240,7 @@ def test_modeld_c3_wiring_source():
   from openpilot.selfdrive.modeld import modeld
   src = inspect.getsource(modeld.main)
   assert "BIG_WARMUP_FRAMES" in src, "modeld 重启后头 4 帧按超时帧（04 号票）"
-  assert "if bigmodel_enabled and run_count > BIG_WARMUP_FRAMES:" in src, \
-    "「远程大模型」关 = 不等不取大模型 REPLY，逐帧小模型（07 号票）"
-  assert "np.any" in src, "REPLY outputs 全零 = 解码跳过帧，须落回小模型（14 号口径）"
+  assert "select_frame(" in src, "逐帧 REPLY 策略必须通过宿主可测的决策 seam"
   assert "modelV2.big = big_out is not None" in src
   assert "bigLatencyMs" in src, "REPLY 往返每帧进遥测（04 号票）"
   # ADR-0001：L̂ 只喂 modeld 收帧时刻 − timestamp_eof（cameraToModelMs），截止用它；
@@ -186,6 +250,5 @@ def test_modeld_c3_wiring_source():
   assert "monotonic_ns" not in src
   assert "monotonic_ns" not in inspect.getsource(BigReplyLatch)
   assert "latency.update(camera_to_model_ms)" in src
-  assert "meta_main.timestamp_eof + int((latency.value + BIG_REPLY_GRACE_MS) * 1e6)" in src
   assert "cameraToModelMs = camera_to_model_ms" in src
   assert "latch.latency" not in src

@@ -5,6 +5,7 @@
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from statistics import median
 from typing import NamedTuple
 
@@ -151,3 +152,50 @@ class BigReplyLatch:
         if now_ns >= deadline_ns:
           return None, 0.
         self._cv.wait((deadline_ns - now_ns) / 1e9)
+
+
+class FrameSelection(NamedTuple):
+  model_output: dict[str, np.ndarray]
+  big_output: dict[str, np.ndarray] | None
+  eof_to_reply_ms: float
+  desired_curvature: float
+  desired_acceleration: float
+  should_stop: bool
+
+
+def select_frame(small_output: dict[str, np.ndarray], *, latch, enabled: bool, run_count: int,
+                 timestamp_eof: int, latency_ms: float, grace_ms: float, warmup_frames: int,
+                 current_time_ns: Callable[[], int],
+                 blender: SourceBlender, action_for: Callable, small_action_t: tuple[float, float],
+                 big_action_t: tuple[float, float],
+                 parse_outputs: Callable[[np.ndarray], dict[str, np.ndarray]] = parse_big_outputs) -> FrameSelection:
+  """Choose, blend, and derive this frame's action through one host-testable seam.
+
+  ``latch`` and ``action_for`` are the runtime adapters; the policy needs no
+  msgq, Cap'n Proto, model runner, or GPU to test.
+  """
+  raw: np.ndarray | None = None
+  eof_to_reply_ms = 0.
+  if enabled and run_count > warmup_frames:
+    deadline_ns = timestamp_eof + int((latency_ms + grace_ms) * 1e6)
+    if not latch.link_alive():
+      deadline_ns = current_time_ns()
+    raw, eof_to_reply_ms = latch.wait_for(timestamp_eof, deadline_ns)
+  if raw is not None and not np.any(raw):
+    raw = None
+
+  big_output = parse_outputs(raw) if raw is not None else None
+  model_output = blender.step(small_output, big_output)
+  small_action = action_for(small_output, *small_action_t)
+  big_leg = big_output if big_output is not None else blender.big_last
+  if big_leg is not None and blender.w > 0.0:
+    big_action = action_for(big_leg, *big_action_t)
+    weight = blender.w
+    curvature = (1. - weight) * small_action.desiredCurvature + weight * big_action.desiredCurvature
+    acceleration = (1. - weight) * small_action.desiredAcceleration + weight * big_action.desiredAcceleration
+    should_stop = big_action.shouldStop if weight >= 0.5 else small_action.shouldStop
+  else:
+    curvature = small_action.desiredCurvature
+    acceleration = small_action.desiredAcceleration
+    should_stop = small_action.shouldStop
+  return FrameSelection(model_output, big_output, eof_to_reply_ms, curvature, acceleration, should_stop)

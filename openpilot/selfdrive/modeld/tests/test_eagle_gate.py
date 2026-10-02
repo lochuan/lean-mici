@@ -8,6 +8,7 @@ modeld 主循环需要 QCOM GPU 无法在 CI 构造（同 test_is_run_model 的�
 import inspect
 
 from openpilot.selfdrive.modeld import modeld
+from openpilot.selfdrive.modeld.modeld import change_clear_flags
 
 
 def test_eagle_gate_routes_through_stream_gate():
@@ -20,13 +21,19 @@ def test_eagle_gate_routes_through_stream_gate():
 def test_eagle_gate_falls_back_to_none_flags():
   # 不新鲜 → 清空标志传 None（desire_helper 的回退语义），不能透传 stale 标志
   src = inspect.getsource(modeld)
-  assert "CHANGE_CLEAR_FLAGS[str(eagle_state.changeClearLeftState)] if eagle_fresh else None" in src
-  assert "CHANGE_CLEAR_FLAGS[str(eagle_state.changeClearRightState)] if eagle_fresh else None" in src
+  assert "change_clear_flags(eagle_state, eagle_fresh)" in src
 
 
 def test_unknown_clear_state_maps_to_none():
   # 本车道线不可信 → unknown → None（不参与门控，回退 BSM + relc）
-  assert modeld.CHANGE_CLEAR_FLAGS == {"unknown": None, "clear": True, "blocked": False}
+  state = type("State", (), {"changeClearLeftState": "unknown", "changeClearRightState": "clear"})()
+  assert change_clear_flags(state, fresh=True) == (None, True)
+  assert change_clear_flags(state, fresh=False) == (None, None)
+
+
+def test_blocked_lane_clear_state_maps_to_false():
+  state = type("State", (), {"changeClearLeftState": "blocked", "changeClearRightState": "unknown"})()
+  assert change_clear_flags(state, fresh=True) == (False, None)
 
 
 def test_block_reasons_published_to_model_data_sp():

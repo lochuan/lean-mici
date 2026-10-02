@@ -22,7 +22,8 @@ from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
-from openpilot.selfdrive.modeld.big_model import parse_big_outputs, SourceBlender, BigReplyLatch, LatencyEstimator, nanos_since_boot
+from openpilot.selfdrive.modeld.big_model import (SourceBlender, BigReplyLatch, LatencyEstimator,
+                                                  nanos_since_boot, select_frame)
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, nv12_copy_size, MODELD_INPUTS
 from openpilot.selfdrive.modeld.fill_model_msg import (fill_model_msg, fill_driving_model_data, fill_pose_msg,
                                                        PublishState, get_curvature_from_output)
@@ -38,6 +39,12 @@ SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
 # eagleState.changeClear*State -> desire_helper 清空标志:unknown(本车道线不可信)传 None 不参与门控
 CHANGE_CLEAR_FLAGS = {"unknown": None, "clear": True, "blocked": False}
+
+
+def change_clear_flags(state, fresh: bool) -> tuple[bool | None, bool | None]:
+  if not fresh:
+    return None, None
+  return CHANGE_CLEAR_FLAGS[str(state.changeClearLeftState)], CHANGE_CLEAR_FLAGS[str(state.changeClearRightState)]
 
 LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
@@ -398,36 +405,20 @@ def main(demo=False):
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
 
-      # 04 号 C-3：等大模型 REPLY（截止 = timestamp_eof + L̂ + 48ms）。结果一到就发不等截止、
-      # 不重试不补发；头 4 帧按超时帧（票面，不等不取）；链路没回音（存活门）就只捡已到的，
-      # 保 20Hz 不塌（不 modeldLagging）。eof_to_reply_ms = REPLY 到达 − timestamp_eof（遥测，非 L̂）。
-      big_raw, eof_to_reply_ms = None, 0.
-      if bigmodel_enabled and run_count > BIG_WARMUP_FRAMES:
-        deadline_ns = meta_main.timestamp_eof + int((latency.value + BIG_REPLY_GRACE_MS) * 1e6)
-        if not latch.link_alive():
-          deadline_ns = nanos_since_boot()
-        big_raw, eof_to_reply_ms = latch.wait_for(meta_main.timestamp_eof, deadline_ns)
-      if big_raw is not None and not np.any(big_raw):
-        big_raw = None  # 全零 = App 侧解码跳过帧（14 号口径），同样落回小模型
-      big_out = parse_big_outputs(big_raw) if big_raw is not None else None
-
-      # 无感切换：全头交叉淡入（兜底腿 hold 最近大模型输出）；action 共用同一 smooth 平滑链
-      blended = blender.step(model_output, big_out)
+      frame = select_frame(
+        model_output, latch=latch, enabled=bigmodel_enabled, run_count=run_count,
+        timestamp_eof=meta_main.timestamp_eof, latency_ms=latency.value, grace_ms=BIG_REPLY_GRACE_MS,
+        warmup_frames=BIG_WARMUP_FRAMES, current_time_ns=nanos_since_boot, blender=blender,
+        action_for=lambda output, lat_t, long_t, prev_action=prev_action, v_ego=v_ego:
+          model.get_action_from_model(output, prev_action, lat_t, long_t, v_ego),
+        small_action_t=(lat_action_t, long_action_t), big_action_t=(big_lat_action_t, big_long_action_t))
+      blended, big_out, eof_to_reply_ms = frame.model_output, frame.big_output, frame.eof_to_reply_ms
       if SEND_RAW_PRED and 'raw_pred' not in blended:
         blended = {**blended, 'raw_pred': model_output['raw_pred']}  # raw_pred 恒为小模型调试输出
 
-      action_small = model.get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego)
-      big_leg = big_out if big_out is not None else blender.big_last
-      if big_leg is not None and blender.w > 0.0:
-        # 两路各按自己的 action_t 算（大路 chestnut 口径），按 blender.w 插值后共用平滑链
-        big_action = model.get_action_from_model(big_leg, prev_action, big_lat_action_t, big_long_action_t, v_ego)
-        w = blender.w
-        action = log.ModelDataV2.Action(
-          desiredCurvature=(1. - w) * action_small.desiredCurvature + w * big_action.desiredCurvature,
-          desiredAcceleration=(1. - w) * action_small.desiredAcceleration + w * big_action.desiredAcceleration,
-          shouldStop=big_action.shouldStop if w >= 0.5 else action_small.shouldStop)
-      else:
-        action = action_small
+      action = log.ModelDataV2.Action(desiredCurvature=frame.desired_curvature,
+                                      desiredAcceleration=frame.desired_acceleration,
+                                      shouldStop=frame.should_stop)
       prev_action = action
 
       fill_model_msg(modelv2_send, blended, action,
@@ -451,9 +442,9 @@ def main(demo=False):
                                    valid=sm.valid['eagleState'])
       eagle_fresh = eagle_status is StreamStatus.FRESH
       eagle_state = sm['eagleState']
+      change_clear_left, change_clear_right = change_clear_flags(eagle_state, eagle_fresh)
       DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, left_edge, right_edge,
-                change_clear_left=CHANGE_CLEAR_FLAGS[str(eagle_state.changeClearLeftState)] if eagle_fresh else None,
-                change_clear_right=CHANGE_CLEAR_FLAGS[str(eagle_state.changeClearRightState)] if eagle_fresh else None)
+                change_clear_left=change_clear_left, change_clear_right=change_clear_right)
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
