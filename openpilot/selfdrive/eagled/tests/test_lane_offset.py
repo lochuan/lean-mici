@@ -355,6 +355,10 @@ def test_time_projection_blocks_slow_and_passes_far_fast():
   assert _clear([(30.0, 3.5, 25.0)])[0] == "clear"       # 30 + 25*4 = 130 > 60
 
 
+def test_slow_target_beyond_60m_still_blocks_at_highway_speed():
+  assert _clear([(70.0, 3.5, 5.0)], v_ego=33.0)[0] == "blocked"   # 70 + 5*4 = 90 <= 33*3
+
+
 def test_unknown_speed_target_in_target_lane_blocks():
   vision = {"camera": _FakeCamera([ROI]), "detector": _FakeDetector([_box_at(30.0, 3.5, "car")])}
   assert _clear([], **vision)[0] == "blocked"

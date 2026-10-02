@@ -161,11 +161,12 @@ def _blocks_lane_change(t, v_ego: float) -> bool:
 def change_clear(targets: Iterable, geo: LaneGeometry | None, v_ego: float) -> tuple[str, str]:
   """变道清空(左, 右):"clear" / "blocked" / "unknown"(本车道线不可信)。
 
-  只看经车道线确认位于目标车道内、dRel 在窗口内的目标;本车道的慢前车因此不拦往左超它。
+  只看经车道线确认位于目标车道内的前方目标;远处目标由时间投影判定,不设距离窗口(高速下 3s 超 60m)。
+  本车道的慢前车因此不拦往左超它。
   """
   if not lane_trusted(geo):
     return "unknown", "unknown"
-  nearby = [t for t in targets if 0.0 < t.dRel <= C.SIDE_WINDOW_D]
+  nearby = [t for t in targets if t.dRel > 0.0]
   return tuple("blocked" if any(_in_target_lane(t.dRel, t.yRel, geo, side) and _blocks_lane_change(t, v_ego)
                                 for t in nearby) else "clear" for side in (1, -1))
 
