@@ -562,12 +562,12 @@
     },
     {
      "id": "lateral_avoidance",
-     "title": "横向避让",
+     "title": "车道内避让",
      "items": [
       {
        "key": "AvoidanceEnabled",
        "widget": "toggle",
-       "title": "启用横向避让",
+       "title": "启用车道内避让",
        "enablement": [
         {
          "type": "calibrated"

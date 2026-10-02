@@ -286,14 +286,12 @@ class TestCalibrationRoutes:
   def test_status_carries_online_calibration_summary(self, app):
     # 在线标定摘要并入安装偏移精修状态（App 精修卡 2 请求 → 1），原有字段不变
     cal = {"calStatus": "calibrated", "calPerc": 100, "calValid": True, "visionGated": False}
-    app.ctx.state.avoidance.calibration_summary = lambda: dict(cal)
-    app.ctx.state.avoidance.snapshot = lambda: {"stale": False, **cal}
+    app.ctx.state.calibration.online_summary = lambda: dict(cal)
     _, r = app.test_client.get("/api/calibration/status")
     assert r.json["running"] is False
-    # 同形：与 /api/avoidance 里的标定摘要同键同值（同一份 extrinsicsCalibration 状态）
     assert r.json["online"] == cal
-    _, a = app.test_client.get("/api/avoidance")
-    assert {k: a.json[k] for k in cal} == r.json["online"]
+    _, s = app.test_client.get("/api/status")
+    assert "calStatus" not in s.json and "online" not in s.json
 
   def test_stop_returns_fit_result(self, app):
     from openpilot.selfdrive.eagled.calibrate import CalibPair

@@ -33,7 +33,7 @@ const state = reactive({
   status: null as StatusSnapshot | null,
 
   // 在线标定摘要：独立于 eagled 是否运行（lanlinkd 自己订阅
-  // extrinsicsCalibration）。规则引擎用它在标定完成前挡住横向避让的启用。
+  // extrinsicsCalibration）。规则引擎用它在标定完成前挡住车道内避让的启用。
   cal: { calStatus: "unknown", calPerc: 0, calValid: false, visionGated: true } as CalState,
 
   paramsVersion: null as string | null | undefined,
@@ -116,13 +116,8 @@ export async function pollStatus(): Promise<void> {
   }
   // 在线标定摘要：失败不打断状态轮询——旧后端没有这些字段时保持上次值
   try {
-    const av = await api.avoidance();
-    state.cal = {
-      calStatus: av.calStatus ?? "unknown",
-      calPerc: av.calPerc ?? 0,
-      calValid: Boolean(av.calValid),
-      visionGated: Boolean(av.visionGated ?? true),
-    };
+    const online = (await api.calibrationStatus()).online;
+    if (online) state.cal = online;
   } catch {
     /* keep last state */
   }

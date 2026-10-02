@@ -9,6 +9,11 @@ Params ``CameraToFront``，消费方下一帧生效（票 #7）。与 CLI 版（
 ...calibrate --duration N）的区别：无固定时长，开/停/保存由 lanlink 按钮控制；
 其余语义一致（增量拟合、分档判据、侧向截距只警告、同一保存防呆）。
 
+在线相机标定摘要（extrinsicsCalibration → online_summary）也由本模块提供：
+未标定时 eagled 整体关掉视觉路径（地平面投影的 dRel 对 pitch 在 40m 处
+0.5° → 41%），网页标定卡片靠摘要解释"为什么没有视觉"。EagleDebug 的 capnp
+没有降级原因字段且 cereal 变更要设备全量重建，所以 lanlinkd 自己订阅。
+
 线程安全：所有状态在锁下读写；start 幂等拒绝（已在跑返回 False）。
 """
 import threading
@@ -16,6 +21,7 @@ import time
 
 from openpilot.common.model_geometry import read_camera_to_front, write_camera_to_front
 from openpilot.common.swaglog import cloudlog
+from openpilot.selfdrive.eagled.projection import calibrated_geometry_from_msg
 from openpilot.selfdrive.eagled.calibrate import (
   MIN_FIT_PAIRS,
   MIN_SAVE_PAIRS,
@@ -24,6 +30,18 @@ from openpilot.selfdrive.eagled.calibrate import (
   fit_calibrated_offsets,
   propose_camera_to_front,
 )
+
+
+def _online_summary(msg, valid: bool) -> dict:
+  """判定走 projection.calibrated_geometry_from_msg 的唯一出口，与 eagled 同源；
+  calStatus/calPerc 只是展示字段。"""
+  cal_valid = calibrated_geometry_from_msg(msg, valid=valid) is not None
+  return {
+    "calStatus": str(getattr(msg, "calStatus", "unknown")),
+    "calPerc": int(getattr(msg, "calPerc", 0) or 0),
+    "calValid": cal_valid,
+    "visionGated": not cal_valid,
+  }
 
 
 class CalibrationController:
@@ -37,6 +55,27 @@ class CalibrationController:
     self._start_t: float = 0.0
     self.last_result: dict | None = None
     self.last_error: str | None = None
+    self._online: dict = {"calStatus": "unknown", "calPerc": 0, "calValid": False, "visionGated": True}
+
+  # ---- 在线标定摘要 ----
+
+  def online_summary(self) -> dict:
+    with self._lock:
+      return dict(self._online)
+
+  def run_online(self, exit_event: threading.Event) -> None:
+    try:
+      from openpilot.cereal import messaging
+      sm = messaging.SubMaster(['extrinsicsCalibration'])
+    except Exception:
+      cloudlog.exception("lanlink calibration: online SubMaster init failed")
+      return
+    while not exit_event.is_set():
+      sm.update(1000)
+      if sm.updated['extrinsicsCalibration']:
+        summary = _online_summary(sm['extrinsicsCalibration'], sm.valid['extrinsicsCalibration'])
+        with self._lock:
+          self._online = summary
 
   # ---- 会话生命周期 ----
 

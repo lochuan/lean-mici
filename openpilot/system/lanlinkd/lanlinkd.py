@@ -60,6 +60,7 @@ class LanlinkApp:
     self._wifi_manager = None
     self._wifi_lock = threading.Lock()
     threading.Thread(target=self.cache.run, args=(self.exit_event,), name="lanlink_status", daemon=True).start()
+    threading.Thread(target=self.calibration.run_online, args=(self.exit_event,), name="lanlink_calibration_online", daemon=True).start()
     threading.Thread(target=self.avoidance.run, args=(self.exit_event,), name="lanlink_avoidance", daemon=True).start()
 
   # ---- helpers ----
@@ -235,7 +236,7 @@ class LanlinkApp:
     while (event := await asyncio.to_thread(next, events, None)) is not None:
       await response.send(event)
 
-  # ---- avoidance calibration session (collect/fit/save the CameraToFront mount offset) ----
+  # ---- calibration session (collect/fit/save the CameraToFront mount offset) ----
 
   async def calibration_start(self, request: Request) -> HTTPResponse:
     if not self.calibration.start():
@@ -253,8 +254,7 @@ class LanlinkApp:
 
   async def calibration_status(self, request: Request) -> HTTPResponse:
     body = self.calibration.status()
-    # 在线标定摘要并入：与 /api/avoidance 的标定摘要同形（共用 AvoidanceCache 的缓存）
-    body["online"] = self.avoidance.calibration_summary()
+    body["online"] = self.calibration.online_summary()
     return json_response(body)
 
   async def bootstrap(self, request: Request) -> HTTPResponse:

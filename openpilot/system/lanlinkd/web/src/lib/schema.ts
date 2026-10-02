@@ -8,7 +8,7 @@
 
 export type Widget = "toggle" | "option" | "multiple_button" | "button" | "info";
 
-/** 在线标定摘要（/api/avoidance 透传的 extrinsicsCalibration 字段）。
+/** 在线标定摘要（/api/calibration/status 的 online，来自 extrinsicsCalibration）。
  *  eagled 在相机未标定时整体关掉视觉路径——地平面投影的 dRel 对 pitch
  *  的敏感度在 40m 处是 0.5° → 41%，未标定的 pitch 会直接生成虚假偏移。
  *  这份状态独立于 eagled 是否运行：lanlinkd 自己订阅标定消息。 */
@@ -173,14 +173,6 @@ export interface StatusSnapshot {
   capabilities?: Capabilities;
 }
 
-/** /api/avoidance 里 store 只取的在线标定摘要（lanlinkd 订阅 extrinsicsCalibration 透传） */
-export interface AvoidanceSnapshot {
-  calStatus?: string; // "uncalibrated" | "calibrated" | "recalibrating" | "unknown"
-  calPerc?: number; // 标定进度 0-100
-  calValid?: boolean; // 消息 valid 且 calStatus=="calibrated" 且 rpyCalib 长度为 3
-  visionGated?: boolean; // 视觉路径是否被标定门关掉（= !calValid）
-}
-
 /** /api/calibration/status：在线标定会话状态（CalibrationController）。
  *  last_result 是 fit_calibrated_offsets 的输出 + camera_to_front（建议值与
  *  保存防呆结论）+ saved；insufficient = 配对数低于保存下限 30。
@@ -236,6 +228,7 @@ export interface CalibrationStatus {
   elapsed_s: number;
   last_error?: string | null;
   last_result?: CalibrationResult | null;
+  online?: CalState; // 在线标定摘要（extrinsicsCalibration），与精修会话无关
 }
 
 /** 车辆指纹状态（GET /api/vehicle，见 vehicle_api.vehicle_state） */

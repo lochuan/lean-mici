@@ -1,8 +1,10 @@
 """CalibrationController 会话生命周期测试（不起真 SubMaster）。"""
 import threading
+import time
 
 import pytest
 
+from openpilot.cereal import messaging
 from openpilot.selfdrive.eagled.calibrate import CalibPair
 from openpilot.system.lanlinkd.calibration import CalibrationController
 from .fake_params import FakeParams
@@ -125,3 +127,58 @@ def test_recommended_min_pairs_flags_insufficient():
   res = ctl.status()["last_result"]
   assert res is not None
   assert res["insufficient"] is True
+
+
+# --- 在线标定摘要（extrinsicsCalibration） -----------------------------------
+# 未标定时视觉路径整体关闭；网页标定卡片靠摘要解释"为什么没有视觉"。
+
+def _publish_calibration(pm: messaging.PubMaster, status: str, perc: int, valid: bool = True) -> None:
+  msg = messaging.new_message('extrinsicsCalibration')
+  msg.valid = valid
+  cal = msg.extrinsicsCalibration
+  cal.calStatus = status
+  cal.calPerc = perc
+  if status == "calibrated":
+    cal.rpyCalib = [0.0, 0.01, 0.0]
+  pm.send('extrinsicsCalibration', msg)
+
+
+def _online_after_publishing(status: str, perc: int, valid: bool = True) -> dict:
+  ctl = CalibrationController(params=FakeParams())
+  exit_event = threading.Event()
+  t = threading.Thread(target=ctl.run_online, args=(exit_event,), daemon=True)
+  t.start()
+  pm = messaging.PubMaster(['extrinsicsCalibration'])
+  try:
+    for _ in range(20):
+      _publish_calibration(pm, status, perc, valid)
+      time.sleep(0.1)
+      if ctl.online_summary()["calStatus"] == status:
+        break
+    return ctl.online_summary()
+  finally:
+    exit_event.set()
+    t.join(timeout=2)
+
+
+def test_online_summary_defaults_to_unknown_and_gated():
+  assert CalibrationController(params=FakeParams()).online_summary() == {
+    "calStatus": "unknown", "calPerc": 0, "calValid": False, "visionGated": True}
+
+
+def test_online_summary_reports_uncalibrated_progress():
+  assert _online_after_publishing("uncalibrated", 42) == {
+    "calStatus": "uncalibrated", "calPerc": 42, "calValid": False, "visionGated": True}
+
+
+def test_online_summary_reports_calibrated():
+  summary = _online_after_publishing("calibrated", 100)
+  assert summary["calValid"] is True
+  assert summary["visionGated"] is False
+
+
+def test_online_summary_does_not_trust_calibrated_status_on_an_invalid_message():
+  summary = _online_after_publishing("calibrated", 100, valid=False)
+  assert summary["calStatus"] == "calibrated"
+  assert summary["calValid"] is False
+  assert summary["visionGated"] is True

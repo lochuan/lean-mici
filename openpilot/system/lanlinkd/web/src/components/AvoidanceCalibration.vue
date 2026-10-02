@@ -1,15 +1,16 @@
 <script setup lang="ts">
-/** 横向避让设置区的标定卡片。从 AvoidanceView 迁来——用户要求"开始标定"
- * 放进 设置 → 转向 → 横向避让,且未完成标定不许启用避让。
+/** 车道内避让设置区的标定卡片。用户要求"开始标定"
+ * 放进 设置 → 转向 → 车道内避让,且未完成标定不许启用避让。
  *
  * 卡片里有两件都叫"标定"的事,必须分清:
  *  - 在线标定(extrinsicsCalibration,pitch/yaw/roll):openpilot 自动做,
- *    行驶中收敛,没有任何手动步骤。它是启用横向避让的门槛——地平面投影的
+ *    行驶中收敛,没有任何手动步骤。它是启用车道内避让的门槛——地平面投影的
  *    dRel 对 pitch 的敏感度在 40m 处是 0.5° → 41%,用未标定的 pitch 会直接
  *    生成虚假偏移,所以开关在收敛前置灰并显示进度。
  *  - CameraToFront 精修:可选,只想精修纵向安装偏移(相机在前保险杠
- *    后方多远)时才跑。配对数据来自避让运行时的 eagleDebug 雷达↔视觉
- *    关联,所以它反过来需要避让已经开着。拟合后「保存并生效」一键写进
+ *    后方多远)时才跑。配对数据来自 eagleDebug 的雷达↔视觉关联,而视觉
+ *    链路(相机+YOLO)只在车道内避让开着时才运行——避让关闭时只剩雷达,
+ *    凑不出配对,所以它反过来需要避让已经开着。拟合后「保存并生效」一键写进
  *    Params,下一帧生效(票 #7)。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
@@ -91,7 +92,7 @@ const avoidanceOn = computed(() => boolValue("AvoidanceEnabled"));
 const manualBlockedReason = computed(() =>
   avoidanceOn.value
     ? ""
-    : "需要先开启横向避让——配对数据来自避让运行时的雷达↔视觉关联",
+    : "需要先开启车道内避让——视觉只在避让开着时运行，没有视觉就凑不出雷达↔视觉配对",
 );
 
 const BAND_LABELS: Record<string, string> = {
