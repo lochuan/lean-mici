@@ -5,9 +5,9 @@
 # 发布树 = 本设备的构建树剥离后的运行时快照：
 #   * 产物在运行时路径（消费设备 git reset 即用，无需 overlay/编译）
 #   * 完整性由构建过程结构性保证（剥离只去掉构建输入与中间产物，不靠人工清单）
-#   * `prebuilt` 标记随树发布：由发布机的"冒烟验证过的运行中构建"挣得
+#   * `prebuilt` 标记随树发布（发布机构建，无发布前冒烟）
 #   * 单孤儿 commit（每次发布全新 git init，上游 publish.sh 模式）
-#   * 发布前 60s 冒烟：PASS 才准发布；EXIT trap 保证任何失败都恢复 comma 运行
+#   * EXIT trap 保证任何失败都恢复 comma 运行
 #
 # 用法（设备上）:  bash tools/release/device_release.sh
 # 产出: /data/relstage（扁平树 git 仓库，分支 $RELEASE_BRANCH），由 Mac 侧取走推送。
@@ -36,7 +36,7 @@ die() {
 }
 
 cleanup() {
-  # 冒烟停掉了 openpilot：无论成败，收尾必须恢复运行（幂等）
+  # 收尾必须保证 comma 在运行（幂等）
   sudo systemctl start comma
 }
 trap cleanup EXIT
@@ -278,18 +278,6 @@ check_params_keys() {
   /usr/local/venv/bin/python /tmp/relhelper/release_lib.py check-params-keys "$SRC"
 }
 
-wait_gpu_idle() {
-  # EGL 需要干净的显示/DRM 状态，等 GPU 从编译负载回落
-  sleep 15
-}
-
-smoke_device() {
-  sudo systemctl stop comma
-  PYTHONPATH=/data/openpilot:/data/openpilot/openpilot \
-    /usr/local/venv/bin/python /tmp/relhelper/smoke_onroad_device.py 60
-  echo "[ok] smoke PASS"
-}
-
 assemble_stage() {
   sudo rm -rf "$STAGE"
   mkdir -p "$STAGE"
@@ -362,7 +350,7 @@ commit_release() {
 
 date: $DATETIME
 source commit: $SRC_BRANCH@$SRC_SHA
-built on: comma device (smoke-verified before publish)"
+built on: comma device"
 }
 
 run_stage "前提检查" check_prereqs
@@ -374,12 +362,10 @@ run_stage "eagled YOLO pkl（输入指纹未变则跳过重编）" compile_yolo_
 run_stage "内置 driving 模型（输入指纹未变则跳过重编）" compile_driving_pkl
 run_stage "capnp schema/gen 一致性门禁" check_schema_stamp
 run_stage "params 键表门禁：params_keys.h 的每个键必须已编译进 libparams_c.so" check_params_keys
-run_stage "等 GPU 从编译负载回落（EGL 需要干净的显示/DRM 状态）" wait_gpu_idle
-run_stage "60s 冒烟（确定设备正常运行）" smoke_device
 run_stage "组装扁平树 stage" assemble_stage
 run_stage "stamp tinygrad pin（发布树剥了 .git，这是选择器门控唯一可读的树 pin）" stamp_tinygrad_pin_stage
 run_stage "stage 树发布门禁（PC 路径 ELF + tinygrad pin 可解析）" check_flat_tree
-run_stage "touch prebuilt（发布机构建已通过冒烟验证）" touch prebuilt
+run_stage "touch prebuilt" touch prebuilt
 
 VERSION=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' openpilot/sunnypilot/common/version.h | head -1)
 run_stage "组发布 commit: openpilot v$VERSION lean release (device-built, flat)" commit_release

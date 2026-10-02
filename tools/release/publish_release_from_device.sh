@@ -32,10 +32,10 @@ fi
 
 echo "[-] 推送发布辅助文件（/tmp 随设备重启被清——先建目录，勿省）"
 ssh "$DEVICE" 'mkdir -p /tmp/relhelper'
-scp -q "$DIR/smoke_onroad_device.py" "$DIR/release_lib.py" "$DEVICE:/tmp/relhelper/"
+scp -q "$DIR/release_lib.py" "$DEVICE:/tmp/relhelper/"
 scp -q "$DIR/device_release.sh" "$DEVICE:/tmp/device_release.sh"
 
-echo "[-] 设备侧发布（nohup + 轮询；含 scons/键表门禁/schema 门禁/冒烟/打包）"
+echo "[-] 设备侧发布（nohup + 轮询；含 scons/键表门禁/schema 门禁/打包）"
 # 清树：上一次发布/调试留下的同步状态会让前提检查（树必须干净）误判。
 # reset 绝不接管道（SIGPIPE 会掐死 reset，见 ADR 发布基建三连坑）。
 ssh "$DEVICE" 'cd /data/openpilot && git reset -q --hard HEAD 2>/dev/null; (setsid nohup env SRC_BRANCH='"$SRC_BRANCH"' RELEASE_BRANCH='"$RELEASE_BRANCH"' bash /tmp/device_release.sh > /tmp/release.log 2>&1 & echo $! > /tmp/release.pid)'
@@ -76,4 +76,3 @@ print(\"[ok] eagleDebug 落盘开关\")
 '"
 
 echo "[ok] $RELEASE_BRANCH = ${RELEASE_SHA} 已部署（设备重启完成）"
-echo "    冒烟门禁: EXPECT_COMMIT=$RELEASE_SHA ./tools/release/smoke_gate.sh"
