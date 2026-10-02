@@ -23,10 +23,10 @@ class _Line:
     self.y = [float(y)] * 3                          # 相机系 y 右正
 
 
-def _model(half=HALF, probs=(0.9, 0.9), lane_change="off"):
+def _model(half=HALF, probs=(0.9, 0.9), lane_change="off", outer_probs=(0.5, 0.5), outer_half=3 * HALF):
   m = _NS(action=_NS(desiredCurvature=0.01), roadEdges=[], meta=_NS(laneChangeState=lane_change),
-          laneLines=[_Line(-half), _Line(-half), _Line(half), _Line(half)],
-          laneLineProbs=[0.5, probs[0], probs[1], 0.5], laneLineStds=[0.5, 0.1, 0.1, 0.5],
+          laneLines=[_Line(-outer_half), _Line(-half), _Line(half), _Line(outer_half)],
+          laneLineProbs=[outer_probs[0], probs[0], probs[1], outer_probs[1]], laneLineStds=[0.1, 0.1, 0.1, 0.1],
           position=_Line(0.0))
   m.position.yStd = [0.1] * 3
   return m
@@ -65,12 +65,12 @@ def _points(radar, v_ego):
 
 
 def _run(radar=(), *, frames=40, v_ego=20.0, enabled=True, lat_active=True, steering=False, lane_change="off",
-         half=HALF, probs=(0.9, 0.9), camera=None, detector=None):
+         half=HALF, probs=(0.9, 0.9), camera=None, detector=None, outer_probs=(0.5, 0.5), outer_half=3 * HALF):
   """radar = [(dRel, yRel[, 对地速度])] 或 callable(帧号) -> 同样的列表。返回 (每帧 plan, 最后一帧 debug, 最后一帧 state)。"""
   car_state = _NS(vEgo=v_ego, leftBlindspot=False, rightBlindspot=False, steeringPressed=steering)
   points = _NS(points=_points(radar(0) if callable(radar) else radar, v_ego),
                errors=_NS(canError=False, radarUnavailableTemporary=False))
-  sm = _SM(_model(half, probs, lane_change), car_state, points, _NS(latActive=lat_active),
+  sm = _SM(_model(half, probs, lane_change, outer_probs, outer_half), car_state, points, _NS(latActive=lat_active),
            {"modelV2": True, "carState": True, "radarTracks": True, "carControl": True})
   pm = _FakePubMaster()
   daemon = EagleDaemon(sm=sm, pm=pm, params=_Params(enabled), camera=camera, detector=detector)
@@ -330,3 +330,51 @@ def test_target_rows_carry_line_distance_and_pressure():
   assert state.pressureRight == pytest.approx(0.5)
   assert state.offsetCap == pytest.approx(CAP)
   assert debug.laneOffsetTarget == pytest.approx(RATE_STEP)
+
+
+# --- 变道清空(目标车道经车道线确认) ----------------------------------------------------
+# 目标车道:本车道线与再外一条线之间。外侧线默认概率 0.5 → 不可信 → 按本车道同宽推定。
+# 目标例:左邻道中心 yRel = 3.5。对地速度为第三项;v_ego=20。
+
+def _clear(radar, **kw):
+  state = _run(radar, frames=1, **kw)[2]
+  return str(state.changeClearLeftState), str(state.changeClearRightState)
+
+
+def test_slow_lead_in_own_lane_does_not_block_left_change():
+  assert _clear([(25.0, 0.2, 5.0)]) == ("clear", "clear")
+
+
+def test_near_zone_target_in_target_lane_blocks_that_side_only():
+  assert _clear([(5.0, 3.5, 30.0)]) == ("blocked", "clear")
+  assert _clear([(5.0, -3.5, 30.0)]) == ("clear", "blocked")
+
+
+def test_time_projection_blocks_slow_and_passes_far_fast():
+  assert _clear([(20.0, 3.5, 5.0)])[0] == "blocked"      # 20 + 5*4 = 40 <= 20*3
+  assert _clear([(30.0, 3.5, 25.0)])[0] == "clear"       # 30 + 25*4 = 130 > 60
+
+
+def test_unknown_speed_target_in_target_lane_blocks():
+  vision = {"camera": _FakeCamera([ROI]), "detector": _FakeDetector([_box_at(30.0, 3.5, "car")])}
+  assert _clear([], **vision)[0] == "blocked"
+
+
+def test_target_two_lanes_over_is_not_in_target_lane():
+  assert _clear([(20.0, 6.5, 5.0)]) == ("clear", "clear")
+
+
+def test_untrusted_outer_line_infers_same_width_target_lane():
+  assert _clear([(20.0, 5.0, 5.0)])[0] == "blocked"      # 推定 [1.75, 5.25]
+
+
+def test_trusted_outer_line_is_used_instead_of_inference():
+  narrow = {"outer_probs": (0.9, 0.9), "outer_half": HALF + 2.5}   # 邻道只有 2.5m 宽 → [1.75, 4.25]
+  assert _clear([(20.0, 4.8, 5.0)], **narrow)[0] == "clear"
+  assert _clear([(20.0, 3.5, 5.0)], **narrow)[0] == "blocked"
+
+
+def test_untrusted_ego_lane_line_makes_clear_unknown_but_legacy_bool_does_not_block():
+  _, _, state = _run([(5.0, 3.5, 30.0)], frames=1, probs=(0.9, 0.3))
+  assert str(state.changeClearLeftState) == "unknown" and str(state.changeClearRightState) == "unknown"
+  assert state.changeClearLeft is True and state.changeClearRight is True

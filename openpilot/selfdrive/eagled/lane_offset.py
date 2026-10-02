@@ -30,6 +30,13 @@ class LaneGeometry:
   path_x: tuple
   path_y: tuple
   path_std: tuple
+  # 变道目标车道的外边界(laneLines[0]/[3]);置信不足时同宽推定,故只带 valid + 几何
+  outer_left_valid: bool = False
+  outer_left_x: tuple = ()
+  outer_left_y: tuple = ()
+  outer_right_valid: bool = False
+  outer_right_x: tuple = ()
+  outer_right_y: tuple = ()
 
 
 def lane_geometry(model_v2, camera_to_front: float) -> LaneGeometry | None:
@@ -49,8 +56,11 @@ def lane_geometry(model_v2, camera_to_front: float) -> LaneGeometry | None:
   left, right = vgeo.lane_lines[C.LANE_IDX_LEFT], vgeo.lane_lines[C.LANE_IDX_RIGHT]
   if left is None or right is None:
     return None
-  left_valid = float(probs[C.LANE_IDX_LEFT]) >= C.LANE_PROB_MIN and float(stds[C.LANE_IDX_LEFT]) <= C.LANE_STD_MAX
-  right_valid = float(probs[C.LANE_IDX_RIGHT]) >= C.LANE_PROB_MIN and float(stds[C.LANE_IDX_RIGHT]) <= C.LANE_STD_MAX
+  def confident(idx):
+    return idx < min(len(probs), len(stds)) and float(probs[idx]) >= C.LANE_PROB_MIN and float(stds[idx]) <= C.LANE_STD_MAX
+
+  left_valid, right_valid = confident(C.LANE_IDX_LEFT), confident(C.LANE_IDX_RIGHT)
+  outer_left, outer_right = vgeo.lane_lines[C.LANE_IDX_OUTER_LEFT], vgeo.lane_lines[C.LANE_IDX_OUTER_RIGHT]
   path = vgeo.path
   path_x = path.x if path is not None else ()
   path_std = tuple(getattr(position, "yStd", ()) or ())
@@ -60,6 +70,12 @@ def lane_geometry(model_v2, camera_to_front: float) -> LaneGeometry | None:
     right_x=right.x, right_y=right.y,
     path_x=path_x, path_y=(path.y if path is not None else ()),
     path_std=path_std if len(path_std) == len(path_x) else (),
+    outer_left_valid=outer_left is not None and confident(C.LANE_IDX_OUTER_LEFT),
+    outer_left_x=outer_left.x if outer_left is not None else (),
+    outer_left_y=outer_left.y if outer_left is not None else (),
+    outer_right_valid=outer_right is not None and confident(C.LANE_IDX_OUTER_RIGHT),
+    outer_right_x=outer_right.x if outer_right is not None else (),
+    outer_right_y=outer_right.y if outer_right is not None else (),
   )
 
 
@@ -118,6 +134,40 @@ def target_pressure(dRel: float, yRel: float, cls, geo: LaneGeometry, approach: 
     return side, line_distance, 0.0
   trigger = C.TRIGGER_LINE_DISTANCE_VRU if cls in C.VRU_CLASSES else C.TRIGGER_LINE_DISTANCE_VEHICLE
   return side, line_distance, min(max((trigger - line_distance) / trigger, 0.0), 1.0)
+
+
+def _in_target_lane(d_rel: float, y_rel: float, geo: LaneGeometry, side: int) -> bool:
+  """目标中心是否在 side(+1 左 / -1 右)的目标车道内:本车道该侧线与再外一条线之间。
+
+  外侧线置信不足时按本车道同宽推定(多数路段外侧线置信偏低,这是默认回退)。
+  """
+  left = float(np.interp(d_rel, geo.left_x, geo.left_y))
+  right = float(np.interp(d_rel, geo.right_x, geo.right_y))
+  width = left - right
+  if side > 0:
+    outer = float(np.interp(d_rel, geo.outer_left_x, geo.outer_left_y)) if geo.outer_left_valid else left + width
+    return left < y_rel <= outer
+  outer = float(np.interp(d_rel, geo.outer_right_x, geo.outer_right_y)) if geo.outer_right_valid else right - width
+  return outer <= y_rel < right
+
+
+def _blocks_lane_change(t, v_ego: float) -> bool:
+  """近区硬拦;速度未知不放宽;时间投影(目标 LEAD_TIME 秒后位置 ≤ 自车 EGO_TIME 秒后位置,carrotpilot 4s/3s)。"""
+  if t.dRel <= C.LANE_CHANGE_NEAR_D or t.vRel is None:
+    return True
+  return t.dRel + (t.vRel + v_ego) * C.LANE_CHANGE_LEAD_TIME_S <= v_ego * C.LANE_CHANGE_EGO_TIME_S
+
+
+def change_clear(targets: Iterable, geo: LaneGeometry | None, v_ego: float) -> tuple[str, str]:
+  """变道清空(左, 右):"clear" / "blocked" / "unknown"(本车道线不可信)。
+
+  只看经车道线确认位于目标车道内、dRel 在窗口内的目标;本车道的慢前车因此不拦往左超它。
+  """
+  if not lane_trusted(geo):
+    return "unknown", "unknown"
+  nearby = [t for t in targets if 0.0 < t.dRel <= C.SIDE_WINDOW_D]
+  return tuple("blocked" if any(_in_target_lane(t.dRel, t.yRel, geo, side) and _blocks_lane_change(t, v_ego)
+                                for t in nearby) else "clear" for side in (1, -1))
 
 
 HOLD_MATCH_TOLERANCE = 3.0   # m, 可见目标 dRel 落在保持记录这一拍推算走过的区间(±此值)内,视为同一目标

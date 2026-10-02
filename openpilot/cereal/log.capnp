@@ -1296,13 +1296,21 @@ struct EagleState {
   sideLeadRight @13 :EagleSideLead;  # C9：右侧最紧约束目标
   budgetLeft @14 :Float32;        # C9：左侧横向预算 m；999.0 = 无侧向约束
   budgetRight @15 :Float32;       # C9：右侧横向预算 m；999.0 = 无侧向约束
-  changeClearLeft @16 :Bool;      # C9+：目标道（左）变道清空（时间投影放行远快侧车）
-  changeClearRight @17 :Bool;     # C9+：目标道（右）变道清空
+  changeClearLeft @16 :Bool;      # 兼容旧消费者：未知按不拦；新消费者读 changeClearLeftState
+  changeClearRight @17 :Bool;     # 兼容旧消费者，同上
   pressureLeft @18 :Float32;      # 左侧侧向压力 0~1
   pressureRight @19 :Float32;     # 右侧侧向压力 0~1
   laneOffsetTarget @20 :Float32;  # 车道内偏移目标 m（左正，已过速率限制）
   offsetCap @21 :Float32;         # 贴线上限 m
   inactiveReason @22 :Text;       # 不生效原因；"" = 生效门全通
+  changeClearLeftState @23 :ChangeClear;   # 目标车道（左）变道清空：车道线确认目标车道；本车道线不可信 = unknown
+  changeClearRightState @24 :ChangeClear;
+
+  enum ChangeClear {
+    unknown @0;   # 本车道线不可信，无法判定；消费者不参与门控（回退 BSM + relc）
+    clear @1;
+    blocked @2;
+  }
 }
 
 struct EagleSideLead {

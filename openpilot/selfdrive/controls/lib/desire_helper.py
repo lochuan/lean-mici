@@ -11,11 +11,11 @@ TurnDirection = custom.ModelDataV2SP.TurnDirection
 LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
 LANE_CHANGE_TIME_MAX = 10.
 LANE_CHANGE_START_TIME = 0.5
-# C9+ 变道清空门:eagleState 的 changeClearLeft/Right 为 False -> 拦截启动。
-# 清空判定在 eagled（单一事实来源,全量对象时间投影）:近区硬拦、速度未知
-# （视觉独有目标）不放宽、"远而快"的侧车按 carrotpilot 4s/3s 投影放行。
-# eagleState 缺失/过期时清空标志为 None,完全不参与门控（回退纯 BSM 布尔
-# + relc 边缘）,绝不因感知缺失锁死变道。
+# C9+ 变道清空门:清空标志为 False -> 拦截启动。清空判定在 eagled
+# （change_clear）:只看车道线确认位于目标车道内的目标,近区硬拦、速度未知
+# （视觉独有目标）不放宽、"远而快"的车按 carrotpilot 4s/3s 投影放行。
+# eagleState 缺失/过期、或本车道线不可信（清空状态 unknown）时标志为 None,
+# 完全不参与门控（回退纯 BSM 布尔 + relc 边缘）,绝不因感知缺失锁死变道。
 
 TURN_DESIRES = {
   TurnDirection.none: log.Desire.none,

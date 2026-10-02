@@ -48,6 +48,8 @@ LANE_CHANGE_NEAR_D = 6.0       # 近区硬拦 m:贴身目标无论投影如何�
 # laneLines[1]=本道左边界, [2]=本道右边界; roadEdges[0]=左沿, [1]=右沿。
 LANE_IDX_LEFT = 1    # laneLines 索引: 本道左边界
 LANE_IDX_RIGHT = 2  # laneLines 索引: 本道右边界
+LANE_IDX_OUTER_LEFT = 0    # laneLines 索引: 左邻道外侧线(变道目标车道的外边界)
+LANE_IDX_OUTER_RIGHT = 3   # laneLines 索引: 右邻道外侧线
 
 # 类别半宽(m): 侵入判据用车身边缘,不是中心 —— "车屁股侵入车道"的语义来源。
 CLASS_HALF_WIDTHS_M = {

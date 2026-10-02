@@ -20,5 +20,10 @@ def test_eagle_gate_routes_through_stream_gate():
 def test_eagle_gate_falls_back_to_none_flags():
   # 不新鲜 → 清空标志传 None（desire_helper 的回退语义），不能透传 stale 标志
   src = inspect.getsource(modeld)
-  assert "change_clear_left=eagle_state.changeClearLeft if eagle_fresh else None" in src
-  assert "change_clear_right=eagle_state.changeClearRight if eagle_fresh else None" in src
+  assert "CHANGE_CLEAR_FLAGS[str(eagle_state.changeClearLeftState)] if eagle_fresh else None" in src
+  assert "CHANGE_CLEAR_FLAGS[str(eagle_state.changeClearRightState)] if eagle_fresh else None" in src
+
+
+def test_unknown_clear_state_maps_to_none():
+  # 本车道线不可信 → unknown → None（不参与门控，回退 BSM + relc）
+  assert modeld.CHANGE_CLEAR_FLAGS == {"unknown": None, "clear": True, "blocked": False}

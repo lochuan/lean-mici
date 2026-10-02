@@ -38,6 +38,9 @@ from openpilot.sunnypilot.selfdrive.controls.lib.relc import RoadEdgeLaneChangeC
 
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
+# eagleState.changeClear*State -> desire_helper 清空标志:unknown(本车道线不可信)传 None 不参与门控
+CHANGE_CLEAR_FLAGS = {"unknown": None, "clear": True, "blocked": False}
+
 LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
 # 04 号 C-2：大模型 action_t 用 chestnut 公式（bundle overrides 实测 lat=.1/long=.3，
@@ -451,8 +454,8 @@ def main(demo=False):
       eagle_fresh = eagle_status is StreamStatus.FRESH
       eagle_state = sm['eagleState']
       DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, left_edge, right_edge,
-                change_clear_left=eagle_state.changeClearLeft if eagle_fresh else None,
-                change_clear_right=eagle_state.changeClearRight if eagle_fresh else None)
+                change_clear_left=CHANGE_CLEAR_FLAGS[str(eagle_state.changeClearLeftState)] if eagle_fresh else None,
+                change_clear_right=CHANGE_CLEAR_FLAGS[str(eagle_state.changeClearRightState)] if eagle_fresh else None)
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction

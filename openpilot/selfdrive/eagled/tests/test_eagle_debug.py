@@ -279,7 +279,7 @@ def test_budgets_and_side_leads_published():
 
 
 def test_bsm_maps_to_zero_budget_without_a_lead():
-  # BSM 左 -> budget_left 0 + 不清空,lead 无可指
+  # BSM 左 -> budget_left 0,lead 无可指
   model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
                  meta=_NS(laneChangeState="off"))
   car_state = _NS(vEgo=20.0, leftBlindspot=True, rightBlindspot=False, steeringPressed=False)
@@ -291,5 +291,5 @@ def test_bsm_maps_to_zero_budget_without_a_lead():
   daemon.update(C.ENTER_HOLD_S + 0.01)
   st = _state_msgs(pm)[-1].eagleState
   assert st.budgetLeft == 0.0 and st.sideLeadLeft.valid is False
-  assert st.changeClearLeft is False          # BSM 侧不清空(变道门消费)
-  assert st.changeClearRight is True          # 右侧同速远车投影放行
+  # BSM 不在 eagled 的变道清空里(desire_helper 自己否决),这里只看车道线确认的目标车道
+  assert st.changeClearLeft is True and st.changeClearRight is True

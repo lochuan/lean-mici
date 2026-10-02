@@ -73,7 +73,7 @@ class TestBudgetGate:
     assert dh.lane_change_state == LaneChangeState.preLaneChange   # 没启动
 
   def test_not_clear_blocks_like_bsm(self, dh):
-    # BSM 报警在 eagled 侧即映射为不清空:必须拦
+    # 清空标志 False 即拦启动
     _to_pre(dh)
     dh.update(_cs(torque=0.5), True, 0.0, change_clear_left=NOT_CLEAR, change_clear_right=CLEAR)
     assert dh.lane_change_state == LaneChangeState.preLaneChange
@@ -137,5 +137,5 @@ class TestNoRecheckAfterStarting:
     assert dh.lane_change_state == LaneChangeState.laneChangeStarting
 
 
-# 清空语义(eagled side_pictures)在 test_side_budget.py 的 TestChangeClear
-# 中钉死;desire_helper 只消费布尔,无本地阈值。
+# 清空语义(eagled change_clear)在 eagled/tests/test_lane_offset.py 的变道清空段
+# 中钉死;desire_helper 只消费布尔/None,无本地阈值。
