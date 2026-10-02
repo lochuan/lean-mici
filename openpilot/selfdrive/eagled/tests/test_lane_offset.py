@@ -8,6 +8,7 @@
 import pytest
 
 from openpilot.selfdrive.eagled.eagled import EagleDaemon
+from openpilot.selfdrive.eagled.lane_offset import approach_speed
 from openpilot.selfdrive.eagled.tests.test_daemon_fusion import ROI, _box_at, _FakeCamera, _FakeDetector, _FakePubMaster, _NS
 
 HALF = 1.75
@@ -57,11 +58,17 @@ class _Params:
     return None
 
 
+def _points(radar, v_ego):
+  # (dRel, yRel) 默认对向来车(对地 -10 m/s,接近速度 v_ego+10);(dRel, yRel, 对地速度) 显式指定
+  return [_NS(dRel=e[0], yRel=e[1], vRel=(e[2] if len(e) > 2 else -10.0) - v_ego, trackId=i)
+          for i, e in enumerate(radar)]
+
+
 def _run(radar=(), *, frames=40, v_ego=20.0, enabled=True, lat_active=True, steering=False, lane_change="off",
          half=HALF, probs=(0.9, 0.9), camera=None, detector=None):
-  """radar = [(dRel, yRel)],都是对地 15m/s 的移动点。返回 (每帧 plan, 最后一帧 debug, 最后一帧 state)。"""
+  """radar = [(dRel, yRel[, 对地速度])] 或 callable(帧号) -> 同样的列表。返回 (每帧 plan, 最后一帧 debug, 最后一帧 state)。"""
   car_state = _NS(vEgo=v_ego, leftBlindspot=False, rightBlindspot=False, steeringPressed=steering)
-  points = _NS(points=[_NS(dRel=d, yRel=y, vRel=15.0 - v_ego, trackId=i) for i, (d, y) in enumerate(radar)],
+  points = _NS(points=_points(radar(0) if callable(radar) else radar, v_ego),
                errors=_NS(canError=False, radarUnavailableTemporary=False))
   sm = _SM(_model(half, probs, lane_change), car_state, points, _NS(latActive=lat_active),
            {"modelV2": True, "carState": True, "radarTracks": True, "carControl": True})
@@ -69,6 +76,8 @@ def _run(radar=(), *, frames=40, v_ego=20.0, enabled=True, lat_active=True, stee
   daemon = EagleDaemon(sm=sm, pm=pm, params=_Params(enabled), camera=camera, detector=detector)
   plans = []
   for i in range(frames):
+    if callable(radar):
+      points.points = _points(radar(i), v_ego)
     daemon.update(i * DT)
     plans.append([m for s, m in pm.sent if s == "lateralManeuverPlan"][-1])
   debug = [m for s, m in pm.sent if s == "eagleDebug"][-1].eagleDebug
@@ -139,6 +148,92 @@ def test_far_target_is_ignored_and_range_edge_counts():
   assert edge.pressureRight == pytest.approx(0.5)
 
 
+# --- 到达时间窗口(默认 4.0s):到达时间 = dRel / 接近速度 -------------------------------
+
+RIGHT_Y = -(HALF + 0.75)   # 线距 0.25 → 压力 0.5(机动车)
+
+
+def test_oncoming_fast_car_triggers_far_before_a_slow_one_at_the_same_distance():
+  _, fast, _ = _run([(55.0, RIGHT_Y)])             # 接近速度 30 → 1.8s
+  _, slow, _ = _run([(55.0, RIGHT_Y, 15.0)])       # 接近速度 5 → 11s
+  assert fast.pressureRight == pytest.approx(0.5)
+  assert slow.pressureRight == 0.0
+
+
+def test_arrival_window_edge_counts():
+  _, edge, _ = _run([(20.0, RIGHT_Y, 15.0)])       # 20 / 5 = 4.0s
+  _, late, _ = _run([(20.5, RIGHT_Y, 15.0)])       # 4.1s
+  assert edge.pressureRight == pytest.approx(0.5)
+  assert late.pressureRight == 0.0
+
+
+def test_receding_or_matching_speed_target_is_not_counted():
+  _, receding, _ = _run([(10.0, RIGHT_Y, 25.0)])   # 比自车快,接近速度 -5
+  _, matching, _ = _run([(10.0, RIGHT_Y, 20.0)])   # 接近速度 0
+  assert receding.pressureRight == 0.0 and matching.pressureRight == 0.0
+
+
+def test_vision_only_target_assumes_slow_same_direction_traffic():
+  # 速度未知:接近速度 = max(自车速度 - 5 m/s, 1 m/s 下限);雷达实测则 = -vRel
+  assert approach_speed(None, 20.0) == 15.0
+  assert approach_speed(None, 5.5) == 1.0
+  assert approach_speed(-30.0, 20.0) == 30.0
+
+
+def test_vision_only_target_uses_the_assumed_approach_speed_for_the_window():
+  def vision(d_rel):   # 自车 8 m/s → 假设接近速度 3 m/s:窗口内最远 12m
+    return _run(camera=_FakeCamera([ROI]), detector=_FakeDetector([_box_at(d_rel, -(HALF + 0.3 + 0.5), "person")]),
+                v_ego=8.0, frames=1)[1]
+  assert vision(10.0).pressureRight > 0.0
+  assert vision(14.0).pressureRight == 0.0
+
+
+# --- 并行保持:目标离开前向视野后按推算保留压力 ----------------------------------------
+# 目标对地 15 m/s、自车 20 m/s → 接近速度 5 m/s。dRel 从 18m 起收缩,第 15 帧(dRel 3m)是最后可见帧。
+
+VANISH_FRAME = 16
+
+
+def _overtaken(vanish_frame=VANISH_FRAME, ground_speed=15.0, start=18.0):
+  closing = 20.0 - ground_speed
+  return lambda i: [(start - closing * DT * i, RIGHT_Y, ground_speed)] if i < vanish_frame else []
+
+
+def _frames_after_vanish(seconds):
+  return VANISH_FRAME + round(seconds / DT)
+
+
+def test_pressure_is_held_after_target_leaves_view():
+  plans, debug, _ = _run(_overtaken(), frames=_frames_after_vanish(1.0))
+  assert debug.pressureRight == pytest.approx(0.5)      # 推算 dRel 3 → -2,还没超过
+  assert debug.holdingTargets == 1
+  assert plans[-1].valid and _offset(plans[-1]) == pytest.approx(0.5 * CAP)
+
+
+def test_hold_releases_once_ego_has_passed_target_plus_length_margin():
+  # 最后可见 dRel 3m → -10m(车长余量 10m)需 13/5 = 2.6s
+  _, held, _ = _run(_overtaken(), frames=_frames_after_vanish(2.2))
+  _, released, _ = _run(_overtaken(), frames=_frames_after_vanish(3.0))
+  assert held.pressureRight == pytest.approx(0.5) and held.holdingTargets == 1
+  assert released.pressureRight == 0.0 and released.holdingTargets == 0
+
+
+def test_hold_is_capped_by_max_duration():
+  # 接近速度 1.5 m/s:推算超过要 8s 以上,最长时限 5s 先到
+  slow = _overtaken(vanish_frame=VANISH_FRAME, ground_speed=18.5, start=7.0)
+  _, held, _ = _run(slow, frames=_frames_after_vanish(4.5))
+  _, released, _ = _run(slow, frames=_frames_after_vanish(5.4))
+  assert held.pressureRight == pytest.approx(0.5)
+  assert released.pressureRight == 0.0
+
+
+def test_visible_target_moving_away_laterally_is_not_held():
+  def moves_out(i):
+    return [(10.0, RIGHT_Y if i < 10 else -(HALF + 1.5), 15.0)]   # 线距 1.0 → 压力 0
+  _, debug, _ = _run(moves_out, frames=14)
+  assert debug.pressureRight == 0.0 and debug.holdingTargets == 0
+
+
 def test_unconfirmed_static_radar_point_does_not_trigger():
   car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
   guardrail = _NS(points=[_NS(dRel=30.0, yRel=-2.5, vRel=-20.0, trackId=1)],
@@ -200,9 +295,9 @@ def test_offset_builds_at_rate_limit():
 
 
 def test_offset_released_at_rate_limit_and_stays_valid_until_zero():
-  # 前 40 帧有目标,之后目标消失:偏移按速率回 0,回 0 前 plan 保持 valid
+  # 前 40 帧有目标贴线,之后目标侧移走(仍可见、压力 0):偏移按速率回 0,回 0 前 plan 保持 valid
   car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
-  radar = _NS(points=[_NS(dRel=30.0, yRel=-(HALF + 0.75), vRel=-5.0, trackId=1)],
+  radar = _NS(points=[_NS(dRel=30.0, yRel=-(HALF + 0.75), vRel=-30.0, trackId=1)],
               errors=_NS(canError=False, radarUnavailableTemporary=False))
   sm = _SM(_model(), car_state, radar, _NS(latActive=True),
            {"modelV2": True, "carState": True, "radarTracks": True, "carControl": True})
@@ -211,7 +306,7 @@ def test_offset_released_at_rate_limit_and_stays_valid_until_zero():
   for i in range(40):
     daemon.update(i * DT)
   held = _offset(pm.sent[-1][1])
-  radar.points = []
+  radar.points = [_NS(dRel=30.0, yRel=-(HALF + 3.0), vRel=-30.0, trackId=1)]
   daemon.update(40 * DT)
   after = pm.sent[-1][1]
   assert _offset(after) == pytest.approx(held - RATE_STEP)

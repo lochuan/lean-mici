@@ -47,7 +47,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.camera_stream import CameraStream
 from openpilot.selfdrive.eagled.device_health import DeviceHealth
-from openpilot.selfdrive.eagled.lane_offset import LaneOffsetPlanner, OffsetDecision, lane_trusted, target_pressure
+from openpilot.selfdrive.eagled.lane_offset import LaneOffsetPlanner, OffsetDecision, approach_speed, lane_trusted, target_pressure
 from openpilot.selfdrive.eagled.perception import PerceptionCore, PerceptionFrame, VisionWorker, gate_target, radar_point_counts, radar_point_key
 from openpilot.selfdrive.eagled.yolo_detector import DEFAULT_FPS
 
@@ -177,11 +177,11 @@ class EagleDaemon:
     vision_pair_ids = {id(p[1]): p[2] for p in frame.pairs}
     geo = frame.lane_geo
 
-    def distance_pressure(d_rel, y_rel, cls, counts=True):
+    def distance_pressure(d_rel, y_rel, cls, v_rel, counts=True):
       # 线距/压力与规划同源(target_pressure);被融合丢弃的点(静止未确认)压力为 0
       if not lane_trusted(geo):
         return 999.0, 0.0
-      side, line_distance, pressure = target_pressure(d_rel, y_rel, cls, geo)
+      side, line_distance, pressure = target_pressure(d_rel, y_rel, cls, geo, approach_speed(v_rel, v_ego))
       return (line_distance if side else 999.0), (pressure if counts else 0.0)
 
     rows: list[tuple[bool, dict]] = []
@@ -191,7 +191,7 @@ class EagleDaemon:
       # vision class weight (fuse_targets), not the vehicle default.
       cls = frame.vision_cls_by_key.get(key)
       in_gate, lane = gate_target(float(point.dRel), float(point.yRel), cls, frame.lane_geo)
-      line_distance, pressure = distance_pressure(float(point.dRel), float(point.yRel), cls,
+      line_distance, pressure = distance_pressure(float(point.dRel), float(point.yRel), cls, float(point.vRel),
                                    radar_point_counts(point, v_ego, frame.confirmed_keys))
       rows.append((in_gate, {
         "dRel": float(point.dRel), "yRel": float(point.yRel), "vRel": float(point.vRel),
@@ -205,7 +205,7 @@ class EagleDaemon:
       cls = det.get("cls")
       in_gate, lane = gate_target(float(det["dRel"]), float(det["yRel"]), cls, frame.lane_geo)
       weight = C.class_weight(cls)
-      line_distance, pressure = distance_pressure(float(det["dRel"]), float(det["yRel"]), cls)
+      line_distance, pressure = distance_pressure(float(det["dRel"]), float(det["yRel"]), cls, None)
       rows.append((in_gate, {
         "dRel": float(det["dRel"]), "yRel": float(det["yRel"]), "vRel": 0.0,
         "cls": cls or "", "conf": float(det.get("conf", 1.0)),
@@ -236,6 +236,7 @@ class EagleDaemon:
     dbg.laneOffsetTarget = float(decision.offset)
     dbg.offsetCap = float(decision.cap)
     dbg.inactiveReason = decision.reason
+    dbg.holdingTargets = decision.holding
     dbg.bsmLeft = bool(car_state.leftBlindspot)
     dbg.bsmRight = bool(car_state.rightBlindspot)
     dbg.vEgo = float(car_state.vEgo)

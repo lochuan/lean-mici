@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -91,12 +91,19 @@ def lane_offset_correction(geo: LaneGeometry, desired_offset: float) -> float:
   return float(2.0 * (target - path_offset) / look ** 2)
 
 
-def target_pressure(dRel: float, yRel: float, cls, geo: LaneGeometry) -> tuple[int, float, float]:
+def approach_speed(v_rel: float | None, v_ego: float) -> float:
+  """接近速度 = 自车速度 - 目标对地纵向速度(= -vRel)。vRel 未知(纯视觉)按假设速度保守推算。"""
+  if v_rel is None:
+    return max(v_ego - C.VISION_TARGET_SPEED, C.APPROACH_SPEED_MIN)
+  return -v_rel
+
+
+def target_pressure(dRel: float, yRel: float, cls, geo: LaneGeometry, approach: float) -> tuple[int, float, float]:
   """单个目标 -> (侧, 线距, 压力)。侧:+1 左邻 / -1 右邻 / 0 非邻道目标(中心在本车道内)。
 
   线距 = 目标靠近自车一侧的车身边缘到本车道对应车道线(目标 dRel 处插值)的横向距离,
   侵入为负。压力 ``clamp((触发线距 - 线距)/触发线距, 0, 1)``,触发线距按类别;
-  不在 (0, 距离上限] 内的目标压力为 0。
+  dRel 不在 (0, 距离上限] 内、接近速度 ≤ 0、或到达时间 dRel/接近速度 超过时间窗口的目标压力为 0。
   """
   half = C.class_half_width(cls)
   left_line = float(np.interp(dRel, geo.left_x, geo.left_y))
@@ -107,10 +114,23 @@ def target_pressure(dRel: float, yRel: float, cls, geo: LaneGeometry) -> tuple[i
     side, line_distance = -1, right_line - (yRel + half)
   else:
     return 0, float("inf"), 0.0
-  if not (0.0 < dRel <= C.TRIGGER_RANGE_MAX):
+  if not (0.0 < dRel <= C.TRIGGER_RANGE_MAX and approach > 0.0 and dRel / approach <= C.TIME_WINDOW_S):
     return side, line_distance, 0.0
   trigger = C.TRIGGER_LINE_DISTANCE_VRU if cls in C.VRU_CLASSES else C.TRIGGER_LINE_DISTANCE_VEHICLE
   return side, line_distance, min(max((trigger - line_distance) / trigger, 0.0), 1.0)
+
+
+HOLD_MATCH_TOLERANCE = 3.0   # m, 可见目标 dRel 落在保持记录这一拍推算走过的区间(±此值)内,视为同一目标
+
+
+@dataclass(frozen=True)
+class _Hold:
+  """一个邻道目标的并行保持记录:最后一次可见时的 dRel / 接近速度 / 压力,dRel 随推算收缩。"""
+  side: int
+  dRel: float
+  approach: float
+  pressure: float
+  seen_t: float
 
 
 @dataclass(frozen=True)
@@ -121,6 +141,7 @@ class OffsetDecision:
   pressure_left: float
   pressure_right: float
   reason: str              # 不生效原因;"" = 生效门全通
+  holding: int = 0         # 正在并行保持(已离开视野、按推算保留压力)的目标数
 
 
 class LaneOffsetPlanner:
@@ -129,6 +150,7 @@ class LaneOffsetPlanner:
   def __init__(self) -> None:
     self._offset = 0.0
     self._last_t: float | None = None
+    self._holds: list[_Hold] = []
 
   def update(self, targets: Iterable, geo: LaneGeometry | None, v_ego: float, now: float, *,
              enabled: bool, lat_active: bool, steering_pressed: bool, lane_change_active: bool) -> OffsetDecision:
@@ -147,22 +169,47 @@ class LaneOffsetPlanner:
     else:
       reason = ""
 
-    pressure = {1: 0.0, -1: 0.0}
-    cap = 0.0
-    if not reason:
-      cap = lane_offset_cap(geo)
-      for t in targets:
-        side, _line_distance, p = target_pressure(t.dRel, t.yRel, t.cls, geo)
-        if side:
-          pressure[side] = max(pressure[side], p)
-    target = cap * (pressure[-1] - pressure[1])
-
     dt = C.DT_5HZ if self._last_t is None else min(max(now - self._last_t, 0.0), 1.0)
     self._last_t = now
+
+    pressure = {1: 0.0, -1: 0.0}
+    cap = 0.0
+    holding = 0
+    if reason:
+      self._holds = []
+    else:
+      cap = lane_offset_cap(geo)
+      seen = []   # 当前可见、在前方的邻道目标(含压力 0 的):用来认出哪些保持记录仍可见
+      for t in targets:
+        approach = approach_speed(t.vRel, v_ego)
+        side, _line_distance, p = target_pressure(t.dRel, t.yRel, t.cls, geo, approach)
+        if side:
+          pressure[side] = max(pressure[side], p)
+          if t.dRel > 0.0:
+            seen.append(_Hold(side, t.dRel, approach, p, now))
+      kept = self._advance_holds(seen, dt, now)
+      holding = len(kept)
+      for h in kept:
+        pressure[h.side] = max(pressure[h.side], h.pressure)
+      self._holds = kept + [h for h in seen if h.pressure > 0.0]
+    target = cap * (pressure[-1] - pressure[1])
+
     step = C.OFFSET_RATE * dt
     self._offset += min(max(target - self._offset, -step), step)
     if not reason:
       self._offset = min(max(self._offset, -cap), cap)
 
     valid = not reason and (pressure[1] > 0.0 or pressure[-1] > 0.0 or abs(self._offset) > 1e-3)
-    return OffsetDecision(valid, self._offset, cap, pressure[1], pressure[-1], reason)
+    return OffsetDecision(valid, self._offset, cap, pressure[1], pressure[-1], reason, holding)
+
+  def _advance_holds(self, seen: list[_Hold], dt: float, now: float) -> list[_Hold]:
+    """推算上一拍的保持记录;仍可见的交还给 seen,已超过目标 + 车长余量或超时的丢弃,其余继续保持。"""
+    kept = []
+    for h in self._holds:
+      lo, hi = h.dRel - max(h.approach, 0.0) * dt, h.dRel
+      visible = any(s.side == h.side and lo - HOLD_MATCH_TOLERANCE <= s.dRel <= hi + HOLD_MATCH_TOLERANCE for s in seen)
+      h = replace(h, dRel=lo)
+      passed = h.dRel < -C.HOLD_PASS_MARGIN or now - h.seen_t > C.HOLD_MAX_S
+      if not (visible or passed):
+        kept.append(h)
+    return kept

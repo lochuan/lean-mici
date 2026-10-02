@@ -1271,6 +1271,7 @@ struct EagleDebug {
   laneOffsetTarget @24 :Float32;  # 车道内偏移目标 m（左正，已过速率限制）
   offsetCap @25 :Float32;      # 贴线上限 m
   inactiveReason @26 :Text;    # 不生效原因；"" = 生效门全通
+  holdingTargets @27 :UInt8;   # 并行保持中（已离开视野、按推算保留压力）的目标数
 }
 
 struct EagleState {

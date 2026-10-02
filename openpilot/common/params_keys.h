@@ -34,6 +34,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AvoidanceMaxRange", {PERSISTENT, FLOAT, "60.0"}},          // 避让目标距离上限 m
     {"AvoidanceMinSpeedKph", {PERSISTENT, FLOAT, "15.0"}},       // 避让车速下限 km/h
     {"AvoidanceLateralRate", {PERSISTENT, FLOAT, "0.3"}},        // 车道内偏移横向速率 m/s
+    {"AvoidanceTimeWindow", {PERSISTENT, FLOAT, "4.0"}},         // 到达时间窗口 s
+    {"AvoidanceHoldMax", {PERSISTENT, FLOAT, "5.0"}},            // 并行保持最长时限 s
+    {"AvoidanceVisionTargetSpeed", {PERSISTENT, FLOAT, "5.0"}},  // 纯视觉目标假设对地速度 m/s
     {"BigmodelServerHost", {PERSISTENT | BACKUP, STRING, ""}},  // 06/07 号：手动 IP；空 = mDNS 自动发现
     {"BigmodelToggle", {PERSISTENT | BACKUP, BOOL}},          // 07 号：「远程大模型」开关（仅 offroad 可改；默认关，同 AdbEnabled）
     {"BigmodelLinkState", {CLEAR_ON_MANAGER_START | DONT_LOG, STRING, ""}},  // 06 号：bigmodeld 写的链路状态串

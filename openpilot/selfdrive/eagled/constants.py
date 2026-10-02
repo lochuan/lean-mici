@@ -85,6 +85,11 @@ TRIGGER_LINE_DISTANCE_VEHICLE = 0.5      # 机动车(含未知类别)触发线�
 TRIGGER_RANGE_MAX = 60.0       # 距离上限 m:更远的目标不计入
 V_EGO_MIN_KPH = 15.0           # 车速下限 km/h
 OFFSET_RATE = 0.3              # 车道内偏移的横向速率限制 m/s
+TIME_WINDOW_S = 4.0            # 到达时间窗口 s:到达时间 = dRel / 接近速度,超过不计入
+HOLD_MAX_S = 5.0               # 并行保持最长时限 s:目标离开视野后最多再保留这么久
+VISION_TARGET_SPEED = 5.0      # 纯视觉目标假设对地纵向速度 m/s(速度未知时保守推算)
+APPROACH_SPEED_MIN = 1.0       # 纯视觉目标接近速度下限 m/s
+HOLD_PASS_MARGIN = 10.0        # 并行保持的车长余量 m:dRel 低于 -此值才算自车已完全超过目标(目标车长 + 自车车长)
 
 
 # Camera -> car-frame projection (spec §4). Initial mount values; the P0
@@ -165,6 +170,9 @@ _PARAM_OVERRIDABLE: dict[str, tuple[str, float, float, float]] = {
   "AvoidanceMaxRange":         ("TRIGGER_RANGE_MAX", TRIGGER_RANGE_MAX, 20.0, 100.0),
   "AvoidanceMinSpeedKph":      ("V_EGO_MIN_KPH", V_EGO_MIN_KPH, 0.0, 60.0),
   "AvoidanceLateralRate":      ("OFFSET_RATE", OFFSET_RATE, 0.05, 1.0),
+  "AvoidanceTimeWindow":       ("TIME_WINDOW_S", TIME_WINDOW_S, 1.0, 10.0),
+  "AvoidanceHoldMax":          ("HOLD_MAX_S", HOLD_MAX_S, 0.0, 15.0),
+  "AvoidanceVisionTargetSpeed": ("VISION_TARGET_SPEED", VISION_TARGET_SPEED, 0.0, 15.0),
 }
 
 
