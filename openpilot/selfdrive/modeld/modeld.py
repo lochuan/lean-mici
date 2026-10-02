@@ -2,14 +2,12 @@
 from collections.abc import Callable
 import os
 from pathlib import Path
-from tinygrad.device import Device
 import time
 import numpy as np
 import openpilot.cereal.messaging as messaging
 from openpilot.cereal import log
 from opendbc.car.structs import car
 from openpilot.cereal.messaging import PubMaster, SubMaster
-from openpilot.cereal.services import SERVICE_LIST
 from openpilot.cereal.visionipc import VisionStreamType
 from msgq.visionipc import VisionIpcClient, VisionBuf
 from opendbc.car.car_helpers import get_demo_car_params

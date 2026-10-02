@@ -52,7 +52,7 @@ def test_big_output_slices_cover_abi():
   # MODEL_ABI §5：0-2066 无缝覆盖，hidden_state/pad 不在其中
   spans = sorted((s.start, s.stop) for s in BIG_OUTPUT_SLICES.values())
   assert spans[0][0] == 0 and spans[-1][1] == 2066
-  for (a0, a1), (b0, b1) in zip(spans, spans[1:]):
+  for (_, a1), (b0, _) in zip(spans, spans[1:], strict=False):
     assert a1 == b0, f"slice gap/overlap at {a1} vs {b0}"
 
 

@@ -132,8 +132,7 @@ class TinygradRunner:
     pin = pkl_pin_compatible(pkl_path)
     if pin is False:
       raise RuntimeError(
-        f"yolo pkl was compiled with a different tinygrad revision "
-        f"(stale sidecar pin next to {pkl_path}); rebuild it from the committed onnx"
+        f"yolo pkl was compiled with a different tinygrad revision (stale sidecar pin next to {pkl_path}); rebuild it from the committed onnx"
       )
     with open(pkl_path, "rb") as f:
       self._jit = load_oob(f)

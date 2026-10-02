@@ -70,7 +70,7 @@ def test_cpu_factor_rises_with_hot_cores():
   # 8 cores at 100%: hot-core factor 3.5. The low-pass swallows the first
   # reading (dt~0 -> alpha~0), so pump several calls: the factor must climb.
   factor = 1.0
-  for i in range(6):
+  for _ in range(6):
     factor = device_cpu_throttle_factor([100.0] * 8, name="t2")
     time.sleep(0.02)
   assert factor > 1.05

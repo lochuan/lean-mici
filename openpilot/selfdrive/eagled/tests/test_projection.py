@@ -150,9 +150,7 @@ def test_project_detections_empty():
 # --- ROI modes: native 1:1 window + RoiMeta.offset_u (task 1 brief) -------------
 
 import math
-from openpilot.selfdrive.eagled import constants as C
-from openpilot.selfdrive.eagled.projection import (RoiMeta, project_box_to_vehicle,
-                                                       roi_meta_for, roi_to_full)
+from openpilot.selfdrive.eagled.projection import RoiMeta
 
 W, H, FX, FY, CX, CY = 1344.0, 760.0, 425.25, 425.25, 672.0, 380.0
 

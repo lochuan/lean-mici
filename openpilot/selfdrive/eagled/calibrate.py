@@ -78,6 +78,7 @@ LATERAL_BIAS_WARN_M = 0.10
 # mount error that NO constant in constants.py can fix (the projection no
 # longer reads CAMERA_PITCH/CAMERA_YAW) — warn instead of suggesting one.
 CONTAMINATION_WARN_RAD = math.radians(0.2)
+RECOLLECT_HINT = "re-collect after it reports calibrated"
 
 
 @dataclass(frozen=True)
@@ -191,8 +192,8 @@ def fit_calibrated_offsets(pairs: Sequence[CalibPair], height: float = C.CAMERA_
   coeffs_d, *_ = np.linalg.lstsq(basis_d, e_d, rcond=None)
   d_pitch_equiv = float(coeffs_d[1])
   if abs(d_pitch_equiv) > CONTAMINATION_WARN_RAD:
-    warnings.append(f"forward residual grows with distance (Δpitch ≈ {math.degrees(d_pitch_equiv):+.2f} deg); "
-                    "pitch is extrinsicsCalibration's job — re-collect after it reports calibrated")
+    pitch_deg = math.degrees(d_pitch_equiv)
+    warnings.append(f"forward residual grows with distance (Δpitch ≈ {pitch_deg:+.2f} deg); pitch is extrinsicsCalibration's job — {RECOLLECT_HINT}")
   if np.linalg.matrix_rank(basis_d) < 2:
     warnings.append("distance range too narrow to diagnose pitch contamination; collect pairs across a wider distance spread")
 
@@ -211,8 +212,8 @@ def fit_calibrated_offsets(pairs: Sequence[CalibPair], height: float = C.CAMERA_
   if lateral_warning:
     warnings.append(f"constant lateral residual {lateral_bias:+.3f} m suggests a lateral mount offset; re-measure physically, do not patch it into a constant")
   if abs(d_yaw_equiv) > CONTAMINATION_WARN_RAD:
-    warnings.append(f"lateral residual grows with distance (Δyaw ≈ {math.degrees(d_yaw_equiv):+.2f} deg); "
-                    "yaw is extrinsicsCalibration's job — re-collect after it reports calibrated")
+    yaw_deg = math.degrees(d_yaw_equiv)
+    warnings.append(f"lateral residual grows with distance (Δyaw ≈ {yaw_deg:+.2f} deg); yaw is extrinsicsCalibration's job — {RECOLLECT_HINT}")
   if np.allclose(d_r, 0.0):
     warnings.append("all pairs at zero distance; yaw contamination is unidentifiable")
 

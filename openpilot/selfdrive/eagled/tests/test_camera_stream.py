@@ -54,7 +54,7 @@ def test_roi_from_rgb_bottom_crop():
 
 
 def test_roi_from_rgb_native_mode_does_not_resample():
-  rgb = np.random.randint(0, 255, (760, 1344, 3), dtype=np.uint8)
+  rgb = np.random.default_rng(0).integers(0, 255, (760, 1344, 3), dtype=np.uint8)
   roi, meta = cs.roi_from_rgb(rgb, mode=C.ROI_MODE_NATIVE, horizon_row=380.0)
   assert roi.shape == (384, 640, 3)
   assert meta.scale_u == 1.0 and meta.scale_v == 1.0
