@@ -675,6 +675,8 @@ class WifiManager:
           'ssid': ('ay', ssid.encode("utf-8")),
           'hidden': ('b', hidden),
           'mode': ('s', 'infrastructure'),
+          # 2 = disable：agnos 全局默认 3(省电)让大模型 REPLY 抖动迟到；根分区只读，只能逐连接写
+          'powersave': ('u', 2),
         },
         'ipv4': {
           'method': ('s', 'auto'),
