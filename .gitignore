@@ -57,7 +57,6 @@ openpilot/selfdrive/modeld/models/tg_input_devices.json
 
 # build artifacts
 docs/_site/
-docs/agents/
 openpilot/selfdrive/pandad/pandad
 openpilot/cereal/services.h
 openpilot/cereal/gen
@@ -99,7 +98,10 @@ build/
 PLAN.md
 TASK.md
 CLAUDE.md
+AGENTS.md
 SKILL.md
+CONTEXT.md
+.scratch/
 
 ### JetBrains ###
 !.idea/customTargets.xml
