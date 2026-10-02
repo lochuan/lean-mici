@@ -15,12 +15,12 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.params import Params
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import config_realtime_process, DT_MDL
-from openpilot.common.stream_gate import StreamStatus, stream_status
 from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value
+from openpilot.selfdrive.modeld.lane_change_gate import run_lane_change_gate
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.big_model import (SourceBlender, BigReplyLatch, LatencyEstimator,
                                                   nanos_since_boot, select_frame)
@@ -36,15 +36,6 @@ from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.selfdrive.controls.lib.relc import RoadEdgeLaneChangeController
 
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
-
-# eagleState.changeClear*State -> desire_helper 清空标志:unknown(本车道线不可信)传 None 不参与门控
-CHANGE_CLEAR_FLAGS = {"unknown": None, "clear": True, "blocked": False}
-
-
-def change_clear_flags(state, fresh: bool) -> tuple[bool | None, bool | None]:
-  if not fresh:
-    return None, None
-  return CHANGE_CLEAR_FLAGS[str(state.changeClearLeftState)], CHANGE_CLEAR_FLAGS[str(state.changeClearRightState)]
 
 LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
@@ -433,24 +424,7 @@ def main(demo=False):
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
       mdv2sp_send = messaging.new_message('modelDataV2SP')
       left_edge, right_edge = RELC.update_and_fill(modelv2_send.modelV2, mdv2sp_send.modelDataV2SP, v_ego)
-      # C9 变道清空门:eagleState 是 5Hz 观测流,新鲜度经观测流接收门判定
-      # (fix/stream-gate,阈值/语义见 common.stream_gate)。不新鲜(从未收到/
-      # 无效/超龄) -> 清空标志传 None,desire_helper 回退纯 BSM+relc 门控,
-      # 绝不因感知缺失锁死变道。
-      eagle_status = stream_status("eagleState",
-                                   None if not sm.seen['eagleState'] else time.monotonic() - sm.recv_time['eagleState'],
-                                   valid=sm.valid['eagleState'])
-      eagle_fresh = eagle_status is StreamStatus.FRESH
-      eagle_state = sm['eagleState']
-      change_clear_left, change_clear_right = change_clear_flags(eagle_state, eagle_fresh)
-      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, left_edge, right_edge,
-                change_clear_left=change_clear_left, change_clear_right=change_clear_right)
-      modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
-      modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
-      mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
-      mdv2sp_send.modelDataV2SP.leftLaneChangeBlock = DH.block_left
-      mdv2sp_send.modelDataV2SP.rightLaneChangeBlock = DH.block_right
-      mdv2sp_send.modelDataV2SP.laneChangeHoldReason = DH.hold_reason
+      run_lane_change_gate(DH, sm, lane_change_prob, left_edge, right_edge, modelv2_send.modelV2, mdv2sp_send.modelDataV2SP)
       # 04 号 C-2：大模型输入元数据上行（bigmodeld 帧头 desire/action_t 的来源）。
       # action_t = chestnut 公式（lat 走 get_lat_delay，受 LagdToggle 控制；13 号/research/02 §4）；
       # desireClass = DH.desire 电平，pulse 边沿由 bigmodeld 生成（msgq 电平采样不怕迟到漏沿）
