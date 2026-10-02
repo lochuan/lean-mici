@@ -74,6 +74,7 @@ class EagleDaemon:
     self._enabled_prev = False
     self._next_vision_t = 0.0
     self._health = DeviceHealth(cores=VISION_AFFINITY_CORES)
+    self._throttled = False
     self._last_params_t = -PARAMS_REFRESH_PERIOD
 
   # The camera/YOLO lifecycle lives on the perception core; these read-only
@@ -130,8 +131,9 @@ class EagleDaemon:
     frame = self.perception.process(self.sm, now, car_state.vEgo, camera_to_front,
                                     vision_enabled=self.enabled, vision_due=vision_due)
     if vision_due:
-      interval, _reason = self._health.inference_interval(now, VISION_BASE_INTERVAL,
-                                                          self.perception.last_vision_duration_s)
+      interval, reason = self._health.inference_interval(now, VISION_BASE_INTERVAL,
+                                                         self.perception.last_vision_duration_s)
+      self._throttled = reason != "steady"
       self._next_vision_t = now + interval
     # Suppress the offset during lane changes: the model curvature is already
     # executing a large lateral manoeuvre. laneChangeState lives on modelV2.meta
@@ -272,7 +274,7 @@ class EagleDaemon:
     """Publish eagleState: the formal per-frame perception picture.
 
     Same data as eagleDebug minus the debug-only noise (decision snapshot,
-    pair ids): adjacent-lane fused targets, side inputs (BSM), geometry and
+    pair ids): all fused targets (own lane included), side inputs (BSM), geometry and
     sensor health. This is the stream future consumers
     (desire_helper in modeld) subscribe to; the envelope ``valid`` is always
     true — the picture is an observation, planner validity lives in the plan.
@@ -299,7 +301,9 @@ class EagleDaemon:
     st.laneOffsetTarget = float(decision.offset)
     st.offsetCap = float(decision.cap)
     st.inactiveReason = decision.reason
-    rows = [t for t in self._target_rows(frame, car_state.vEgo) if t["lane"] != 0]
+    vision_state = self.perception.vision_state
+    st.visionState = "throttled" if vision_state == "ok" and self._throttled else vision_state
+    rows = self._target_rows(frame, car_state.vEgo)
     self._write_targets(st.init('targets', len(rows)), rows)
     msg.valid = True
     self.pm.send('eagleState', msg)

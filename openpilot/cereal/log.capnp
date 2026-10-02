@@ -1270,10 +1270,10 @@ struct EagleDebug {
 }
 
 struct EagleState {
-  # eagled 感知层态势：本帧融合的邻道目标与侧向输入快照，及变道清空判定。
+  # eagled 感知层态势：本帧融合的全部目标（含本道）与侧向输入快照，及变道清空判定。
   # 消费者：desire_helper(modeld, 变道门控)、lanlink UI；lateralManeuverPlan
   # 是避让执行输出，与本消息分工：eagleState=看，lateralManeuverPlan=动。
-  targets @0 :List(EagleTarget);  # 邻道融合目标(lane != 0)
+  targets @0 :List(EagleTarget);  # 全部融合目标（含本道，lane = -1 / 0 / +1）
   bsmLeft @1 :Bool;
   bsmRight @2 :Bool;
   vEgo @3 :Float32;
@@ -1293,6 +1293,16 @@ struct EagleState {
   inactiveReason @17 :Text;       # 不生效原因；"" = 生效门全通
   changeClearLeftState @18 :ChangeClear;   # 目标车道（左）变道清空：车道线确认目标车道；本车道线不可信 = unknown
   changeClearRightState @19 :ChangeClear;
+  visionState @20 :VisionState;   # 视觉链路（相机→检测）当前是否在工作及不工作的原因
+
+  enum VisionState {
+    ok @0;
+    calibrating @1;   # 在线标定未完成
+    noCamera @2;      # 无相机流
+    noModel @3;       # 检测模型不可用
+    throttled @4;     # 设备负载/健康门控降频
+    off @5;           # 视觉链被关闭（AvoidanceEnabled 关）
+  }
 
   enum ChangeClear {
     unknown @0;   # 本车道线不可信，无法判定；消费者不参与门控（回退 BSM + relc）

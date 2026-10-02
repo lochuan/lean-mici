@@ -7,6 +7,8 @@ from openpilot.sunnypilot.selfdrive.controls.lib.lane_turn_desire import LaneTur
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
 TurnDirection = custom.ModelDataV2SP.TurnDirection
+Block = custom.ModelDataV2SP.LaneChangeBlock
+Hold = custom.ModelDataV2SP.LaneChangeHoldReason
 
 LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
 LANE_CHANGE_TIME_MAX = 10.
@@ -23,6 +25,15 @@ TURN_DESIRES = {
   TurnDirection.turnRight: log.Desire.turnRight,
 }
 
+def geometry_block(blindspot, edge_detected, not_clear):
+  # 优先级 blindspot > roadEdge > targetNotClear
+  if blindspot:
+    return Block.blindspot
+  if edge_detected:
+    return Block.roadEdge
+  return Block.targetNotClear if not_clear else Block.none
+
+
 class DesireHelper:
   def __init__(self):
     self.lane_change_state = LaneChangeState.off
@@ -33,6 +44,9 @@ class DesireHelper:
     self.alc = AutoLaneChangeController(self)
     self.lane_turn_controller = LaneTurnController(self)
     self.lane_turn_direction = TurnDirection.none
+    self.block_left = Block.none
+    self.block_right = Block.none
+    self.hold_reason = Hold.none
 
   @staticmethod
   def get_lane_change_direction(CS):
@@ -45,6 +59,12 @@ class DesireHelper:
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
+
+    # 每侧几何拦截与是否打灯无关：没打灯时 HUD 也要显示左右能否变道。
+    self.block_left = geometry_block(carstate.leftBlindspot, left_edge_detected,
+                                     change_clear_left is not None and not change_clear_left)
+    self.block_right = geometry_block(carstate.rightBlindspot, right_edge_detected,
+                                      change_clear_right is not None and not change_clear_right)
 
     # Lane turn controller update
     self.lane_turn_controller.update_lane_turn(blindspot_left=carstate.leftBlindspot, blindspot_right=carstate.rightBlindspot,
@@ -74,10 +94,8 @@ class DesireHelper:
         # BSM 布尔兜底(eagleState 缺失时唯一门)、relc 边缘(目标道不存在,
         # 清空判定不含路沿)、清空标志(eagled 的时间投影:近区/速度未知拦,
         # 远而快的侧车放行)。仅拦启动,starting 之后不复查(与上游一致)。
-        left_not_clear = change_clear_left is not None and not change_clear_left
-        right_not_clear = change_clear_right is not None and not change_clear_right
-        blindspot_detected = (((carstate.leftBlindspot or left_edge_detected or left_not_clear) and self.lane_change_direction == LaneChangeDirection.left) or
-                              ((carstate.rightBlindspot or right_edge_detected or right_not_clear) and self.lane_change_direction == LaneChangeDirection.right))
+        blindspot_detected = ((self.block_left != Block.none and self.lane_change_direction == LaneChangeDirection.left) or
+                              (self.block_right != Block.none and self.lane_change_direction == LaneChangeDirection.right))
 
         self.alc.update_lane_change(blindspot_detected, carstate.brakePressed)
 
@@ -114,3 +132,21 @@ class DesireHelper:
           self.desire = log.Desire.laneChangeRight
 
     self.alc.update_state()
+    self.hold_reason = self._hold_reason(one_blinker, lateral_active, below_lane_change_speed)
+
+  def _hold_reason(self, one_blinker, lateral_active, below_lane_change_speed):
+    # 请求保持原因：仅打灯请求期间有意义；几何拦截已能解释的不重复发布
+    if not (lateral_active and one_blinker):
+      return Hold.none
+    if self.alc.lane_change_set_timer == AutoLaneChangeMode.OFF:
+      return Hold.alcOff
+    if below_lane_change_speed:
+      return Hold.belowSpeed
+    if self.lane_change_state != LaneChangeState.preLaneChange:
+      return Hold.none
+    blocked = self.block_left if self.lane_change_direction == LaneChangeDirection.left else self.block_right
+    if blocked != Block.none:
+      return Hold.none
+    if self.alc.lane_change_set_timer != AutoLaneChangeMode.NUDGE and self.alc.prev_brake_pressed:
+      return Hold.brake
+    return Hold.awaitingConfirm

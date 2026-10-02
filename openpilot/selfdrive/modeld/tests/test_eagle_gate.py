@@ -27,3 +27,11 @@ def test_eagle_gate_falls_back_to_none_flags():
 def test_unknown_clear_state_maps_to_none():
   # 本车道线不可信 → unknown → None（不参与门控，回退 BSM + relc）
   assert modeld.CHANGE_CLEAR_FLAGS == {"unknown": None, "clear": True, "blocked": False}
+
+
+def test_block_reasons_published_to_model_data_sp():
+  src = inspect.getsource(modeld)
+  for line in ("modelDataV2SP.leftLaneChangeBlock = DH.block_left",
+               "modelDataV2SP.rightLaneChangeBlock = DH.block_right",
+               "modelDataV2SP.laneChangeHoldReason = DH.hold_reason"):
+    assert line in src

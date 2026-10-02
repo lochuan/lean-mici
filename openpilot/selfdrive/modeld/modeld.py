@@ -457,6 +457,9 @@ def main(demo=False):
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
+      mdv2sp_send.modelDataV2SP.leftLaneChangeBlock = DH.block_left
+      mdv2sp_send.modelDataV2SP.rightLaneChangeBlock = DH.block_right
+      mdv2sp_send.modelDataV2SP.laneChangeHoldReason = DH.hold_reason
       # 04 号 C-2：大模型输入元数据上行（bigmodeld 帧头 desire/action_t 的来源）。
       # action_t = chestnut 公式（lat 走 get_lat_delay，受 LagdToggle 控制；13 号/research/02 §4）；
       # desireClass = DH.desire 电平，pulse 边沿由 bigmodeld 生成（msgq 电平采样不怕迟到漏沿）

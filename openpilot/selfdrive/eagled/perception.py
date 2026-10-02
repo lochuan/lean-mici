@@ -195,6 +195,8 @@ class PerceptionCore:
     self.detector = detector              # lazy: YoloDetector on first use
     self.detector_dead = False            # YOLO failed hard -> stop retrying
     self.degraded: set[str] = set()       # radar-only fallback reasons, logged once each
+    self.vision_state = "ok"              # eagleState.visionState of the latest tick (current, unlike ``degraded``)
+    self._detect_state = "ok"             # outcome of the latest detect(); runs on the worker thread in async mode
     self.last_vision_duration_s = 0.0     # wall time of the last detector forward (0 if skipped)
     self._held: list[dict] = []           # last inference's projected detections
     self._held_t: float = 0.0             # when those detections were projected
@@ -275,6 +277,7 @@ class PerceptionCore:
       # on an uncalibrated camera is exactly how spurious biases get produced,
       # so fall back to radar-only until openpilot's calibration converges.
       self._degrade("calibration")
+      self._detect_state = "calibrating"
       return []
     if self.camera is None:
       self.camera = self.camera_factory()
@@ -290,11 +293,13 @@ class PerceptionCore:
       # alive for interval decisions that saw no inference at all.
       self.last_vision_duration_s = 0.0
       self._degrade("camera")
+      self._detect_state = "noCamera"
       return []
     roi, roi_meta = frame
     if self.detector is None:
       self.detector = YoloDetector(YOLO_PKL_PATH)
     if self.detector_dead:
+      self._detect_state = "noModel"
       return []
     try:
       t0 = time.perf_counter()
@@ -305,8 +310,10 @@ class PerceptionCore:
       # radar-only from here on, logged once, never crash the daemon.
       self.detector_dead = True
       self._degrade("yolo")
+      self._detect_state = "noModel"
       cloudlog.exception("eagled: YOLO inference failed")
       return []
+    self._detect_state = "ok"
     fx, fy, cx, cy = self.camera.intrinsics
     return project_detections(detections, fx=fx, fy=fy, cx=cx, cy=cy,
                               height=C.CAMERA_HEIGHT, pitch=geom.pitch,
@@ -326,6 +333,7 @@ class PerceptionCore:
     radar = sm['radarTracks']
     model_v2 = sm['modelV2']
     self._absorb_worker()
+    self.vision_state = self._detect_state if vision_enabled else "off"
     if not vision_enabled:
       # 避让关:立即清空保持,回到纯雷达(不让旧目标活过 TTL)。代际 +1 作废
       # 在途推理——它完成时不得复活旧目标。

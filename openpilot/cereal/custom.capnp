@@ -469,6 +469,27 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   desireClass @4 :UInt8;         # DH.desire 电平（log.Desire 索引），bigmodeld 生成 pulse 边沿
   bigLatencyMs @5 :Float32;      # C-3：REPLY 到达 − timestamp_eof（ms），0 = 本帧没等到
   cameraToModelMs @6 :Float32;   # 帧出图（timestamp_eof）→ modeld 收帧（ms），ADR-0001 的 L_n，喂 L̂
+  # HUD：变道拦截原因由 desire_helper 在合并盲区/路沿/目标道不空的同一处发布。
+  # 每侧几何拦截不依赖打灯，优先级 blindspot > roadEdge > targetNotClear。
+  leftLaneChangeBlock @7 :LaneChangeBlock;
+  rightLaneChangeBlock @8 :LaneChangeBlock;
+  # 整车层面的请求保持原因，仅打灯请求期间有意义；无请求为 none。
+  laneChangeHoldReason @9 :LaneChangeHoldReason;
+
+  enum LaneChangeBlock {
+    none @0;
+    blindspot @1;
+    roadEdge @2;
+    targetNotClear @3;
+  }
+
+  enum LaneChangeHoldReason {
+    none @0;
+    alcOff @1;
+    belowSpeed @2;
+    awaitingConfirm @3;
+    brake @4;
+  }
 
   enum TurnDirection {
     none @0;

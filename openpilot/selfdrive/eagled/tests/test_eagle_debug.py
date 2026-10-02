@@ -127,9 +127,9 @@ def test_state_service_is_5hz_and_not_logged():
   assert svc.should_log is False
 
 
-def test_state_published_every_frame_with_adjacent_lane_targets_only():
+def test_state_published_every_frame_with_all_lane_targets():
   # One adjacent-lane radar+vision pair and one in-lane far car: eagleState
-  # carries the adjacent-lane row(s) only — the picture, not the raw telemetry.
+  # carries every fused row, own lane included.
   person = _box_at(20.0, PERSON_Y, cls="person", conf=0.8)
   far_car = _box_at(60.0, 0.0, cls="car", conf=0.9)  # vision-only, unmatched, in own lane
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
@@ -144,8 +144,8 @@ def test_state_published_every_frame_with_adjacent_lane_targets_only():
   st = states[-1].eagleState
   assert st.nRadar == 1 and st.nVision == 2 and st.nAssociated == 1
   assert st.vEgo == pytest.approx(20.0)
-  assert all(t.lane != 0 for t in st.targets)   # in-lane far car filtered out
-  assert len(st.targets) == 2                   # the radar point + its matched vision row
+  assert len(st.targets) == 3                   # radar point + its matched vision row + in-lane far car
+  assert sorted(t.lane for t in st.targets) == [0, 1, 1]
   assert st.targets[0].vision is False and st.targets[1].vision is True
 
 
@@ -218,7 +218,7 @@ def test_streams_publish_false_flags_when_geometry_unavailable():
   dbg = _debug_msgs(pm)[-1].eagleDebug
   assert st.laneLeftValid is False and st.laneRightValid is False
   assert dbg.laneLeftValid is False and dbg.laneRightValid is False
-  assert len(st.targets) == 0
+  assert len(st.targets) == 1 and st.targets[0].lane == 0
   assert dbg.targets[0].lane == 0 and dbg.targets[0].lineDistance == 999.0
 
 

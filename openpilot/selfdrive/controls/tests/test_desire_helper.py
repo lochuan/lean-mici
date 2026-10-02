@@ -13,6 +13,8 @@ from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 
 LaneChangeState = log.LaneChangeState
 TurnDirection = custom.ModelDataV2SP.TurnDirection
+Block = custom.ModelDataV2SP.LaneChangeBlock
+Hold = custom.ModelDataV2SP.LaneChangeHoldReason
 
 CLEAR = True             # eagleState.changeClear*:该目标道可进
 NOT_CLEAR = False         # 近区/速度未知/投影冲突/BSM 任一不满足
@@ -139,3 +141,67 @@ class TestNoRecheckAfterStarting:
 
 # 清空语义(eagled change_clear)在 eagled/tests/test_lane_offset.py 的变道清空段
 # 中钉死;desire_helper 只消费布尔/None,无本地阈值。
+
+
+class TestPublishedBlockReasons:
+  """HUD：拦截原因由判定方发布。每侧几何拦截不依赖打灯;请求保持原因仅打灯期间有意义。"""
+
+  @pytest.mark.parametrize("cs_kwargs, dh_kwargs, expected", [
+    ({}, {}, "none"),
+    ({"bsm_left": True}, {}, "blindspot"),
+    ({}, {"left_edge_detected": True}, "roadEdge"),
+    ({}, {"change_clear_left": NOT_CLEAR}, "targetNotClear"),
+    ({"bsm_left": True}, {"left_edge_detected": True, "change_clear_left": NOT_CLEAR}, "blindspot"),
+    ({}, {"left_edge_detected": True, "change_clear_left": NOT_CLEAR}, "roadEdge"),
+  ])
+  def test_geometry_block_left(self, dh, cs_kwargs, dh_kwargs, expected):
+    dh.update(_cs(left_blinker=False, right_blinker=False, **cs_kwargs), True, 0.0, **dh_kwargs)   # 没打灯也要发布
+    assert dh.block_left == getattr(Block, expected)
+    assert dh.block_right == Block.none
+
+  def test_geometry_block_right_is_independent(self, dh):
+    dh.update(_cs(left_blinker=False, right_blinker=False, bsm_right=True), True, 0.0, change_clear_left=NOT_CLEAR)
+    assert (dh.block_left, dh.block_right) == (Block.targetNotClear, Block.blindspot)
+
+  def test_unknown_clear_is_no_block(self, dh):
+    dh.update(_cs(left_blinker=False, right_blinker=False), True, 0.0, change_clear_left=None)
+    assert dh.block_left == Block.none
+
+  def test_hold_none_without_request(self, dh):
+    dh.update(_cs(left_blinker=False, right_blinker=False), True, 0.0)
+    assert dh.hold_reason == Hold.none
+
+  def test_hold_alc_off(self, dh):
+    from openpilot.sunnypilot.selfdrive.controls.lib.auto_lane_change import AutoLaneChangeMode
+    dh.alc.lane_change_set_timer = AutoLaneChangeMode.OFF
+    dh.update(_cs(), True, 0.0)
+    assert dh.hold_reason == Hold.alcOff
+
+  def test_hold_below_speed(self, dh):
+    dh.update(_cs(v=1.0), True, 0.0)
+    assert dh.hold_reason == Hold.belowSpeed
+
+  def test_hold_awaiting_confirm_in_nudge(self, dh):
+    _to_pre(dh)
+    dh.update(_cs(), True, 0.0)
+    assert dh.hold_reason == Hold.awaitingConfirm
+
+  def test_hold_brake_in_auto_mode(self, dh):
+    from openpilot.sunnypilot.selfdrive.controls.lib.auto_lane_change import AutoLaneChangeMode
+    dh.alc.lane_change_set_timer = AutoLaneChangeMode.NUDGELESS
+    dh.alc.prev_brake_pressed = True
+    _to_pre(dh)
+    dh.update(_cs(brake=True), True, 0.0)
+    assert dh.hold_reason == Hold.brake
+
+  def test_hold_none_when_geometry_blocks(self, dh):
+    _to_pre(dh)
+    dh.update(_cs(bsm_left=True), True, 0.0)
+    assert dh.block_left == Block.blindspot
+    assert dh.hold_reason == Hold.none
+
+  def test_hold_none_once_changing(self, dh):
+    _to_pre(dh)
+    dh.update(_cs(torque=0.5), True, 0.0)
+    assert dh.lane_change_state == LaneChangeState.laneChangeStarting
+    assert dh.hold_reason == Hold.none
