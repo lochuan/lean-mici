@@ -15,6 +15,9 @@ export VECLIB_MAXIMUM_THREADS=1
 # headroom for this until ui is moved to the CPU.
 export QCOM_PRIORITY=12
 
+# lean build: no driver monitoring, cabin camera unused
+export DISABLE_DRIVER=1
+
 if [ -z "$AGNOS_VERSION" ]; then
   export AGNOS_VERSION="19.6.26"
 fi

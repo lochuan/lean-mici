@@ -13,7 +13,7 @@ from openpilot.system.camerad.snapshot import get_snapshots
 from openpilot.selfdrive.test.helpers import collect_logs, log_collector, processes_context
 
 TEST_TIMESPAN = 10
-CAMERAS = ('narrowRoadCameraState', 'cabinCameraState', 'wideRoadCameraState')
+CAMERAS = ('narrowRoadCameraState', 'wideRoadCameraState')
 EXPOSURE_STABLE_COUNT = 3
 EXPOSURE_RANGE = (0.15, 0.35)
 MAX_TEST_TIME = 25
@@ -49,9 +49,9 @@ def _camera_session():
     exposure = {cam: [] for cam in CAMERAS}
     start = time.monotonic()
     while time.monotonic() - start < MAX_TEST_TIME:
-      rpic, dpic = get_snapshots(frame="narrowRoadCameraState", front_frame="cabinCameraState")
-      wpic, _ = get_snapshots(frame="wideRoadCameraState")
-      for cam, img in zip(CAMERAS, [rpic, dpic, wpic], strict=True):
+      rpic, _ = get_snapshots(frame="narrowRoadCameraState", front_frame=None)
+      wpic, _ = get_snapshots(frame="wideRoadCameraState", front_frame=None)
+      for cam, img in zip(CAMERAS, [rpic, wpic], strict=True):
         exposure[cam].append(_exposure_stats(img))
 
       if time.monotonic() - start >= TEST_TIMESPAN and _exposure_stable(exposure):
@@ -117,11 +117,6 @@ class TestCamerad(OpenpilotTestCase):
     diffs = {i: (max(ts) - min(ts))/1e6 for i, ts in synced_times.items()}
     laggy_frames = {k: v for k, v in diffs.items() if v > 1.1}
     assert len(laggy_frames) == 0, f"Frames not synced properly: {laggy_frames=}"
-
-    # cabin camera should be staggered ~25ms from road camera
-    for i in n:
-      offset_ms = abs(self.logs['cabinCameraState']['timestampSof'][i] - self.logs['narrowRoadCameraState']['timestampSof'][i]) / 1e6
-      assert 20 < offset_ms < 30, f"cabin camera stagger out of range at frame {i}: {offset_ms:.1f}ms (expected ~25ms)"
 
   def test_sanity_checks(self):
     self._sanity_checks(self.logs)
