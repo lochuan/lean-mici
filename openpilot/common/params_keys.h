@@ -28,6 +28,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AvoidanceExitHold", {PERSISTENT, FLOAT, "1.0"}},     // 避让退出滞回 s（目标消失后保持）
     {"AvoidanceBiasTau", {PERSISTENT, FLOAT, "0.5"}},      // 避让偏置平滑时间常数 s
     {"LaneChangeNearZone", {PERSISTENT, FLOAT, "6.0"}},    // 变道近区硬拦距离 m
+    {"AvoidanceLaneEdgeMargin", {PERSISTENT, FLOAT, "0.15"}},    // 贴线余量 m（车道内避让）
+    {"AvoidanceVruTriggerLineDistance", {PERSISTENT, FLOAT, "1.0"}},      // 弱势交通参与者触发线距 m
+    {"AvoidanceVehicleTriggerLineDistance", {PERSISTENT, FLOAT, "0.5"}},  // 机动车触发线距 m
+    {"AvoidanceMaxRange", {PERSISTENT, FLOAT, "60.0"}},          // 避让目标距离上限 m
+    {"AvoidanceMinSpeedKph", {PERSISTENT, FLOAT, "15.0"}},       // 避让车速下限 km/h
+    {"AvoidanceLateralRate", {PERSISTENT, FLOAT, "0.3"}},        // 车道内偏移横向速率 m/s
     {"BigmodelServerHost", {PERSISTENT | BACKUP, STRING, ""}},  // 06/07 号：手动 IP；空 = mDNS 自动发现
     {"BigmodelToggle", {PERSISTENT | BACKUP, BOOL}},          // 07 号：「远程大模型」开关（仅 offroad 可改；默认关，同 AdbEnabled）
     {"BigmodelLinkState", {CLEAR_ON_MANAGER_START | DONT_LOG, STRING, ""}},  // 06 号：bigmodeld 写的链路状态串

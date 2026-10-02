@@ -77,6 +77,16 @@ PATH_STD_MAX = 0.35
 EDGE_STD_MAX = 0.35
 
 
+# --- 车道内避让(CONTEXT.md):压力 -> 车道内偏移 ---------------------------------------
+# 以下均为 Params 可覆盖的初值,路测后在 LANLink 调。
+LANE_EDGE_MARGIN = 0.15        # 贴线余量 m:达到贴线上限时车身边缘距车道线保留的距离
+TRIGGER_LINE_DISTANCE_VRU = 1.0          # 弱势交通参与者触发线距 m:线距小于此值开始产生压力
+TRIGGER_LINE_DISTANCE_VEHICLE = 0.5      # 机动车(含未知类别)触发线距 m
+TRIGGER_RANGE_MAX = 60.0       # 距离上限 m:更远的目标不计入
+V_EGO_MIN_KPH = 15.0           # 车速下限 km/h
+OFFSET_RATE = 0.3              # 车道内偏移的横向速率限制 m/s
+
+
 # Camera -> car-frame projection (spec §4). Initial mount values; the P0
 # calibration (shadow harness, spec §4) refines them.
 CAMERA_HEIGHT = 1.2    # m, wide camera above the ground (windshield mount)
@@ -149,6 +159,12 @@ _PARAM_OVERRIDABLE: dict[str, tuple[str, float, float, float]] = {
   "AvoidanceExitHold":      ("EXIT_HOLD_S", EXIT_HOLD_S, 0.0, 5.0),
   "AvoidanceBiasTau":       ("LOWPASS_TAU_S", LOWPASS_TAU_S, 0.05, 2.0),
   "LaneChangeNearZone":     ("LANE_CHANGE_NEAR_D", LANE_CHANGE_NEAR_D, 0.0, 20.0),
+  "AvoidanceLaneEdgeMargin":   ("LANE_EDGE_MARGIN", LANE_EDGE_MARGIN, 0.05, 0.5),
+  "AvoidanceVruTriggerLineDistance":    ("TRIGGER_LINE_DISTANCE_VRU", TRIGGER_LINE_DISTANCE_VRU, 0.2, 3.0),
+  "AvoidanceVehicleTriggerLineDistance": ("TRIGGER_LINE_DISTANCE_VEHICLE", TRIGGER_LINE_DISTANCE_VEHICLE, 0.1, 2.0),
+  "AvoidanceMaxRange":         ("TRIGGER_RANGE_MAX", TRIGGER_RANGE_MAX, 20.0, 100.0),
+  "AvoidanceMinSpeedKph":      ("V_EGO_MIN_KPH", V_EGO_MIN_KPH, 0.0, 60.0),
+  "AvoidanceLateralRate":      ("OFFSET_RATE", OFFSET_RATE, 0.05, 1.0),
 }
 
 

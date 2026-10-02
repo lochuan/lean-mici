@@ -525,45 +525,6 @@ class _NS:
 MODEL_CURVATURE = 0.012
 
 
-def _make_daemon(enabled=True):
-  from openpilot.selfdrive.eagled.eagled import EagleDaemon
-  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
-                 meta=_NS(laneChangeState="off"))
-  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
-  # yRel=-1.8: outside the own-lane gate (Task 6) — the target must survive the
-  # gate for the planner to activate.
-  radar = _NS(points=[_RadarPoint(8.0, -1.8)], errors=_NS(canError=False, radarUnavailableTemporary=False))
-  pm = _FakePubMaster()
-  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams(enabled=enabled))
-  return daemon, pm
-
-
-def test_daemon_sends_valid_flag_every_frame():
-  daemon, pm = _make_daemon()
-  daemon.update(0.0)                    # enter hysteresis not yet satisfied -> invalid
-  daemon.update(C.ENTER_HOLD_S + 0.01)  # active -> valid
-
-  assert len(pm.sent) == 6  # eagleDebug (2) + eagleState (2) + lateralManeuverPlan (2)
-  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
-  assert len(plans) == 2
-  assert plans[0].valid is False
-  assert plans[0].lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
-  assert plans[1].valid is True
-  assert plans[1].lateralManeuverPlan.desiredCurvature > MODEL_CURVATURE
-
-
-def test_daemon_invalid_frame_carries_model_curvature():
-  daemon, pm = _make_daemon(enabled=False)
-  daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
-
-  assert len(pm.sent) == 6  # eagleDebug (2) + eagleState (2) + lateralManeuverPlan (2)
-  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
-  for msg in plans:
-    assert msg.valid is False
-    assert msg.lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
-
-
 # --- regression: BSM cap must not flip the avoidance side --------------------
 
 def test_cap_does_not_reselect_target_on_the_other_side():

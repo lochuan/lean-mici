@@ -7,13 +7,13 @@ wide-camera YOLO detections into the per-frame target picture, published as
 the planned second one) alongside ``eagleDebug`` (raw detection/association
 telemetry for the lanlink UI and calibration — never a control input).
 
-The avoidance planner (``avoidance_planner.AvoidancePlanner``) is the first
-in-process consumer: it gates the fused targets (BSM / road-edge / speed /
-lane-change) and produces a small curvature bias, published as
-``lateralManeuverPlan`` **every frame** with the envelope ``valid`` flag set
-from the planner. An invalid frame (no target, gated, takeover, disabled)
-still carries the raw model curvature, so controlsd falls back cleanly;
-nothing depends on the message going stale.
+The in-lane avoidance planner (``lane_offset.LaneOffsetPlanner``) is the first
+in-process consumer: it turns adjacent-lane targets into side pressures and a
+lane offset target, published as ``lateralManeuverPlan.desiredLaneOffset``
+**every frame** with the envelope ``valid`` flag set from the planner (ADR 0001:
+controlsd closes the loop on the lane lines). An invalid frame (no pressure,
+gated, takeover, disabled) makes controlsd fall back to the raw model
+curvature; nothing depends on the message going stale.
 
 Perception runs whenever the device is onroad in a car; the ``AvoidanceEnabled``
 param gates both the avoidance actuation (planner ``valid`` envelope) and the
@@ -38,7 +38,6 @@ if COMMA_HARDWARE:
 import time
 
 import cv2
-import numpy as np
 
 import openpilot.cereal.messaging as messaging
 from openpilot.common.model_geometry import read_camera_to_front
@@ -46,10 +45,10 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper, config_best_effort_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.eagled import constants as C
-from openpilot.selfdrive.eagled.avoidance_planner import AvoidancePlanner
 from openpilot.selfdrive.eagled.camera_stream import CameraStream
 from openpilot.selfdrive.eagled.device_health import DeviceHealth
-from openpilot.selfdrive.eagled.perception import PerceptionCore, PerceptionFrame, VisionWorker, gate_target, radar_point_key
+from openpilot.selfdrive.eagled.lane_offset import LaneOffsetPlanner, OffsetDecision, lane_trusted, target_pressure
+from openpilot.selfdrive.eagled.perception import PerceptionCore, PerceptionFrame, VisionWorker, gate_target, radar_point_counts, radar_point_key
 from openpilot.selfdrive.eagled.yolo_detector import DEFAULT_FPS
 
 PARAMS_REFRESH_PERIOD = 1.0  # s
@@ -61,17 +60,16 @@ VISION_BASE_INTERVAL = 1.0 / DEFAULT_FPS  # s; detector's own fps cap is the flo
 
 
 class EagleDaemon:
-  def __init__(self, sm=None, pm=None, params=None, planner=None, perception=None,
+  def __init__(self, sm=None, pm=None, params=None, lane_offset=None, perception=None,
                camera=None, detector=None, camera_factory=CameraStream, vision_worker=None):
     self.params = params if params is not None else Params()
     self.sm = sm if sm is not None else messaging.SubMaster(
-      ['modelV2', 'carState', 'radarTracks', 'extrinsicsCalibration', 'deviceState', 'procLog', 'deviceMotion'])
+      ['modelV2', 'carState', 'carControl', 'radarTracks', 'extrinsicsCalibration', 'deviceState', 'procLog', 'deviceMotion'])
     self.pm = pm if pm is not None else messaging.PubMaster(['eagleDebug', 'eagleState', 'lateralManeuverPlan'])
-    self.planner = planner if planner is not None else AvoidancePlanner()
+    self.lane_offset = lane_offset if lane_offset is not None else LaneOffsetPlanner()
     self.perception = perception if perception is not None else PerceptionCore(
       camera=camera, detector=detector, camera_factory=camera_factory,
       vision_worker=vision_worker)
-    self.max_offset = C.MAX_OFFSET_FREE
     self.enabled = False
     self._enabled_prev = False
     self._next_vision_t = 0.0
@@ -105,12 +103,6 @@ class EagleDaemon:
     self.enabled = self.params.get_bool("AvoidanceEnabled")
     # C9+ 可调参:按 Params 重绑 constants 的可覆盖常量(缺键恢复默认)。
     C.apply_param_overrides(self.params)
-    try:
-      value = self.params.get("AvoidanceMaxLateralOffset")
-    except Exception:
-      value = None
-    if value is not None:
-      self.max_offset = float(np.clip(float(value), 0.0, C.MAX_OFFSET_HARD))
 
   def update(self, now: float) -> None:
     self._refresh_params(now)
@@ -141,52 +133,34 @@ class EagleDaemon:
       interval, _reason = self._health.inference_interval(now, VISION_BASE_INTERVAL,
                                                           self.perception.last_vision_duration_s)
       self._next_vision_t = now + interval
-    # Suppress the bias during lane changes: the model curvature is already
-    # executing a large lateral manoeuvre and the target's relative bearing is
-    # changing fast, so a bias derived from "target is on the left/right" on
-    # top of it is unpredictable. laneChangeState lives on modelV2.meta
+    # Suppress the offset during lane changes: the model curvature is already
+    # executing a large lateral manoeuvre. laneChangeState lives on modelV2.meta
     # (log.capnp MetaData) — no new subscription needed.
-    lane_change_active = str(model_v2.meta.laneChangeState) != "off"
-    model_curv = model_v2.action.desiredCurvature
-    curvature, valid = self.planner.update(
-      model_curvature=model_curv,
-      targets=frame.targets,
-      v_ego=car_state.vEgo,
-      budget_left=frame.left.budget,
-      budget_right=frame.right.budget,
-      road_edges=model_v2.roadEdges,
+    decision = self.lane_offset.update(
+      frame.objects, frame.lane_geo, car_state.vEgo, now,
       enabled=self.enabled,
-      steering_pressed=car_state.steeringPressed,
-      lane_change_active=lane_change_active,
-      max_offset=self.max_offset,
-      now=now,
-      road_edge_stds=getattr(model_v2, "roadEdgeStds", None),
+      lat_active=bool(self.sm['carControl'].latActive),
+      steering_pressed=bool(car_state.steeringPressed),
+      lane_change_active=str(model_v2.meta.laneChangeState) != "off",
     )
 
     # Publish order per frame: eagleDebug (raw telemetry) -> eagleState (the
     # picture) -> lateralManeuverPlan (the plan) LAST so the every-frame
     # freshness invariant tests reading pm.sent[-1] keep holding. ``valid`` on
     # the plan is the envelope flag controlsd reads via
-    # ``sm.valid['lateralManeuverPlan']``; an invalid plan still carries the
-    # model curvature so a fresh-but-invalid frame falls back cleanly.
-    # Defensive gate: if this frame's modelV2 failed validation its curvature
-    # is suspect, so the plan is never published as valid. We keep sending
-    # (instead of skipping the frame) to preserve the every-frame freshness
-    # invariant in controlsd; the invalid envelope makes controlsd ignore the
-    # curvature.
-    self._publish_debug(frame, car_state, valid=bool(valid), radar_errors=radar.errors)
-    self._publish_state(frame, car_state, radar_errors=radar.errors)
+    # ``sm.valid['lateralManeuverPlan']``. Defensive gate: if this frame's
+    # modelV2 failed validation the plan is never published as valid; we keep
+    # sending (instead of skipping) to preserve the every-frame freshness
+    # invariant in controlsd.
+    self._publish_debug(frame, car_state, decision, radar_errors=radar.errors)
+    self._publish_state(frame, car_state, decision, radar_errors=radar.errors)
 
     msg = messaging.new_message('lateralManeuverPlan')
-    msg.lateralManeuverPlan.desiredCurvature = float(curvature)
-    # controlsd 融合只叠加这个偏置分量（model + curvatureBias,见 capnp 注释）:
-    # desiredCurvature 里的模型部分到 controlsd 时已陈旧一两百 ms,整句替换会
-    # 把陈旧曲率误差注入转向（2026-09-25 路测实测 0.9m 等效偏移,超避让上限）。
-    msg.lateralManeuverPlan.curvatureBias = float(curvature - model_curv)
-    msg.valid = bool(valid) and bool(self.sm.valid['modelV2'])
+    msg.lateralManeuverPlan.desiredLaneOffset = float(decision.offset)
+    msg.valid = decision.valid and bool(self.sm.valid['modelV2'])
     self.pm.send('lateralManeuverPlan', msg)
 
-  def _target_rows(self, frame: PerceptionFrame) -> list[tuple[bool, dict]]:
+  def _target_rows(self, frame: PerceptionFrame, v_ego: float) -> list[tuple[bool, dict]]:
     """One row per radar point and per detection: (in_gate, serialized fields).
 
     Shared by both publishers so eagleState and eagleDebug can never disagree
@@ -201,6 +175,15 @@ class EagleDaemon:
     """
     radar_pair_ids = {radar_point_key(p[0]): p[2] for p in frame.pairs}
     vision_pair_ids = {id(p[1]): p[2] for p in frame.pairs}
+    geo = frame.lane_geo
+
+    def distance_pressure(d_rel, y_rel, cls, counts=True):
+      # 线距/压力与规划同源(target_pressure);被融合丢弃的点(静止未确认)压力为 0
+      if not lane_trusted(geo):
+        return 999.0, 0.0
+      side, line_distance, pressure = target_pressure(d_rel, y_rel, cls, geo)
+      return (line_distance if side else 999.0), (pressure if counts else 0.0)
+
     rows: list[tuple[bool, dict]] = []
     for point in frame.radar_points:
       key = radar_point_key(point)
@@ -208,29 +191,32 @@ class EagleDaemon:
       # vision class weight (fuse_targets), not the vehicle default.
       cls = frame.vision_cls_by_key.get(key)
       in_gate, lane = gate_target(float(point.dRel), float(point.yRel), cls, frame.lane_geo)
+      line_distance, pressure = distance_pressure(float(point.dRel), float(point.yRel), cls,
+                                   radar_point_counts(point, v_ego, frame.confirmed_keys))
       rows.append((in_gate, {
         "dRel": float(point.dRel), "yRel": float(point.yRel), "vRel": float(point.vRel),
         "cls": cls or "", "conf": 0.0,
         "weight": C.class_weight(cls),
         "matched": key in radar_pair_ids, "inGate": in_gate, "vision": False,
         "pairId": radar_pair_ids.get(key, 0),
-        "lane": lane,
+        "lane": lane, "lineDistance": line_distance, "pressure": pressure,
       }))
     for det in frame.detections:
       cls = det.get("cls")
       in_gate, lane = gate_target(float(det["dRel"]), float(det["yRel"]), cls, frame.lane_geo)
       weight = C.class_weight(cls)
+      line_distance, pressure = distance_pressure(float(det["dRel"]), float(det["yRel"]), cls)
       rows.append((in_gate, {
         "dRel": float(det["dRel"]), "yRel": float(det["yRel"]), "vRel": 0.0,
         "cls": cls or "", "conf": float(det.get("conf", 1.0)),
         "weight": weight,
         "matched": id(det) in vision_pair_ids, "inGate": in_gate, "vision": True,
         "pairId": vision_pair_ids.get(id(det), 0),
-        "lane": lane,
+        "lane": lane, "lineDistance": line_distance, "pressure": pressure,
       }))
     return rows
 
-  def _publish_debug(self, frame: PerceptionFrame, car_state, valid: bool, radar_errors=None) -> None:
+  def _publish_debug(self, frame: PerceptionFrame, car_state, decision: OffsetDecision, radar_errors=None) -> None:
     """Build and publish the fused eagleDebug snapshot for this frame.
 
     Sent every frame regardless of planner validity: the message envelope
@@ -240,30 +226,33 @@ class EagleDaemon:
     """
     msg = messaging.new_message('eagleDebug')
     dbg = msg.eagleDebug
-    last = self.planner.last_state
-    dbg.valid = bool(valid)
-    dbg.active = bool(last.get("active", False))
-    dbg.direction = int(last.get("direction", 0))
-    dbg.yDes = float(last.get("yDes", 0.0))
-    dbg.bias = float(last.get("bias", 0.0))
-    dbg.maxOffset = float(last.get("maxOffset", self.max_offset))
+    dbg.valid = decision.valid
+    dbg.active = decision.valid
+    # 旧字段经新语义继续喂 lanlink(票 06 改展示后随票 05 停用)
+    dbg.yDes = float(decision.offset)
+    dbg.maxOffset = float(decision.cap)
+    dbg.pressureLeft = float(decision.pressure_left)
+    dbg.pressureRight = float(decision.pressure_right)
+    dbg.laneOffsetTarget = float(decision.offset)
+    dbg.offsetCap = float(decision.cap)
+    dbg.inactiveReason = decision.reason
     dbg.bsmLeft = bool(car_state.leftBlindspot)
     dbg.bsmRight = bool(car_state.rightBlindspot)
     dbg.vEgo = float(car_state.vEgo)
     dbg.nRadar = len(frame.radar_points)
     dbg.nVision = len(frame.detections)
     dbg.nAssociated = int(frame.n_associated)
-    dbg.edgeClearance = min(float(last.get("edgeClearance", float("inf"))), 999.0)
+    dbg.edgeClearance = 999.0
     dbg.canError = bool(radar_errors.canError) if radar_errors is not None else False
     dbg.radarUnavailable = bool(radar_errors.radarUnavailableTemporary) if radar_errors is not None else False
     geo = frame.lane_geo
     dbg.laneLeftValid = bool(geo.left_valid) if geo is not None else False
     dbg.laneRightValid = bool(geo.right_valid) if geo is not None else False
-    dbg.budgetLeft = float(last.get("budgetLeft", C.BUDGET_UNCONSTRAINED))
-    dbg.budgetRight = float(last.get("budgetRight", C.BUDGET_UNCONSTRAINED))
+    dbg.budgetLeft = float(frame.left.budget)
+    dbg.budgetRight = float(frame.right.budget)
     dbg.changeClearLeft = bool(frame.left.change_clear)
     dbg.changeClearRight = bool(frame.right.change_clear)
-    rows = self._target_rows(frame)
+    rows = self._target_rows(frame, car_state.vEgo)
     tgts = dbg.init('targets', len(rows))
     for i, (in_gate, t) in enumerate(rows):
       tgts[i].dRel = t["dRel"]
@@ -277,10 +266,12 @@ class EagleDaemon:
       tgts[i].vision = t["vision"]
       tgts[i].pairId = t["pairId"]
       tgts[i].lane = t["lane"]
+      tgts[i].lineDistance = t["lineDistance"]
+      tgts[i].pressure = t["pressure"]
     msg.valid = True
     self.pm.send('eagleDebug', msg)
 
-  def _publish_state(self, frame: PerceptionFrame, car_state, radar_errors=None) -> None:
+  def _publish_state(self, frame: PerceptionFrame, car_state, decision: OffsetDecision, radar_errors=None) -> None:
     """Publish eagleState: the formal per-frame perception picture.
 
     Same data as eagleDebug minus the debug-only noise (decision snapshot,
@@ -291,11 +282,10 @@ class EagleDaemon:
     """
     msg = messaging.new_message('eagleState')
     st = msg.eagleState
-    last = self.planner.last_state
     st.bsmLeft = bool(car_state.leftBlindspot)
     st.bsmRight = bool(car_state.rightBlindspot)
     st.vEgo = float(car_state.vEgo)
-    st.edgeClearance = min(float(last.get("edgeClearance", float("inf"))), 999.0)
+    st.edgeClearance = 999.0
     st.nRadar = len(frame.radar_points)
     st.nVision = len(frame.detections)
     st.nAssociated = int(frame.n_associated)
@@ -308,6 +298,11 @@ class EagleDaemon:
     st.budgetRight = frame.right.budget
     st.changeClearLeft = bool(frame.left.change_clear)
     st.changeClearRight = bool(frame.right.change_clear)
+    st.pressureLeft = float(decision.pressure_left)
+    st.pressureRight = float(decision.pressure_right)
+    st.laneOffsetTarget = float(decision.offset)
+    st.offsetCap = float(decision.cap)
+    st.inactiveReason = decision.reason
     for field, picture in ((st.sideLeadLeft, frame.left), (st.sideLeadRight, frame.right)):
       lead = picture.lead
       field.valid = lead is not None
@@ -317,7 +312,7 @@ class EagleDaemon:
         field.vRel = lead.vRel if lead.vRel is not None else 0.0
         field.edgeDist = abs(lead.yRel) - C.class_half_width(lead.cls)
         field.cls = lead.cls or ""
-    rows = [t for in_gate, t in self._target_rows(frame) if in_gate]
+    rows = [t for in_gate, t in self._target_rows(frame, car_state.vEgo) if in_gate]
     tgts = st.init('targets', len(rows))
     for i, t in enumerate(rows):
       tgts[i].dRel = t["dRel"]
@@ -331,6 +326,8 @@ class EagleDaemon:
       tgts[i].vision = t["vision"]
       tgts[i].pairId = t["pairId"]
       tgts[i].lane = t["lane"]
+      tgts[i].lineDistance = t["lineDistance"]
+      tgts[i].pressure = t["pressure"]
     msg.valid = True
     self.pm.send('eagleState', msg)
 

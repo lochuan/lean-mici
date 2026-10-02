@@ -1219,13 +1219,12 @@ struct DriverAssistance {
 }
 
 struct LateralManeuverPlan {
-  desiredCurvature @0 :Float32;  # 1/m
-  # 1/m,相对 modelV2.action.desiredCurvature 的避让偏置分量。
-  # controlsd 融合用这个:当前模型曲率 + curvatureBias —— 绝不拿
-  # desiredCurvature 整句替换(它打包的模型部分到 controlsd 时 p50 已陈旧
-  # 188ms,2026-09-25 路测实测偏差 0.9m 超避让上限)。desiredCurvature 保留
-  # 全量语义供离线消费。未发布的旧消息按 0 读出 = 无偏置,自然回退。
-  curvatureBias @1 :Float32;
+  desiredCurvatureDEPRECATED @0 :Float32;  # 开环偏置时代的全量曲率,已停用
+  curvatureBiasDEPRECATED @1 :Float32;     # 开环曲率偏置,已停用
+  # m,车道内偏移(CONTEXT.md):自车中心相对本车道中心的期望横向位置,左正。
+  # controlsd 用当拍车道线闭环并按贴线上限再钳一次(ADR 0001)。
+  # envelope valid=false 时 controlsd 用纯模型曲率。
+  desiredLaneOffset @2 :Float32;
 }
 
 struct EagleTarget {
@@ -1240,6 +1239,8 @@ struct EagleTarget {
   vision @8 :Bool;       # true=YOLO 投影目标；false=雷达点
   pairId @9 :UInt16;     # 0=未配对；配对双方共享同 id（递增分配）
   lane @10 :Int8;        # C2 车道归属：-1 左邻 / 0 本道或重叠 / +1 右邻（分类未参与时 0）
+  lineDistance @11 :Float32;  # 线距 m：车身近缘到本车道线，侵入为负；非邻道目标/车道线不可信发 999.0
+  pressure @12 :Float32; # 单目标侧向压力 0~1
 }
 
 struct EagleDebug {
@@ -1265,6 +1266,11 @@ struct EagleDebug {
   budgetRight @19 :Float32;    # C9：右侧横向预算 m；999.0 = 无侧向约束
   changeClearLeft @20 :Bool;   # C9+：目标道（左）变道清空（时间投影放行远快侧车）
   changeClearRight @21 :Bool;  # C9+：目标道（右）变道清空
+  pressureLeft @22 :Float32;   # 左侧侧向压力 0~1
+  pressureRight @23 :Float32;  # 右侧侧向压力 0~1
+  laneOffsetTarget @24 :Float32;  # 车道内偏移目标 m（左正，已过速率限制）
+  offsetCap @25 :Float32;      # 贴线上限 m
+  inactiveReason @26 :Text;    # 不生效原因；"" = 生效门全通
 }
 
 struct EagleState {
@@ -1291,6 +1297,11 @@ struct EagleState {
   budgetRight @15 :Float32;       # C9：右侧横向预算 m；999.0 = 无侧向约束
   changeClearLeft @16 :Bool;      # C9+：目标道（左）变道清空（时间投影放行远快侧车）
   changeClearRight @17 :Bool;     # C9+：目标道（右）变道清空
+  pressureLeft @18 :Float32;      # 左侧侧向压力 0~1
+  pressureRight @19 :Float32;     # 右侧侧向压力 0~1
+  laneOffsetTarget @20 :Float32;  # 车道内偏移目标 m（左正，已过速率限制）
+  offsetCap @21 :Float32;         # 贴线上限 m
+  inactiveReason @22 :Text;       # 不生效原因；"" = 生效门全通
 }
 
 struct EagleSideLead {

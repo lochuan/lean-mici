@@ -48,6 +48,7 @@ class _FakeSubMaster:
     # pre-calibration mount constants (C.CAMERA_PITCH / C.CAMERA_YAW are 0.0),
     # so existing tests keep their exact expected projections.
     self._data = {"modelV2": model_v2, "carState": car_state, "radarTracks": radar,
+                  "carControl": _NS(latActive=True),
                   "extrinsicsCalibration": _NS(calStatus=cal_status, rpyCalib=list(rpy)),
                   # health services: healthy defaults (DeviceHealth degrades to these)
                   "deviceState": _NS(cpuUsagePercent=[10.0] * 8, memoryUsagePercent=50.0),
@@ -125,60 +126,55 @@ def _daemon(*, camera=None, detector=None, camera_factory=None, radar_points=(),
   return daemon, pm
 
 
-def _bias_curv(offset):
-  return 2.0 * offset / C.L_LOOKAHEAD ** 2
+class _LaneLine:
+  def __init__(self, y):
+    self.x = [1.5, 21.5, 101.5]   # 相机系 = 车体系 + 安装偏移 1.5
+    self.y = [float(y)] * 3       # 相机系 y 右正
 
 
-def _first_frame_bias(offset):
-  # FirstOrderFilter(0, tau=0.5, dt=0.2): first update scales by dt/(tau+dt).
-  alpha = C.DT_5HZ / (C.LOWPASS_TAU_S + C.DT_5HZ)
-  return _bias_curv(offset) * alpha
+def _add_standard_lane(daemon, half=1.75):
+  """给 daemon 的 modelV2 桩补 3.5m 直车道 + 路径,车道内避让才可判定。"""
+  m = daemon.sm._data["modelV2"]
+  m.laneLines = [_LaneLine(-half), _LaneLine(-half), _LaneLine(half), _LaneLine(half)]
+  m.laneLineProbs = [0.5, 0.9, 0.9, 0.5]
+  m.laneLineStds = [0.5, 0.1, 0.1, 0.5]
+  m.position = _LaneLine(0.0)
+  m.position.yStd = [0.1] * 3
+  return daemon
 
 
-def _expected_offset(d_rel, weight):
-  return min(C.MAX_OFFSET_FREE, C.K_GAIN * weight * (1.0 - d_rel / C.D_MAX))
+def _debug(pm):
+  return [msg for service, msg in pm.sent if service == "eagleDebug"][-1].eagleDebug
+
+
+# 线距 0.5m 的右侧目标中心:行人半宽 0.3,右车道线 -1.75
+PERSON_Y = -(1.75 + 0.3 + 0.5)   # 行人触发线距 1.0 → 压力 0.5
 
 
 # --- fusion chain ----------------------------------------------------------------
 
-def test_daemon_vru_detection_gets_vru_weight():
-  # Radar sees nothing; YOLO spots a person on the right -> VRU weight drives the bias.
+def test_daemon_vru_detection_drives_pressure():
+  # Radar sees nothing; YOLO spots a person on the right -> vulnerable-user trigger gap.
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
-  daemon.update(0.0)                    # enter hysteresis
-  daemon.update(C.ENTER_HOLD_S + 0.01)  # active
+                       detector=_FakeDetector(detections=[_box_at(20.0, PERSON_Y, cls="person")]))
+  _add_standard_lane(daemon)
+  daemon.update(0.0)
   assert pm.sent[-1][1].valid is True
-  expected = MODEL_CURVATURE + _first_frame_bias(_expected_offset(20.0, C.VRU_WEIGHT))
-  assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(expected, rel=1e-6)
-
-
-def test_daemon_vru_weight_exceeds_vehicle_weight():
-  frames = [ROI] * 2
-  person, _ = _daemon(camera=_FakeCamera(frames),
-                      detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
-  car, _ = _daemon(camera=_FakeCamera(frames),
-                   detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="car")]))
-  for d in (person, car):
-    d.update(0.0)
-    d.update(C.ENTER_HOLD_S + 0.01)
-  person_curv = person.pm.sent[-1][1].lateralManeuverPlan.desiredCurvature
-  car_curv = car.pm.sent[-1][1].lateralManeuverPlan.desiredCurvature
-  assert person_curv > car_curv > MODEL_CURVATURE
-  assert car_curv == pytest.approx(MODEL_CURVATURE + _first_frame_bias(_expected_offset(20.0, C.VEHICLE_WEIGHT)), rel=1e-6)
+  assert _debug(pm).pressureRight == pytest.approx(0.5, abs=0.02)
 
 
 def test_daemon_associated_detection_not_double_counted():
   # Radar point and YOLO box at the same spot: the radar point absorbs the
-  # detection (one target, not two). Task 5: the absorbed point takes the
-  # vision class weight, so a radar point matched to a person box is a VRU.
+  # detection (one target, not two) and takes the vision class, so a radar
+  # point matched to a person box uses the vulnerable-user trigger gap.
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]),
-                       radar_points=[(20.0, -1.8)])
+                       detector=_FakeDetector(detections=[_box_at(20.0, PERSON_Y, cls="person")]),
+                       radar_points=[(20.0, PERSON_Y)])
+  _add_standard_lane(daemon)
   daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
   assert pm.sent[-1][1].valid is True
-  expected = MODEL_CURVATURE + _first_frame_bias(_expected_offset(20.0, C.VRU_WEIGHT))
-  assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(expected, rel=1e-6)
+  assert _debug(pm).nAssociated == 1
+  assert _debug(pm).pressureRight == pytest.approx(0.5, abs=0.02)
 
 
 def test_daemon_confirms_static_radar_across_reiteration():
@@ -195,27 +191,24 @@ def test_daemon_confirms_static_radar_across_reiteration():
       return iter([_NS(**self._fields)])
 
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
-  daemon.sm["radarTracks"].points = _ReiteratedPoints(dRel=20.0, yRel=-1.8, vRel=-20.0, trackId=7)
+                       detector=_FakeDetector(detections=[_box_at(20.0, PERSON_Y, cls="person")]))
+  _add_standard_lane(daemon)
+  daemon.sm["radarTracks"].points = _ReiteratedPoints(dRel=20.0, yRel=PERSON_Y, vRel=-20.0, trackId=7)
   daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
   assert pm.sent[-1][1].valid is True   # 静止点被视觉确认 → 仍然驱动计划
-  expected = MODEL_CURVATURE + _first_frame_bias(_expected_offset(20.0, C.VRU_WEIGHT))
-  assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(expected, rel=1e-6)
+  assert _debug(pm).pressureRight == pytest.approx(0.5, abs=0.02)
 
 
-def test_daemon_suppresses_bias_during_lane_change():
+def test_daemon_suppresses_offset_during_lane_change():
   # modelV2.meta.laneChangeState != off: the model curvature is already
-  # executing the lateral manoeuvre, so the avoidance bias must be suppressed
-  # (planner gate, Task 6) and the frame published invalid with the raw model
-  # curvature.
+  # executing the lateral manoeuvre, so the plan is published invalid.
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
+                       detector=_FakeDetector(detections=[_box_at(20.0, PERSON_Y, cls="person")]))
+  _add_standard_lane(daemon)
   daemon.sm._data["modelV2"].meta.laneChangeState = "preLaneChange"
   daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
   assert pm.sent[-1][1].valid is False
-  assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
+  assert pm.sent[-1][1].lateralManeuverPlan.desiredLaneOffset == 0.0
 
 
 def test_daemon_projects_through_roi_inverse_mapping():
@@ -223,7 +216,7 @@ def test_daemon_projects_through_roi_inverse_mapping():
   # car-frame point as its full-frame equivalent.
   meta = RoiMeta(1344.0 / 640.0, 760.0 / 384.0, 0.0)
   d_cam = 20.0 + C.CAMERA_TO_FRONT
-  u_full = CX - FX * (-1.8) / d_cam
+  u_full = CX - FX * PERSON_Y / d_cam
   v_full = CY + FY * C.CAMERA_HEIGHT / d_cam
   u_roi, v_roi = u_full / meta.scale_u, v_full / meta.scale_v
   # Height in ROI px such that the FULL-FRAME height makes box-height ranging
@@ -233,10 +226,9 @@ def test_daemon_projects_through_roi_inverse_mapping():
   box = {"x1": u_roi - 5.0, "y1": v_roi - h_roi, "x2": u_roi + 5.0, "y2": v_roi, "cls": "person", "conf": 0.9}
   daemon, pm = _daemon(camera=_FakeCamera(frames=[(np.zeros((384, 640, 3), np.uint8), meta)] * 2),
                        detector=_FakeDetector(detections=[box]))
+  _add_standard_lane(daemon)
   daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
-  expected = MODEL_CURVATURE + _first_frame_bias(_expected_offset(20.0, C.VRU_WEIGHT))
-  assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(expected, rel=1e-6)
+  assert _debug(pm).pressureRight == pytest.approx(0.5, abs=0.02)
 
 
 # --- degradation ------------------------------------------------------------------
@@ -249,11 +241,12 @@ def test_daemon_degrades_to_radar_only_without_camera():
       return None
 
   daemon, pm = _daemon(camera=_DeadCamera(), radar_points=[(8.0, -1.8)])
+  _add_standard_lane(daemon)
   daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
+  daemon.update(C.DT_5HZ)
   assert "camera" in daemon.degraded          # logged once, radar-only fallback
   assert pm.sent[-1][1].valid is True         # the radar target still drives the plan
-  assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature > MODEL_CURVATURE
+  assert pm.sent[-1][1].lateralManeuverPlan.desiredLaneOffset > 0.0
 
 
 def test_daemon_degrades_to_radar_only_when_yolo_fails():
@@ -267,13 +260,14 @@ def test_daemon_degrades_to_radar_only_when_yolo_fails():
 
   detector = _BrokenDetector()
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 4), detector=detector, radar_points=[(8.0, -1.8)])
+  _add_standard_lane(daemon)
   for i in range(4):
     daemon.update(i * C.DT_5HZ)
   assert "yolo" in daemon.degraded
   assert daemon.detector_dead is True
   assert detector.calls == 1                  # no retry spam after the failure
   assert pm.sent[-1][1].valid is True         # radar-only still works
-  assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature > MODEL_CURVATURE
+  assert pm.sent[-1][1].lateralManeuverPlan.desiredLaneOffset > 0.0
 
 
 def test_daemon_creates_camera_lazily_via_factory():
@@ -295,65 +289,25 @@ def test_daemon_skips_vision_when_no_new_frame():
   # Camera connected but no fresh frame this tick: radar-only, no crash.
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI]), detector=_FakeDetector(detections=[_box_at(20.0, -1.8)]),
                        radar_points=[(8.0, -1.8)])
+  _add_standard_lane(daemon)
   daemon.update(0.0)                          # consumes the only frame
   daemon.update(C.DT_5HZ)                     # no frame -> radar-only this tick
-  assert pm.sent[-1][1].valid is False        # enter hysteresis not satisfied yet
-  assert pm.sent[-1][1].lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
+  assert pm.sent[-1][1].valid is True         # the radar target still drives the plan
+  assert pm.sent[-1][1].lateralManeuverPlan.desiredLaneOffset > 0.0
 
 
 def test_daemon_gates_valid_on_modelv2_validity():
   # Defensive: a frame whose modelV2 failed validation must never be published
   # as a valid plan, even with a target that would otherwise drive the bias.
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]),
+                       detector=_FakeDetector(detections=[_box_at(20.0, PERSON_Y, cls="person")]),
                        model_valid=False)
+  _add_standard_lane(daemon)
   daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
+  daemon.update(C.DT_5HZ)
+  assert _debug(pm).pressureRight > 0.0       # the target would otherwise drive the plan
   assert len(pm.sent) == 6                    # 3 streams x 2 frames, every-frame invariant holds
   assert pm.sent[-1][1].valid is False        # controlsd falls back to its own modelV2
-
-
-def _edge_std_daemon(road_edge_stds):
-  """右侧目标 + 左沿净空 1.0m（够）,仅路沿方差可变 —— 验证 daemon 把
-  modelV2.roadEdgeStds 接进 planner 的 C7 置信门。"""
-  edge = _NS(x=[10.0], y=[-1.0])   # 左沿净空 1.0 >= 0.6,本该放行
-  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[edge],
-                 meta=_NS(laneChangeState="off"), roadEdgeStds=road_edge_stds)
-  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
-  radar = _NS(points=[_NS(dRel=8.0, yRel=-1.8, vRel=0.0)],
-              errors=_NS(canError=False, radarUnavailableTemporary=False))
-  pm = _FakePubMaster()
-  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams())
-  return daemon, pm
-
-
-def test_daemon_wires_edge_stds_into_planner_gate():
-  # 左沿方差超标 -> 向左偏置被拦（valid=False,携带原始模型曲率）
-  daemon, pm = _edge_std_daemon([0.9, 0.1])
-  daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
-  assert pm.sent[-1][1].valid is False
-
-  # 方差达标（左沿可信）-> 放行
-  daemon, pm = _edge_std_daemon([0.1, 0.9])
-  daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
-  assert pm.sent[-1][1].valid is True
-
-
-def test_daemon_without_edge_stds_attribute_keeps_running():
-  # 旧桩形态的 modelV2（无 roadEdgeStds 字段）:getattr 回退 None,行为不变
-  edge = _NS(x=[10.0], y=[-1.0])
-  model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[edge],
-                 meta=_NS(laneChangeState="off"))
-  car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
-  radar = _NS(points=[_NS(dRel=8.0, yRel=-1.8, vRel=0.0)],
-              errors=_NS(canError=False, radarUnavailableTemporary=False))
-  pm = _FakePubMaster()
-  daemon = EagleDaemon(sm=_FakeSubMaster(model_v2, car_state, radar), pm=pm, params=_FakeParams())
-  daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
-  assert pm.sent[-1][1].valid is True
 
 
 def test_vision_is_gated_off_when_uncalibrated():
@@ -455,35 +409,6 @@ def test_vision_chain_kept_running_when_avoidance_enabled():
                        radar_points=[])
   daemon.update(0.0)
   assert daemon.detector.calls == 1
-
-
-def test_plan_publishes_curvature_bias_separately():
-  """controlsd 融合改为 model+curvatureBias(capnp @1):偏置必须单独发布。
-
-  旧语义整句替换 desiredCurvature 会把 eagled 拍的陈旧模型曲率带进转向
-  （2026-09-25 路测实测偏差超避让上限）。desiredCurvature 保留全量语义
-  供离线消费,curvatureBias 是 controlsd 要叠加的分量。
-  """
-  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
-  daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
-  plan_msg = pm.sent[-1][1].lateralManeuverPlan
-  expected_bias = _first_frame_bias(_expected_offset(20.0, C.VRU_WEIGHT))
-  assert plan_msg.curvatureBias == pytest.approx(expected_bias, rel=1e-6)
-  assert plan_msg.desiredCurvature == pytest.approx(MODEL_CURVATURE + plan_msg.curvatureBias, rel=1e-6)
-
-
-def test_curvature_bias_zero_on_suppressed_frames():
-  """变道压制/无效帧:偏置归零(等于没有避让,不产生任何替换效应)。"""
-  daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 2),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
-  daemon.sm._data["modelV2"].meta.laneChangeState = "preLaneChange"
-  daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
-  plan_msg = pm.sent[-1][1].lateralManeuverPlan
-  assert plan_msg.curvatureBias == pytest.approx(0.0)
-  assert plan_msg.desiredCurvature == pytest.approx(MODEL_CURVATURE)
 
 
 # --- vision hold: detections persist between vision ticks -------------------------

@@ -33,12 +33,12 @@ import time
 
 import numpy as np
 
-from openpilot.common.model_geometry import geometry_to_vehicle_frame
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.selfdrive.eagled import constants as C
 from openpilot.selfdrive.eagled.association import associate
 from openpilot.selfdrive.eagled.camera_stream import CameraStream
+from openpilot.selfdrive.eagled.lane_offset import LaneGeometry, lane_geometry
 from openpilot.selfdrive.eagled.projection import calibrated_geometry_from_msg, horizon_row_for, project_detections
 from openpilot.selfdrive.eagled.yolo_detector import YoloDetector
 
@@ -71,63 +71,6 @@ class Target:
   cls: str | None = None  # 视觉类别（car/person/...；纯雷达未关联为 None）—— 半宽折算用
   vRel: float | None = None  # 纵向相对速度 m/s（雷达实测;视觉独有目标速度未知 = None,
                              # 变道时间投影对 None 不放宽）
-
-
-@dataclass(frozen=True)
-class LaneGeometry:
-  """Ego-lane boundaries + model path in the **vehicle frame** (y left-positive).
-
-  几何来自 ``model_geometry`` 的换算输出：x 以前保险杠为原点（dRel 同参照）、
-  y 左正（yRel 同参照）——判定里目标与几何同原点，无手写坐标换算。
-
-  ``left_valid``/``right_valid`` 是 C7 置信门（laneLineProbs/Stds）的逐边裁决：
-  边界线磨损/无划线的那一侧为 False，该侧目标回退到 path-relative 层。
-  """
-  left_valid: bool
-  right_valid: bool
-  left_x: tuple
-  left_y: tuple
-  right_x: tuple
-  right_y: tuple
-  path_x: tuple
-  path_y: tuple
-  path_std: tuple
-
-
-def lane_geometry(model_v2, camera_to_front: float) -> LaneGeometry | None:
-  """Extract ego-lane boundaries (laneLines[1]/[2]) + path with C7 quality flags.
-
-  几何本身经 ``model_geometry`` 换算（解释权的唯一落点）：输出已是车体系
-  （x 前保险杠原点、y 左正），目标与几何在判定中同原点。``camera_to_front``
-  为安装偏移（票 #6 读点注入，本模块不持 Params）。
-
-  None = 模型几何整体不可用（字段缺失/列表为空）——目标判定回退固定带。
-  对 duck-typed 测试桩安全：缺属性的假 modelV2 直接得 None。
-  """
-  probs = getattr(model_v2, "laneLineProbs", None)
-  stds = getattr(model_v2, "laneLineStds", None)
-  position = getattr(model_v2, "position", None)
-  if probs is None or stds is None or position is None:
-    return None
-  if len(probs) <= C.LANE_IDX_RIGHT or len(stds) <= C.LANE_IDX_RIGHT:
-    return None
-  vgeo = geometry_to_vehicle_frame(model_v2, camera_to_front=camera_to_front)
-  left, right = vgeo.lane_lines[C.LANE_IDX_LEFT], vgeo.lane_lines[C.LANE_IDX_RIGHT]
-  if left is None or right is None:
-    return None
-  left_valid = float(probs[C.LANE_IDX_LEFT]) >= C.LANE_PROB_MIN and float(stds[C.LANE_IDX_LEFT]) <= C.LANE_STD_MAX
-  right_valid = float(probs[C.LANE_IDX_RIGHT]) >= C.LANE_PROB_MIN and float(stds[C.LANE_IDX_RIGHT]) <= C.LANE_STD_MAX
-  path = vgeo.path
-  path_x = path.x if path is not None else ()
-  # duck-typed position 桩可能没有 yStd -> tier 2 安全关闭
-  path_std = tuple(getattr(position, "yStd", ()) or ())
-  return LaneGeometry(
-    left_valid=left_valid, right_valid=right_valid,
-    left_x=left.x, left_y=left.y,
-    right_x=right.x, right_y=right.y,
-    path_x=path_x, path_y=(path.y if path is not None else ()),
-    path_std=path_std if len(path_std) == len(path_x) else (),
-  )
 
 
 def gate_target(dRel: float, yRel: float, cls, geo: LaneGeometry | None) -> tuple[bool, int]:
@@ -203,6 +146,16 @@ def radar_point_key(point) -> int:
   return id(point) if track_id is None else int(track_id)
 
 
+def radar_point_counts(point, v_ego: float, confirmed_keys) -> bool:
+  """雷达点是否计入融合:对地静止(或速度缺失按静止)的点须有视觉关联确认。
+
+  fuse_objects 与遥测 _target_rows 共用:遥测不许把被融合丢弃的点标成有压力。
+  """
+  v_rel = getattr(point, "vRel", None)
+  ground_speed = None if v_rel is None else abs(float(v_rel) + v_ego)
+  return not (ground_speed is None or ground_speed < C.STATIC_SPEED_THRESH) or radar_point_key(point) in confirmed_keys
+
+
 def fuse_objects(radar_points: Iterable[RadarPoint], detections: Iterable[dict] | None = None,
                  v_ego: float = 0.0, confirmed_keys: Iterable[int] = (),
                  vision_cls_by_key: dict[int, str] | None = None,
@@ -223,10 +176,8 @@ def fuse_objects(radar_points: Iterable[RadarPoint], detections: Iterable[dict] 
   for point in radar_points:
     dRel, yRel = float(point.dRel), float(point.yRel)
     key = radar_point_key(point)
-    # vRel 缺失时保守按静止处理
     v_rel = getattr(point, "vRel", None)
-    ground_speed = None if v_rel is None else abs(float(v_rel) + v_ego)
-    if (ground_speed is None or ground_speed < C.STATIC_SPEED_THRESH) and key not in confirmed:
+    if not radar_point_counts(point, v_ego, confirmed):
       continue
     cls = cls_by_key.get(key)
     in_gate, lane = gate_target(dRel, yRel, cls, lane_geo)

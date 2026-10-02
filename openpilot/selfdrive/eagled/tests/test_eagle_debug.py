@@ -8,7 +8,7 @@ from openpilot.selfdrive.eagled.eagled import EagleDaemon
 from openpilot.selfdrive.eagled.tests.test_daemon_fusion import (MODEL_CURVATURE, ROI, _FakeCamera, _FakeDetector,
                                                                  _FakeParams, _FakePubMaster, _FakeSubMaster, _NS,
                                                                  _box_at, _daemon)
-
+from openpilot.selfdrive.eagled.tests.test_daemon_fusion import PERSON_Y, _add_standard_lane
 
 
 def _debug_msgs(pm):
@@ -101,17 +101,18 @@ def test_debug_counts_and_gate_flags_radar_only():
   assert dbg.valid is False  # planner not yet active (hysteresis)
 
 
-def test_debug_carries_planner_state():
+def test_debug_carries_decision_state():
   daemon, pm = _daemon(camera=_FakeCamera(frames=[ROI] * 4),
-                       detector=_FakeDetector(detections=[_box_at(20.0, -1.8, cls="person")]))
+                       detector=_FakeDetector(detections=[_box_at(20.0, PERSON_Y, cls="person")]))
+  _add_standard_lane(daemon)
   daemon.update(0.0)
-  daemon.update(C.ENTER_HOLD_S + 0.01)
   dbg = _debug_msgs(pm)[-1].eagleDebug
   assert dbg.valid is True and dbg.active is True
-  assert dbg.direction == 1  # target on the right -> avoid left
-  assert dbg.yDes > 0.0
-  assert dbg.maxOffset == pytest.approx(C.MAX_OFFSET_FREE)
-  assert dbg.edgeClearance == 999.0  # no road edges -> inf sent as 999.0
+  assert dbg.pressureRight == pytest.approx(0.5, abs=0.02) and dbg.pressureLeft == 0.0
+  assert dbg.laneOffsetTarget > 0.0           # 右侧目标 → 向左偏
+  assert dbg.offsetCap == pytest.approx(0.70)
+  assert dbg.inactiveReason == ""
+  assert dbg.edgeClearance == 999.0           # 路沿门已删,恒发哨兵值
 
 
 def test_debug_bsm_flags_from_car_state():
@@ -247,10 +248,9 @@ def test_streams_publish_false_flags_when_geometry_unavailable():
 # --- C9: budget + sideLead publication --------------------------------------------
 
 
-def test_budgets_published_and_flow_into_the_plan():
+def test_budgets_and_side_leads_published():
   # 左侧邻道目标(|yRel|=2.6,无视觉类别 -> 默认半宽 0.5)
-  # -> budget_left = 2.6-0.5-0.9-0.3 = 0.9 > 0.35,本帧不压偏置;
-  # 右侧威胁(yRel=-1.8,vehicle 权重)desire = 0.5*0.6*(1-20/50) = 0.18 全额放行。
+  # -> budget_left = 2.6-0.5-0.9-0.3 = 0.9。
   model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
                  meta=_NS(laneChangeState="off"))
   car_state = _NS(vEgo=20.0, leftBlindspot=False, rightBlindspot=False, steeringPressed=False)
@@ -276,16 +276,10 @@ def test_budgets_published_and_flow_into_the_plan():
   assert st.sideLeadLeft.vRel == pytest.approx(0.0)
   # 右侧约束 lead 就是那个威胁本身
   assert st.sideLeadRight.valid is True and st.sideLeadRight.edgeDist == pytest.approx(1.3)
-  # 预算 0.9 > desire 0.18:向左偏置全额放行(右预算 0.1 管的是向右偏,不参与)。
-  # 首帧低通 alpha = 0.2/0.7
-  alpha = C.DT_5HZ / (C.LOWPASS_TAU_S + C.DT_5HZ)
-  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
-  assert plans[-1].lateralManeuverPlan.desiredCurvature == pytest.approx(
-    MODEL_CURVATURE + 2.0 * alpha * 0.18 / C.L_LOOKAHEAD ** 2)
 
 
 def test_bsm_maps_to_zero_budget_without_a_lead():
-  # BSM 左 -> budget_left 0 + 不清空,lead 无可指;右侧威胁的计划仍 valid 但偏置 0
+  # BSM 左 -> budget_left 0 + 不清空,lead 无可指
   model_v2 = _NS(action=_NS(desiredCurvature=MODEL_CURVATURE), roadEdges=[],
                  meta=_NS(laneChangeState="off"))
   car_state = _NS(vEgo=20.0, leftBlindspot=True, rightBlindspot=False, steeringPressed=False)
@@ -299,6 +293,3 @@ def test_bsm_maps_to_zero_budget_without_a_lead():
   assert st.budgetLeft == 0.0 and st.sideLeadLeft.valid is False
   assert st.changeClearLeft is False          # BSM 侧不清空(变道门消费)
   assert st.changeClearRight is True          # 右侧同速远车投影放行
-  plans = [msg for service, msg in pm.sent if service == "lateralManeuverPlan"]
-  assert plans[-1].valid is True   # 滞回按目标存在性,预算 0 只消偏置
-  assert plans[-1].lateralManeuverPlan.desiredCurvature == pytest.approx(MODEL_CURVATURE)
