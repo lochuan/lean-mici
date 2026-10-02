@@ -6,6 +6,7 @@ import importlib.util
 import os
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,6 +24,7 @@ overlay_prebuilt = release_lib.overlay_prebuilt
 read_manifest = release_lib.read_manifest
 validate_artifact = release_lib.validate_artifact
 write_manifest = release_lib.write_manifest
+plan_source_sync = release_lib.plan_source_sync
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -143,6 +145,7 @@ class TestConstants(unittest.TestCase):
     self.assertEqual(set(NATIVE_INPUT_PATHS), expected)
     self.assertEqual(len(NATIVE_INPUT_PATHS), len(expected))
 
+
   def test_model_pkl_inputs_feed_native_hash(self):
     """A stale pkl must never ship: its build inputs must invalidate native_hash.
 
@@ -164,6 +167,63 @@ class TestConstants(unittest.TestCase):
     for artifact in ARTIFACT_PATHS:
       covered = [p for p in NATIVE_INPUT_PATHS if artifact == p or artifact.startswith(p + "/")]
       self.assertTrue(covered, f"{artifact} has no corresponding native input path")
+
+
+class TestSourceSyncPlan(unittest.TestCase):
+  def test_plan_deletes_stale_sources_and_allows_runtime_artifacts(self):
+    plan = plan_source_sync(
+      device_paths={"keep.py", "removed.py", "runtime.so", "flat-link", "changed.py"},
+      source_paths={"keep.py", "changed.py"},
+      changed_paths={"removed.py", "runtime.so", "changed.py"},
+      allowed_paths={"runtime.so", "flat-link"},
+    )
+    self.assertEqual(plan.delete_paths, ("removed.py",))
+    self.assertEqual(plan.reject_paths, ("changed.py",))
+
+  def test_plan_is_empty_when_tree_matches(self):
+    plan = plan_source_sync(
+      device_paths={"a.py", "runtime.so"},
+      source_paths={"a.py"},
+      changed_paths={"runtime.so"},
+      allowed_paths={"runtime.so"},
+    )
+    self.assertEqual(plan.delete_paths, ())
+    self.assertEqual(plan.reject_paths, ())
+
+  def test_cli_does_not_reject_source_deleted_paths(self):
+    with tempfile.TemporaryDirectory() as td:
+      repo = Path(td)
+
+      def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+
+      git("init", "-q", "-b", "main")
+      git("config", "user.email", "test@example.com")
+      git("config", "user.name", "test")
+      (repo / "removed.py").write_text("old\n")
+      (repo / "changed.py").write_text("old\n")
+      (repo / "keep.py").write_text("keep\n")
+      git("add", ".")
+      git("commit", "-qm", "device base")
+      git("branch", "device")
+
+      (repo / "removed.py").unlink()
+      (repo / "changed.py").write_text("source\n")
+      (repo / "new.py").write_text("new\n")
+      git("add", "-A")
+      git("commit", "-qm", "source")
+      git("branch", "source")
+
+      git("checkout", "-q", "device")
+      (repo / "runtime.so").write_text("runtime\n")
+      git("add", "runtime.so")
+      git("commit", "-qm", "runtime artifact")
+      git("checkout", "-q", "source", "--", ".")
+
+      result = subprocess.run(
+        [sys.executable, str(MODULE_PATH), "plan-source-sync", "source"],
+        cwd=repo, input="runtime.so\n", check=True, capture_output=True, text=True)
+      self.assertEqual(result.stdout, "D\tremoved.py\n")
 
 
 class TestElfValidation(unittest.TestCase):

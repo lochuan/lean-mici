@@ -95,33 +95,24 @@ check_prereqs() {
 }
 
 sync_sources() {
+  cd "$SRC"
   # 设备到 GitHub 的 TLS 偶发握手失败（fake-IP 代理链路），重试 3 次。
   # 重试尽失败不直接拒：ref 验证行才是门（ref 可能是上轮 fetch 留下的）。
   git_fetch_retry fetch origin "$SRC_BRANCH:refs/remotes/origin/$SRC_BRANCH" 2>/dev/null || true
   git rev-parse -q --verify "$SRC_REF" >/dev/null || die "$SRC_BRANCH fetch 失败（3 次重试后）"
-  # 白名单 = 产物路径（ARTIFACT_PATHS + data globs 的实际文件）——设备树有、lean-master
-  # 没有的运行时产物是扁平模型的预期内容。
-  # ls 失败（glob 无匹配，如消费态树没有 yolo pkl）必须吞掉——否则 for 循环 rc≠0，
-  # 命令替换在 set -e 下静默杀死整个发布。
-  ART_EXPECT=$(
-    /usr/local/venv/bin/python /tmp/relhelper/release_lib.py artifact-paths
-    /usr/local/venv/bin/python /tmp/relhelper/release_lib.py flat-tree-entries
-    for pat in $(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py data-artifact-globs); do ls "$pat" 2>/dev/null || true; done
-  )
+  # 运行时产物 + flat-tree 结构条目是源树之外的预期内容。
+  ART_EXPECT=$(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py source-sync-allowlist)
   git checkout "$SRC_REF" -- .
-  # 镜像 lean-master 的删除：源里删掉的文件（功能移除）从设备树一并移除，
-  # 否则发布树继续携带死代码。白名单（构建产物）不删——产物在 HEAD 里 tracked、
-  # lean-master 没有，属于扁平模型的预期内容。
-  # grep -v 在"零行需要删除"时退出 1（本版本与上一版无删除差异时必然发生），
-  # pipefail+set -e 会无声杀死整个发布。与 ls glob 空匹配同类坑，|| true 兜底。
-  comm -23 \
-    <(git ls-files | sort) \
-    <(git ls-tree -r --name-only "$SRC_REF" | sort) \
-    | { grep -vxF -f <(echo "$ART_EXPECT" | sort -u) || true; } \
-    | xargs -r rm -f
-  AM_BAD=$(git diff --name-only --diff-filter=AM "$SRC_REF" | grep -vxF -f <(echo "$ART_EXPECT" | sort -u) || true)
-  if [ -n "$AM_BAD" ]; then
-    echo "$AM_BAD" | head -20 >&2
+  SYNC_PLAN=$(printf '%s\n' "$ART_EXPECT" | /usr/local/venv/bin/python /tmp/relhelper/release_lib.py plan-source-sync "$SRC_REF")
+  SYNC_REJECT=""
+  while IFS=$'\t' read -r kind path; do
+    case "$kind" in
+      D) rm -f -- "$path" ;;
+      R) SYNC_REJECT="${SYNC_REJECT}${path}"$'\n' ;;
+    esac
+  done <<< "$SYNC_PLAN"
+  if [ -n "$SYNC_REJECT" ]; then
+    printf '%s' "$SYNC_REJECT" | head -20 >&2
     die "设备树同步 $SRC_BRANCH 后仍有非产物的新增/修改，拒绝发布（排查 .gitignore/权限）"
   fi
   echo "[ok] 设备树源内容 ≡ $SRC_REF（+ 运行时产物）"

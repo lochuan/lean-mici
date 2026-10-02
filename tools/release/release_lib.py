@@ -17,6 +17,7 @@ import subprocess
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+from typing import NamedTuple
 
 
 # Every native runtime artifact that must be built on comma hardware.
@@ -100,6 +101,28 @@ MANIFEST_NAME = "MANIFEST"
 FLAT_TREE_ENTRIES: tuple[str, ...] = (
   "msgq", "opendbc", "rednose", "tinygrad", "prebuilt", ".overlay_init",
 )
+
+
+class SourceSyncPlan(NamedTuple):
+  delete_paths: tuple[str, ...]
+  reject_paths: tuple[str, ...]
+
+
+def plan_source_sync(device_paths: Iterable[str], source_paths: Iterable[str], changed_paths: Iterable[str],
+                     allowed_paths: Iterable[str]) -> SourceSyncPlan:
+  """Decide stale tracked files to delete and non-artifact diffs to reject."""
+  device, source, changed, allowed = map(set, (device_paths, source_paths, changed_paths, allowed_paths))
+  delete_paths = device - source - allowed
+  reject_paths = changed - allowed - delete_paths
+  return SourceSyncPlan(tuple(sorted(delete_paths)), tuple(sorted(reject_paths)))
+
+
+def source_sync_allowlist(repo_root: Path) -> tuple[str, ...]:
+  """Return structural entries and present runtime data artifacts for source sync."""
+  allowed = set(ARTIFACT_PATHS) | set(FLAT_TREE_ENTRIES)
+  for pattern in DATA_ARTIFACT_GLOBS:
+    allowed.update(str(path.relative_to(repo_root)) for path in repo_root.glob(pattern))
+  return tuple(sorted(allowed))
 
 
 def _run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -583,6 +606,9 @@ def main() -> int:
   hash_parser.add_argument("commit", nargs="?", default="HEAD")
 
   sub.add_parser("artifact-paths", help="print native artifact paths")
+  sub.add_parser("source-sync-allowlist", help="print runtime paths allowed by the source sync gate")
+  sync_plan = sub.add_parser("plan-source-sync", help="plan stale-file deletion and non-artifact diff rejection")
+  sync_plan.add_argument("source_ref")
   sub.add_parser("schema-paths", help="print the capnp schema registry (openpilot/cereal/schemas.py)")
   sub.add_parser("data-artifact-globs", help="print non-ELF data artifact globs")
   sub.add_parser("flat-tree-entries", help="print flat-tree structural entries lean-master does not track")
@@ -638,6 +664,24 @@ def main() -> int:
   if args.command == "artifact-paths":
     for rel in ARTIFACT_PATHS:
       print(rel)
+    return 0
+
+  if args.command == "source-sync-allowlist":
+    for rel in source_sync_allowlist(_repo_root()):
+      print(rel)
+    return 0
+
+  if args.command == "plan-source-sync":
+    root = _repo_root()
+    device_paths = [p for p in _run(["git", "ls-files", "-z"], cwd=root).stdout.split("\0") if p]
+    source_paths = [p for p in _run(["git", "ls-tree", "-r", "-z", "--name-only", args.source_ref], cwd=root).stdout.split("\0") if p]
+    changed_paths = [p for p in _run(["git", "diff", "--name-only", "-z", "--diff-filter=AM", args.source_ref], cwd=root).stdout.split("\0") if p]
+    allowed_paths = [p for p in sys.stdin.read().splitlines() if p]
+    plan = plan_source_sync(device_paths, source_paths, changed_paths, allowed_paths)
+    for path in plan.delete_paths:
+      print(f"D\t{path}")
+    for path in plan.reject_paths:
+      print(f"R\t{path}")
     return 0
 
   if args.command == "check-flat-tree":
