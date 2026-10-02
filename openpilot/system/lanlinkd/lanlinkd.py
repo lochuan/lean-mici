@@ -7,7 +7,7 @@ Sanic 由 pyproject.toml 声明，随 AGNOS venv 一起安装（19.7.2 起），
 /data/pydeps 旁路。
 
 为什么 single_process=True（见 main()）：Sanic 默认起多 worker 进程，而
-StatusCache / RadarCache 状态线程、WifiManager DBus 单例都是**进程内状态**。
+StatusCache 状态线程、WifiManager DBus 单例都是**进程内状态**。
 多 worker 下各自起一套线程订阅 msgq/NM，重复开销且互相打架。
 """
 
@@ -35,7 +35,6 @@ from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd import wifi_api
 from openpilot.system.lanlinkd import software_api
-from openpilot.system.lanlinkd.avoidanced import AvoidanceCache
 from openpilot.system.lanlinkd.calibration import CalibrationController
 from openpilot.system.lanlinkd.statusd import StatusCache
 
@@ -53,7 +52,6 @@ class LanlinkApp:
     self.params = Params()
     self.version_info = {k: params_api.to_str(self.params.get(k)) or "" for k in VERSION_PARAMS}
     self.cache = StatusCache(self.version_info, device_type="pc" if PC else HARDWARE.get_device_type(), params=self.params)
-    self.avoidance = AvoidanceCache(self.params)
     self.calibration = CalibrationController(self.params)
     self.exit_event = threading.Event()
     self._settings_ui: dict | None = None
@@ -61,7 +59,6 @@ class LanlinkApp:
     self._wifi_lock = threading.Lock()
     threading.Thread(target=self.cache.run, args=(self.exit_event,), name="lanlink_status", daemon=True).start()
     threading.Thread(target=self.calibration.run_online, args=(self.exit_event,), name="lanlink_calibration_online", daemon=True).start()
-    threading.Thread(target=self.avoidance.run, args=(self.exit_event,), name="lanlink_avoidance", daemon=True).start()
 
   # ---- helpers ----
   @staticmethod
@@ -223,9 +220,6 @@ class LanlinkApp:
     snap["paramsVersion"] = params_api.to_str(self.params.get(params_api.VERSION_KEY))
     return json_response(snap)
 
-  async def avoidance_get(self, request: Request) -> HTTPResponse:
-    return json_response(self.avoidance.snapshot())
-
   # ---- HUD：SSE 帧流，订阅随客户端连接建立、断开即退订 ----
   def hud_events(self):
     return hud.HudStream(self.params).events()
@@ -323,7 +317,6 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/software/<action:str>", "software_action"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/bootstrap", "bootstrap"),
-  ("GET", "/api/avoidance", "avoidance_get"),
   ("GET", "/api/hud/stream", "hud_stream"),
   ("POST", "/api/calibration/start", "calibration_start"),
   ("POST", "/api/calibration/stop", "calibration_stop"),

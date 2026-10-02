@@ -9,7 +9,6 @@
 - y 左正（model_geometry 出口已换算，本模块不再做符号翻转）。
 - 字段缺失/空列表 → 对应线为 None，绝不抛异常（模型桩形态千差万别）。
 """
-import time
 from types import SimpleNamespace as NS
 
 import numpy as np
@@ -148,39 +147,3 @@ def test_invalid_envelope_modelV2_returns_none():
   # ③：envelope invalid 的帧不过接收门（modeld 的 modelV2 在 vipc 丢帧时置 invalid）
   assert lanes.lane_snapshot(_model_v2(), recv_mono=100.0, now_mono=100.05,
                              camera_to_front=CTF, valid=False) is None
-
-
-# --- LaneCache 集成（真实 SubMaster 链路） ----------------------------------------
-
-def test_lane_cache_serves_published_model_v2():
-  from openpilot.cereal import messaging
-  cache = lanes.LaneCache()
-  pub = messaging.PubMaster(['modelV2'])
-  msg = messaging.new_message('modelV2')
-  msg.valid = True   # 生产端 modeld 在 fill_model_msg 里置 envelope valid
-  ml = msg.modelV2
-  ml.init('laneLines', 4)
-  ml.laneLines[1].x, ml.laneLines[1].y = [0.0, 50.0], [-1.75, -1.75]
-  ml.laneLineProbs = [0.1, 0.9, 0.1, 0.1]
-  ml.laneLineStds = [0.5, 0.1, 0.5, 0.5]
-  ml.position.x, ml.position.y, ml.position.yStd = [0.0, 50.0], [0.0, 0.0], [0.05, 0.05]
-  try:
-    snap = None
-    for _ in range(20):   # 订阅建立前的帧会丢，循环发送直到收到
-      pub.send('modelV2', msg)
-      snap = cache.snapshot(camera_to_front=CTF)
-      if snap is not None:
-        break
-      time.sleep(0.05)
-  finally:
-    cache.stop()
-  assert snap is not None
-  assert snap["corrected"]["laneLines"][1]["y"][0] == pytest.approx(1.75)
-
-
-def test_lane_cache_returns_none_before_any_frame():
-  cache = lanes.LaneCache()
-  try:
-    assert cache.snapshot(camera_to_front=CTF) is None
-  finally:
-    cache.stop()

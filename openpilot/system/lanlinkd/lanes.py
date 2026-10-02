@@ -1,26 +1,19 @@
-"""车道几何快照：modelV2 → 避让监测俯视图的车道数据源。
+"""车道几何快照：modelV2 → HUD 的车道数据源（hud.py 调 lane_snapshot）。
 
-设计（2026-09-25 spec #1 / 票 #4，方案 A）：lanlinkd 自己订阅 modelV2，不动 capnp。
-conflate socket 请求时取帧——/api/avoidance 约 2Hz，每请求最多解码一帧，
-不跑后台解码循环。
-
-坐标语义由 ``model_geometry`` 独占解释（spec #1）：本模块只做重采样与组装，
+坐标语义由 ``model_geometry`` 独占解释：本模块只做重采样与组装，
 不做符号翻转/偏移换算。快照携带两套同网格几何：
 
 - ``corrected``：``model_geometry(ctf=安装偏移)`` —— 车体系（x 前保险杠原点、
-  y 左正），鸟瞰图默认层，与雷达目标/判定同原点。
+  y 左正），与雷达目标/判定同原点。
 - ``raw``：``model_geometry(ctf=0)`` —— 与换算前的展示行为逐点一致。
 
-叠加视图两套曲线的错位 = 安装偏移本身，即精修仪器（自检：错位应等于
-正在生效的 CAMERA_TO_FRONT）。
+两套曲线的错位 = 安装偏移本身（自检：错位应等于正在生效的 CAMERA_TO_FRONT）。
 """
 from __future__ import annotations
 
-import time
 
 import numpy as np
 
-from openpilot.cereal import messaging
 from openpilot.common.model_geometry import geometry_to_vehicle_frame
 from openpilot.common.stream_gate import StreamStatus, stream_status
 
@@ -106,29 +99,3 @@ def lane_snapshot(model_v2, recv_mono: float, now_mono: float, camera_to_front: 
     "corrected": _geometry_set(model_v2, probs, stds, edge_stds, position, camera_to_front),
     "raw": _geometry_set(model_v2, probs, stds, edge_stds, position, 0.0),
   }
-
-
-class LaneCache:
-  """请求时取帧的 modelV2 订阅（conflate，无后台循环）。
-
-  只在 API handler 线程使用：SubMaster 惰性创建，snapshot() 每次调用
-  先收一轮再判定新鲜度。超龄/无帧返回 None，调用方决定省略字段。
-  ``camera_to_front`` 为安装偏移注入点（票 #6）：调用方每帧从读点取值注入。
-  """
-
-  def __init__(self, clock=time.monotonic):
-    self._sm: messaging.SubMaster | None = None
-    self._clock = clock
-
-  def snapshot(self, camera_to_front: float) -> dict | None:
-    if self._sm is None:
-      try:
-        self._sm = messaging.SubMaster(['modelV2'])
-      except Exception:
-        return None
-    self._sm.update(0)
-    return lane_snapshot(self._sm['modelV2'], self._sm.recv_time['modelV2'], self._clock(),
-                         camera_to_front=camera_to_front, valid=bool(self._sm.valid['modelV2']))
-
-  def stop(self) -> None:
-    self._sm = None

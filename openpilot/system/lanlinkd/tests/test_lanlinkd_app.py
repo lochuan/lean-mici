@@ -102,9 +102,8 @@ def app(monkeypatch):
   monkeypatch.setattr(mod.StatusCache, "snapshot", lambda self: {"stale": True})
   monkeypatch.setattr(mod.StatusCache, "capabilities", lambda self: {"brand": "toyota"})
   monkeypatch.setattr(mod.StatusCache, "download", lambda self: None)
-  # AvoidanceCache 同理：真实 run 会起 SubMaster
-  monkeypatch.setattr(mod.AvoidanceCache, "run", lambda self, ev: None)
-  monkeypatch.setattr(mod.AvoidanceCache, "snapshot", lambda self: {"stale": True})
+  # 在线标定摘要线程同理：真实 run 会起 SubMaster
+  monkeypatch.setattr(mod.CalibrationController, "run_online", lambda self, ev: None)
   # Sanic 要求 app name 唯一，否则跨测试复用同一实例
   a = mod.create_app(name=f"lanlinkd_test_{os.urandom(4).hex()}")
   a.ctx.fake_params = params
@@ -117,7 +116,7 @@ class TestOpenSurface:
   @pytest.mark.parametrize("path", [
     "/api/params", "/api/params/_all", "/api/params/TestToggle", "/api/models",
     "/api/status", "/api/capabilities", "/api/settings_ui", "/api/logs",
-    "/api/vehicle", "/api/avoidance", "/api/bluetooth",
+    "/api/vehicle", "/api/bluetooth",
   ])
   def test_read_endpoints_need_no_token(self, app, path):
     _, r = app.test_client.get(path)
@@ -174,28 +173,10 @@ class TestParamsRoutes:
     assert r.status == 404
 
 
-class TestAvoidanceRoute:
-  def test_avoidance_returns_cached_snapshot(self, app):
-    fake = {
-      "stale": False,
-      "logMonoTime": 42,
-      "valid": True, "active": True, "yDes": 0.2,
-      "maxOffset": 0.35, "bsmLeft": False, "bsmRight": False, "vEgo": 20.0,
-      "nRadar": 1, "nVision": 1, "nAssociated": 1,
-      "targets": [{"dRel": 20.0, "yRel": -1.0, "vRel": 0.0, "cls": "", "conf": 0.0,
-                   "matched": True, "vision": False, "pairId": 1}],
-    }
-    app.ctx.state.avoidance.snapshot = lambda: fake
+class TestLegacyAvoidanceRoute:
+  def test_legacy_avoidance_endpoint_is_gone(self, app):
     _, r = app.test_client.get("/api/avoidance")
-    assert r.status == 200
-    assert r.json == fake
-
-  def test_avoidance_stale_shape(self, app):
-    # 无数据时（熄火/eagled 未跑）必须返回 {"stale": true}
-    app.ctx.state.avoidance.snapshot = lambda: {"stale": True}
-    _, r = app.test_client.get("/api/avoidance")
-    assert r.status == 200
-    assert r.json == {"stale": True}
+    assert r.status == 404
 
 
 class TestWifiCachedRead:
@@ -337,12 +318,12 @@ class TestStaticRoutes:
     # 真正要保证的性质是"STATIC_DIR 外的文件内容绝不外泄"，而不是某个具体状态码：
     # httpx 会在发包前把 `..` 规范化掉（于是打到不存在的路径得 404），
     # 而绕过规范化的编码形式则由 _serve_static 的 commonpath 检查挡掉（404）。
-    for attack in ["../settings_ui.json", "../../common/params.py", "..%2f..%2fradard.py",
-                   "....//radard.py", "%2e%2e/settings_ui.json"]:
+    for attack in ["../settings_ui.json", "../../common/params.py", "..%2f..%2fstatusd.py",
+                   "....//statusd.py", "%2e%2e/settings_ui.json"]:
       _, r = app.test_client.get(f"/static/{attack}")
       assert r.status in (400, 404), f"traversal not blocked: {attack} -> {r.status}"
       # 内容层面的兜底断言：这些文件的特征串一个都不能出现在响应里
-      for marker in ("BLOCKED_PARAMS", "RadarCache", "schema_version"):
+      for marker in ("BLOCKED_PARAMS", "StatusCache", "schema_version"):
         assert marker not in r.text, f"leaked {marker} via {attack}"
 
   def test_static_dir_escape_is_rejected_at_the_handler(self, app):
@@ -350,7 +331,7 @@ class TestStaticRoutes:
     # 用 asyncio.run 起干净的 loop：test_client 跑完会关掉它自己的 loop。
     import asyncio
     state = app.ctx.state
-    for rel in ["../radard.py", "../../common/params.py", "../settings_ui.json"]:
+    for rel in ["../statusd.py", "../../common/params.py", "../settings_ui.json"]:
       resp = asyncio.run(state._serve_static(rel))
       assert resp.status == 404, f"handler served {rel}"
 
@@ -368,7 +349,7 @@ class TestStaticRoutes:
 
 class TestServerConfig:
   def test_single_process_is_requested(self):
-    # 多 worker 会复制状态线程（StatusCache/RadarCache）和 WifiManager 单例，
+    # 多 worker 会复制状态线程（StatusCache）和 WifiManager 单例，
     # NM DBus 订阅互相打架。这不是性能选项，删掉它是功能 bug，所以锁死。
     src = open(mod.__file__).read()
     assert "single_process=True" in src
