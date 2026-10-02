@@ -9,6 +9,14 @@
 推送节奏：``eagleState`` 每到一帧推一帧（约 5Hz）；静默 1 秒发一次心跳；
 ``eagleState`` 超龄或无效时推过期帧（之后静默期只发心跳，手机端以最后一帧为准）。
 订阅只在有客户端连接时才建立（见 :meth:`HudStream.events`）。
+
+侧向机动两段（ADR 0002，只转发判定方的结论）：
+
+* ``laneChange``：阶段 / 方向取 ``modelV2.meta``，每侧几何拦截与整车请求保持原因取
+  ``modelDataV2SP``，每侧 clear / blocked / unknown 取 ``eagleState.changeClear*State``。
+  modeld 的两条消息尚未收到或 ``modelV2`` 超龄时整段为 ``None``。
+* ``avoidance``：``offset`` 是车道内偏移目标（米，左正右负），``inactiveReason`` 是 planner 的
+  不生效原因（``None`` = 生效门全通）。
 """
 from __future__ import annotations
 
@@ -24,7 +32,9 @@ from openpilot.system.lanlinkd import lanes as lanes_mod
 HEARTBEAT_TIMEOUT_MS = 1000
 VISION_CLASSES = ("person", "bicycle", "motorcycle", "car")
 UNCLASSIFIED = "unclassified"
-STALE_FRAME = {"t": None, "stale": True, "vEgo": None, "lanes": None, "vehicles": None, "sensors": None}
+STALE_FRAME = {"t": None, "stale": True, "vEgo": None, "lanes": None, "vehicles": None, "sensors": None,
+               "laneChange": None, "avoidance": None}
+LANE_CHANGE_STAGES = {"laneChangeStarting": "starting", "laneChangeFinishing": "finishing"}
 
 
 def _r(value, digits=2):
@@ -66,7 +76,18 @@ def _vehicles(targets, v_ego: float, lane_trusted: bool) -> list[dict]:
   return out
 
 
-def build_frame(state, log_mono_time: int, lane_geo: dict | None) -> dict:
+def _lane_change(state, meta, sp) -> dict:
+  stage = str(meta.laneChangeState)
+  return {
+    "state": LANE_CHANGE_STAGES.get(stage, stage),
+    "direction": str(meta.laneChangeDirection),
+    "left": {"clear": str(state.changeClearLeftState), "block": str(sp.leftLaneChangeBlock)},
+    "right": {"clear": str(state.changeClearRightState), "block": str(sp.rightLaneChangeBlock)},
+    "hold": str(sp.laneChangeHoldReason),
+  }
+
+
+def build_frame(state, log_mono_time: int, lane_geo: dict | None, model_meta=None, model_sp=None) -> dict:
   lane_trusted = bool(state.laneLeftValid and state.laneRightValid)
   return {
     "t": int(log_mono_time),
@@ -78,6 +99,8 @@ def build_frame(state, log_mono_time: int, lane_geo: dict | None) -> dict:
       "radar": "canError" if state.canError else "unavailable" if state.radarUnavailable else "ok",
       "vision": str(state.visionState),
     },
+    "laneChange": None if model_meta is None or model_sp is None else _lane_change(state, model_meta, model_sp),
+    "avoidance": {"offset": _r(state.laneOffsetTarget), "inactiveReason": state.inactiveReason or None},
   }
 
 
@@ -88,13 +111,22 @@ def sse(event: str, data: dict) -> str:
 class HudStream:
   def __init__(self, params, sm_factory=None, clock=time.monotonic):
     self._params = params
-    self._sm_factory = sm_factory or (lambda: messaging.SubMaster(['eagleState', 'modelV2'], poll='eagleState'))
+    self._sm_factory = sm_factory or (lambda: messaging.SubMaster(['eagleState', 'modelV2', 'modelDataV2SP'], poll='eagleState'))
     self._clock = clock
 
   def _lane_geo(self, sm) -> dict | None:
     return lanes_mod.lane_snapshot(sm['modelV2'], sm.recv_time['modelV2'], self._clock(),
                                    camera_to_front=read_camera_to_front(self._params),
                                    valid=bool(sm.valid['modelV2'])) if sm.seen['modelV2'] else None
+
+  def _maneuver(self, sm) -> tuple:
+    """变道判定方的两条消息；modeld 两条同循环发布，新鲜度借 modelV2 的登记阈值。"""
+    if not (sm.seen['modelV2'] and sm.seen['modelDataV2SP']):
+      return None, None
+    age = self._clock() - sm.recv_time['modelV2']
+    if stream_status("modelV2", age, valid=bool(sm.valid['modelV2'])) is not StreamStatus.FRESH:
+      return None, None
+    return sm['modelV2'].meta, sm['modelDataV2SP']
 
   def events(self):
     """阻塞式事件迭代器：首次 next 才建立订阅，丢弃迭代器即退订。"""
@@ -106,7 +138,7 @@ class HudStream:
       fresh = stream_status("eagleState", age, valid=bool(sm.valid['eagleState'])) is StreamStatus.FRESH
       if sm.updated['eagleState'] and fresh:
         last_stale = False
-        yield sse("frame", build_frame(sm['eagleState'], sm.logMonoTime['eagleState'], self._lane_geo(sm)))
+        yield sse("frame", build_frame(sm['eagleState'], sm.logMonoTime['eagleState'], self._lane_geo(sm), *self._maneuver(sm)))
       elif not fresh and last_stale is not True:
         last_stale = True
         yield sse("frame", STALE_FRAME)

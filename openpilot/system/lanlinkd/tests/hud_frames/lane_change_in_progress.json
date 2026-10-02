@@ -28,30 +28,42 @@
       },
       null
     ],
-    "egoLeftTrusted": false,
+    "egoLeftTrusted": true,
     "egoRightTrusted": true
   },
   "vehicles": [
     {
+      "dRel": 30.0,
+      "yRel": 0.0,
+      "cls": "car",
+      "lane": 0
+    },
+    {
       "dRel": 40.0,
       "yRel": 3.5,
       "cls": "unclassified",
-      "lane": null
+      "lane": -1
+    },
+    {
+      "dRel": 15.0,
+      "yRel": -3.5,
+      "cls": "person",
+      "lane": 1
     }
   ],
   "sensors": {
-    "radar": "unavailable",
-    "vision": "noModel"
+    "radar": "ok",
+    "vision": "ok"
   },
   "laneChange": {
-    "state": "off",
-    "direction": "none",
+    "state": "starting",
+    "direction": "left",
     "left": {
-      "clear": "unknown",
+      "clear": "clear",
       "block": "none"
     },
     "right": {
-      "clear": "unknown",
+      "clear": "clear",
       "block": "none"
     },
     "hold": "none"

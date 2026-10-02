@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace as NS
 
+import pytest
 
 from openpilot.cereal import messaging
 from openpilot.system.lanlinkd import hud, lanes
@@ -34,16 +35,28 @@ def _lane_geo(model=None):
   return lanes.lane_snapshot(model or _model_v2(), recv_mono=100.0, now_mono=100.05, camera_to_front=1.5, valid=True)
 
 
-def _state(targets, *, v_ego=20.0, left=True, right=True, vision="ok", can_error=False, radar_unavailable=False):
+def _state(targets, *, v_ego=20.0, left=True, right=True, vision="ok", can_error=False, radar_unavailable=False,
+           clear=("clear", "clear"), offset=0.0, inactive_reason=""):
   msg = messaging.new_message('eagleState')
   st = msg.eagleState
   st.vEgo, st.laneLeftValid, st.laneRightValid = v_ego, left, right
   st.canError, st.radarUnavailable, st.visionState = can_error, radar_unavailable, vision
+  st.changeClearLeftState, st.changeClearRightState = clear
+  st.laneOffsetTarget, st.inactiveReason = offset, inactive_reason
   rows = st.init('targets', len(targets))
   for out, t in zip(rows, targets, strict=True):
     for k, v in t.items():
       setattr(out, k, v)
   return msg.as_reader().eagleState
+
+
+def _maneuver(state="off", direction="none", left="none", right="none", hold="none"):
+  """变道判定方（modeld）发布的两条消息：modelV2.meta 与 modelDataV2SP。"""
+  meta = messaging.new_message('modelV2').modelV2.meta
+  meta.laneChangeState, meta.laneChangeDirection = state, direction
+  sp = messaging.new_message('modelDataV2SP').modelDataV2SP
+  sp.leftLaneChangeBlock, sp.rightLaneChangeBlock, sp.laneChangeHoldReason = left, right, hold
+  return meta, sp
 
 
 RADAR_CAR = {"dRel": 30.0, "yRel": 0.0, "vRel": -5.0, "cls": "car", "matched": True, "vision": False, "pairId": 1, "lane": 0}
@@ -53,14 +66,35 @@ RADAR_ONLY_STATIC = {"dRel": 25.0, "yRel": 5.0, "vRel": -20.0, "lane": 1}   # �
 VISION_PERSON = {"dRel": 15.0, "yRel": -3.5, "cls": "person", "conf": 0.8, "vision": True, "lane": 1}
 
 
+ALL_TARGETS = [RADAR_CAR, VISION_CAR, RADAR_ONLY_MOVING, RADAR_ONLY_STATIC, VISION_PERSON]
+
+
 def test_normal_driving_matches_sample():
-  state = _state([RADAR_CAR, VISION_CAR, RADAR_ONLY_MOVING, RADAR_ONLY_STATIC, VISION_PERSON])
-  assert hud.build_frame(state, MONO_NS, _lane_geo()) == _expected("normal")
+  assert hud.build_frame(_state(ALL_TARGETS), MONO_NS, _lane_geo(), *_maneuver()) == _expected("normal")
 
 
 def test_vision_degraded_matches_sample():
-  state = _state([RADAR_ONLY_MOVING], left=False, vision="noModel", radar_unavailable=True)
-  assert hud.build_frame(state, MONO_NS, _lane_geo()) == _expected("vision_degraded")
+  state = _state([RADAR_ONLY_MOVING], left=False, vision="noModel", radar_unavailable=True, clear=("unknown", "unknown"))
+  assert hud.build_frame(state, MONO_NS, _lane_geo(), *_maneuver()) == _expected("vision_degraded")
+
+
+@pytest.mark.parametrize("sample, state_kwargs, maneuver_kwargs", [
+  ("lane_change_blindspot", {"clear": ("blocked", "clear")}, {"state": "preLaneChange", "direction": "left", "left": "blindspot"}),
+  ("lane_change_road_edge", {"clear": ("clear", "clear")}, {"state": "preLaneChange", "direction": "right", "right": "roadEdge"}),
+  ("lane_change_target_not_clear", {"clear": ("clear", "blocked")}, {"state": "preLaneChange", "direction": "right", "right": "targetNotClear"}),
+  ("lane_change_awaiting_confirm", {}, {"state": "preLaneChange", "direction": "left", "hold": "awaitingConfirm"}),
+  ("lane_change_in_progress", {}, {"state": "laneChangeStarting", "direction": "left"}),
+  ("avoidance_active_left", {"offset": 0.4}, {}),
+  ("avoidance_blocked_steering", {"inactive_reason": "steering_pressed"}, {}),
+])
+def test_maneuver_samples(sample, state_kwargs, maneuver_kwargs):
+  frame = hud.build_frame(_state(ALL_TARGETS, **state_kwargs), MONO_NS, _lane_geo(), *_maneuver(**maneuver_kwargs))
+  assert frame == _expected(sample)
+
+
+def test_maneuver_sections_are_null_when_model_messages_unseen():
+  frame = hud.build_frame(_state([]), MONO_NS, None)
+  assert frame["laneChange"] is None and frame["avoidance"]["offset"] == 0.0
 
 
 def test_stale_matches_sample():
@@ -88,9 +122,9 @@ def test_radar_error_precedence():
 class FakeSM:
   """按脚本逐拍给出 (updated, state, valid, 距上次收帧秒数)；时钟由测试推进。"""
 
-  def __init__(self, script, clock):
-    self._script, self._clock = iter(script), clock
-    self.seen = {'eagleState': False, 'modelV2': False}
+  def __init__(self, script, clock, with_maneuver=False):
+    self._script, self._clock, self._with_maneuver = iter(script), clock, with_maneuver
+    self.seen = {'eagleState': False, 'modelV2': False, 'modelDataV2SP': False}
     self.updated = {'eagleState': False}
     self.valid = {'eagleState': True, 'modelV2': True}
     self.recv_time = {'eagleState': 0.0, 'modelV2': 0.0}
@@ -106,8 +140,15 @@ class FakeSM:
       self.seen['eagleState'] = True
       self.recv_time['eagleState'] = self._clock.now
       self._state = _state([RADAR_CAR])
+      if self._with_maneuver:
+        self.seen['modelV2'] = self.seen['modelDataV2SP'] = True
+        self.recv_time['modelV2'] = self._clock.now
 
   def __getitem__(self, name):
+    if name == 'modelV2':
+      return messaging.new_message('modelV2').modelV2
+    if name == 'modelDataV2SP':
+      return _maneuver(left="blindspot")[1]
     return self._state
 
 
@@ -118,9 +159,9 @@ class Clock:
     return self.now
 
 
-def _events(script):
+def _events(script, with_maneuver=False):
   clock = Clock()
-  stream = hud.HudStream(params=NS(get=lambda key: None), sm_factory=lambda: FakeSM(script, clock), clock=clock)
+  stream = hud.HudStream(params=NS(get=lambda key: None), sm_factory=lambda: FakeSM(script, clock, with_maneuver), clock=clock)
   gen = stream.events()
   return [next(gen) for _ in script]
 
@@ -134,6 +175,11 @@ def test_new_frame_is_pushed_per_eagle_state():
   assert [_kind(e) for e in events] == ["frame", "frame"]
   data = json.loads(events[0].split("\n")[1].removeprefix("data: "))
   assert data["stale"] is False and data["vEgo"] == 20.0 and data["lanes"] is None   # modelV2 未收到：空而非猜
+
+
+def test_frame_carries_lane_change_once_modeld_messages_arrive():
+  frame = json.loads(_events([(True, True, 0.2)], with_maneuver=True)[0].split("\n")[1].removeprefix("data: "))
+  assert frame["laneChange"]["left"]["block"] == "blindspot" and frame["laneChange"]["state"] == "off"
 
 
 def test_silence_sends_heartbeat():

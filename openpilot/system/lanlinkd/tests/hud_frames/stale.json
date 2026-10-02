@@ -4,5 +4,7 @@
   "vEgo": null,
   "lanes": null,
   "vehicles": null,
-  "sensors": null
+  "sensors": null,
+  "laneChange": null,
+  "avoidance": null
 }

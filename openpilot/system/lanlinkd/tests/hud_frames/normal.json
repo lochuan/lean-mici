@@ -54,5 +54,22 @@
   "sensors": {
     "radar": "ok",
     "vision": "ok"
+  },
+  "laneChange": {
+    "state": "off",
+    "direction": "none",
+    "left": {
+      "clear": "clear",
+      "block": "none"
+    },
+    "right": {
+      "clear": "clear",
+      "block": "none"
+    },
+    "hold": "none"
+  },
+  "avoidance": {
+    "offset": 0.0,
+    "inactiveReason": null
   }
 }
