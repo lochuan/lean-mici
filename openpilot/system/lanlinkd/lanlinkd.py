@@ -27,6 +27,7 @@ from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.hardware.hw import Paths
 from openpilot.sunnypilot.system.bluetooth import BluetoothClient
 from openpilot.system.lanlinkd import bluetooth_api
+from openpilot.system.lanlinkd import hud
 from openpilot.system.lanlinkd import logs as logs_mod
 from openpilot.system.lanlinkd import mdns
 from openpilot.system.lanlinkd import params_api
@@ -224,6 +225,16 @@ class LanlinkApp:
   async def avoidance_get(self, request: Request) -> HTTPResponse:
     return json_response(self.avoidance.snapshot())
 
+  # ---- HUD：SSE 帧流，订阅随客户端连接建立、断开即退订 ----
+  def hud_events(self):
+    return hud.HudStream(self.params).events()
+
+  async def hud_stream(self, request: Request) -> None:
+    response = await request.respond(content_type="text/event-stream", headers={"cache-control": "no-cache"})
+    events = self.hud_events()
+    while (event := await asyncio.to_thread(next, events, None)) is not None:
+      await response.send(event)
+
   # ---- avoidance calibration session (collect/fit/save the CameraToFront mount offset) ----
 
   async def calibration_start(self, request: Request) -> HTTPResponse:
@@ -313,6 +324,7 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("GET", "/api/status", "status"),
   ("GET", "/api/bootstrap", "bootstrap"),
   ("GET", "/api/avoidance", "avoidance_get"),
+  ("GET", "/api/hud/stream", "hud_stream"),
   ("POST", "/api/calibration/start", "calibration_start"),
   ("POST", "/api/calibration/stop", "calibration_stop"),
   ("POST", "/api/calibration/apply", "calibration_apply"),

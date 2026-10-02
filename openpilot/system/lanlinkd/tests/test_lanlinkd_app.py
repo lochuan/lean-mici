@@ -9,7 +9,7 @@ import os
 import pytest
 
 from openpilot.common.params import UnknownKeyName
-from openpilot.system.lanlinkd import lanlinkd as mod
+from openpilot.system.lanlinkd import hud, lanlinkd as mod
 
 
 class FakeParams:
@@ -401,3 +401,13 @@ class TestServerConfig:
     mod.main()
     assert len(started) == 1, "启动时没有拉起 mDNS 发布"
     assert stopped == ["PROC"], "退出时没有结束 mDNS 发布"
+
+
+class TestHudStream:
+  def test_streams_events_as_sse(self, app):
+    state = app.ctx.state
+    state.hud_events = lambda: iter([hud.sse("frame", {"stale": True}), hud.sse("heartbeat", {})])
+    _, r = app.test_client.get("/api/hud/stream")
+    assert r.status == 200
+    assert r.headers["content-type"].startswith("text/event-stream")
+    assert r.text == 'event: frame\ndata: {"stale":true}\n\nevent: heartbeat\ndata: {}\n\n'
