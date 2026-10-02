@@ -332,6 +332,34 @@ def test_target_rows_carry_line_distance_and_pressure():
   assert debug.laneOffsetTarget == pytest.approx(RATE_STEP)
 
 
+# --- 间隙不足 --------------------------------------------------------------------
+# 窄车道(半宽 1.2):贴线上限 0.15。侵入 0.4m 的目标在偏移目标下剩余间隙 = -0.4 + (1.2-0.9) + 0.15 = 0.05 < 余量 0.15。
+
+def _gap_insufficient(radar, **kw):
+  return _run(radar, half=1.2, **kw)[0][-1].lateralManeuverPlan.gapInsufficient
+
+
+@pytest.mark.parametrize("y_rel", [-1.3, 1.3])
+def test_deeply_intruding_target_sets_gap_insufficient_on_either_side(y_rel):
+  assert _gap_insufficient([(30.0, y_rel)])
+
+
+def test_barely_intruding_target_leaves_enough_gap():
+  assert not _gap_insufficient([(30.0, -1.45)])      # 侵入 0.25 → 间隙 0.2 ≥ 余量
+
+
+def test_non_intruding_target_does_not_set_gap_insufficient():
+  assert not _gap_insufficient([(30.0, -1.8)])       # 线距 +0.1
+
+
+def test_wide_lane_leaves_enough_gap_even_when_intruding():
+  assert not _run([(30.0, -(HALF + 0.1))])[0][-1].lateralManeuverPlan.gapInsufficient
+
+
+def test_gap_insufficient_not_set_when_avoidance_inactive():
+  assert not _gap_insufficient([(30.0, -1.3)], steering=True)
+
+
 # --- 变道清空(目标车道经车道线确认) ----------------------------------------------------
 # 目标车道:本车道线与再外一条线之间。外侧线默认概率 0.5 → 不可信 → 按本车道同宽推定。
 # 目标例:左邻道中心 yRel = 3.5。对地速度为第三项;v_ego=20。

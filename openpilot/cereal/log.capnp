@@ -1225,6 +1225,8 @@ struct LateralManeuverPlan {
   # controlsd 用当拍车道线闭环并按贴线上限再钳一次(ADR 0001)。
   # envelope valid=false 时 controlsd 用纯模型曲率。
   desiredLaneOffset @2 :Float32;
+  # 侵入目标使偏移目标下的剩余横向间隙 < 贴线余量(CONTEXT.md「间隙不足提醒」);仅避让生效时置位。
+  gapInsufficient @3 :Bool;
 }
 
 struct EagleTarget {

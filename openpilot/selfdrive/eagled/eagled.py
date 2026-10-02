@@ -158,6 +158,7 @@ class EagleDaemon:
 
     msg = messaging.new_message('lateralManeuverPlan')
     msg.lateralManeuverPlan.desiredLaneOffset = float(decision.offset)
+    msg.lateralManeuverPlan.gapInsufficient = decision.gap_insufficient
     msg.valid = decision.valid and bool(self.sm.valid['modelV2'])
     self.pm.send('lateralManeuverPlan', msg)
 

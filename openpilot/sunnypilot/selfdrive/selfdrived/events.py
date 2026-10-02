@@ -260,4 +260,12 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
       AlertStatus.normal, AlertSize.small,
       Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 2.),
   },
+
+  EventNameSP.gapInsufficient: {
+    ET.WARNING: Alert(
+      "Vehicle Too Close in Lane",
+      "Be Ready to Take Over",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 2.),
+  },
 }

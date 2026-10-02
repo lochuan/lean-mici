@@ -184,6 +184,15 @@ class _Hold:
   seen_t: float
 
 
+def _remaining_gap(side: int, line_distance: float, d_rel: float, geo: LaneGeometry, offset: float) -> float:
+  """自车在车道内偏移 offset(左正)时,与 side 侧邻道目标车身的横向间隙(m)。
+
+  间隙 = 线距 + (本车道半宽 - 自车半宽) - side·offset;车道取目标 dRel 处,按直道近似。
+  """
+  half_lane = (float(np.interp(d_rel, geo.left_x, geo.left_y)) - float(np.interp(d_rel, geo.right_x, geo.right_y))) / 2.0
+  return line_distance + half_lane - C.EGO_HALF_WIDTH - side * offset
+
+
 @dataclass(frozen=True)
 class OffsetDecision:
   valid: bool
@@ -193,6 +202,7 @@ class OffsetDecision:
   pressure_right: float
   reason: str              # 不生效原因;"" = 生效门全通
   holding: int = 0         # 正在并行保持(已离开视野、按推算保留压力)的目标数
+  gap_insufficient: bool = False   # 侵入目标使偏移目标下的剩余横向间隙 < 贴线余量
 
 
 class LaneOffsetPlanner:
@@ -226,6 +236,7 @@ class LaneOffsetPlanner:
     pressure = {1: 0.0, -1: 0.0}
     cap = 0.0
     holding = 0
+    intruders = []   # (侧, 线距, dRel):正在逼近且车身越线的邻道目标
     if reason:
       self._holds = []
     else:
@@ -233,9 +244,11 @@ class LaneOffsetPlanner:
       seen = []   # 当前可见、在前方的邻道目标(含压力 0 的):用来认出哪些保持记录仍可见
       for t in targets:
         approach = approach_speed(t.vRel, v_ego)
-        side, _line_distance, p = target_pressure(t.dRel, t.yRel, t.cls, geo, approach)
+        side, line_distance, p = target_pressure(t.dRel, t.yRel, t.cls, geo, approach)
         if side:
           pressure[side] = max(pressure[side], p)
+          if line_distance < 0.0 and p > 0.0:
+            intruders.append((side, line_distance, t.dRel))
           if t.dRel > 0.0:
             seen.append(_Hold(side, t.dRel, approach, p, now))
       kept = self._advance_holds(seen, dt, now)
@@ -244,6 +257,8 @@ class LaneOffsetPlanner:
         pressure[h.side] = max(pressure[h.side], h.pressure)
       self._holds = kept + [h for h in seen if h.pressure > 0.0]
     target = cap * (pressure[-1] - pressure[1])
+    gap_insufficient = any(_remaining_gap(side, line_distance, d_rel, geo, target) < C.LANE_EDGE_MARGIN
+                           for side, line_distance, d_rel in intruders)
 
     step = C.OFFSET_RATE * dt
     self._offset += min(max(target - self._offset, -step), step)
@@ -251,7 +266,7 @@ class LaneOffsetPlanner:
       self._offset = min(max(self._offset, -cap), cap)
 
     valid = not reason and (pressure[1] > 0.0 or pressure[-1] > 0.0 or abs(self._offset) > 1e-3)
-    return OffsetDecision(valid, self._offset, cap, pressure[1], pressure[-1], reason, holding)
+    return OffsetDecision(valid, self._offset, cap, pressure[1], pressure[-1], reason, holding, gap_insufficient)
 
   def _advance_holds(self, seen: list[_Hold], dt: float, now: float) -> list[_Hold]:
     """推算上一拍的保持记录;仍可见的交还给 seen,已超过目标 + 车长余量或超时的丢弃,其余继续保持。"""
