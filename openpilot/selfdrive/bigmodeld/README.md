@@ -2,8 +2,9 @@
 
 生命周期跟随 modeld（`system/manager/process_config.py` 注册 `only_onroad`）：从 camerad 的
 VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_ROAD`）两路帧，
-用 `logger_lib` 的 `V4LEncoder` 双路硬编（HEVC Main、VBR、无 B 帧、GOP 20、默认每路 5 Mb/s
-可调），按 10 号布局组 FRAME 经 TCP 发出（road 出包即发）。不落盘、不进 loggerd（编码输出
+在取帧线程按标定矩阵 warp 成模型视图 512×256 NV12（协议 v2，App 只做 pack），
+用 `logger_lib` 的 `V4LEncoder` 双路硬编（HEVC Main、VBR、无 B 帧、GOP 20、venus realtime 优先级、
+默认每路 2 Mb/s 可调），按 10 号布局组 FRAME 经 TCP 发出（road 出包即发）。不落盘、不进 loggerd（编码输出
 回调 ⇒ 不建 PubMaster ⇒ loggerd 无编码数据）。线协议见 `1b-model-qnn` 仓库
 `.scratch/big-model-offload-v1/spec.md`「线协议」，`frame_codec.{h,cpp}` 与 App 服务端共用同一实现。
 
@@ -11,7 +12,8 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 
 | 文件 | 职责 |
 |---|---|
-| `frame_codec.{h,cpp}` | BGM1 线协议 FRAME/REPLY/ERR 编解码（与本仓库 `android/` 原样同源，勿改） |
+| `frame_codec.{h,cpp}` | BGM1 线协议 FRAME/REPLY/ERR 编解码（与 chipmunk `android/app/src/main/cpp/` 原样同源，勿改） |
+| `warp_pack.{h,cpp}` | NEON warp：`warpNv12` 相机帧 → 512×256 NV12（协议 v2 在 C4 上 warp；与 chipmunk 原样同源，勿改） |
 | `frame_meta.{h,cpp}` | 帧头元数据：warp 矩阵 C++ 复刻 + MetaProvider（标定喂 rpyCalib，modeld 喂 desire/action_t） |
 | `frame_scheduler.{h,cpp}` | I 帧/丢帧状态机（纯逻辑事件输出，调用方执行 request_keyframe） |
 | `meta_cache.h` | 编码输出查表（FIFO/路）：miss 分类（stale 静默 / gap=断档上报），查不到不弹队 |
@@ -23,8 +25,8 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 
 ## 实现口径
 
-1. **编码前配对**：两路 VisionIPC 线程收帧→拷进编码缓冲（`VisionBuf::allocate(max(len, 2428928))`，
-   21 号 EINVAL 坑 `prototypes/21/venus/venus_bench.cpp:344-346`）→按 `timestamp_sof` 邻近配对
+1. **编码前配对**：两路 VisionIPC 线程收帧→`warpNv12` 写进 512×256 编码缓冲（venus 对齐、
+   `VENUS_BUFFER_SIZE`，21 号 EINVAL 坑；取帧线程 road→core 5、wide→core 4、FIFO 50，warp ~2.3 ms/路）→按 `timestamp_sof` 邻近配对
    （单槽/流，10 ms 容差）→两路同时 `encode_frame`。未配对死亡帧只计数/`LOGW` 并归还缓冲，
    不进编码器、不上报调度器；缺半帧不会中断码流。
    拷贝后的 VisionIPC 缓冲立即可复用（配对等待不占上游缓冲）。
@@ -63,7 +65,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
    golden 口径：rpy 按 float32 取值再以 double 精度算同公式；**modeld 的 float32 中间路径
    另带 ~2.7e-5 噪声（相对 ~1e-7），实测超 1e-5 判据，故 golden 走 double 路径**，判据 ≤1e-5。
 5. **编码**：EncoderInfo 自带 get_settings（FULL_H_E_V_C、bitrate 初值 = `--bitrate`/
-   `kDefaultBitrate` 默认 5'000'000/路、gop 20、
+   `kDefaultBitrate` 默认 2'000'000/路、gop 20、
    b_frames 0），`V4LEncoder::Options.output_callback`（1a 接缝，`encoder.h:25-33`、
    `v4l_encoder.h:16-24`）；回调里 IDR AU = header(VPS/SPS/PPS)‖dat（仅实际 keyframe 时拼，
    `v4l_encoder.cc:120-133` header 每帧都给）。不设 PubMaster ⇒ loggerd 无编码数据
@@ -100,7 +102,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
   `-I/data/openpilot -I…/openpilot -I…/msgq_repo`）。
 - CLI：`bigmodeld [--host HOST|auto] [--port PORT] [--bitrate BPS]`；`--host` 缺省读
   Params `BigmodelServerHost`（空 = mDNS 自动发现，限 wlan0 子网）。联调用
-  `--host 127.0.0.1`（`adb reverse`）、5'000'000 bps/路。
+  `--host 127.0.0.1`（`adb reverse`）、2'000'000 bps/路。
 
 ## 宿主测试（Mac/Linux，无设备依赖）
 

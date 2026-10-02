@@ -1,17 +1,18 @@
 // BGM1 线协议 FRAME 消息（HEVC 版）编解码 —— C4 上行进程与 App 服务端共用同一实现。
-// 布局定稿见 .scratch/big-model-offload-v1/spec.md「线协议」（09 号 BGM1 + 21 号 HEVC 修订）：
+// 布局定稿（09 号 BGM1 + 21 号 HEVC 修订）如下，本注释即权威；原 spec 已归档 git 历史：
 //
 //   FRAME（type 0x10）线上布局，全小端：
-//     0   16  MsgHdr：magic "BGM1"、ver=1、type=0x10、flags（bit0=road IDR、bit1=wide IDR）、
+//     0   16  MsgHdr：magic "BGM1"、ver=2、type=0x10、flags（bit0=road IDR、bit1=wide IDR）、
 //                frame_idx u32、len u32 = road 段字节数
 //     16   8  t_eof u64（timestamp_eof，ns）
 //     24  32  desire f32[8]（本帧 pulse，全零=无事件）
 //     56   8  traffic_convention f32[2]
 //     64   8  action_t f32[2]（[lat, long] 秒）
-//     72  36  warp_road f32[9]（3×3 透视矩阵，行主序，与 lean modeld 送进 frame_prepare 的同义）
+//     72  36  warp_road f32[9]（3×3 透视矩阵，行主序，与 lean modeld 送进 frame_prepare 的同义；
+//                v2 起为 C4 已应用的矩阵，仅遥测/dump，App 不再 warp）
 //    108  36  warp_wide f32[9]
 //    144  16  保留（置 0，解析端忽略）
-//    160  ..  road 段（road_len = MsgHdr.len，HEVC Annex-B 码流）
+//    160  ..  road 段（road_len = MsgHdr.len，HEVC Annex-B 码流；v2 = warp 后 512×256 NV12 编码）
 //     ..   4  wide_len u32
 //     ..  ..  wide 段（HEVC Annex-B 码流）
 //     ..  16  MAC 位（HMAC-SHA256 截断 16 B；本阶段填零不校验，05 号开启）
@@ -19,7 +20,7 @@
 //   线长 = 160 + road_len + 4 + wide_len + 16。
 //
 //   REPLY（type 0x11，09 号 §5）线上布局，全小端：
-//     0   16  MsgHdr：magic "BGM1"、ver=1、type=0x11、flags（bit0=SEQ_RESET、bit1=ZERO_PAIR）、
+//     0   16  MsgHdr：magic "BGM1"、ver=2、type=0x11、flags（bit0=SEQ_RESET、bit1=ZERO_PAIR）、
 //                frame_idx u32（回显）、len u32 = 8280（payload 字节数，不含 t_eof）
 //     16   8  t_eof u64（回显）
 //     24 8264  outputs[0:2066) f32
@@ -41,7 +42,7 @@
 namespace bgm1 {
 
 constexpr uint32_t kMagic = 0x314D4742u;  // "BGM1" 小端
-constexpr uint8_t kVersion = 1;
+constexpr uint8_t kVersion = 2;  // v2：段内容 = C4 已 warp 的 512×256 HEVC（v1 = 相机全幅）
 constexpr uint8_t kTypeFrame = 0x10;
 constexpr uint8_t kTypeReply = 0x11;
 constexpr uint8_t kTypeErr = 0x7F;

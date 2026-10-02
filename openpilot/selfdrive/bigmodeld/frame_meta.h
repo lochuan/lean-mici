@@ -53,6 +53,10 @@ class MetaProvider {
   // 只填 t_eof/desire/traffic_convention/action_t/warp_*；flags/frame_idx/road_len/wide_len 归调用方。
   void fill(uint64_t t_eof, bgm1::FrameHeader* out) const;
 
+  // 当前 warp 矩阵（wide=false → road/MED，true → wide/SBIG），与 fill 写进帧头的同一份。
+  // capture 线程据此在 C4 上 warp（协议 v2）。
+  void warp(bool wide, float out[9]) const;
+
  private:
   void recompute_locked();
 

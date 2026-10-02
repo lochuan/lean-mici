@@ -1,6 +1,7 @@
 // bigmodeld：C4 上行进程（16 号）。生命周期跟随 modeld（process_config only_onroad）：
-//   camered VisionIPC 两路取帧 → 编码缓冲拷贝 → 按 frame_id 配对 → V4L 双路硬编
-//   （HEVC Main、VBR、无 B 帧、GOP 20、默认 5 Mb/s/路可调）→ 10 号布局组 FRAME
+//   camered VisionIPC 两路取帧 → warp 成 512×256 NV12 进编码缓冲（协议 v2，App 不再 warp）
+//   → 按 frame_id 配对 → V4L 双路硬编
+//   （HEVC Main、VBR、无 B 帧、GOP 20、默认 2 Mb/s/路可调）→ 10 号布局组 FRAME
 //   经 TCP 发出（road 出包即发）；REPLY 独立线程收下解析并转交 modeld。不落盘、不进 loggerd
 //   （设了编码输出回调 ⇒ 不建 PubMaster ⇒ loggerd 无编码数据）。
 //
@@ -43,6 +44,8 @@
 #include "system/loggerd/encoder/v4l_encoder.h"
 #include "system/loggerd/loggerd.h"
 
+#include <media/msm_media_info.h>
+
 #include "frame_codec.h"
 #include "frame_meta.h"
 #include "frame_scheduler.h"
@@ -50,6 +53,7 @@
 #include "pair_matcher.h"
 #include "server_locator.h"
 #include "uplink_sender.h"
+#include "warp_pack.h"
 
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
@@ -61,20 +65,26 @@ namespace {
 
 constexpr int kFps = 20;
 constexpr int kGopSize = 20;
-constexpr int kDefaultBitrate = 5'000'000;  // 5 Mb/s/路（两路合计 10 Mb/s）
-// QBUF 要求 plane.length ≥ S_FMT sizeimage（1344×760 NV12 = 2,428,928 B，21 号 EINVAL 坑）
-constexpr size_t kNv12SizeImage = 2428928;
+constexpr int kDefaultBitrate = 2'000'000;  // 2 Mb/s/路（512×256 下约 4 KB/帧/路）
+// 编码输入 = warp 后 512×256 NV12，按 venus 对齐布局（QBUF 要求 plane.length ≥ S_FMT sizeimage，21 号 EINVAL 坑）
+const size_t kEncStride = VENUS_Y_STRIDE(COLOR_FMT_NV12, chipmunk::kModelW);
+const size_t kEncUvOffset = kEncStride * VENUS_Y_SCANLINES(COLOR_FMT_NV12, chipmunk::kModelH);
+const size_t kEncBufSize = VENUS_BUFFER_SIZE(COLOR_FMT_NV12, chipmunk::kModelW, chipmunk::kModelH);
 constexpr int kEncPoolDepth = 6;   // 每路编码缓冲池（1 配对槽 + ≤5 在编码器在途）
 constexpr int kSchedFifoPrio = 53;
 const std::vector<int> kCpuAffinity = {3};  // 仿 encoderd.cc:216；EINVAL（离线核）容忍
+// capture 线程做 warp（~2.3 ms/路）：两路分到两颗大核并行，FIFO 50 低于 CTRL_LOW 51 不抢 control/planner
+// （core 4 = controlsd/card，5 = plannerd/radard，6 = camerad，7 = modeld）
+constexpr int kCaptureFifoPrio = 50;
+const std::vector<int> kCaptureCore[2] = {{5}, {4}};
 
 enum StreamId { kRoad = 0, kWide = 1 };
 
-void setup_realtime(const char* who) {
-  if (util::set_realtime_priority(kSchedFifoPrio) != 0) {
-    LOGW("bigmodeld: %s SCHED_FIFO %d 失败 errno=%d", who, kSchedFifoPrio, errno);
+void setup_realtime(const char* who, int prio = kSchedFifoPrio, const std::vector<int>& cores = kCpuAffinity) {
+  if (util::set_realtime_priority(prio) != 0) {
+    LOGW("bigmodeld: %s SCHED_FIFO %d 失败 errno=%d", who, prio, errno);
   }
-  if (util::set_core_affinity(kCpuAffinity) != 0) {
+  if (util::set_core_affinity(cores) != 0) {
     LOGW("bigmodeld: %s 绑核失败（容忍）errno=%d", who, errno);
   }
 }
@@ -265,7 +275,7 @@ class Bigmodeld {
 
   // ===== 取帧/配对线程（×2）=====
   void capture_thread(StreamId sid) {
-    setup_realtime(sid == kRoad ? "bgm_road" : "bgm_wide");
+    setup_realtime(sid == kRoad ? "bgm_road" : "bgm_wide", kCaptureFifoPrio, kCaptureCore[sid]);
 
     VisionStreamType type = sid == kRoad ? VISION_STREAM_NARROW_ROAD : VISION_STREAM_WIDE_ROAD;
     VisionIpcClient vipc("camerad", type, false);
@@ -277,7 +287,7 @@ class Bigmodeld {
         continue;
       }
       if (!inited) {
-        init_encoder(sid, vipc.buffers[0]);
+        init_encoder(sid);
         inited = true;
       }
       while (!do_exit) {
@@ -286,10 +296,19 @@ class Bigmodeld {
         if (buf == nullptr) continue;
         // 上游覆盖/滞后（缓冲被新帧顶掉）：不进编码器；后续 SOF 可形成时间槽空洞
         if (buf->get_frame_id() != extra.frame_id) continue;
-        // 拷进编码缓冲后立即可放回 VisionIPC 缓冲（配对等待不占上游缓冲）
+        // warp 进编码缓冲后立即可放回 VisionIPC 缓冲（配对等待不占上游缓冲）
         VisionBuf* dst = ctx_[sid].pool.acquire();
-        std::memcpy(dst->addr, buf->addr, std::min(buf->len, ctx_[sid].pool.len()));
-        place_frame(sid, extra, dst);
+        float mat[9];
+        meta_.warp(sid == kWide, mat);
+        const chipmunk::Nv12View src{buf->y, buf->uv, (int)buf->width, (int)buf->height,
+                                     (int)buf->stride, (int)buf->stride};
+        if (!chipmunk::warpNv12(src, mat, chipmunk::Nv12Out{dst->y, dst->uv, (int)dst->stride, (int)dst->stride})) {
+          LOGE("bigmodeld: %s warp 失败（源 %zux%zu stride %zu）", sid == kRoad ? "road" : "wide",
+               buf->width, buf->height, buf->stride);
+          ctx_[sid].pool.release(dst);
+          continue;
+        }
+        place_frame(sid, extra, dst, mat);
       }
     }
   }
@@ -436,13 +455,13 @@ class Bigmodeld {
   struct Slot {
     VisionIpcBufExtra extra = {};
     VisionBuf* buf = nullptr;
+    float mat[9] = {0};  // 本帧 warp 实际用的矩阵（帧头遥测记它，不在配对时重读标定）
   };
 
-  void init_encoder(StreamId sid, const VisionBuf& bi) {
-    LOGW("bigmodeld: %s 编码器 init %zux%zu", sid == kRoad ? "road" : "wide", bi.width, bi.height);
+  void init_encoder(StreamId sid) {
+    LOGW("bigmodeld: %s 编码器 init %dx%d", sid == kRoad ? "road" : "wide", chipmunk::kModelW, chipmunk::kModelH);
 
-    // 编码缓冲池：plane.length ≥ sizeimage（21 号 EINVAL 坑）
-    ctx_[sid].pool.init(std::max(bi.len, kNv12SizeImage), bi.width, bi.height, bi.stride, bi.uv_offset);
+    ctx_[sid].pool.init(kEncBufSize, chipmunk::kModelW, chipmunk::kModelH, kEncStride, kEncUvOffset);
 
     EncoderInfo info{};
     info.publish_name = sid == kRoad ? "bgmRoad" : "bgmWide";  // 仅日志标识（不建 PubMaster）
@@ -456,13 +475,14 @@ class Bigmodeld {
     };
 
     V4LEncoder::Options opt;
+    opt.max_performance = true;  // venus realtime 优先级：512×256 编码 p90 5.1→1.9 ms（C4 实测）
     opt.output_callback = [this, sid](int, uint32_t, VisionIpcBufExtra& extra, unsigned int flags,
                                       kj::ArrayPtr<capnp::byte> header, kj::ArrayPtr<capnp::byte> dat) {
       on_encoded(sid, extra, flags, header, dat);
     };
     opt.input_done_callback = [this, sid](VisionBuf* b) { ctx_[sid].pool.release(b); };
 
-    ctx_[sid].enc = std::make_unique<V4LEncoder>(info, (int)bi.width, (int)bi.height, opt);
+    ctx_[sid].enc = std::make_unique<V4LEncoder>(info, chipmunk::kModelW, chipmunk::kModelH, opt);
     ctx_[sid].enc->encoder_open();
   }
 
@@ -470,12 +490,14 @@ class Bigmodeld {
   // 配对键 = timestamp_sof 邻近（见 pair_matcher.h：真机实测两路 frame_id 是各自
   // 独立的出帧计数器、持续漂移，不能作配对键）。配对死亡只计数/日志，不上报调度器；
   // road 死亡帧的 SOF 仍参与时间槽编号，wide 死亡帧不参与编号。
-  void place_frame(StreamId sid, const VisionIpcBufExtra& extra, VisionBuf* buf) {
+  void place_frame(StreamId sid, const VisionIpcBufExtra& extra, VisionBuf* buf, const float mat[9]) {
     std::lock_guard<std::mutex> lk(state_mtx_);
     drain_events_locked();
 
     const bool is_road = (sid == kRoad);
-    bgm::PairMatcher<Slot>::Frame f{extra.frame_id, extra.timestamp_sof, Slot{extra, buf}};
+    Slot slot{extra, buf};
+    std::memcpy(slot.mat, mat, sizeof slot.mat);
+    bgm::PairMatcher<Slot>::Frame f{extra.frame_id, extra.timestamp_sof, slot};
     bgm::PairMatcher<Slot>::Actions a = matcher_.push(is_road, f);
 
     if (a.kill_road) {
@@ -518,6 +540,8 @@ class Bigmodeld {
 
     bgm1::FrameHeader hdr;
     meta_.fill(road.extra.timestamp_eof, &hdr);
+    std::memcpy(hdr.warp_road, road.mat, sizeof hdr.warp_road);
+    std::memcpy(hdr.warp_wide, wide.mat, sizeof hdr.warp_wide);
     hdr.frame_idx = u32(frame_idx);
 
     OutMeta om;

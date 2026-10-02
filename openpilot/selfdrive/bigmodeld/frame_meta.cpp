@@ -103,6 +103,11 @@ MetaProvider::MetaProvider() {
   recompute_locked();
 }
 
+void MetaProvider::warp(bool wide, float out[9]) const {
+  std::lock_guard<std::mutex> lk(mtx_);
+  std::memcpy(out, wide ? warp_wide_ : warp_road_, sizeof warp_road_);
+}
+
 void MetaProvider::recompute_locked() {
   get_warp_matrix(rpy_, kNarrowRoadIntrinsics, false, warp_road_);
   get_warp_matrix(rpy_, kWideRoadIntrinsics, true, warp_wide_);

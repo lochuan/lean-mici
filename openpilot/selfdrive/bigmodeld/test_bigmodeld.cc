@@ -756,7 +756,7 @@ static void test_frame_codec_roundtrip() {
   CHECK(bgm1::parse_hello(hbuf.data(), bgm1::kHelloWireSize - 1, &h2) == bgm1::Err::kTruncated);
   // golden 逐字节钉死（android/tests/fixtures/hello_golden.bin 同一样例，跨仓库镜像互证）
   static const uint8_t kHelloGolden[bgm1::kHelloWireSize] = {
-      0x42, 0x47, 0x4D, 0x31, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x42, 0x47, 0x4D, 0x31, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x10, 0x00, 0x00, 0x00, 0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01,
       0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   };
@@ -872,6 +872,13 @@ static void test_meta_provider() {
     CHECK_NEAR(h.warp_wide[i], g.wide[i], 1e-5);
   }
   CHECK(h.t_eof == 43);
+
+  // capture 线程 warp 用的矩阵 == 帧头矩阵（协议 v2：帧头记录 C4 已应用的矩阵）
+  float road[9], wide[9];
+  mp.warp(false, road);
+  mp.warp(true, wide);
+  CHECK(std::memcmp(road, h.warp_road, sizeof road) == 0);
+  CHECK(std::memcmp(wide, h.warp_wide, sizeof wide) == 0);
 }
 
 // 04 号 C-2：modeld 上行元数据（modelDataV2SP）经 MetaProvider 进帧头——
