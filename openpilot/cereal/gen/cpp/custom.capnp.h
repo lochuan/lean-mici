@@ -208,6 +208,7 @@ enum class EventName_b8007ed8a646b5e6: uint16_t {
   E2E_CHIME,
   LANE_CHANGE_ROAD_EDGE,
   BIG_MODEL_READY,
+  GAP_INSUFFICIENT,
 };
 CAPNP_DECLARE_ENUM(EventName, b8007ed8a646b5e6);
 CAPNP_DECLARE_SCHEMA(80ae746ee2596b11);
@@ -241,6 +242,23 @@ CAPNP_DECLARE_SCHEMA(9e62278160b7df26);
 CAPNP_DECLARE_SCHEMA(b86e6369214c01c8);
 CAPNP_DECLARE_SCHEMA(f416ec09499d9d19);
 CAPNP_DECLARE_SCHEMA(a1680744031fdb2d);
+CAPNP_DECLARE_SCHEMA(d5ecfcc79e6f39d6);
+enum class LaneChangeBlock_d5ecfcc79e6f39d6: uint16_t {
+  NONE,
+  BLINDSPOT,
+  ROAD_EDGE,
+  TARGET_NOT_CLEAR,
+};
+CAPNP_DECLARE_ENUM(LaneChangeBlock, d5ecfcc79e6f39d6);
+CAPNP_DECLARE_SCHEMA(a298c9e9a40ba858);
+enum class LaneChangeHoldReason_a298c9e9a40ba858: uint16_t {
+  NONE,
+  ALC_OFF,
+  BELOW_SPEED,
+  AWAITING_CONFIRM,
+  BRAKE,
+};
+CAPNP_DECLARE_ENUM(LaneChangeHoldReason, a298c9e9a40ba858);
 CAPNP_DECLARE_SCHEMA(b73df234a23b0cc2);
 enum class TurnDirection_b73df234a23b0cc2: uint16_t {
   NONE,
@@ -834,11 +852,15 @@ struct ModelDataV2SP {
   class Reader;
   class Builder;
   class Pipeline;
+  typedef ::capnp::schemas::LaneChangeBlock_d5ecfcc79e6f39d6 LaneChangeBlock;
+
+  typedef ::capnp::schemas::LaneChangeHoldReason_a298c9e9a40ba858 LaneChangeHoldReason;
+
   typedef ::capnp::schemas::TurnDirection_b73df234a23b0cc2 TurnDirection;
 
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 2, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 3, 1)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -4573,6 +4595,12 @@ public:
 
   inline float getCameraToModelMs() const;
 
+  inline  ::cereal::ModelDataV2SP::LaneChangeBlock getLeftLaneChangeBlock() const;
+
+  inline  ::cereal::ModelDataV2SP::LaneChangeBlock getRightLaneChangeBlock() const;
+
+  inline  ::cereal::ModelDataV2SP::LaneChangeHoldReason getLaneChangeHoldReason() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -4626,6 +4654,15 @@ public:
 
   inline float getCameraToModelMs();
   inline void setCameraToModelMs(float value);
+
+  inline  ::cereal::ModelDataV2SP::LaneChangeBlock getLeftLaneChangeBlock();
+  inline void setLeftLaneChangeBlock( ::cereal::ModelDataV2SP::LaneChangeBlock value);
+
+  inline  ::cereal::ModelDataV2SP::LaneChangeBlock getRightLaneChangeBlock();
+  inline void setRightLaneChangeBlock( ::cereal::ModelDataV2SP::LaneChangeBlock value);
+
+  inline  ::cereal::ModelDataV2SP::LaneChangeHoldReason getLaneChangeHoldReason();
+  inline void setLaneChangeHoldReason( ::cereal::ModelDataV2SP::LaneChangeHoldReason value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -9094,6 +9131,48 @@ inline float ModelDataV2SP::Builder::getCameraToModelMs() {
 inline void ModelDataV2SP::Builder::setCameraToModelMs(float value) {
   _builder.setDataField<float>(
       ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::cereal::ModelDataV2SP::LaneChangeBlock ModelDataV2SP::Reader::getLeftLaneChangeBlock() const {
+  return _reader.getDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline  ::cereal::ModelDataV2SP::LaneChangeBlock ModelDataV2SP::Builder::getLeftLaneChangeBlock() {
+  return _builder.getDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void ModelDataV2SP::Builder::setLeftLaneChangeBlock( ::cereal::ModelDataV2SP::LaneChangeBlock value) {
+  _builder.setDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::cereal::ModelDataV2SP::LaneChangeBlock ModelDataV2SP::Reader::getRightLaneChangeBlock() const {
+  return _reader.getDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+}
+
+inline  ::cereal::ModelDataV2SP::LaneChangeBlock ModelDataV2SP::Builder::getRightLaneChangeBlock() {
+  return _builder.getDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+}
+inline void ModelDataV2SP::Builder::setRightLaneChangeBlock( ::cereal::ModelDataV2SP::LaneChangeBlock value) {
+  _builder.setDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::cereal::ModelDataV2SP::LaneChangeHoldReason ModelDataV2SP::Reader::getLaneChangeHoldReason() const {
+  return _reader.getDataField< ::cereal::ModelDataV2SP::LaneChangeHoldReason>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+
+inline  ::cereal::ModelDataV2SP::LaneChangeHoldReason ModelDataV2SP::Builder::getLaneChangeHoldReason() {
+  return _builder.getDataField< ::cereal::ModelDataV2SP::LaneChangeHoldReason>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+inline void ModelDataV2SP::Builder::setLaneChangeHoldReason( ::cereal::ModelDataV2SP::LaneChangeHoldReason value) {
+  _builder.setDataField< ::cereal::ModelDataV2SP::LaneChangeHoldReason>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint32_t BigModelReply::Reader::getFrameIdx() const {

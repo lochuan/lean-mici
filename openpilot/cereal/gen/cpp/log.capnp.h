@@ -461,7 +461,23 @@ CAPNP_DECLARE_SCHEMA(ed12f1c294702e30);
 CAPNP_DECLARE_SCHEMA(c7266d4c6cd8e076);
 CAPNP_DECLARE_SCHEMA(b8c1798d65d7843b);
 CAPNP_DECLARE_SCHEMA(a8286b202a58b2e7);
-CAPNP_DECLARE_SCHEMA(e3a5c0ab1fab749e);
+CAPNP_DECLARE_SCHEMA(d0e10b0938183f0d);
+enum class VisionState_d0e10b0938183f0d: uint16_t {
+  OK,
+  CALIBRATING,
+  NO_CAMERA,
+  NO_MODEL,
+  THROTTLED,
+  OFF,
+};
+CAPNP_DECLARE_ENUM(VisionState, d0e10b0938183f0d);
+CAPNP_DECLARE_SCHEMA(c267ac897344e494);
+enum class ChangeClear_c267ac897344e494: uint16_t {
+  UNKNOWN,
+  CLEAR,
+  BLOCKED,
+};
+CAPNP_DECLARE_ENUM(ChangeClear, c267ac897344e494);
 CAPNP_DECLARE_SCHEMA(e00b5b3eba12876c);
 CAPNP_DECLARE_SCHEMA(b231a753cc079120);
 enum class LongitudinalPlanSource_b231a753cc079120: uint16_t {
@@ -1799,7 +1815,7 @@ struct EagleTarget {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(c7266d4c6cd8e076, 3, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(c7266d4c6cd8e076, 4, 1)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -1814,7 +1830,7 @@ struct EagleDebug {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(b8c1798d65d7843b, 5, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(b8c1798d65d7843b, 6, 2)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -1827,24 +1843,13 @@ struct EagleState {
   class Reader;
   class Builder;
   class Pipeline;
+  typedef ::capnp::schemas::VisionState_d0e10b0938183f0d VisionState;
+
+  typedef ::capnp::schemas::ChangeClear_c267ac897344e494 ChangeClear;
+
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(a8286b202a58b2e7, 3, 3)
-    #if !CAPNP_LITE
-    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
-    #endif  // !CAPNP_LITE
-  };
-};
-
-struct EagleSideLead {
-  EagleSideLead() = delete;
-
-  class Reader;
-  class Builder;
-  class Pipeline;
-
-  struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(e3a5c0ab1fab749e, 3, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(a8286b202a58b2e7, 5, 2)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -11782,9 +11787,9 @@ public:
   }
 #endif  // !CAPNP_LITE
 
-  inline float getDesiredCurvature() const;
+  inline float getDesiredLaneOffset() const;
 
-  inline float getCurvatureBias() const;
+  inline bool getGapInsufficient() const;
 
 private:
   ::capnp::_::StructReader _reader;
@@ -11814,11 +11819,11 @@ public:
   inline ::kj::StringTree toString() const { return asReader().toString(); }
 #endif  // !CAPNP_LITE
 
-  inline float getDesiredCurvature();
-  inline void setDesiredCurvature(float value);
+  inline float getDesiredLaneOffset();
+  inline void setDesiredLaneOffset(float value);
 
-  inline float getCurvatureBias();
-  inline void setCurvatureBias(float value);
+  inline bool getGapInsufficient();
+  inline void setGapInsufficient(bool value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -11874,17 +11879,17 @@ public:
 
   inline float getConf() const;
 
-  inline float getWeight() const;
-
   inline bool getMatched() const;
-
-  inline bool getInGate() const;
 
   inline bool getVision() const;
 
   inline  ::uint16_t getPairId() const;
 
   inline  ::int8_t getLane() const;
+
+  inline float getLineDistance() const;
+
+  inline float getPressure() const;
 
 private:
   ::capnp::_::StructReader _reader;
@@ -11933,14 +11938,8 @@ public:
   inline float getConf();
   inline void setConf(float value);
 
-  inline float getWeight();
-  inline void setWeight(float value);
-
   inline bool getMatched();
   inline void setMatched(bool value);
-
-  inline bool getInGate();
-  inline void setInGate(bool value);
 
   inline bool getVision();
   inline void setVision(bool value);
@@ -11950,6 +11949,12 @@ public:
 
   inline  ::int8_t getLane();
   inline void setLane( ::int8_t value);
+
+  inline float getLineDistance();
+  inline void setLineDistance(float value);
+
+  inline float getPressure();
+  inline void setPressure(float value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -11998,11 +12003,7 @@ public:
 
   inline bool getActive() const;
 
-  inline  ::int8_t getDirection() const;
-
   inline float getYDes() const;
-
-  inline float getBias() const;
 
   inline float getMaxOffset() const;
 
@@ -12018,8 +12019,6 @@ public:
 
   inline  ::uint16_t getNAssociated() const;
 
-  inline float getEdgeClearance() const;
-
   inline bool hasTargets() const;
   inline  ::capnp::List< ::cereal::EagleTarget,  ::capnp::Kind::STRUCT>::Reader getTargets() const;
 
@@ -12031,13 +12030,26 @@ public:
 
   inline bool getLaneRightValid() const;
 
-  inline float getBudgetLeft() const;
-
-  inline float getBudgetRight() const;
-
   inline bool getChangeClearLeft() const;
 
   inline bool getChangeClearRight() const;
+
+  inline float getPressureLeft() const;
+
+  inline float getPressureRight() const;
+
+  inline float getLaneOffsetTarget() const;
+
+  inline float getOffsetCap() const;
+
+  inline bool hasInactiveReason() const;
+  inline  ::capnp::Text::Reader getInactiveReason() const;
+
+  inline  ::uint8_t getHoldingTargets() const;
+
+  inline  ::cereal::EagleState::ChangeClear getChangeClearLeftState() const;
+
+  inline  ::cereal::EagleState::ChangeClear getChangeClearRightState() const;
 
 private:
   ::capnp::_::StructReader _reader;
@@ -12073,14 +12085,8 @@ public:
   inline bool getActive();
   inline void setActive(bool value);
 
-  inline  ::int8_t getDirection();
-  inline void setDirection( ::int8_t value);
-
   inline float getYDes();
   inline void setYDes(float value);
-
-  inline float getBias();
-  inline void setBias(float value);
 
   inline float getMaxOffset();
   inline void setMaxOffset(float value);
@@ -12103,9 +12109,6 @@ public:
   inline  ::uint16_t getNAssociated();
   inline void setNAssociated( ::uint16_t value);
 
-  inline float getEdgeClearance();
-  inline void setEdgeClearance(float value);
-
   inline bool hasTargets();
   inline  ::capnp::List< ::cereal::EagleTarget,  ::capnp::Kind::STRUCT>::Builder getTargets();
   inline void setTargets( ::capnp::List< ::cereal::EagleTarget,  ::capnp::Kind::STRUCT>::Reader value);
@@ -12125,17 +12128,39 @@ public:
   inline bool getLaneRightValid();
   inline void setLaneRightValid(bool value);
 
-  inline float getBudgetLeft();
-  inline void setBudgetLeft(float value);
-
-  inline float getBudgetRight();
-  inline void setBudgetRight(float value);
-
   inline bool getChangeClearLeft();
   inline void setChangeClearLeft(bool value);
 
   inline bool getChangeClearRight();
   inline void setChangeClearRight(bool value);
+
+  inline float getPressureLeft();
+  inline void setPressureLeft(float value);
+
+  inline float getPressureRight();
+  inline void setPressureRight(float value);
+
+  inline float getLaneOffsetTarget();
+  inline void setLaneOffsetTarget(float value);
+
+  inline float getOffsetCap();
+  inline void setOffsetCap(float value);
+
+  inline bool hasInactiveReason();
+  inline  ::capnp::Text::Builder getInactiveReason();
+  inline void setInactiveReason( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initInactiveReason(unsigned int size);
+  inline void adoptInactiveReason(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownInactiveReason();
+
+  inline  ::uint8_t getHoldingTargets();
+  inline void setHoldingTargets( ::uint8_t value);
+
+  inline  ::cereal::EagleState::ChangeClear getChangeClearLeftState();
+  inline void setChangeClearLeftState( ::cereal::EagleState::ChangeClear value);
+
+  inline  ::cereal::EagleState::ChangeClear getChangeClearRightState();
+  inline void setChangeClearRightState( ::cereal::EagleState::ChangeClear value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -12189,8 +12214,6 @@ public:
 
   inline float getVEgo() const;
 
-  inline float getEdgeClearance() const;
-
   inline  ::uint16_t getNRadar() const;
 
   inline  ::uint16_t getNVision() const;
@@ -12205,19 +12228,26 @@ public:
 
   inline bool getLaneRightValid() const;
 
-  inline bool hasSideLeadLeft() const;
-  inline  ::cereal::EagleSideLead::Reader getSideLeadLeft() const;
-
-  inline bool hasSideLeadRight() const;
-  inline  ::cereal::EagleSideLead::Reader getSideLeadRight() const;
-
-  inline float getBudgetLeft() const;
-
-  inline float getBudgetRight() const;
-
   inline bool getChangeClearLeft() const;
 
   inline bool getChangeClearRight() const;
+
+  inline float getPressureLeft() const;
+
+  inline float getPressureRight() const;
+
+  inline float getLaneOffsetTarget() const;
+
+  inline float getOffsetCap() const;
+
+  inline bool hasInactiveReason() const;
+  inline  ::capnp::Text::Reader getInactiveReason() const;
+
+  inline  ::cereal::EagleState::ChangeClear getChangeClearLeftState() const;
+
+  inline  ::cereal::EagleState::ChangeClear getChangeClearRightState() const;
+
+  inline  ::cereal::EagleState::VisionState getVisionState() const;
 
 private:
   ::capnp::_::StructReader _reader;
@@ -12263,9 +12293,6 @@ public:
   inline float getVEgo();
   inline void setVEgo(float value);
 
-  inline float getEdgeClearance();
-  inline void setEdgeClearance(float value);
-
   inline  ::uint16_t getNRadar();
   inline void setNRadar( ::uint16_t value);
 
@@ -12287,31 +12314,39 @@ public:
   inline bool getLaneRightValid();
   inline void setLaneRightValid(bool value);
 
-  inline bool hasSideLeadLeft();
-  inline  ::cereal::EagleSideLead::Builder getSideLeadLeft();
-  inline void setSideLeadLeft( ::cereal::EagleSideLead::Reader value);
-  inline  ::cereal::EagleSideLead::Builder initSideLeadLeft();
-  inline void adoptSideLeadLeft(::capnp::Orphan< ::cereal::EagleSideLead>&& value);
-  inline ::capnp::Orphan< ::cereal::EagleSideLead> disownSideLeadLeft();
-
-  inline bool hasSideLeadRight();
-  inline  ::cereal::EagleSideLead::Builder getSideLeadRight();
-  inline void setSideLeadRight( ::cereal::EagleSideLead::Reader value);
-  inline  ::cereal::EagleSideLead::Builder initSideLeadRight();
-  inline void adoptSideLeadRight(::capnp::Orphan< ::cereal::EagleSideLead>&& value);
-  inline ::capnp::Orphan< ::cereal::EagleSideLead> disownSideLeadRight();
-
-  inline float getBudgetLeft();
-  inline void setBudgetLeft(float value);
-
-  inline float getBudgetRight();
-  inline void setBudgetRight(float value);
-
   inline bool getChangeClearLeft();
   inline void setChangeClearLeft(bool value);
 
   inline bool getChangeClearRight();
   inline void setChangeClearRight(bool value);
+
+  inline float getPressureLeft();
+  inline void setPressureLeft(float value);
+
+  inline float getPressureRight();
+  inline void setPressureRight(float value);
+
+  inline float getLaneOffsetTarget();
+  inline void setLaneOffsetTarget(float value);
+
+  inline float getOffsetCap();
+  inline void setOffsetCap(float value);
+
+  inline bool hasInactiveReason();
+  inline  ::capnp::Text::Builder getInactiveReason();
+  inline void setInactiveReason( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initInactiveReason(unsigned int size);
+  inline void adoptInactiveReason(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownInactiveReason();
+
+  inline  ::cereal::EagleState::ChangeClear getChangeClearLeftState();
+  inline void setChangeClearLeftState( ::cereal::EagleState::ChangeClear value);
+
+  inline  ::cereal::EagleState::ChangeClear getChangeClearRightState();
+  inline void setChangeClearRightState( ::cereal::EagleState::ChangeClear value);
+
+  inline  ::cereal::EagleState::VisionState getVisionState();
+  inline void setVisionState( ::cereal::EagleState::VisionState value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -12326,114 +12361,6 @@ private:
 class EagleState::Pipeline {
 public:
   typedef EagleState Pipelines;
-
-  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
-  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
-      : _typeless(kj::mv(typeless)) {}
-
-  inline  ::cereal::EagleSideLead::Pipeline getSideLeadLeft();
-  inline  ::cereal::EagleSideLead::Pipeline getSideLeadRight();
-private:
-  ::capnp::AnyPointer::Pipeline _typeless;
-  friend class ::capnp::PipelineHook;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::ToDynamic_;
-};
-#endif  // !CAPNP_LITE
-
-class EagleSideLead::Reader {
-public:
-  typedef EagleSideLead Reads;
-
-  Reader() = default;
-  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
-
-  inline ::capnp::MessageSize totalSize() const {
-    return _reader.totalSize().asPublic();
-  }
-
-#if !CAPNP_LITE
-  inline ::kj::StringTree toString() const {
-    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
-  }
-#endif  // !CAPNP_LITE
-
-  inline bool getValid() const;
-
-  inline float getDRel() const;
-
-  inline float getYRel() const;
-
-  inline float getVRel() const;
-
-  inline float getEdgeDist() const;
-
-  inline bool hasCls() const;
-  inline  ::capnp::Text::Reader getCls() const;
-
-private:
-  ::capnp::_::StructReader _reader;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::ToDynamic_;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::_::PointerHelpers;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::List;
-  friend class ::capnp::MessageBuilder;
-  friend class ::capnp::Orphanage;
-};
-
-class EagleSideLead::Builder {
-public:
-  typedef EagleSideLead Builds;
-
-  Builder() = delete;  // Deleted to discourage incorrect usage.
-                       // You can explicitly initialize to nullptr instead.
-  inline Builder(decltype(nullptr)) {}
-  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
-  inline operator Reader() const { return Reader(_builder.asReader()); }
-  inline Reader asReader() const { return *this; }
-
-  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
-#if !CAPNP_LITE
-  inline ::kj::StringTree toString() const { return asReader().toString(); }
-#endif  // !CAPNP_LITE
-
-  inline bool getValid();
-  inline void setValid(bool value);
-
-  inline float getDRel();
-  inline void setDRel(float value);
-
-  inline float getYRel();
-  inline void setYRel(float value);
-
-  inline float getVRel();
-  inline void setVRel(float value);
-
-  inline float getEdgeDist();
-  inline void setEdgeDist(float value);
-
-  inline bool hasCls();
-  inline  ::capnp::Text::Builder getCls();
-  inline void setCls( ::capnp::Text::Reader value);
-  inline  ::capnp::Text::Builder initCls(unsigned int size);
-  inline void adoptCls(::capnp::Orphan< ::capnp::Text>&& value);
-  inline ::capnp::Orphan< ::capnp::Text> disownCls();
-
-private:
-  ::capnp::_::StructBuilder _builder;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::ToDynamic_;
-  friend class ::capnp::Orphanage;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::_::PointerHelpers;
-};
-
-#if !CAPNP_LITE
-class EagleSideLead::Pipeline {
-public:
-  typedef EagleSideLead Pipelines;
 
   inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
   inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
@@ -37435,32 +37362,32 @@ inline void DriverAssistance::Builder::setRightLaneDeparture(bool value) {
       ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
 }
 
-inline float LateralManeuverPlan::Reader::getDesiredCurvature() const {
+inline float LateralManeuverPlan::Reader::getDesiredLaneOffset() const {
   return _reader.getDataField<float>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS);
 }
 
-inline float LateralManeuverPlan::Builder::getDesiredCurvature() {
+inline float LateralManeuverPlan::Builder::getDesiredLaneOffset() {
   return _builder.getDataField<float>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS);
 }
-inline void LateralManeuverPlan::Builder::setDesiredCurvature(float value) {
+inline void LateralManeuverPlan::Builder::setDesiredLaneOffset(float value) {
   _builder.setDataField<float>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
 }
 
-inline float LateralManeuverPlan::Reader::getCurvatureBias() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+inline bool LateralManeuverPlan::Reader::getGapInsufficient() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<32>() * ::capnp::ELEMENTS);
 }
 
-inline float LateralManeuverPlan::Builder::getCurvatureBias() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+inline bool LateralManeuverPlan::Builder::getGapInsufficient() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<32>() * ::capnp::ELEMENTS);
 }
-inline void LateralManeuverPlan::Builder::setCurvatureBias(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+inline void LateralManeuverPlan::Builder::setGapInsufficient(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<32>() * ::capnp::ELEMENTS, value);
 }
 
 inline float EagleTarget::Reader::getDRel() const {
@@ -37553,88 +37480,88 @@ inline void EagleTarget::Builder::setConf(float value) {
       ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
 }
 
-inline float EagleTarget::Reader::getWeight() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
-}
-
-inline float EagleTarget::Builder::getWeight() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
-}
-inline void EagleTarget::Builder::setWeight(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
-}
-
 inline bool EagleTarget::Reader::getMatched() const {
   return _reader.getDataField<bool>(
-      ::capnp::bounded<160>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<128>() * ::capnp::ELEMENTS);
 }
 
 inline bool EagleTarget::Builder::getMatched() {
   return _builder.getDataField<bool>(
-      ::capnp::bounded<160>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<128>() * ::capnp::ELEMENTS);
 }
 inline void EagleTarget::Builder::setMatched(bool value) {
   _builder.setDataField<bool>(
-      ::capnp::bounded<160>() * ::capnp::ELEMENTS, value);
-}
-
-inline bool EagleTarget::Reader::getInGate() const {
-  return _reader.getDataField<bool>(
-      ::capnp::bounded<161>() * ::capnp::ELEMENTS);
-}
-
-inline bool EagleTarget::Builder::getInGate() {
-  return _builder.getDataField<bool>(
-      ::capnp::bounded<161>() * ::capnp::ELEMENTS);
-}
-inline void EagleTarget::Builder::setInGate(bool value) {
-  _builder.setDataField<bool>(
-      ::capnp::bounded<161>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<128>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool EagleTarget::Reader::getVision() const {
   return _reader.getDataField<bool>(
-      ::capnp::bounded<162>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<129>() * ::capnp::ELEMENTS);
 }
 
 inline bool EagleTarget::Builder::getVision() {
   return _builder.getDataField<bool>(
-      ::capnp::bounded<162>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<129>() * ::capnp::ELEMENTS);
 }
 inline void EagleTarget::Builder::setVision(bool value) {
   _builder.setDataField<bool>(
-      ::capnp::bounded<162>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<129>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint16_t EagleTarget::Reader::getPairId() const {
   return _reader.getDataField< ::uint16_t>(
-      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
 }
 
 inline  ::uint16_t EagleTarget::Builder::getPairId() {
   return _builder.getDataField< ::uint16_t>(
-      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
 }
 inline void EagleTarget::Builder::setPairId( ::uint16_t value) {
   _builder.setDataField< ::uint16_t>(
-      ::capnp::bounded<11>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::int8_t EagleTarget::Reader::getLane() const {
   return _reader.getDataField< ::int8_t>(
-      ::capnp::bounded<21>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
 }
 
 inline  ::int8_t EagleTarget::Builder::getLane() {
   return _builder.getDataField< ::int8_t>(
-      ::capnp::bounded<21>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
 }
 inline void EagleTarget::Builder::setLane( ::int8_t value) {
   _builder.setDataField< ::int8_t>(
-      ::capnp::bounded<21>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS, value);
+}
+
+inline float EagleTarget::Reader::getLineDistance() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline float EagleTarget::Builder::getLineDistance() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void EagleTarget::Builder::setLineDistance(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline float EagleTarget::Reader::getPressure() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline float EagleTarget::Builder::getPressure() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void EagleTarget::Builder::setPressure(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool EagleDebug::Reader::getValid() const {
@@ -37665,20 +37592,6 @@ inline void EagleDebug::Builder::setActive(bool value) {
       ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
 }
 
-inline  ::int8_t EagleDebug::Reader::getDirection() const {
-  return _reader.getDataField< ::int8_t>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
-}
-
-inline  ::int8_t EagleDebug::Builder::getDirection() {
-  return _builder.getDataField< ::int8_t>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
-}
-inline void EagleDebug::Builder::setDirection( ::int8_t value) {
-  _builder.setDataField< ::int8_t>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
-}
-
 inline float EagleDebug::Reader::getYDes() const {
   return _reader.getDataField<float>(
       ::capnp::bounded<1>() * ::capnp::ELEMENTS);
@@ -37693,32 +37606,18 @@ inline void EagleDebug::Builder::setYDes(float value) {
       ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
 }
 
-inline float EagleDebug::Reader::getBias() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
-}
-
-inline float EagleDebug::Builder::getBias() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
-}
-inline void EagleDebug::Builder::setBias(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
-}
-
 inline float EagleDebug::Reader::getMaxOffset() const {
   return _reader.getDataField<float>(
-      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
 }
 
 inline float EagleDebug::Builder::getMaxOffset() {
   return _builder.getDataField<float>(
-      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
 }
 inline void EagleDebug::Builder::setMaxOffset(float value) {
   _builder.setDataField<float>(
-      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool EagleDebug::Reader::getBsmLeft() const {
@@ -37751,16 +37650,16 @@ inline void EagleDebug::Builder::setBsmRight(bool value) {
 
 inline float EagleDebug::Reader::getVEgo() const {
   return _reader.getDataField<float>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
 }
 
 inline float EagleDebug::Builder::getVEgo() {
   return _builder.getDataField<float>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
 }
 inline void EagleDebug::Builder::setVEgo(float value) {
   _builder.setDataField<float>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint16_t EagleDebug::Reader::getNRadar() const {
@@ -37779,44 +37678,30 @@ inline void EagleDebug::Builder::setNRadar( ::uint16_t value) {
 
 inline  ::uint16_t EagleDebug::Reader::getNVision() const {
   return _reader.getDataField< ::uint16_t>(
-      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
 }
 
 inline  ::uint16_t EagleDebug::Builder::getNVision() {
   return _builder.getDataField< ::uint16_t>(
-      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
 }
 inline void EagleDebug::Builder::setNVision( ::uint16_t value) {
   _builder.setDataField< ::uint16_t>(
-      ::capnp::bounded<10>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint16_t EagleDebug::Reader::getNAssociated() const {
   return _reader.getDataField< ::uint16_t>(
-      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
 }
 
 inline  ::uint16_t EagleDebug::Builder::getNAssociated() {
   return _builder.getDataField< ::uint16_t>(
-      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
 }
 inline void EagleDebug::Builder::setNAssociated( ::uint16_t value) {
   _builder.setDataField< ::uint16_t>(
-      ::capnp::bounded<11>() * ::capnp::ELEMENTS, value);
-}
-
-inline float EagleDebug::Reader::getEdgeClearance() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
-}
-
-inline float EagleDebug::Builder::getEdgeClearance() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
-}
-inline void EagleDebug::Builder::setEdgeClearance(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool EagleDebug::Reader::hasTargets() const {
@@ -37909,60 +37794,164 @@ inline void EagleDebug::Builder::setLaneRightValid(bool value) {
       ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
 }
 
-inline float EagleDebug::Reader::getBudgetLeft() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
-}
-
-inline float EagleDebug::Builder::getBudgetLeft() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
-}
-inline void EagleDebug::Builder::setBudgetLeft(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
-}
-
-inline float EagleDebug::Reader::getBudgetRight() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
-}
-
-inline float EagleDebug::Builder::getBudgetRight() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
-}
-inline void EagleDebug::Builder::setBudgetRight(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
-}
-
 inline bool EagleDebug::Reader::getChangeClearLeft() const {
   return _reader.getDataField<bool>(
-      ::capnp::bounded<288>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
 }
 
 inline bool EagleDebug::Builder::getChangeClearLeft() {
   return _builder.getDataField<bool>(
-      ::capnp::bounded<288>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
 }
 inline void EagleDebug::Builder::setChangeClearLeft(bool value) {
   _builder.setDataField<bool>(
-      ::capnp::bounded<288>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool EagleDebug::Reader::getChangeClearRight() const {
   return _reader.getDataField<bool>(
-      ::capnp::bounded<289>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
 }
 
 inline bool EagleDebug::Builder::getChangeClearRight() {
   return _builder.getDataField<bool>(
-      ::capnp::bounded<289>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
 }
 inline void EagleDebug::Builder::setChangeClearRight(bool value) {
   _builder.setDataField<bool>(
-      ::capnp::bounded<289>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS, value);
+}
+
+inline float EagleDebug::Reader::getPressureLeft() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline float EagleDebug::Builder::getPressureLeft() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void EagleDebug::Builder::setPressureLeft(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline float EagleDebug::Reader::getPressureRight() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline float EagleDebug::Builder::getPressureRight() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void EagleDebug::Builder::setPressureRight(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+}
+
+inline float EagleDebug::Reader::getLaneOffsetTarget() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+}
+
+inline float EagleDebug::Builder::getLaneOffsetTarget() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+}
+inline void EagleDebug::Builder::setLaneOffsetTarget(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
+}
+
+inline float EagleDebug::Reader::getOffsetCap() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+
+inline float EagleDebug::Builder::getOffsetCap() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+inline void EagleDebug::Builder::setOffsetCap(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool EagleDebug::Reader::hasInactiveReason() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool EagleDebug::Builder::hasInactiveReason() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader EagleDebug::Reader::getInactiveReason() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder EagleDebug::Builder::getInactiveReason() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void EagleDebug::Builder::setInactiveReason( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder EagleDebug::Builder::initInactiveReason(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void EagleDebug::Builder::adoptInactiveReason(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> EagleDebug::Builder::disownInactiveReason() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline  ::uint8_t EagleDebug::Reader::getHoldingTargets() const {
+  return _reader.getDataField< ::uint8_t>(
+      ::capnp::bounded<36>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint8_t EagleDebug::Builder::getHoldingTargets() {
+  return _builder.getDataField< ::uint8_t>(
+      ::capnp::bounded<36>() * ::capnp::ELEMENTS);
+}
+inline void EagleDebug::Builder::setHoldingTargets( ::uint8_t value) {
+  _builder.setDataField< ::uint8_t>(
+      ::capnp::bounded<36>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::cereal::EagleState::ChangeClear EagleDebug::Reader::getChangeClearLeftState() const {
+  return _reader.getDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+
+inline  ::cereal::EagleState::ChangeClear EagleDebug::Builder::getChangeClearLeftState() {
+  return _builder.getDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+inline void EagleDebug::Builder::setChangeClearLeftState( ::cereal::EagleState::ChangeClear value) {
+  _builder.setDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::cereal::EagleState::ChangeClear EagleDebug::Reader::getChangeClearRightState() const {
+  return _reader.getDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<20>() * ::capnp::ELEMENTS);
+}
+
+inline  ::cereal::EagleState::ChangeClear EagleDebug::Builder::getChangeClearRightState() {
+  return _builder.getDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<20>() * ::capnp::ELEMENTS);
+}
+inline void EagleDebug::Builder::setChangeClearRightState( ::cereal::EagleState::ChangeClear value) {
+  _builder.setDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<20>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool EagleState::Reader::hasTargets() const {
@@ -38041,20 +38030,6 @@ inline void EagleState::Builder::setVEgo(float value) {
       ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
 }
 
-inline float EagleState::Reader::getEdgeClearance() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
-}
-
-inline float EagleState::Builder::getEdgeClearance() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
-}
-inline void EagleState::Builder::setEdgeClearance(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
-}
-
 inline  ::uint16_t EagleState::Reader::getNRadar() const {
   return _reader.getDataField< ::uint16_t>(
       ::capnp::bounded<1>() * ::capnp::ELEMENTS);
@@ -38071,30 +38046,30 @@ inline void EagleState::Builder::setNRadar( ::uint16_t value) {
 
 inline  ::uint16_t EagleState::Reader::getNVision() const {
   return _reader.getDataField< ::uint16_t>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
 }
 
 inline  ::uint16_t EagleState::Builder::getNVision() {
   return _builder.getDataField< ::uint16_t>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
 }
 inline void EagleState::Builder::setNVision( ::uint16_t value) {
   _builder.setDataField< ::uint16_t>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint16_t EagleState::Reader::getNAssociated() const {
   return _reader.getDataField< ::uint16_t>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
 }
 
 inline  ::uint16_t EagleState::Builder::getNAssociated() {
   return _builder.getDataField< ::uint16_t>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
 }
 inline void EagleState::Builder::setNAssociated( ::uint16_t value) {
   _builder.setDataField< ::uint16_t>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool EagleState::Reader::getCanError() const {
@@ -38153,112 +38128,6 @@ inline void EagleState::Builder::setLaneRightValid(bool value) {
       ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
 }
 
-inline bool EagleState::Reader::hasSideLeadLeft() const {
-  return !_reader.getPointerField(
-      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
-}
-inline bool EagleState::Builder::hasSideLeadLeft() {
-  return !_builder.getPointerField(
-      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
-}
-inline  ::cereal::EagleSideLead::Reader EagleState::Reader::getSideLeadLeft() const {
-  return ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::get(_reader.getPointerField(
-      ::capnp::bounded<1>() * ::capnp::POINTERS));
-}
-inline  ::cereal::EagleSideLead::Builder EagleState::Builder::getSideLeadLeft() {
-  return ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::get(_builder.getPointerField(
-      ::capnp::bounded<1>() * ::capnp::POINTERS));
-}
-#if !CAPNP_LITE
-inline  ::cereal::EagleSideLead::Pipeline EagleState::Pipeline::getSideLeadLeft() {
-  return  ::cereal::EagleSideLead::Pipeline(_typeless.getPointerField(1));
-}
-#endif  // !CAPNP_LITE
-inline void EagleState::Builder::setSideLeadLeft( ::cereal::EagleSideLead::Reader value) {
-  ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::set(_builder.getPointerField(
-      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
-}
-inline  ::cereal::EagleSideLead::Builder EagleState::Builder::initSideLeadLeft() {
-  return ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::init(_builder.getPointerField(
-      ::capnp::bounded<1>() * ::capnp::POINTERS));
-}
-inline void EagleState::Builder::adoptSideLeadLeft(
-    ::capnp::Orphan< ::cereal::EagleSideLead>&& value) {
-  ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::adopt(_builder.getPointerField(
-      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
-}
-inline ::capnp::Orphan< ::cereal::EagleSideLead> EagleState::Builder::disownSideLeadLeft() {
-  return ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::disown(_builder.getPointerField(
-      ::capnp::bounded<1>() * ::capnp::POINTERS));
-}
-
-inline bool EagleState::Reader::hasSideLeadRight() const {
-  return !_reader.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
-}
-inline bool EagleState::Builder::hasSideLeadRight() {
-  return !_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
-}
-inline  ::cereal::EagleSideLead::Reader EagleState::Reader::getSideLeadRight() const {
-  return ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::get(_reader.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS));
-}
-inline  ::cereal::EagleSideLead::Builder EagleState::Builder::getSideLeadRight() {
-  return ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::get(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS));
-}
-#if !CAPNP_LITE
-inline  ::cereal::EagleSideLead::Pipeline EagleState::Pipeline::getSideLeadRight() {
-  return  ::cereal::EagleSideLead::Pipeline(_typeless.getPointerField(2));
-}
-#endif  // !CAPNP_LITE
-inline void EagleState::Builder::setSideLeadRight( ::cereal::EagleSideLead::Reader value) {
-  ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::set(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
-}
-inline  ::cereal::EagleSideLead::Builder EagleState::Builder::initSideLeadRight() {
-  return ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::init(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS));
-}
-inline void EagleState::Builder::adoptSideLeadRight(
-    ::capnp::Orphan< ::cereal::EagleSideLead>&& value) {
-  ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::adopt(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
-}
-inline ::capnp::Orphan< ::cereal::EagleSideLead> EagleState::Builder::disownSideLeadRight() {
-  return ::capnp::_::PointerHelpers< ::cereal::EagleSideLead>::disown(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS));
-}
-
-inline float EagleState::Reader::getBudgetLeft() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
-}
-
-inline float EagleState::Builder::getBudgetLeft() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
-}
-inline void EagleState::Builder::setBudgetLeft(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
-}
-
-inline float EagleState::Reader::getBudgetRight() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
-}
-
-inline float EagleState::Builder::getBudgetRight() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
-}
-inline void EagleState::Builder::setBudgetRight(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
-}
-
 inline bool EagleState::Reader::getChangeClearLeft() const {
   return _reader.getDataField<bool>(
       ::capnp::bounded<6>() * ::capnp::ELEMENTS);
@@ -38287,108 +38156,136 @@ inline void EagleState::Builder::setChangeClearRight(bool value) {
       ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
 }
 
-inline bool EagleSideLead::Reader::getValid() const {
-  return _reader.getDataField<bool>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
-}
-
-inline bool EagleSideLead::Builder::getValid() {
-  return _builder.getDataField<bool>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
-}
-inline void EagleSideLead::Builder::setValid(bool value) {
-  _builder.setDataField<bool>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
-}
-
-inline float EagleSideLead::Reader::getDRel() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
-}
-
-inline float EagleSideLead::Builder::getDRel() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
-}
-inline void EagleSideLead::Builder::setDRel(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
-}
-
-inline float EagleSideLead::Reader::getYRel() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
-}
-
-inline float EagleSideLead::Builder::getYRel() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
-}
-inline void EagleSideLead::Builder::setYRel(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
-}
-
-inline float EagleSideLead::Reader::getVRel() const {
+inline float EagleState::Reader::getPressureLeft() const {
   return _reader.getDataField<float>(
       ::capnp::bounded<3>() * ::capnp::ELEMENTS);
 }
 
-inline float EagleSideLead::Builder::getVRel() {
+inline float EagleState::Builder::getPressureLeft() {
   return _builder.getDataField<float>(
       ::capnp::bounded<3>() * ::capnp::ELEMENTS);
 }
-inline void EagleSideLead::Builder::setVRel(float value) {
+inline void EagleState::Builder::setPressureLeft(float value) {
   _builder.setDataField<float>(
       ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
 }
 
-inline float EagleSideLead::Reader::getEdgeDist() const {
+inline float EagleState::Reader::getPressureRight() const {
   return _reader.getDataField<float>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS);
 }
 
-inline float EagleSideLead::Builder::getEdgeDist() {
+inline float EagleState::Builder::getPressureRight() {
   return _builder.getDataField<float>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS);
 }
-inline void EagleSideLead::Builder::setEdgeDist(float value) {
+inline void EagleState::Builder::setPressureRight(float value) {
   _builder.setDataField<float>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
 }
 
-inline bool EagleSideLead::Reader::hasCls() const {
+inline float EagleState::Reader::getLaneOffsetTarget() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline float EagleState::Builder::getLaneOffsetTarget() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void EagleState::Builder::setLaneOffsetTarget(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline float EagleState::Reader::getOffsetCap() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline float EagleState::Builder::getOffsetCap() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void EagleState::Builder::setOffsetCap(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool EagleState::Reader::hasInactiveReason() const {
   return !_reader.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
 }
-inline bool EagleSideLead::Builder::hasCls() {
+inline bool EagleState::Builder::hasInactiveReason() {
   return !_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
 }
-inline  ::capnp::Text::Reader EagleSideLead::Reader::getCls() const {
+inline  ::capnp::Text::Reader EagleState::Reader::getInactiveReason() const {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS));
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
-inline  ::capnp::Text::Builder EagleSideLead::Builder::getCls() {
+inline  ::capnp::Text::Builder EagleState::Builder::getInactiveReason() {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS));
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
-inline void EagleSideLead::Builder::setCls( ::capnp::Text::Reader value) {
+inline void EagleState::Builder::setInactiveReason( ::capnp::Text::Reader value) {
   ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
 }
-inline  ::capnp::Text::Builder EagleSideLead::Builder::initCls(unsigned int size) {
+inline  ::capnp::Text::Builder EagleState::Builder::initInactiveReason(unsigned int size) {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
 }
-inline void EagleSideLead::Builder::adoptCls(
+inline void EagleState::Builder::adoptInactiveReason(
     ::capnp::Orphan< ::capnp::Text>&& value) {
   ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::capnp::Text> EagleSideLead::Builder::disownCls() {
+inline ::capnp::Orphan< ::capnp::Text> EagleState::Builder::disownInactiveReason() {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS));
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline  ::cereal::EagleState::ChangeClear EagleState::Reader::getChangeClearLeftState() const {
+  return _reader.getDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS);
+}
+
+inline  ::cereal::EagleState::ChangeClear EagleState::Builder::getChangeClearLeftState() {
+  return _builder.getDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS);
+}
+inline void EagleState::Builder::setChangeClearLeftState( ::cereal::EagleState::ChangeClear value) {
+  _builder.setDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::cereal::EagleState::ChangeClear EagleState::Reader::getChangeClearRightState() const {
+  return _reader.getDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS);
+}
+
+inline  ::cereal::EagleState::ChangeClear EagleState::Builder::getChangeClearRightState() {
+  return _builder.getDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS);
+}
+inline void EagleState::Builder::setChangeClearRightState( ::cereal::EagleState::ChangeClear value) {
+  _builder.setDataField< ::cereal::EagleState::ChangeClear>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::cereal::EagleState::VisionState EagleState::Reader::getVisionState() const {
+  return _reader.getDataField< ::cereal::EagleState::VisionState>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+
+inline  ::cereal::EagleState::VisionState EagleState::Builder::getVisionState() {
+  return _builder.getDataField< ::cereal::EagleState::VisionState>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+inline void EagleState::Builder::setVisionState( ::cereal::EagleState::VisionState value) {
+  _builder.setDataField< ::cereal::EagleState::VisionState>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS, value);
 }
 
 inline typename LongitudinalPlan::Deprecated::Reader LongitudinalPlan::Reader::getDeprecated() const {
