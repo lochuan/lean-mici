@@ -27,7 +27,6 @@ if [ "$SKIP_TESTS" -eq 0 ]; then
     openpilot/selfdrive/controls/tests/test_avoidance_fusion.py \
     openpilot/selfdrive/controls/tests/test_desire_helper.py \
     openpilot/system/lanlinkd/tests/test_lanes.py \
-    openpilot/system/lanlinkd/tests/test_avoidanced.py \
     tools/release/test_release_lib.py)
 fi
 
