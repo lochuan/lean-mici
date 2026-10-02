@@ -86,6 +86,27 @@ def build_snapshot(services: dict, version_info: dict, capabilities: dict) -> di
   }
 
 
+def build_model_status(frames, big_enabled: bool, link_state: str, server_telemetry_us) -> dict:
+  """最近 N 帧 (big, bigLatencyMs, cameraToModelMs, execMs, dropPerc) -> 模型来源卡片数据。
+  bigLatencyMs 只在大模型帧上有意义（0 = 没等到），统计只算 >0；server_telemetry_us = REPLY 的 recv/prep/htp/total µs。"""
+  frames = list(frames)
+  lat = [f[1] for f in frames if f[1] > 0]
+  avg = lambda xs: round(sum(xs) / len(xs), 2) if xs else None  # noqa: E731
+  tel = list(server_telemetry_us or [])
+  return {
+    "bigEnabled": big_enabled,
+    "linkState": link_state,
+    "frames": [f[0] for f in frames],
+    "bigLatencyAvgMs": avg(lat),
+    "bigLatencyMaxMs": round(max(lat), 2) if lat else None,
+    "cameraToModelAvgMs": avg([f[2] for f in frames]),
+    "execAvgMs": avg([f[3] for f in frames]),
+    "execMaxMs": round(max((f[3] for f in frames), default=0.0), 2) if frames else None,
+    "frameDropPerc": round(frames[-1][4], 2) if frames else None,
+    "serverMs": dict(zip(("recv", "prep", "htp", "total"), (round(v / 1000, 2) for v in tel), strict=False)) if len(tel) == 4 else None,
+  }
+
+
 _CAP_KEYS = (
   "protocol_version", "has_longitudinal_control", "has_icbm", "icbm_available",
   "torque_allowed", "brand", "pcm_cruise", "alpha_long_available",

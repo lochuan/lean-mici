@@ -11,7 +11,7 @@ def make_fake_submaster_cls(exit_event, stop_after):
 
   class FakeSubMaster:
     def __init__(self, services):
-      self.updated = {name: False for name in services}
+      self.updated = dict.fromkeys(services, False)
 
     def update(self, timeout):
       state["calls"] += 1
@@ -44,7 +44,7 @@ class TestStatusdRun:
       cache.run(exit_event)
 
     assert state["ok"] is True
-    assert cache.snapshot() == {"stale": False}
+    assert cache.snapshot()["stale"] is False
 
   def test_submaster_init_failure_returns(self):
     def boom(services):
@@ -54,3 +54,42 @@ class TestStatusdRun:
                         params=NS(get=lambda k: None, get_bool=lambda k: False))
     with patch.object(statusd.messaging, "SubMaster", boom):
       cache.run(threading.Event())
+
+
+  def test_model_status_from_frames_and_server_telemetry(self):
+    exit_event = threading.Event()
+    n = 60
+
+    class FakeSubMaster:
+      def __init__(self, services):
+        self.updated = dict.fromkeys(services, False)
+        self.calls = 0
+
+      def update(self, timeout):
+        self.calls += 1
+        self.updated["modelV2"] = True
+        self.updated["bigModelReply"] = True
+        if self.calls >= n:
+          exit_event.set()
+
+      def __getitem__(self, name):
+        big = self.calls > 55
+        return {
+          "modelV2": NS(big=big, modelExecutionTime=0.01, frameDropPerc=1.5),
+          "modelDataV2SP": NS(bigLatencyMs=40. if big else 0., cameraToModelMs=20.),
+          "bigModelReply": NS(telemetry=[1000, 2000, 3000, 6000]),
+        }.get(name, NS())
+
+    params = NS(get=lambda k: "connected" if k == "BigmodelLinkState" else None, get_bool=lambda k: k == "BigmodelToggle")
+    cache = StatusCache({}, "tici", params=params)
+    with patch.object(statusd.messaging, "SubMaster", FakeSubMaster), \
+         patch.object(statusd, "build_snapshot", lambda *a: {}), \
+         patch.object(statusd, "build_capabilities", lambda *a, **k: {}):
+      cache.run(exit_event)
+
+    model = cache.snapshot()["model"]
+    assert model["bigEnabled"] is True and model["linkState"] == "connected"
+    assert len(model["frames"]) == 50
+    assert model["frames"][-5:] == [1] * 5 and model["frames"][-6] == 0
+    assert model["bigLatencyAvgMs"] == 40. and model["execAvgMs"] == 10. and model["frameDropPerc"] == 1.5
+    assert model["serverMs"] == {"recv": 1., "prep": 2., "htp": 3., "total": 6.}

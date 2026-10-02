@@ -2039,7 +2039,7 @@
    "label": "状态",
    "icon": "status",
    "order": 8,
-   "description": "设备遥测与 ACC 雷达点阵实时视图",
+   "description": "设备遥测与模型来源实时视图",
    "sections": []
   },
   {

@@ -1,15 +1,18 @@
 # system/lanlinkd/statusd.py
 """SubMaster 快照线程：1Hz 采集，线程安全缓存。capabilities 从持久化 params 生成（停车可用）。"""
 import threading
+from collections import deque
 
 from openpilot.cereal import messaging
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.system.lanlinkd.status_snapshot import (
-  build_capabilities, build_models_download, build_snapshot)
+  build_capabilities, build_model_status, build_models_download, build_snapshot)
 
 # carParams 移除（capabilities 不再依赖实时 CP）；modelManagerSP 新增（模型下载进度）
-SERVICES = ['deviceState', 'carState', 'pandaStates', 'gpsLocation', 'modelManagerSP']
+SERVICES = ['deviceState', 'carState', 'pandaStates', 'gpsLocation', 'modelManagerSP', 'modelV2',
+            'modelDataV2SP', 'bigModelReply']
+MODEL_FRAMES = 50  # 最近 50 帧（20Hz ≈ 2.5s）的模型来源
 
 _CAP_PARAM_KEYS = (
   "IsReleaseSpBranch", "IsDevelopmentBranch", "ToyotaEnforceStockLongitudinal",
@@ -31,6 +34,8 @@ class StatusCache:
     self._capabilities: dict = {}
     self._download: dict | None = None
     self._cap_inputs: tuple | None = None
+    self._server_telemetry: list = []
+    self._model_frames: deque[tuple] = deque(maxlen=MODEL_FRAMES)
 
   def _capabilities_from_params(self) -> dict:
     """输入（CP/CPSP bytes、bundle、相关 bool params）不变则复用上次结果。"""
@@ -53,10 +58,20 @@ class StatusCache:
       return
     while not exit_event.is_set():
       sm.update(1000)
+      if sm.updated['modelV2']:
+        m = sm['modelV2']
+        sp = sm['modelDataV2SP']
+        self._model_frames.append((int(bool(m.big)), float(sp.bigLatencyMs), float(sp.cameraToModelMs),
+                                   float(m.modelExecutionTime) * 1000, float(m.frameDropPerc)))
+      if sm.updated['bigModelReply']:
+        self._server_telemetry = list(sm['bigModelReply'].telemetry)
       try:
         caps = self._capabilities_from_params()
         download = build_models_download(sm["modelManagerSP"])
         snap = build_snapshot({name: sm[name] for name in SERVICES}, self._version_info, caps)
+        snap["model"] = build_model_status(
+          self._model_frames, bool(self._params.get_bool("BigmodelToggle")),
+          str(self._params.get("BigmodelLinkState") or ""), self._server_telemetry)
       except Exception:
         cloudlog.exception("lanlink statusd: snapshot build failed")
         continue

@@ -150,88 +150,35 @@ export interface DeviceStatus {
   thermalStatus?: number; // 0 ok / 2 overheated / 3 critical
 }
 
+/** 最近 N 帧 modelV2.big：1=大模型出的帧，0=小模型兜底；最旧在前 */
+export interface ModelStatus {
+  bigEnabled?: boolean;
+  linkState?: string; // BigmodelLinkState：connecting/connected/blip/restart/lost
+  frames?: number[];
+  bigLatencyAvgMs?: number | null; // REPLY 往返（只算大模型帧）
+  bigLatencyMaxMs?: number | null;
+  cameraToModelAvgMs?: number | null; // 帧出图 → modeld 收帧
+  execAvgMs?: number | null; // 模型执行耗时
+  execMaxMs?: number | null;
+  frameDropPerc?: number | null;
+  serverMs?: { recv: number; prep: number; htp: number; total: number } | null;
+}
+
 export interface StatusSnapshot {
   stale?: boolean;
   paramsVersion?: string | null;
   system?: { version?: string; branch?: string; commit?: string; ignition?: boolean };
   device?: DeviceStatus;
+  model?: ModelStatus;
   capabilities?: Capabilities;
 }
 
-/** 避让监测目标（eagleDebug targets 条目；雷达点与视觉目标共用） */
-export interface EagleTarget {
-  dRel: number; // m，车头原点
-  yRel: number; // m，左正
-  vRel: number; // m/s，雷达点才有，视觉目标 0
-  cls: string; // person/bicycle/motorcycle/car；雷达点 ""
-  conf: number; // YOLO conf，雷达点 0
-  matched: boolean; // 雷达↔视觉关联上
-  vision: boolean; // true=YOLO 投影目标；false=雷达点
-  pairId: number;
-  lane: number; // 车道归属：-1 左邻 / 0 本道或重叠 / +1 右邻（车道线不可信时 0）
-  pressure: number; // 单目标侧向压力 0~1
-}
-
+/** /api/avoidance 里 store 只取的在线标定摘要（lanlinkd 订阅 extrinsicsCalibration 透传） */
 export interface AvoidanceSnapshot {
-  stale?: boolean;
-  logMonoTime?: number;
-  valid?: boolean;
-  active?: boolean;
-  yDes?: number; // 期望横向偏移 m，左正
-  maxOffset?: number; // 贴线上限 m
-  bsmLeft?: boolean;
-  bsmRight?: boolean;
-  vEgo?: number; // m/s
-  nRadar?: number;
-  nVision?: number;
-  nAssociated?: number;
-  canError?: boolean; // radarTracks.errors.canError（随 debug 透传）
-  radarUnavailable?: boolean; // radarTracks.errors.radarUnavailableTemporary
-  targets?: EagleTarget[];
-  // 新增字段——旧后端不发时 undefined，UI 必须容忍
-  laneLeftValid?: boolean; // 本道左边界线置信
-  laneRightValid?: boolean; // 本道右边界线置信
-  changeClearLeft?: boolean; // 目标道（左）变道清空（时间投影）
-  changeClearRight?: boolean; // 目标道（右）变道清空
-
-  // 标定状态：lanlinkd 自己订阅 extrinsicsCalibration 透传。eagled 在
-  // 相机未标定时整体关掉视觉路径，否则前端只会看到 nVision 恒为 0 而无从解释。
-  // EagleDebug 的 capnp 结构里没有降级原因字段，而加字段要设备全量重建。
   calStatus?: string; // "uncalibrated" | "calibrated" | "recalibrating" | "unknown"
   calPerc?: number; // 标定进度 0-100
   calValid?: boolean; // 消息 valid 且 calStatus=="calibrated" 且 rpyCalib 长度为 3
   visionGated?: boolean; // 视觉路径是否被标定门关掉（= !calValid）
-
-  // 车道几何（lanlinkd 自己订阅 modelV2，lanes.py）：modelV2 停更/无帧为 null
-  lanes?: LaneSnapshot | null;
-}
-
-/** lanes.py lane_snapshot 的 wire 形状。两套同网格几何（y 均为左正、
- *  x 网格 0-60m，坐标语义由后端 model_geometry 独占解释，前端只画图）：
- *  - corrected：车体系（x 前保险杠原点）——鸟瞰图默认层，与雷达目标同原点。
- *  - raw：零安装偏移的车体系（ctf=0 过同一换算口，y 同为左正；x 原点即相机）
- *    ——叠加层即精修仪器，两套错位 = 安装偏移。
- *  line.y null = 该线本轮不可用。 */
-export interface LaneLineSnap {
-  /** 共享网格上的 y 值（m，左正） */
-  y: number[] | null;
-  prob?: number | null; // 车道线：laneLineProbs（外侧线透明度用）
-  std?: number | null; // laneLineStds / roadEdgeStds
-}
-
-export interface LaneGeometrySet {
-  /** [远左外线, 本道左边界, 本道右边界, 远右外线]；单项可为 null */
-  laneLines: (LaneLineSnap | null)[];
-  /** [左路沿, 右路沿] */
-  roadEdges: (LaneLineSnap | null)[];
-  /** modelV2 预测路径（本车轨迹） */
-  path?: { y: number[] | null; std: number[] | null } | null;
-}
-
-export interface LaneSnapshot {
-  x: number[];
-  corrected: LaneGeometrySet;
-  raw: LaneGeometrySet;
 }
 
 /** /api/calibration/status：在线标定会话状态（CalibrationController）。
