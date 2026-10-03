@@ -1,0 +1,7 @@
+* text=auto
+
+# LFS routing removed 2026-09-21: every formerly-LFS-pointed file (driving
+# supercombo onnx, comma updater, avoidanced yolo onnx) is committed as a
+# regular blob. The previous LFS endpoint (gitlab) was not writable from this
+# fork, and pointers made device-side checkouts depend on an lfs smudge.
+# History keeps the old pointer blobs untouched (no rewrite of pushed commits).
