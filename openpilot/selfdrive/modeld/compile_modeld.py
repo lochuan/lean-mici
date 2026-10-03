@@ -39,11 +39,6 @@ from tinygrad.engine.jit import TinyJit
 NV12Frame = namedtuple("NV12Frame", ['width', 'height', 'stride', 'y_height', 'uv_height', 'size'])
 MODELD_INPUTS = ['img_q', 'big_img_q', 'feat_q', 'desire_q', 'packed_npy_inputs']
 
-# Split models (vision + policy compiled separately) expose two JITs instead of a
-# single fused run_model: a per-camera-resolution warp and a shared run_policy.
-WARP_INPUTS = ['tfm', 'big_tfm']
-POLICY_INPUTS = ['img_q', 'big_img_q', 'feat_q', 'desire_q', 'packed_npy_inputs']
-
 
 def nv12_copy_size(stride: int, y_height: int, uv_height: int) -> int:
   # Retain the padded Y and UV plane storage, but skip the trailing kernel/guard allocation.
@@ -123,21 +118,6 @@ def _detect_desire_key(shapes):
   return next((key for key in shapes if key.startswith('desire')), None)
 
 
-def _detect_vision_keys(shapes):
-  """Return (road_key, wide_key) for the narrow and wide camera inputs."""
-  img_keys = sorted(key for key in shapes if 'img' in key)
-  return (
-    next((key for key in img_keys if 'big' not in key), None),
-    next((key for key in img_keys if 'big' in key), None),
-  )
-
-
-def derive_frame_skip(vision_input_shapes, policy_input_shapes):
-  """Models carrying a full-rate features buffer (>=99 entries) run without temporal skipping."""
-  features_buffer = policy_input_shapes.get('features_buffer')
-  return 1 if not features_buffer or features_buffer[1] >= 99 else 4
-
-
 def get_policy_npy_shapes(input_shapes, is_supercombo=False):
   # Ordering matters: run_model/run_policy split the packed buffer positionally.
   # For supercombo this yields desire, traffic_convention, action_t, prev_feat.
@@ -156,63 +136,6 @@ def get_policy_npy_shapes(input_shapes, is_supercombo=False):
     shapes['prev_feat'] = (fb[0], math.prod(fb[2:]))
 
   return shapes, [math.prod(s) for s in shapes.values()]
-
-
-def generate_queues_and_npy(input_shapes, frame_skip, device=None, is_supercombo=False):
-  """Allocate the runtime input queues and the numpy views used to refill them.
-
-  Unlike make_input_queues (supercombo, frames packed into one buffer for the
-  fused run_model JIT), split models warp frames separately, so no frame views
-  are returned here and tfm/big_tfm are exposed as their own NPY tensors.
-  """
-  device = Device.DEFAULT if device is None else device
-
-  road_key, _ = _detect_vision_keys(input_shapes)
-  if not road_key:
-    raise ValueError("Vision road key missing from input shapes.")
-  img_shape = input_shapes[road_key]
-  n_frames = img_shape[1] // 6
-  img_buf_shape = (frame_skip * (n_frames - 1) + 1, 6, img_shape[2], img_shape[3])
-
-  desire_key = _detect_desire_key(input_shapes)
-  if not desire_key:
-    raise ValueError("Desire key missing from input shapes.")
-  desire_shape = input_shapes[desire_key]
-
-  npy_arrays = {'tfm': np.zeros((3, 3), dtype=np.float32), 'big_tfm': np.zeros((3, 3), dtype=np.float32)}
-
-  shapes, sizes = get_policy_npy_shapes(input_shapes, is_supercombo=is_supercombo)
-  packed_npy_inputs = np.zeros(sum(sizes), dtype=np.float32)
-  split_views = np.split(packed_npy_inputs, np.cumsum(sizes[:-1]))
-  for (k, s), v in zip(shapes.items(), split_views, strict=True):
-    npy_arrays[k] = v.reshape(s)
-
-  queues = {
-    'img_q': Tensor(np.zeros(img_buf_shape, dtype=np.uint8), device=device).contiguous().realize(),
-    'big_img_q': Tensor(np.zeros(img_buf_shape, dtype=np.uint8), device=device).contiguous().realize(),
-    'desire_q': Tensor(np.zeros((frame_skip * desire_shape[1], desire_shape[0], desire_shape[2]),
-                                dtype=np.float32), device=device).contiguous().realize(),
-    'packed_npy_inputs': Tensor(packed_npy_inputs, device='NPY').realize(),
-  }
-
-  if (features_buffer := input_shapes.get('features_buffer')) is not None:
-    feat_dim = math.prod(features_buffer[2:])
-    # Supercombo feeds prev_feat explicitly; split models append the current frame's
-    # feature inside the JIT, so they need one extra slot instead of a full stride.
-    feat_q_len = frame_skip * features_buffer[1] if is_supercombo else frame_skip * (features_buffer[1] - 1) + 1
-    queues['feat_q'] = Tensor(np.zeros((feat_q_len, features_buffer[0], feat_dim),
-                                       dtype=np.float32), device=device).contiguous().realize()
-
-  queues.update({k: Tensor(npy_arrays[k], device='NPY').realize() for k in WARP_INPUTS})
-  return queues, npy_arrays
-
-
-def make_split_input_queues(vision_input_shapes, policy_input_shapes, frame_skip, device=None):
-  return generate_queues_and_npy({**vision_input_shapes, **policy_input_shapes}, frame_skip, device, is_supercombo=False)
-
-
-def make_supercombo_input_queues(input_shapes, frame_skip, device=None):
-  return generate_queues_and_npy(input_shapes, frame_skip, device, is_supercombo=True)
 
 
 def make_input_queues(input_shapes, frame_skip, device, frame_copy_size):

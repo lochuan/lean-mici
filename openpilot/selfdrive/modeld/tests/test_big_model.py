@@ -335,7 +335,7 @@ def test_select_frame_rejects_zero_reply():
 
 
 def test_modeld_c3_wiring_source():
-  """modeld 主循环需 QCOM GPU 无法宿主构造，照 test_is_run_model 手法锁票面不变量
+  """modeld 主循环需 QCOM GPU 无法宿主构造，锁票面不变量
   （头 4 帧超时帧、全零兜底、modelV2.big、L_n 遥测）。接线一起改的话本测试会提醒更新。"""
   import inspect
   from openpilot.selfdrive.modeld import modeld

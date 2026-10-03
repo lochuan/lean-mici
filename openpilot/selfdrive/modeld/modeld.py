@@ -113,15 +113,12 @@ class ModelState:
     jits = load_oob(open_file_chunked(pkl_path))
 
     metadata = jits['metadata']
-    self.is_run_model = 'run_model' in jits
-    if not self.is_run_model:
+    if 'run_model' not in jits:
       raise ModelUnavailable(f"unsupported model pkl (no run_model): {pkl_path}")
 
     self.frame_copy_size = nv12_copy_size(*get_nv12_info(cam_w, cam_h)[:3])
     self.prev_desire = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
     self.parser = Parser()
-    self.full_frames: dict = {}
-    self._blob_cache: dict = {}
     self.LAT_SMOOTH_SECONDS = LAT_SMOOTH_SECONDS
     self.LONG_SMOOTH_SECONDS = LONG_SMOOTH_SECONDS
 
@@ -133,7 +130,6 @@ class ModelState:
 
   def _init_supercombo(self, jits, metadata, cam_w: int, cam_h: int) -> None:
     self.model_device = jits['input_devices']['model']
-    self.warp_device = self.model_device
     self.input_shapes = metadata['input_shapes']
     self.vision_input_names = [k for k in self.input_shapes if 'img' in k]
     self.output_slices = metadata['output_slices']
@@ -186,17 +182,14 @@ class ModelState:
     self.npy['tfm'][:,:] = transforms[self.road_key][:,:]
     self.npy['big_tfm'][:,:] = transforms[self.wide_key][:,:]
 
-    if self.is_run_model:
-      outs, = self.run_model(**{k: self.input_queues[k] for k in MODELD_INPUTS})
-      if after_enqueue is not None:
-        after_enqueue()
-      model_output = outs.numpy()[0]
-      outputs_dict = self.parser.parse_outputs(self.slice_outputs(model_output, self.output_slices))
-      self.npy['prev_feat'][:] = model_output[self.output_slices['hidden_state']]
-      if SEND_RAW_PRED:
-        outputs_dict['raw_pred'] = model_output.copy()
-      return outputs_dict
-
+    outs, = self.run_model(**{k: self.input_queues[k] for k in MODELD_INPUTS})
+    if after_enqueue is not None:
+      after_enqueue()
+    model_output = outs.numpy()[0]
+    outputs_dict = self.parser.parse_outputs(self.slice_outputs(model_output, self.output_slices))
+    self.npy['prev_feat'][:] = model_output[self.output_slices['hidden_state']]
+    if SEND_RAW_PRED:
+      outputs_dict['raw_pred'] = model_output.copy()
     return outputs_dict
 
   def warmup(self) -> None:
