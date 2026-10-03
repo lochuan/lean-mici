@@ -15,7 +15,6 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
-from openpilot.common.stream_gate import StreamStatus, stream_status
 
 from openpilot.selfdrive.car.car_events import CarEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
@@ -52,12 +51,6 @@ SafetyModel = car.CarParams.SafetyModel
 TurnDirection = custom.ModelDataV2SP.TurnDirection
 
 IGNORED_SAFETY_MODES = (SafetyModel.silent, SafetyModel.noOutput)
-
-
-def gap_insufficient_alert_active(gap_insufficient: bool, *, last_recv_s: float, now: float, valid: bool) -> bool:
-  """lateralManeuverPlan 新鲜(common.stream_gate)、valid 且 gapInsufficient 置位才提醒。last_recv_s 为 0 = 从未收到。"""
-  age_s = now - last_recv_s if last_recv_s > 0.0 else None
-  return gap_insufficient and stream_status("lateralManeuverPlan", age_s, valid=valid) is StreamStatus.FRESH
 
 
 class SelfdriveD(CruiseHelper):
@@ -321,11 +314,6 @@ class SelfdriveD(CruiseHelper):
     elif self.sm['modelV2'].meta.laneChangeState in (LaneChangeState.laneChangeStarting,
                                                     LaneChangeState.laneChangeFinishing):
       self.events.add(EventName.laneChange)
-
-    plan = self.sm['lateralManeuverPlan']
-    if gap_insufficient_alert_active(plan.gapInsufficient, last_recv_s=self.sm.recv_time['lateralManeuverPlan'],
-                                     now=time.monotonic(), valid=self.sm.valid['lateralManeuverPlan']):
-      self.events_sp.add(custom.OnroadEventSP.EventName.gapInsufficient)
 
     # Handle lane turn
     lane_turn_direction = self.sm['modelDataV2SP'].laneTurnDirection

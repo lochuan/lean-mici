@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import math
-import time
 from numbers import Number
 
 from openpilot.cereal import log
@@ -20,10 +19,6 @@ from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, S
 from openpilot.selfdrive.controls.lib.latcontrol_curvature import LatControlCurvature
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
-from openpilot.common.model_geometry import CAMERA_TO_FRONT_DEFAULT, read_camera_to_front
-from openpilot.common.stream_gate import StreamStatus, stream_status
-from openpilot.selfdrive.eagled import constants as eagled_constants
-from openpilot.selfdrive.eagled.lane_offset import lane_geometry, lane_offset_correction, lane_trusted
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
@@ -34,36 +29,6 @@ LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
 
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
-
-
-def plan_offset_or_none(offset: float, *, last_recv_s: float, now: float,
-                        valid: bool, enabled: bool) -> float | None:
-  """车道内偏移的组合门：收帧计时 → 观测流接收门 → enabled（fix/stream-gate）。
-
-  返回 offset 或 None（None = 任一门不通，调用方回退纯模型曲率）。
-  ``last_recv_s`` 是 lateralManeuverPlan 最近收帧时刻（monotonic s），
-  未收到过传 -inf；新鲜度定义见 ``common.stream_gate``。
-  """
-  age_s = now - last_recv_s if math.isfinite(last_recv_s) else None
-  if not enabled or stream_status("lateralManeuverPlan", age_s, valid=valid) is not StreamStatus.FRESH:
-    return None
-  return offset
-
-
-def fuse_curvature(model_v2, offset: float | None, camera_to_front: float) -> float:
-  """车道内偏移闭环：当拍模型曲率 + 按当拍车道线算出的修正（ADR 0001）。
-
-  不用 eagled 拍的曲率（p50 陈旧 188ms，2026-09-25 路测实测 0.9m 等效偏移）；
-  目标在此按当拍车道线再钳一次贴线上限。offset 为 None（门没过）或当拍
-  本车道线不可信 → 纯模型曲率。
-  """
-  model = model_v2.action.desiredCurvature
-  if offset is None:
-    return model
-  geo = lane_geometry(model_v2, camera_to_front)
-  if not lane_trusted(geo):
-    return model
-  return model + lane_offset_correction(geo, offset)
 
 
 class Controls(ControlsExt):
@@ -87,10 +52,6 @@ class Controls(ControlsExt):
     self.steer_limited_by_safety = False
     self.curvature = 0.0
     self.desired_curvature = 0.0
-    self.frame = 0
-    self.last_avoidance_recv_s = -math.inf
-    self.avoidance_enabled = False
-    self.camera_to_front = CAMERA_TO_FRONT_DEFAULT
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -178,21 +139,10 @@ class Controls(ControlsExt):
 
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage
-    if self.frame % 100 == 0:
-      self.avoidance_enabled = self.params.get_bool("AvoidanceEnabled")
-      eagled_constants.apply_param_overrides(self.params)
-      self.camera_to_front = read_camera_to_front(self.params)
-    if CC.latActive:
-      if self.sm.updated['lateralManeuverPlan']:
-        self.last_avoidance_recv_s = time.monotonic()
-      offset = plan_offset_or_none(self.sm['lateralManeuverPlan'].desiredLaneOffset,
-                                   last_recv_s=self.last_avoidance_recv_s, now=time.monotonic(),
-                                   valid=self.sm.valid['lateralManeuverPlan'],
-                                   enabled=self.avoidance_enabled)
-      new_desired_curvature = fuse_curvature(model_v2, offset, self.camera_to_front)
+    if self.sm.valid['lateralManeuverPlan']:
+      new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature if CC.latActive else self.curvature
     else:
-      new_desired_curvature = self.curvature
-    self.frame += 1
+      new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 

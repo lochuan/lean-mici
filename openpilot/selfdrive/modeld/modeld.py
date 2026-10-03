@@ -20,7 +20,6 @@ from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value
-from openpilot.selfdrive.modeld.lane_change_gate import run_lane_change_gate
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.big_model import (SourceBlender, BigReplyLatch, LatencyEstimator,
                                                   nanos_since_boot, select_frame)
@@ -258,7 +257,7 @@ def main(demo=False):
   # messaging
   pub_socks = ["modelV2", "drivingModelData", "cameraOdometry", "modelDataV2SP"]
   pm = PubMaster(pub_socks)
-  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "carControl", "lateralDelay", "eagleState"])
+  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "carControl", "lateralDelay"])
   # 04 号 C-3：bigModelReply 独立订阅——latch 读线程收帧即盖到达时刻，主循环不碰 sm 的 updated 语义
   sm_big = SubMaster(["bigModelReply"])
   latch = BigReplyLatch(sm_big)
@@ -424,7 +423,10 @@ def main(demo=False):
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
       mdv2sp_send = messaging.new_message('modelDataV2SP')
       left_edge, right_edge = RELC.update_and_fill(modelv2_send.modelV2, mdv2sp_send.modelDataV2SP, v_ego)
-      run_lane_change_gate(DH, sm, lane_change_prob, left_edge, right_edge, modelv2_send.modelV2, mdv2sp_send.modelDataV2SP)
+      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, left_edge, right_edge)
+      modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
+      modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
+      mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
       # 04 号 C-2：大模型输入元数据上行（bigmodeld 帧头 desire/action_t 的来源）。
       # action_t = chestnut 公式（lat 走 get_lat_delay，受 LagdToggle 控制；13 号/research/02 §4）；
       # desireClass = DH.desire 电平，pulse 边沿由 bigmodeld 生成（msgq 电平采样不怕迟到漏沿）
