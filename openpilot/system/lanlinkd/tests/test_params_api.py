@@ -26,7 +26,7 @@ class FakeStore:
     # 真 Params.all_keys() 返回的是 params_keys.h 的**静态注册表**，与有没有
     # 设过值无关（设备实测：IsMetric 在 all_keys 里，但 get() 是 None）。
     # 所以这里要把"已注册但未赋值"的 key 也算进来，否则测不出未设置态的行为。
-    return list({**{k: None for k in self.types}, **self.data}.keys())
+    return list({**dict.fromkeys(self.types), **self.data}.keys())
 
   def get(self, key, block=False, return_default=False):
     k = key.encode() if isinstance(key, str) else key

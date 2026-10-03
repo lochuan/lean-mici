@@ -97,40 +97,6 @@ def validate_connect_body(body: dict) -> tuple[int, str, dict]:
   return 0, "", {"ssid": ssid, "password": password, "hidden": hidden, "static": cfg}
 
 
-def _dbus_val(value):
-  """Unwrap a jeepney ('s', value) style tuple from GetSettings output."""
-  if isinstance(value, tuple) and len(value) == 2:
-    return value[1]
-  return value
-
-
-def _addr_entry_to_dict(entry):
-  """address-data 的元素：jeepney 形是 [(key, (sig, val)), ...] 的 list，dict 形直接用。"""
-  if isinstance(entry, dict):
-    return entry
-  if isinstance(entry, (list, tuple)):
-    return {k: _dbus_val(v) for k, v in entry}
-  return {}
-
-
-def _ipv4_snapshot(profile: dict) -> dict:
-  """从连接 profile 的 ipv4 段蒸馏出页面要展示的字段（值可能是 ('s', v) 形）。"""
-  ipv4 = profile.get("ipv4", {})
-  out = {"method": str(_dbus_val(ipv4.get("method", "auto"))), "addresses": [], "gateway": "", "dns": []}
-  addr_data = _dbus_val(ipv4.get("address-data"))
-  if isinstance(addr_data, (list, tuple)):
-    for a in addr_data:
-      d = _addr_entry_to_dict(a)
-      if "address" in d:
-        out["addresses"].append(str(d["address"]))
-  if ipv4.get("gateway"):
-    out["gateway"] = str(_dbus_val(ipv4["gateway"]))
-  dns_data = _dbus_val(ipv4.get("dns-data"))
-  if isinstance(dns_data, (list, tuple)):
-    out["dns"] = [str(_dbus_val(d)) for d in dns_data]
-  return out
-
-
 def snapshot(mgr, offroad: bool) -> dict:
   """GET /api/wifi 的响应体：只读 WifiManager 的缓存状态，不碰 DBus。
 

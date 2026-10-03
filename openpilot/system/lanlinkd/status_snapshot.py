@@ -157,7 +157,7 @@ def build_capabilities(params, device_type: str) -> dict:
   注：lean fork 的 opendbc 仅 Toyota，无 hyundai/subaru/tesla 目录，
   故 tesla_has_vehicle_bus/subaru_has_sng/hyundai_alpha_long_available 恒 False
   （settings_ui.json 中对应品牌 vehicle_settings 永不显示，行为一致）。"""
-  caps = {k: False for k in _CAP_KEYS}
+  caps = dict.fromkeys(_CAP_KEYS, False)
   caps.update({"protocol_version": 1, "brand": "", "steer_control_type": "",
                "device_type": device_type})
 
@@ -213,53 +213,3 @@ def build_capabilities(params, device_type: str) -> dict:
 
   assert set(caps) == set(_CAP_KEYS)
   return caps
-
-
-_DL_ACTIVE = ("downloading", "verifying")
-_DL_DONE = ("downloaded", "cached")
-
-
-def _enum_name(v) -> str:
-  try:
-    n = getattr(v, "name", None) or str(v)
-    return str(n).lower()
-  except Exception:
-    return "notdownloading"
-
-
-def build_models_download(mm) -> dict | None:
-  """modelManagerSP 消息 -> 下载状态卡数据（对齐车内 UI models.py 的进度算法：
-  progress = Σ artifact 进度 / 数量，downloaded/cached 计 100；任一 verifying → verifying）。
-  supercombo artifact 存在时以其 eta 为准。"""
-  sel = getattr(mm, "selectedBundle", None)
-  if sel is None:
-    return None
-  models = list(getattr(sel, "models", []) or [])
-  if not models:
-    return None
-  progress = 0.0
-  eta = 0
-  verifying = False
-  super_eta = None
-  for m in models:
-    dp = getattr(getattr(m, "artifact", None), "downloadProgress", None)
-    st = _enum_name(getattr(dp, "status", "notDownloading")) if dp is not None else "notdownloading"
-    pv = float(getattr(dp, "progress", 0.0) or 0.0) if dp is not None else 0.0
-    ev = int(getattr(dp, "eta", 0) or 0) if dp is not None else 0
-    if st in _DL_ACTIVE:
-      verifying = verifying or (st == "verifying")
-      progress += pv
-      eta = max(eta, ev)
-    elif st in _DL_DONE:
-      progress += 100.0
-    if _enum_name(getattr(m, "type", "supercombo")) == "supercombo" and dp is not None:
-      super_eta = ev if st in _DL_ACTIVE else (0 if st in _DL_DONE else super_eta)
-  return {
-    "ref": getattr(sel, "ref", "") or "",
-    "displayName": getattr(sel, "displayName", "") or "",
-    "internalName": getattr(sel, "internalName", "") or "",
-    "status": _enum_name(getattr(sel, "status", "notDownloading")),
-    "verifying": verifying,
-    "progress": round(progress / len(models), 2),
-    "eta": super_eta if super_eta is not None else eta,
-  }

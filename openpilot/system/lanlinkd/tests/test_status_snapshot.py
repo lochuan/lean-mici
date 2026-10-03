@@ -1,7 +1,7 @@
 from types import SimpleNamespace as NS
 
 from opendbc.car.structs import car
-from openpilot.cereal import messaging, custom
+from openpilot.cereal import custom
 
 from openpilot.system.lanlinkd.status_snapshot import build_capabilities, build_snapshot
 

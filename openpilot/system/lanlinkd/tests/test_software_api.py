@@ -1,5 +1,4 @@
 """software_api 单测：状态快照组装与动作 gating（stub params，不碰 DBus/进程）。"""
-import pytest
 
 from openpilot.system.lanlinkd import software_api
 
@@ -93,6 +92,3 @@ class TestSignal:
   def test_unknown_action(self):
     code, _ = software_api.signal(_full_params(), "reboot")
     assert code == 404
-
-  def test_version_sanitizer(self):
-    assert software_api.sanitize_report_version("2026.003!@#.000") == "2026.003.000"

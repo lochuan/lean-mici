@@ -7,10 +7,10 @@ from openpilot.cereal import messaging
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.system.lanlinkd.status_snapshot import (
-  build_capabilities, build_model_status, build_models_download, build_snapshot, timing_frame)
+  build_capabilities, build_model_status, build_snapshot, timing_frame)
 
-# carParams 移除（capabilities 不再依赖实时 CP）；modelManagerSP 新增（模型下载进度）
-SERVICES = ['deviceState', 'carState', 'pandaStates', 'gpsLocation', 'modelManagerSP', 'modelV2', 'modelDataV2SP']
+# carParams 移除（capabilities 不再依赖实时 CP）
+SERVICES = ['deviceState', 'carState', 'pandaStates', 'gpsLocation', 'modelV2', 'modelDataV2SP']
 MODEL_FRAMES = 50  # 最近 50 帧（20Hz ≈ 2.5s）的模型来源
 TIMING_FRAMES = 100  # 分段耗时/小模型原因窗口（≈5s）
 
@@ -32,7 +32,6 @@ class StatusCache:
     self._lock = threading.Lock()
     self._snapshot: dict = {"stale": True}
     self._capabilities: dict = {}
-    self._download: dict | None = None
     self._cap_inputs: tuple | None = None
     self._model_frames: deque[int] = deque(maxlen=MODEL_FRAMES)
     self._timing_frames: deque[tuple] = deque(maxlen=TIMING_FRAMES)
@@ -64,7 +63,6 @@ class StatusCache:
         self._timing_frames.append(timing_frame(sm['modelDataV2SP']))
       try:
         caps = self._capabilities_from_params()
-        download = build_models_download(sm["modelManagerSP"])
         snap = build_snapshot({name: sm[name] for name in SERVICES}, self._version_info, caps)
         snap["model"] = build_model_status(
           self._model_frames, bool(self._params.get_bool("BigmodelToggle")),
@@ -74,7 +72,6 @@ class StatusCache:
         continue
       with self._lock:
         self._snapshot = snap
-        self._download = download
 
   def snapshot(self) -> dict:
     with self._lock:
@@ -83,7 +80,3 @@ class StatusCache:
   def capabilities(self) -> dict:
     with self._lock:
       return dict(self._capabilities)
-
-  def download(self) -> dict | None:
-    with self._lock:
-      return dict(self._download) if self._download else None

@@ -101,7 +101,6 @@ def app(monkeypatch):
   monkeypatch.setattr(mod.StatusCache, "run", lambda self, ev: None)
   monkeypatch.setattr(mod.StatusCache, "snapshot", lambda self: {"stale": True})
   monkeypatch.setattr(mod.StatusCache, "capabilities", lambda self: {"brand": "toyota"})
-  monkeypatch.setattr(mod.StatusCache, "download", lambda self: None)
   # Sanic 要求 app name 唯一，否则跨测试复用同一实例
   a = mod.create_app(name=f"lanlinkd_test_{os.urandom(4).hex()}")
   a.ctx.fake_params = params

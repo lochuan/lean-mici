@@ -83,30 +83,3 @@ class TestValidateConnectBody:
   def test_short_psk(self):
     code, msg, _ = wifi_api.validate_connect_body({"ssid": "home", "password": "short"})
     assert code == 400
-
-
-class TestIpv4Snapshot:
-  def test_manual_profile(self):
-    profile = {
-      "ipv4": {
-        "method": ("s", "manual"),
-        "address-data": ("aa{sv}", [[("address", ("s", "192.168.1.50")), ("prefix", ("u", 24))]]),
-        "gateway": ("s", "192.168.1.1"),
-        "dns-data": ("as", ["1.1.1.1"]),
-      },
-    }
-    out = wifi_api._ipv4_snapshot(profile)
-    assert out["method"] == "manual"
-    assert out["addresses"] == ["192.168.1.50"]
-    assert out["gateway"] == "192.168.1.1"
-    assert out["dns"] == ["1.1.1.1"]
-
-  def test_auto_profile_defaults(self):
-    out = wifi_api._ipv4_snapshot({"ipv4": {"method": ("s", "auto")}})
-    assert out["method"] == "auto"
-    assert out["addresses"] == []
-
-  def test_empty_profile(self):
-    out = wifi_api._ipv4_snapshot({})
-    assert out["method"] == "auto"  # NM 未显式写 method 时 default 就是 auto
-

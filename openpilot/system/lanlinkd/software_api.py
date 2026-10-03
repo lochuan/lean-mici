@@ -9,12 +9,10 @@
     行车中 check 按钮也禁用）
 """
 
-import re
 import subprocess
 
 UPDATED_PROC = "openpilot.system.updated.updated"
 SIGNAL_CHECK = "-SIGUSR1"   # mici CheckUpdateButton.CHECK_FOR_UPDATE
-SIGNAL_INSTALL = "-SIGHUP"  # DOWNLOAD_UPDATE -> 触发 fetch/download
 
 _DO_REBOOT = "DoReboot"
 
@@ -87,8 +85,3 @@ def signal(params, action: str) -> tuple[int, dict | str]:
   return 200, {}
 
 _DO_REBOOT_KEY = "DoReboot"
-
-
-def sanitize_report_version(v: str) -> str:
-  """供 UI 展示徽标用的版本号规范化（容错 2026.003.000 之类的奇怪输入）。"""
-  return re.sub(r"[^0-9A-Za-z._-]", "", v)[:64]
