@@ -354,7 +354,6 @@ struct OnroadEventSP @0xda96579883444c35 {
     e2eChime @23;
     laneChangeRoadEdge @24;
     bigModelReady @25;
-    gapInsufficient @26;
   }
 }
 
@@ -469,12 +468,10 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   desireClass @4 :UInt8;         # DH.desire 电平（log.Desire 索引），bigmodeld 生成 pulse 边沿
   bigLatencyMs @5 :Float32;      # C-3：REPLY 到达 − timestamp_eof（ms），0 = 本帧没等到
   cameraToModelMs @6 :Float32;   # 帧出图（timestamp_eof）→ modeld 收帧（ms），ADR-0001 的 L_n，喂 L̂
-  # HUD：变道拦截原因由 desire_helper 在合并盲区/路沿/目标道不空的同一处发布。
-  # 每侧几何拦截不依赖打灯，优先级 blindspot > roadEdge > targetNotClear。
-  leftLaneChangeBlock @7 :LaneChangeBlock;
-  rightLaneChangeBlock @8 :LaneChangeBlock;
-  # 整车层面的请求保持原因，仅打灯请求期间有意义；无请求为 none。
-  laneChangeHoldReason @9 :LaneChangeHoldReason;
+  # 已删除（曾为 HUD 的变道拦截原因）：占位保序号，不能留空号，勿复用
+  retired7 @7 :Void;
+  retired8 @8 :Void;
+  retired9 @9 :Void;
   # 截止后才到的 REPLY：自上一帧发布以来的个数，及其中最近一个的往返（ms）；随后发布的一帧上报一次，
   # 0 = 没有迟到。warmup 头几帧不等 REPLY，不计。
   bigLateReplyMs @10 :Float32;
@@ -505,21 +502,6 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
     timeout @4;     # 截止前没到
     late @5;        # 判定时已在手但过了截止
     zeroOutput @6;  # 手机回了全零 outputs（解码跳帧/没推理）
-  }
-
-  enum LaneChangeBlock {
-    none @0;
-    blindspot @1;
-    roadEdge @2;
-    targetNotClear @3;
-  }
-
-  enum LaneChangeHoldReason {
-    none @0;
-    alcOff @1;
-    belowSpeed @2;
-    awaitingConfirm @3;
-    brake @4;
   }
 
   enum TurnDirection {

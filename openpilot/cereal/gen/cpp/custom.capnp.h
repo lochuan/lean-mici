@@ -208,7 +208,6 @@ enum class EventName_b8007ed8a646b5e6: uint16_t {
   E2E_CHIME,
   LANE_CHANGE_ROAD_EDGE,
   BIG_MODEL_READY,
-  GAP_INSUFFICIENT,
 };
 CAPNP_DECLARE_ENUM(EventName, b8007ed8a646b5e6);
 CAPNP_DECLARE_SCHEMA(80ae746ee2596b11);
@@ -254,23 +253,6 @@ enum class BigSource_a3cddd2d3a1a210c: uint16_t {
   ZERO_OUTPUT,
 };
 CAPNP_DECLARE_ENUM(BigSource, a3cddd2d3a1a210c);
-CAPNP_DECLARE_SCHEMA(d5ecfcc79e6f39d6);
-enum class LaneChangeBlock_d5ecfcc79e6f39d6: uint16_t {
-  NONE,
-  BLINDSPOT,
-  ROAD_EDGE,
-  TARGET_NOT_CLEAR,
-};
-CAPNP_DECLARE_ENUM(LaneChangeBlock, d5ecfcc79e6f39d6);
-CAPNP_DECLARE_SCHEMA(a298c9e9a40ba858);
-enum class LaneChangeHoldReason_a298c9e9a40ba858: uint16_t {
-  NONE,
-  ALC_OFF,
-  BELOW_SPEED,
-  AWAITING_CONFIRM,
-  BRAKE,
-};
-CAPNP_DECLARE_ENUM(LaneChangeHoldReason, a298c9e9a40ba858);
 CAPNP_DECLARE_SCHEMA(b73df234a23b0cc2);
 enum class TurnDirection_b73df234a23b0cc2: uint16_t {
   NONE,
@@ -867,15 +849,11 @@ struct ModelDataV2SP {
   struct BigStageTimes;
   typedef ::capnp::schemas::BigSource_a3cddd2d3a1a210c BigSource;
 
-  typedef ::capnp::schemas::LaneChangeBlock_d5ecfcc79e6f39d6 LaneChangeBlock;
-
-  typedef ::capnp::schemas::LaneChangeHoldReason_a298c9e9a40ba858 LaneChangeHoldReason;
-
   typedef ::capnp::schemas::TurnDirection_b73df234a23b0cc2 TurnDirection;
 
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 4, 2)
+    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 3, 2)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -4625,11 +4603,11 @@ public:
 
   inline float getCameraToModelMs() const;
 
-  inline  ::cereal::ModelDataV2SP::LaneChangeBlock getLeftLaneChangeBlock() const;
+  inline  ::capnp::Void getRetired7() const;
 
-  inline  ::cereal::ModelDataV2SP::LaneChangeBlock getRightLaneChangeBlock() const;
+  inline  ::capnp::Void getRetired8() const;
 
-  inline  ::cereal::ModelDataV2SP::LaneChangeHoldReason getLaneChangeHoldReason() const;
+  inline  ::capnp::Void getRetired9() const;
 
   inline float getBigLateReplyMs() const;
 
@@ -4696,14 +4674,14 @@ public:
   inline float getCameraToModelMs();
   inline void setCameraToModelMs(float value);
 
-  inline  ::cereal::ModelDataV2SP::LaneChangeBlock getLeftLaneChangeBlock();
-  inline void setLeftLaneChangeBlock( ::cereal::ModelDataV2SP::LaneChangeBlock value);
+  inline  ::capnp::Void getRetired7();
+  inline void setRetired7( ::capnp::Void value = ::capnp::VOID);
 
-  inline  ::cereal::ModelDataV2SP::LaneChangeBlock getRightLaneChangeBlock();
-  inline void setRightLaneChangeBlock( ::cereal::ModelDataV2SP::LaneChangeBlock value);
+  inline  ::capnp::Void getRetired8();
+  inline void setRetired8( ::capnp::Void value = ::capnp::VOID);
 
-  inline  ::cereal::ModelDataV2SP::LaneChangeHoldReason getLaneChangeHoldReason();
-  inline void setLaneChangeHoldReason( ::cereal::ModelDataV2SP::LaneChangeHoldReason value);
+  inline  ::capnp::Void getRetired9();
+  inline void setRetired9( ::capnp::Void value = ::capnp::VOID);
 
   inline float getBigLateReplyMs();
   inline void setBigLateReplyMs(float value);
@@ -9321,74 +9299,74 @@ inline void ModelDataV2SP::Builder::setCameraToModelMs(float value) {
       ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
 }
 
-inline  ::cereal::ModelDataV2SP::LaneChangeBlock ModelDataV2SP::Reader::getLeftLaneChangeBlock() const {
-  return _reader.getDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+inline  ::capnp::Void ModelDataV2SP::Reader::getRetired7() const {
+  return _reader.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
 }
 
-inline  ::cereal::ModelDataV2SP::LaneChangeBlock ModelDataV2SP::Builder::getLeftLaneChangeBlock() {
-  return _builder.getDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+inline  ::capnp::Void ModelDataV2SP::Builder::getRetired7() {
+  return _builder.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
 }
-inline void ModelDataV2SP::Builder::setLeftLaneChangeBlock( ::cereal::ModelDataV2SP::LaneChangeBlock value) {
-  _builder.setDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
-}
-
-inline  ::cereal::ModelDataV2SP::LaneChangeBlock ModelDataV2SP::Reader::getRightLaneChangeBlock() const {
-  return _reader.getDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+inline void ModelDataV2SP::Builder::setRetired7( ::capnp::Void value) {
+  _builder.setDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
 }
 
-inline  ::cereal::ModelDataV2SP::LaneChangeBlock ModelDataV2SP::Builder::getRightLaneChangeBlock() {
-  return _builder.getDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
-}
-inline void ModelDataV2SP::Builder::setRightLaneChangeBlock( ::cereal::ModelDataV2SP::LaneChangeBlock value) {
-  _builder.setDataField< ::cereal::ModelDataV2SP::LaneChangeBlock>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
+inline  ::capnp::Void ModelDataV2SP::Reader::getRetired8() const {
+  return _reader.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
 }
 
-inline  ::cereal::ModelDataV2SP::LaneChangeHoldReason ModelDataV2SP::Reader::getLaneChangeHoldReason() const {
-  return _reader.getDataField< ::cereal::ModelDataV2SP::LaneChangeHoldReason>(
-      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+inline  ::capnp::Void ModelDataV2SP::Builder::getRetired8() {
+  return _builder.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void ModelDataV2SP::Builder::setRetired8( ::capnp::Void value) {
+  _builder.setDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
 }
 
-inline  ::cereal::ModelDataV2SP::LaneChangeHoldReason ModelDataV2SP::Builder::getLaneChangeHoldReason() {
-  return _builder.getDataField< ::cereal::ModelDataV2SP::LaneChangeHoldReason>(
-      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+inline  ::capnp::Void ModelDataV2SP::Reader::getRetired9() const {
+  return _reader.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
 }
-inline void ModelDataV2SP::Builder::setLaneChangeHoldReason( ::cereal::ModelDataV2SP::LaneChangeHoldReason value) {
-  _builder.setDataField< ::cereal::ModelDataV2SP::LaneChangeHoldReason>(
-      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
+
+inline  ::capnp::Void ModelDataV2SP::Builder::getRetired9() {
+  return _builder.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void ModelDataV2SP::Builder::setRetired9( ::capnp::Void value) {
+  _builder.setDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
 }
 
 inline float ModelDataV2SP::Reader::getBigLateReplyMs() const {
   return _reader.getDataField<float>(
-      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
 }
 
 inline float ModelDataV2SP::Builder::getBigLateReplyMs() {
   return _builder.getDataField<float>(
-      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
 }
 inline void ModelDataV2SP::Builder::setBigLateReplyMs(float value) {
   _builder.setDataField<float>(
-      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint16_t ModelDataV2SP::Reader::getBigLateReplyCount() const {
   return _reader.getDataField< ::uint16_t>(
-      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
 }
 
 inline  ::uint16_t ModelDataV2SP::Builder::getBigLateReplyCount() {
   return _builder.getDataField< ::uint16_t>(
-      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
 }
 inline void ModelDataV2SP::Builder::setBigLateReplyCount( ::uint16_t value) {
   _builder.setDataField< ::uint16_t>(
-      ::capnp::bounded<9>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool ModelDataV2SP::Reader::hasBigStages() const {
@@ -9432,30 +9410,30 @@ inline ::capnp::Orphan< ::cereal::ModelDataV2SP::BigStageTimes> ModelDataV2SP::B
 
 inline  ::cereal::ModelDataV2SP::BigSource ModelDataV2SP::Reader::getBigSource() const {
   return _reader.getDataField< ::cereal::ModelDataV2SP::BigSource>(
-      ::capnp::bounded<12>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
 }
 
 inline  ::cereal::ModelDataV2SP::BigSource ModelDataV2SP::Builder::getBigSource() {
   return _builder.getDataField< ::cereal::ModelDataV2SP::BigSource>(
-      ::capnp::bounded<12>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
 }
 inline void ModelDataV2SP::Builder::setBigSource( ::cereal::ModelDataV2SP::BigSource value) {
   _builder.setDataField< ::cereal::ModelDataV2SP::BigSource>(
-      ::capnp::bounded<12>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS, value);
 }
 
 inline float ModelDataV2SP::Reader::getBigDeadlineMs() const {
   return _reader.getDataField<float>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
 }
 
 inline float ModelDataV2SP::Builder::getBigDeadlineMs() {
   return _builder.getDataField<float>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
 }
 inline void ModelDataV2SP::Builder::setBigDeadlineMs(float value) {
   _builder.setDataField<float>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
 }
 
 inline float ModelDataV2SP::BigStageTimes::Reader::getCaptureMs() const {
