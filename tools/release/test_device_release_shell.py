@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -38,6 +41,27 @@ class TestDeviceReleaseShellBoilerplate(unittest.TestCase):
   def test_stage_headers_use_run_stage(self):
     self.assertIn('run_stage "', self.src)
     self.assertGreaterEqual(self.src.count("run_stage \""), 5)
+
+
+class TestPklCacheHit(unittest.TestCase):
+  """driving pkl 编完即切块、原文件删掉：缓存判定必须认切块产物，否则每次发版白编 ~11 分钟。"""
+
+  def _hit(self, files: dict[str, str], fp="FP") -> bool:
+    fn = re.search(r"^pkl_cache_hit\(\) \{.*?^\}", DEVICE.read_text(), re.M | re.S).group(0)
+    with tempfile.TemporaryDirectory() as d:
+      for name, body in files.items():
+        Path(d, name).write_text(body)
+      return subprocess.run(["bash", "-c", f'{fn}\npkl_cache_hit "$0/m.pkl" "$1"', d, fp]).returncode == 0
+
+  def test_whole_pkl_hit(self):
+    self.assertTrue(self._hit({"m.pkl": "x", "m.pkl.inputs_fp": "FP"}))
+
+  def test_chunked_pkl_hit(self):
+    self.assertTrue(self._hit({"m.pkl.chunkmanifest": "3", "m.pkl.inputs_fp": "FP"}))
+
+  def test_miss_on_changed_fingerprint_or_no_artifact(self):
+    self.assertFalse(self._hit({"m.pkl": "x", "m.pkl.inputs_fp": "OLD"}))
+    self.assertFalse(self._hit({"m.pkl.inputs_fp": "FP"}))
 
 
 if __name__ == "__main__":

@@ -85,7 +85,8 @@ git_fetch_retry() {
 pkl_cache_hit() {
   # pkl_cache_hit <pkl> <输入指纹> —— 指纹未变则跳过重编（2026-09-25 议定）。
   # 嵌入 tinygrad JIT kernel 的 pkl 只随 pin/onnx/编译脚本/编译参数变。
-  [ -f "$1" ] && [ "$(cat "$1.inputs_fp" 2>/dev/null)" = "$2" ]
+  # 产物认整文件或切块 manifest：driving pkl 编完即切块、原文件删掉
+  { [ -f "$1" ] || [ -f "$1.chunkmanifest" ]; } && [ "$(cat "$1.inputs_fp" 2>/dev/null)" = "$2" ]
 }
 
 check_prereqs() {
@@ -191,9 +192,9 @@ rebuild_native() {
   (
     cd "$SRC"
     export PATH="/usr/local/venv/bin:$PATH"
-    # -j6：2026-10-01 供电确认没问题，4→6 加并行
+    # -j8：2026-10-03 供电确认没问题，6→8 吃满 8 核
     SKIP_CAPNP_REGEN=1 PYTHONPATH="$SRC:$SRC/openpilot" \
-      /usr/local/venv/bin/scons -j6 $ART_TARGETS
+      /usr/local/venv/bin/scons -j8 $ART_TARGETS
   ) || die "native 全量重建失败，拒绝发布"
   echo "[ok] native 全量重建完成 T=$SECONDS"
 }
