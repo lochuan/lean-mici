@@ -9,7 +9,7 @@ import os
 import pytest
 
 from openpilot.common.params import UnknownKeyName
-from openpilot.system.lanlinkd import hud, lanlinkd as mod
+from openpilot.system.lanlinkd import lanlinkd as mod
 
 
 class FakeParams:
@@ -102,8 +102,6 @@ def app(monkeypatch):
   monkeypatch.setattr(mod.StatusCache, "snapshot", lambda self: {"stale": True})
   monkeypatch.setattr(mod.StatusCache, "capabilities", lambda self: {"brand": "toyota"})
   monkeypatch.setattr(mod.StatusCache, "download", lambda self: None)
-  # 在线标定摘要线程同理：真实 run 会起 SubMaster
-  monkeypatch.setattr(mod.CalibrationController, "run_online", lambda self, ev: None)
   # Sanic 要求 app name 唯一，否则跨测试复用同一实例
   a = mod.create_app(name=f"lanlinkd_test_{os.urandom(4).hex()}")
   a.ctx.fake_params = params
@@ -173,12 +171,6 @@ class TestParamsRoutes:
     assert r.status == 404
 
 
-class TestLegacyAvoidanceRoute:
-  def test_legacy_avoidance_endpoint_is_gone(self, app):
-    _, r = app.test_client.get("/api/avoidance")
-    assert r.status == 404
-
-
 class TestWifiCachedRead:
   """Wi-Fi 状态读 WifiManager 缓存，不再每请求阻塞初始化（spec 54）。"""
 
@@ -240,73 +232,6 @@ class TestBootstrapRoute:
     # 与 /api/status 的 paramsVersion 同源同形：App 靠它判断是否重新 bootstrap
     _, st = app.test_client.get("/api/status")
     assert r.json["paramsVersion"] == st.json["paramsVersion"]
-
-
-class TestCalibrationRoutes:
-  def test_start_conflict_returns_409(self, app):
-    import threading
-    alive = threading.Event()
-    ctl = app.ctx.state.calibration
-    ctl._thread = threading.Thread(target=alive.wait, daemon=True)
-    ctl._thread.start()
-    try:
-      _, r = app.test_client.post("/api/calibration/start")
-      assert r.status == 409
-    finally:
-      alive.set()
-      ctl._thread.join()
-      ctl._thread = None
-
-  def test_status_shape(self, app):
-    app.ctx.state.calibration.last_result = None
-    _, r = app.test_client.get("/api/calibration/status")
-    assert r.status == 200
-    assert r.json["running"] is False
-    assert r.json["last_result"] is None
-
-  def test_status_carries_online_calibration_summary(self, app):
-    # 在线标定摘要并入安装偏移精修状态（App 精修卡 2 请求 → 1），原有字段不变
-    cal = {"calStatus": "calibrated", "calPerc": 100, "calValid": True, "visionGated": False}
-    app.ctx.state.calibration.online_summary = lambda: dict(cal)
-    _, r = app.test_client.get("/api/calibration/status")
-    assert r.json["running"] is False
-    assert r.json["online"] == cal
-    _, s = app.test_client.get("/api/status")
-    assert "calStatus" not in s.json and "online" not in s.json
-
-  def test_stop_returns_fit_result(self, app):
-    from openpilot.selfdrive.eagled.calibrate import CalibPair
-    ctl = app.ctx.state.calibration
-    ctl._pairs = [CalibPair(d_radar=d, y_radar=-1.0, d_vision=d + 0.3, y_vision=-1.0, v_ego=20.0)
-                  for d in (5, 10, 15, 20, 25, 30, 35, 40)]
-    ctl._thread = None
-    _, r = app.test_client.post("/api/calibration/stop")
-    assert r.status == 200
-    assert r.json["running"] is False
-    assert r.json["last_result"]["n_pairs"] == 8
-    assert r.json["last_result"]["camera_to_front"]["savable"] is False  # 8 对 < 30
-
-  def _stop_with_offset(self, app, n: int, e: float):
-    from openpilot.selfdrive.eagled.calibrate import CalibPair
-    ctl = app.ctx.state.calibration
-    ctl._pairs = [CalibPair(d_radar=5.0 + i, y_radar=-1.0, d_vision=5.0 + i + e, y_vision=-1.0, v_ego=20.0)
-                  for i in range(n)]
-    ctl._thread = None
-    app.test_client.post("/api/calibration/stop")
-
-  def test_apply_saves_to_params(self, app):
-    self._stop_with_offset(app, 40, 0.2)
-    _, r = app.test_client.post("/api/calibration/apply")
-    assert r.status == 200
-    assert r.json["last_result"]["saved"] is True
-    assert app.ctx.fake_params._v["CameraToFront"] == pytest.approx(1.7)
-
-  def test_apply_rejected_returns_409_without_saving(self, app):
-    self._stop_with_offset(app, 10, 0.2)
-    _, r = app.test_client.post("/api/calibration/apply")
-    assert r.status == 409
-    assert "10" in r.json["error"]
-    assert "CameraToFront" not in app.ctx.fake_params._v
 
 
 class TestStaticRoutes:
@@ -380,13 +305,3 @@ class TestServerConfig:
     mod.main()
     assert len(started) == 1, "启动时没有拉起 mDNS 发布"
     assert stopped == ["PROC"], "退出时没有结束 mDNS 发布"
-
-
-class TestHudStream:
-  def test_streams_events_as_sse(self, app):
-    state = app.ctx.state
-    state.hud_events = lambda: iter([hud.sse("frame", {"stale": True}), hud.sse("heartbeat", {})])
-    _, r = app.test_client.get("/api/hud/stream")
-    assert r.status == 200
-    assert r.headers["content-type"].startswith("text/event-stream")
-    assert r.text == 'event: frame\ndata: {"stale":true}\n\nevent: heartbeat\ndata: {}\n\n'

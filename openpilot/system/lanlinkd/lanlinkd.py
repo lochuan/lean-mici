@@ -27,7 +27,6 @@ from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.hardware.hw import Paths
 from openpilot.sunnypilot.system.bluetooth import BluetoothClient
 from openpilot.system.lanlinkd import bluetooth_api
-from openpilot.system.lanlinkd import hud
 from openpilot.system.lanlinkd import logs as logs_mod
 from openpilot.system.lanlinkd import mdns
 from openpilot.system.lanlinkd import params_api
@@ -35,7 +34,6 @@ from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd import wifi_api
 from openpilot.system.lanlinkd import software_api
-from openpilot.system.lanlinkd.calibration import CalibrationController
 from openpilot.system.lanlinkd.statusd import StatusCache
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -52,13 +50,11 @@ class LanlinkApp:
     self.params = Params()
     self.version_info = {k: params_api.to_str(self.params.get(k)) or "" for k in VERSION_PARAMS}
     self.cache = StatusCache(self.version_info, device_type="pc" if PC else HARDWARE.get_device_type(), params=self.params)
-    self.calibration = CalibrationController(self.params)
     self.exit_event = threading.Event()
     self._settings_ui: dict | None = None
     self._wifi_manager = None
     self._wifi_lock = threading.Lock()
     threading.Thread(target=self.cache.run, args=(self.exit_event,), name="lanlink_status", daemon=True).start()
-    threading.Thread(target=self.calibration.run_online, args=(self.exit_event,), name="lanlink_calibration_online", daemon=True).start()
 
   # ---- helpers ----
   @staticmethod
@@ -220,37 +216,6 @@ class LanlinkApp:
     snap["paramsVersion"] = params_api.to_str(self.params.get(params_api.VERSION_KEY))
     return json_response(snap)
 
-  # ---- HUD：SSE 帧流，订阅随客户端连接建立、断开即退订 ----
-  def hud_events(self):
-    return hud.HudStream(self.params).events()
-
-  async def hud_stream(self, request: Request) -> None:
-    response = await request.respond(content_type="text/event-stream", headers={"cache-control": "no-cache"})
-    events = self.hud_events()
-    while (event := await asyncio.to_thread(next, events, None)) is not None:
-      await response.send(event)
-
-  # ---- calibration session (collect/fit/save the CameraToFront mount offset) ----
-
-  async def calibration_start(self, request: Request) -> HTTPResponse:
-    if not self.calibration.start():
-      return _json_error(409, "calibration session already running")
-    return json_response(self.calibration.status())
-
-  async def calibration_stop(self, request: Request) -> HTTPResponse:
-    return json_response(self.calibration.stop())
-
-  async def calibration_apply(self, request: Request) -> HTTPResponse:
-    ok, payload = self.calibration.apply()
-    if not ok:
-      return _json_error(409, payload)
-    return json_response(payload)
-
-  async def calibration_status(self, request: Request) -> HTTPResponse:
-    body = self.calibration.status()
-    body["online"] = self.calibration.online_summary()
-    return json_response(body)
-
   async def bootstrap(self, request: Request) -> HTTPResponse:
     # 进「车机」页一次拿全三份数据：各字段与原接口同形（App 一次请求渲染首屏）
     return json_response({
@@ -317,11 +282,6 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/software/<action:str>", "software_action"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/bootstrap", "bootstrap"),
-  ("GET", "/api/hud/stream", "hud_stream"),
-  ("POST", "/api/calibration/start", "calibration_start"),
-  ("POST", "/api/calibration/stop", "calibration_stop"),
-  ("POST", "/api/calibration/apply", "calibration_apply"),
-  ("GET", "/api/calibration/status", "calibration_status"),
   ("GET", "/api/capabilities", "capabilities"),
   ("GET", "/api/settings_ui", "settings_ui"),
   ("GET", "/api/logs", "logs_list"),

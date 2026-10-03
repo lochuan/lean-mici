@@ -8,23 +8,11 @@
 
 export type Widget = "toggle" | "option" | "multiple_button" | "button" | "info";
 
-/** 在线标定摘要（/api/calibration/status 的 online，来自 extrinsicsCalibration）。
- *  eagled 在相机未标定时整体关掉视觉路径——地平面投影的 dRel 对 pitch
- *  的敏感度在 40m 处是 0.5° → 41%，未标定的 pitch 会直接生成虚假偏移。
- *  这份状态独立于 eagled 是否运行：lanlinkd 自己订阅标定消息。 */
-export interface CalState {
-  calStatus: string; // "uncalibrated" | "calibrated" | "recalibrating" | "unknown"
-  calPerc: number; // 0-100
-  calValid: boolean; // valid && calStatus=="calibrated" && rpyCalib 长度为 3
-  visionGated: boolean; // = !calValid，前端据此解释 nVision=0
-}
-
 export interface Rule {
   type:
     | "param"
     | "param_compare"
     | "capability"
-    | "calibrated" // 在线标定完成（extrinsicsCalibration）；数据来自 store.cal
     | "offroad_only"
     | "not_engaged"
     | "any"
@@ -181,64 +169,6 @@ export interface StatusSnapshot {
   device?: DeviceStatus;
   model?: ModelStatus;
   capabilities?: Capabilities;
-}
-
-/** /api/calibration/status：在线标定会话状态（CalibrationController）。
- *  last_result 是 fit_calibrated_offsets 的输出 + camera_to_front（建议值与
- *  保存防呆结论）+ saved；insufficient = 配对数低于保存下限 30。
- *  POST /api/calibration/apply 一键把建议值写进 Params CameraToFront，
- *  防呆拒绝时返回 409（票 #7）。
- *
- *  pitch/yaw 已不再由这里拟合：投影改用 openpilot 的 extrinsicsCalibration
- *  实时 rpy，CAMERA_PITCH/CAMERA_YAW 常数不再被读取，手工拟合它们只会给出
- *  不起作用的数字。剩下 CAMERA_TO_FRONT（纵向安装偏移）是在线标定不提供、
- *  因而仍需手工标的唯一量。
- *
- *  通过判据改为按距离分档：单一全局 0.30m 阈值在 10m 以外物理不可达（地平面
- *  投影的 dRel 对 pitch 的敏感度使 40m 处需要 0.013° 精度，而车辆俯仰变化
- *  就有 1° 量级）。25m 以上只考核方位角残差 —— 那是单目真正测得准的量。 */
-export interface CalibrationBand {
-  n: number;
-  p95_m?: number;
-  bearing_p95_deg?: number;
-  pass: boolean | null; // null = 该档无数据，不能算通过
-}
-
-export interface CalibrationResult {
-  n_pairs: number;
-  v_ego_min?: number;
-  v_ego_max?: number;
-  d_front_m: number;
-  lateral_bias_m: number;
-  forward_p95_before_m?: number;
-  forward_p95_after_m?: number;
-  lateral_p95_m?: number;
-  residual_p95_before_m: number;
-  residual_p95_after_m: number; // = max(forward_after, lateral)
-  bands?: Record<string, CalibrationBand>;
-  warnings?: string[];
-  pass: boolean;
-  insufficient?: boolean;
-  camera_to_front: CameraToFrontProposal;
-  saved: boolean; // 已经 POST /api/calibration/apply 写进 Params
-}
-
-/** propose_camera_to_front 的保存防呆结论：proposed = 当前值 + d_front（增量）；
- *  配对 < 30 或越出 0.5–2.5m 时 savable=false，reject_reason 给出原因。 */
-export interface CameraToFrontProposal {
-  current_m: number;
-  proposed_m: number;
-  savable: boolean;
-  reject_reason: string | null;
-}
-
-export interface CalibrationStatus {
-  running: boolean;
-  n_pairs: number;
-  elapsed_s: number;
-  last_error?: string | null;
-  last_result?: CalibrationResult | null;
-  online?: CalState; // 在线标定摘要（extrinsicsCalibration），与精修会话无关
 }
 
 /** 车辆指纹状态（GET /api/vehicle，见 vehicle_api.vehicle_state） */
