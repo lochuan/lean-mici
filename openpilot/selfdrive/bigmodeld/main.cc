@@ -76,10 +76,12 @@ constexpr int kSchedFifoPrio = 53;
 // writer/reply 线程：core 3 有 pandad（FIFO 54，常驻 ~36%）抢占 → 编码完到 send 等 1～8 ms；
 // core 2 只有 RT 5 的 locationd 系（台架 A/B/A：RTT p90 62.4→56.2 ms）。EINVAL（离线核）容忍
 const std::vector<int> kCpuAffinity = {2};
-// capture 线程做 warp（查找表 ~0.3 ms/路，标定变化那帧建表 ~1 ms）：两路分到两颗大核并行，FIFO 50 低于 CTRL_LOW 51 不抢 control/planner
-// （core 4 = controlsd/card，5 = plannerd/radard，6 = camerad，7 = modeld）
+// capture 线程做 warp（查找表 ~0.3 ms/路，标定变化那帧建表 ~1 ms）：两路分到两颗 isolcpus 大核并行。
+// core 4/5 上有 FIFO 53 的 controlsd/card/ui，capture 排队使取帧 p50 比 camerad 出帧晚 ~7 ms；
+// core 7 原属 modeld（lean 下闲置），core 6 与 camerad（TS，~5%）同核，FIFO 50 的短突发可抢占它
+// （台架 road→7、wide→6：RTT p50 63.7→57.9 ms，取帧 29.5→23.0 ms）
 constexpr int kCaptureFifoPrio = 50;
-const std::vector<int> kCaptureCore[2] = {{5}, {4}};
+const std::vector<int> kCaptureCore[2] = {{7}, {6}};
 
 enum StreamId { kRoad = 0, kWide = 1 };
 
