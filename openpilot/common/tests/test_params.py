@@ -37,9 +37,9 @@ class TestParams(OpenpilotTestCase):
 
   def test_params_two_things(self):
     self.params.put("DongleId", "bob", block=True)
-    self.params.put("AthenadPid", 123, block=True)
+    self.params.put("BootCount", 123, block=True)
     assert self.params.get("DongleId") == "bob"
-    assert self.params.get("AthenadPid") == 123
+    assert self.params.get("BootCount") == 123
 
   def test_params_get_block(self):
     def _delayed_writer():
@@ -128,8 +128,8 @@ class TestParams(OpenpilotTestCase):
 
   def test_params_get_type(self):
     # json
-    self.params.put("ApiCache_FirehoseStats", {"a": 0}, block=True)
-    assert self.params.get("ApiCache_FirehoseStats") == {"a": 0}
+    self.params.put("CarPlatformBundle", {"a": 0}, block=True)
+    assert self.params.get("CarPlatformBundle") == {"a": 0}
 
     # int
     self.params.put("BootCount", 1441, block=True)

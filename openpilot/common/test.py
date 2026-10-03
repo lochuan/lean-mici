@@ -2,7 +2,6 @@ import contextlib
 import gc
 import inspect
 import os
-import subprocess
 import unittest
 from unittest import mock
 
@@ -106,7 +105,6 @@ class OpenpilotTestCase(unittest.TestCase):
     if self.COMMA_HARDWARE_TEST:
       HARDWARE.initialize_hardware()
       HARDWARE.set_power_save(False)
-      subprocess.run(["pkill", "-9", "-f", "athena"], check=False)
 
     setup_method = getattr(self, "openpilot_setup_method", None)
     if setup_method is not None:

@@ -36,7 +36,6 @@ class Proc:
 PROCS = [
   Proc(['camerad'], 1.65, atol=0.4, msgs=['narrowRoadCameraState', 'wideRoadCameraState']),
   Proc(['modeld'], 1.5, atol=0.2, msgs=['modelV2']),
-  Proc(['dmonitoringmodeld'], 0.65, atol=0.35, msgs=['driverStateV2']),
   Proc(['encoderd'], 0.23, msgs=[]),
 ]
 

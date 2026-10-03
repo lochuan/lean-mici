@@ -499,14 +499,6 @@ CONFIGS = [
     should_recv_callback=MessageBasedRcvCallback("cameraOdometry", True),
   ),
   ProcessConfig(
-    proc_name="dmonitoringd",
-    pubs=["driverStateV2", "extrinsicsCalibration", "carState", "modelV2", "selfdriveState", "carControl"],
-    subs=["driverMonitoringState"],
-    ignore=["logMonoTime"],
-    should_recv_callback=MessageBasedRcvCallback("driverStateV2"),
-    tolerance=NUMPY_TOLERANCE,
-  ),
-  ProcessConfig(
     proc_name="locationd",
     pubs=[
       "cameraOdometry", "accelerometer", "gyroscope", "extrinsicsCalibration", "carState"
@@ -564,18 +556,6 @@ CONFIGS = [
     vision_pubs=["narrowRoadCameraState", "wideRoadCameraState"],
     ignore_alive_pubs=["wideRoadCameraState"],
     init_callback=get_car_params_callback,
-  ),
-  ProcessConfig(
-    proc_name="dmonitoringmodeld",
-    pubs=["extrinsicsCalibration", "cabinCameraState"],
-    subs=["driverStateV2"],
-    ignore=["logMonoTime", "driverStateV2.modelExecutionTime", "driverStateV2.gpuExecutionTime"],
-    should_recv_callback=MessageBasedRcvCallback("cabinCameraState"),
-    tolerance=NUMPY_TOLERANCE,
-    processing_time=0.020,
-    main_pub=vipc_get_endpoint_name("camerad", meta_from_camera_state("cabinCameraState").stream),
-    vision_pubs=["cabinCameraState"],
-    ignore_alive_pubs=["cabinCameraState"],
   ),
 ]
 

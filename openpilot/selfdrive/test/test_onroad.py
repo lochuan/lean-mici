@@ -383,9 +383,6 @@ class TestOnroad(OpenpilotTestCase):
       # since multiple processes use the GPU and can preempt each other,
       # these numbers are not fully self-contained.
       ("modelV2", 0.06, 0.040),
-
-      # can miss cycles here and there, just important the avg frequency is 20Hz
-      ("driverStateV2", 0.3, 0.05),
     ]
     for (s, instant_max, avg_max) in cfgs:
       ts = [getattr(m, s).modelExecutionTime for m in self.msgs[s] if (m.logMonoTime*1e-9 - self.ts[s]['t'][0]) > LOG_OFFSET]

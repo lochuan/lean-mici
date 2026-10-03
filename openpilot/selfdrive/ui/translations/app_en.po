@@ -145,10 +145,6 @@ msgstr "Change Language"
 msgid "Changing this setting will restart sunnypilot if the car is powered on."
 msgstr ""
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
-msgid "Choose your sponsorship tier and confirm your support"
-msgstr ""
-
 #: openpilot/selfdrive/ui/widgets/pairing_dialog.py
 msgid "Click \"add new device\" and scan the QR code on the right"
 msgstr "Click \"add new device\" and scan the QR code on the right"
@@ -232,10 +228,6 @@ msgstr "ETH"
 #: openpilot/selfdrive/ui/widgets/exp_mode_button.py
 msgid "EXPERIMENTAL MODE ON"
 msgstr "EXPERIMENTAL MODE ON"
-
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
-msgid "Early Access: Become a sunnypilot Sponsor"
-msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
@@ -326,10 +318,6 @@ msgstr "Firehose"
 msgid "Firehose Mode"
 msgstr "Firehose Mode"
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
-msgid "Follow the prompts to complete the pairing process"
-msgstr ""
-
 #: system/ui/widgets/network.py
 msgid "Forget"
 msgstr "Forget"
@@ -362,17 +350,9 @@ msgstr "INSTALL"
 msgid "IP Address"
 msgstr "IP Address"
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
-msgid "If sponsorship status was not updated, please contact a moderator on the community forum at https://community.sunnypilot.ai"
-msgstr ""
-
 #: openpilot/selfdrive/ui/layouts/settings/software.py
 msgid "Install Update"
 msgstr "Install Update"
-
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
-msgid "Join our Community Forum at https://community.sunnypilot.ai and reach out to a moderator if you have issues"
-msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "Joystick Debug Mode"
@@ -460,10 +440,6 @@ msgstr "Pair Device"
 msgid "Pair device"
 msgstr "Pair device"
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
-msgid "Pair your GitHub account"
-msgstr ""
-
 #: openpilot/selfdrive/ui/widgets/pairing_dialog.py
 msgid "Pair your device to your comma account"
 msgstr "Pair your device to your comma account"
@@ -508,10 +484,6 @@ msgstr "RESET"
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "REVIEW"
 msgstr "REVIEW"
-
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
-msgid "Re-enter the \"sunnylink\" panel to verify sponsorship status"
-msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Reboot"
@@ -580,14 +552,6 @@ msgstr "SELECT"
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "SSH Keys"
 msgstr "SSH Keys"
-
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
-msgid "Scan the QR code to login to your GitHub account"
-msgstr ""
-
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
-msgid "Scan the QR code to visit sunnyhaibin's GitHub Sponsors page"
-msgstr ""
 
 #: system/ui/widgets/network.py
 msgid "Scanning Wi-Fi networks..."

@@ -35,7 +35,6 @@ GITHUB = GithubUtils(API_TOKEN, DATA_TOKEN)
 EXEC_TIMINGS = [
   # model, instant max, average max, chestnut average max
   ("modelV2", 0.05, 0.03, 0.05),
-  ("driverStateV2", 0.05, 0.018, 0.018),
 ]
 
 def get_log_fn(test_route, ref="master"):
@@ -72,18 +71,10 @@ def generate_report(proposed, master, tmp, commit):
                      (lambda x: get_idx_if_non_empty(x.meta.desireState, 4), "desireState.laneChangeRight"),
                      (lambda x: get_idx_if_non_empty(x.meta.disengagePredictions.gasPressProbs, 1), "gasPressProbs")
                     ], "modelV2")
-  DriverStateV2_Plots = zl([
-                     (lambda x: get_idx_if_non_empty(x.wheelOnRightProb), "wheelOnRightProb"),
-                     (lambda x: get_idx_if_non_empty(x.leftDriverData.faceProb), "leftDriverData.faceProb"),
-                     (lambda x: get_idx_if_non_empty(x.leftDriverData.faceOrientation, 0), "leftDriverData.faceOrientation0"),
-                     (lambda x: get_idx_if_non_empty(x.leftDriverData.leftBlinkProb), "leftDriverData.leftBlinkProb"),
-                     (lambda x: get_idx_if_non_empty(x.leftDriverData.phoneProb), "leftDriverData.phoneProb"),
-                     (lambda x: get_idx_if_non_empty(x.rightDriverData.faceProb), "rightDriverData.faceProb"),
-                    ], "driverStateV2")
 
   return [plot(map(v[0], get_event(proposed, event)), \
                map(v[0], get_event(master, event)), f"{v[1]}_{commit[:7]}", tmp) \
-               for v,event in ([*ModelV2_Plots] + [*DriverStateV2_Plots])]
+               for v,event in ModelV2_Plots]
 
 def create_table(title, files, link, open_table=False):
   if not files:
@@ -149,26 +140,20 @@ def model_replay(lr, frs):
   camera_states = {"narrowRoadCameraState", "wideRoadCameraState"}
   modeld_logs = trim_logs(lr, START_FRAME, END_FRAME, camera_states,
                           {"narrowRoadEncodeIdx", "wideRoadEncodeIdx", "carParams", "carState", "carControl", "can"})
-  dmodeld_logs = trim_logs(lr, START_FRAME, END_FRAME, {"cabinCameraState"}, {"cabinEncodeIdx", "carParams", "can"})
 
   if not SEND_EXTRA_INPUTS:
     modeld_logs = [msg for msg in modeld_logs if msg.which() != 'extrinsicsCalibration']
-    dmodeld_logs = [msg for msg in dmodeld_logs if msg.which() != 'extrinsicsCalibration']
 
   # initial setup
   for s in ('extrinsicsCalibration', 'deviceState'):
     msg = next(msg for msg in lr if msg.which() == s).as_builder()
     msg.logMonoTime = lr[0].logMonoTime
     modeld_logs.insert(1, msg.as_reader())
-    dmodeld_logs.insert(1, msg.as_reader())
 
   modeld = get_process_config("modeld")
-  dmonitoringmodeld = get_process_config("dmonitoringmodeld")
 
   modeld_msgs = replay_process(modeld, modeld_logs, frs)
-  dmonitoringmodeld_msgs = replay_process(dmonitoringmodeld, dmodeld_logs, frs)
-
-  msgs = modeld_msgs + dmonitoringmodeld_msgs
+  msgs = modeld_msgs
   chestnut = any(m.modelV2.big for m in modeld_msgs if m.which() == "modelV2")
 
   header = ['model', 'max instant', 'max instant allowed', 'average', 'max average allowed', 'test result']
@@ -245,8 +230,6 @@ if __name__ == "__main__":
       cmp_log = []
       model_start_index = next(i for i, m in enumerate(all_logs) if m.which() in ("modelV2", "drivingModelData", "cameraOdometry"))
       cmp_log += all_logs[model_start_index+START_FRAME*3:model_start_index + END_FRAME*3]
-      dmon_start_index = next(i for i, m in enumerate(all_logs) if m.which() == "driverStateV2")
-      cmp_log += all_logs[dmon_start_index+START_FRAME:dmon_start_index + END_FRAME]
 
       ignore = [
         'logMonoTime',
@@ -254,8 +237,6 @@ if __name__ == "__main__":
         'drivingModelData.modelExecutionTime',
         'modelV2.frameDropPerc',
         'modelV2.modelExecutionTime',
-        'driverStateV2.modelExecutionTime',
-        'driverStateV2.gpuExecutionTime'
       ]
       if PC:
         # TODO We ignore whole bunch so we can compare important stuff

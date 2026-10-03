@@ -16,7 +16,7 @@ from openpilot.common.hardware import HARDWARE
 os.environ['FAKEUPLOAD'] = "1"
 
 MAX_STARTUP_TIME = 3
-BLACKLIST_PROCS = ['manage_athenad', 'pandad']
+BLACKLIST_PROCS = ['pandad']
 
 
 class TestManager(OpenpilotTestCase):

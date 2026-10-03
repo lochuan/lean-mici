@@ -299,13 +299,10 @@ void process_peripheral_state(Panda *panda, PubMaster *pm, bool no_fan_control, 
   static int ir_pwr = 0;
   static int prev_ir_pwr = 999;
   static uint32_t prev_frame_id = UINT32_MAX;
-  static bool driver_view = false;
   static bool not_car = false;
   static bool not_car_checked = false;
 
-  // TODO: can we merge these?
   static FirstOrderFilter integ_lines_filter(0, 30.0, 0.05);
-  static FirstOrderFilter integ_lines_filter_driver_view(0, 5.0, 0.05);
 
   {
     sm.update(0);
@@ -325,12 +322,10 @@ void process_peripheral_state(Panda *panda, PubMaster *pm, bool no_fan_control, 
       // reset the filter when camerad restarts
       if (event.getCabinCameraState().getFrameId() < prev_frame_id) {
         integ_lines_filter.reset(0);
-        integ_lines_filter_driver_view.reset(0);
-        driver_view = params.getBool("IsDriverViewEnabled");
       }
       prev_frame_id = event.getCabinCameraState().getFrameId();
 
-      cur_integ_lines = (driver_view ? integ_lines_filter_driver_view : integ_lines_filter).update(cur_integ_lines);
+      cur_integ_lines = integ_lines_filter.update(cur_integ_lines);
       last_cabin_camera_t = event.getLogMonoTime();
 
       if (cur_integ_lines <= CUTOFF_IL) {

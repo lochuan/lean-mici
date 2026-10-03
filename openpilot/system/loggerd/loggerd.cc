@@ -210,11 +210,6 @@ void handle_preserve_segment(LoggerdState *s) {
     LOGE("setxattr %s failed for %s: %s", PRESERVE_ATTR_NAME, s->logger.segmentPath().c_str(), strerror(errno));
   }
 
-  // mark route for uploading
-  Params params;
-  std::string routes = params.get("AthenadRecentlyViewedRoutes");
-  params.put("AthenadRecentlyViewedRoutes", routes + "," + s->logger.routeName());
-
   prev_segment = s->logger.segment();
 }
 

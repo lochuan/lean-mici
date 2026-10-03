@@ -294,7 +294,6 @@ def hardware_thread(end_event, hw_queue) -> None:
     startup_conditions["not_uninstalling"] = not params.get_bool("DoUninstall")
     # with 2% left, we killall, otherwise the phone will take a long time to boot
     startup_conditions["free_space"] = msg.deviceState.freeSpacePercent > 2
-    startup_conditions["not_driver_view"] = not params.get_bool("IsDriverViewEnabled")
 
     # must be at an engageable thermal band to go onroad
     startup_conditions["device_temp_engageable"] = thermal_status < ThermalStatus.overheated
