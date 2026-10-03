@@ -155,16 +155,6 @@ export interface ModelStatus {
   bigEnabled?: boolean;
   linkState?: string; // BigmodelLinkState：connecting/connected/blip/restart/lost
   frames?: number[];
-  bigLatencyAvgMs?: number | null; // REPLY 往返（按时 + 迟到）
-  bigLatencyMaxMs?: number | null;
-  replyOnTime?: number; // 最近 N 帧 REPLY 截止前到达
-  replyLate?: number; // 截止后才到（随后一帧上报，个数）
-  replyMissing?: number; // 其余：没回（近似）
-  cameraToModelAvgMs?: number | null; // 帧出图 → modeld 收帧
-  execAvgMs?: number | null; // 模型执行耗时
-  execMaxMs?: number | null;
-  frameDropPerc?: number | null;
-  serverMs?: { recv: number; prep: number; htp: number; total: number } | null;
 }
 
 export interface StatusSnapshot {

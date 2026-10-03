@@ -86,32 +86,9 @@ def build_snapshot(services: dict, version_info: dict, capabilities: dict) -> di
   }
 
 
-def build_model_status(frames, big_enabled: bool, link_state: str, server_telemetry_us) -> dict:
-  """最近 N 帧 (big, bigLatencyMs, cameraToModelMs, execMs, dropPerc, bigLateReplyMs, bigLateReplyCount) -> 模型来源卡片数据。
-  bigLatencyMs = 按时 REPLY 往返、bigLateReplyMs = 该帧上报的迟到中最近一个的往返（都是 0 = 无），往返统计合并两者 >0 的；
-  迟到在随后一帧上报、可跨窗口边界，没回 = 帧数 − 按时 − 迟到（截到 0，近似）。server_telemetry_us = REPLY 的 recv/prep/htp/total µs。"""
-  frames = list(frames)
-  on_time = [f[1] for f in frames if f[1] > 0]
-  late = [f[5] for f in frames if f[5] > 0]
-  late_count = sum(f[6] for f in frames)
-  lat = on_time + late
-  avg = lambda xs: round(sum(xs) / len(xs), 2) if xs else None  # noqa: E731
-  tel = list(server_telemetry_us or [])
-  return {
-    "bigEnabled": big_enabled,
-    "linkState": link_state,
-    "frames": [f[0] for f in frames],
-    "bigLatencyAvgMs": avg(lat),
-    "bigLatencyMaxMs": round(max(lat), 2) if lat else None,
-    "replyOnTime": len(on_time),
-    "replyLate": late_count,
-    "replyMissing": max(len(frames) - len(on_time) - late_count, 0),
-    "cameraToModelAvgMs": avg([f[2] for f in frames]),
-    "execAvgMs": avg([f[3] for f in frames]),
-    "execMaxMs": round(max((f[3] for f in frames), default=0.0), 2) if frames else None,
-    "frameDropPerc": round(frames[-1][4], 2) if frames else None,
-    "serverMs": dict(zip(("recv", "prep", "htp", "total"), (round(v / 1000, 2) for v in tel), strict=False)) if len(tel) == 4 else None,
-  }
+def build_model_status(frames, big_enabled: bool, link_state: str) -> dict:
+  """最近 N 帧 modelV2.big（1 = 大模型出的帧）-> 模型来源卡片：只回答大模型在不在工作。"""
+  return {"bigEnabled": big_enabled, "linkState": link_state, "frames": list(frames)}
 
 
 _CAP_KEYS = (

@@ -6,7 +6,6 @@
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "@/lib/api";
-import { replyTimelinessText } from "@/lib/modelStatus";
 import type { DeviceStatus, ModelStatus } from "@/lib/schema";
 import Badge from "./ui/Badge.vue";
 
@@ -88,21 +87,9 @@ const LINK_TEXT: Record<string, string> = {
   lost: "已断开",
 };
 
-const modelFields = computed(() => {
-  const m = model.value;
-  const s = m?.serverMs;
-  const avgMax = (a?: number | null, b?: number | null) =>
-    a == null ? "—" : `${a.toFixed(1)} / ${b == null ? "—" : b.toFixed(1)} ms`;
-  return [
-    { label: "链路状态", value: LINK_TEXT[m?.linkState ?? ""] ?? (m?.linkState || "—") },
-    { label: "大模型往返 均/峰", value: avgMax(m?.bigLatencyAvgMs, m?.bigLatencyMaxMs) },
-    { label: "REPLY 按时", value: replyTimelinessText(m) },
-    { label: "相机→模型 均值", value: fmt(m?.cameraToModelAvgMs, "ms", 1) },
-    { label: "模型执行 均/峰", value: avgMax(m?.execAvgMs, m?.execMaxMs) },
-    { label: "丢帧率", value: fmt(m?.frameDropPerc, "%", 1) },
-    { label: "服务端 接收/预处理", value: s ? `${s.recv.toFixed(1)} / ${s.prep.toFixed(1)} ms` : "—" },
-    { label: "服务端 推理/总计", value: s ? `${s.htp.toFixed(1)} / ${s.total.toFixed(1)} ms` : "—" },
-  ];
+const linkText = computed(() => {
+  const s = model.value?.linkState ?? "";
+  return LINK_TEXT[s] ?? (s || "—");
 });
 
 /** 单核负载条的颜色：>85% 提示满载 */
@@ -157,6 +144,7 @@ function coreBarClass(load: number): string {
         <Badge :kind="model?.bigEnabled ? 'accent' : 'muted'">
           {{ model?.bigEnabled ? "远程大模型已开启" : "远程大模型未开启" }}
         </Badge>
+        <span v-if="model?.bigEnabled" class="text-[12px] text-sl-text-3">链路：{{ linkText }}</span>
       </div>
       <div v-if="modelFrames.length" class="mt-3">
         <div class="flex items-center gap-0.5">
@@ -171,12 +159,6 @@ function coreBarClass(load: number): string {
           最近 {{ modelFrames.length }} 帧：
           <span class="mr-0.5 inline-block size-2 rounded-sm bg-sl-accent align-baseline" />大模型 {{ bigCount }} ·
           <span class="mr-0.5 inline-block size-2 rounded-sm bg-sl-info align-baseline" />小模型 {{ modelFrames.length - bigCount }}（左旧右新）
-        </div>
-      </div>
-      <div class="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-sl-border pt-3 sm:grid-cols-4">
-        <div v-for="f in modelFields" :key="f.label" class="min-w-0">
-          <div class="text-[10px] font-semibold uppercase tracking-wider text-sl-text-3">{{ f.label }}</div>
-          <div class="sl-tabular mt-0.5 truncate text-[13px] text-sl-text-1">{{ f.value }}</div>
         </div>
       </div>
       <div v-if="!modelFrames.length" class="mt-3 text-[13px] text-sl-text-3">暂无模型帧（未行驶或 modeld 未运行）</div>
