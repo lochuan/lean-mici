@@ -116,11 +116,17 @@ class BigReplyLatch:
     self._cv = threading.Condition()
     self._last: _Reply | None = None
     self._last_seen = 0.0
+    self._gave_up_t_eof = 0   # 最近一帧没用上 REPLY 的 tEof；tEof ≤ 它的 REPLY 一到就是迟到
+    self._late_count = 0
+    self._late_ms = 0.
     threading.Thread(target=self._run, daemon=True).start()
 
   def _on_reply(self, t_eof: int, outputs: np.ndarray, arrival_ns: int) -> None:
     eof_to_reply_ms = (arrival_ns - t_eof) / 1e6
     with self._cv:
+      if t_eof <= self._gave_up_t_eof:
+        self._late_count += 1
+        self._late_ms = eof_to_reply_ms
       self._last = _Reply(t_eof, outputs, eof_to_reply_ms, arrival_ns)
       self._last_seen = time.monotonic()
       self._cv.notify_all()
@@ -146,12 +152,25 @@ class BigReplyLatch:
       while True:
         r = self._last
         if r is not None and r.t_eof == t_eof:
+          if r.arrival_ns <= deadline_ns:
+            return r.outputs, r.eof_to_reply_ms
           # 票面「按截止时刻择优」：迟到 REPLY（往返超预算）已在手也不用，落小模型兜底
-          return (r.outputs, r.eof_to_reply_ms) if r.arrival_ns <= deadline_ns else (None, 0.)
+          self._gave_up_t_eof = t_eof
+          self._late_count += 1
+          self._late_ms = r.eof_to_reply_ms
+          return None, 0.
         now_ns = nanos_since_boot()
         if now_ns >= deadline_ns:
+          self._gave_up_t_eof = t_eof
           return None, 0.
         self._cv.wait((deadline_ns - now_ns) / 1e9)
+
+  def take_late_replies(self) -> tuple[int, float]:
+    """取走自上次 take 起截止后才到的 REPLY：(个数, 最近一个的往返 ms)，每个只计一次；(0, 0.) = 没有迟到。"""
+    with self._cv:
+      late = (self._late_count, self._late_ms)
+      self._late_count, self._late_ms = 0, 0.
+      return late
 
 
 class FrameSelection(NamedTuple):

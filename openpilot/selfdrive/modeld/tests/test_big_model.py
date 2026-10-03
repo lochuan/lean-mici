@@ -47,6 +47,9 @@ def test_model_data_v2sp_meta_schema():
   assert sp.desireClass == 3
   assert sp.bigLatencyMs == 33.5
   assert sp.cameraToModelMs == 22.5
+  sp.bigLateReplyMs = 91.5
+  sp.bigLateReplyCount = 2
+  assert sp.bigLateReplyMs == 91.5 and sp.bigLateReplyCount == 2
 
 
 def test_big_output_slices_cover_abi():
@@ -168,6 +171,35 @@ def test_big_reply_latch():
   assert not latch.link_alive()                       # 没回音 → 门关
 
 
+def test_big_reply_latch_counts_late_replies():
+  # 截止后才到的 REPLY：take 取走（自上次 take 起的迟到个数, 最近一个的往返 ms），按时的不算
+  latch = BigReplyLatch(_FakeSM())
+  raw = np.ones(2066, dtype=np.float32)
+  t_eof = nanos_since_boot() - 200_000_000
+
+  latch._on_reply(t_eof, raw, t_eof + 25_000_000)
+  latch.wait_for(t_eof, t_eof + 70_000_000)
+  assert latch.take_late_replies() == (0, 0.)         # 按时到达不算迟到
+
+  gave_up = t_eof + 1_000_000
+  assert latch.wait_for(gave_up, nanos_since_boot())[0] is None   # 截止时还没到 → 放弃
+  latch._on_reply(gave_up, raw, gave_up + 90_000_000)              # 放弃后才到
+  assert latch.take_late_replies() == (1, 90.)
+  assert latch.take_late_replies() == (0, 0.)         # 只报一次
+
+  in_hand = t_eof + 2_000_000
+  latch._on_reply(in_hand, raw, in_hand + 75_000_000)
+  assert latch.wait_for(in_hand, in_hand + 70_000_000)[0] is None  # 已在手但过了截止
+  gave_up2 = t_eof + 3_000_000
+  assert latch.wait_for(gave_up2, nanos_since_boot())[0] is None
+  latch._on_reply(gave_up2, raw, gave_up2 + 95_000_000)
+  assert latch.take_late_replies() == (2, 95.)        # 两次 take 之间迟到两个：都计数，往返报最近一个
+
+  early = t_eof + 4_000_000
+  latch._on_reply(early, raw, early + 20_000_000)     # 还没轮到决策的帧先到 → 不是迟到
+  assert latch.take_late_replies() == (0, 0.)
+
+
 class _FakeReplySelector:
   def __init__(self, *, alive, result):
     self.alive = alive
@@ -243,6 +275,8 @@ def test_modeld_c3_wiring_source():
   assert "select_frame(" in src, "逐帧 REPLY 策略必须通过宿主可测的决策 seam"
   assert "modelV2.big = big_out is not None" in src
   assert "bigLatencyMs" in src, "REPLY 往返每帧进遥测（04 号票）"
+  assert "bigLateReplyCount, mdv2sp_send.modelDataV2SP.bigLateReplyMs = latch.take_late_replies()" in src, \
+    "迟到 REPLY 个数与往返也进遥测"
   # ADR-0001：L̂ 只喂 modeld 收帧时刻 − timestamp_eof（cameraToModelMs），截止用它；
   # REPLY 往返不得进 L̂，每帧 L_n 进遥测
   assert "camera_to_model_ms = (nanos_since_boot() - meta_main.timestamp_eof) / 1e6" in src

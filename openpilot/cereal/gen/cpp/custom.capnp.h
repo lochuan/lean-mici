@@ -4601,6 +4601,10 @@ public:
 
   inline  ::cereal::ModelDataV2SP::LaneChangeHoldReason getLaneChangeHoldReason() const;
 
+  inline float getBigLateReplyMs() const;
+
+  inline  ::uint16_t getBigLateReplyCount() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -4663,6 +4667,12 @@ public:
 
   inline  ::cereal::ModelDataV2SP::LaneChangeHoldReason getLaneChangeHoldReason();
   inline void setLaneChangeHoldReason( ::cereal::ModelDataV2SP::LaneChangeHoldReason value);
+
+  inline float getBigLateReplyMs();
+  inline void setBigLateReplyMs(float value);
+
+  inline  ::uint16_t getBigLateReplyCount();
+  inline void setBigLateReplyCount( ::uint16_t value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -9173,6 +9183,34 @@ inline  ::cereal::ModelDataV2SP::LaneChangeHoldReason ModelDataV2SP::Builder::ge
 inline void ModelDataV2SP::Builder::setLaneChangeHoldReason( ::cereal::ModelDataV2SP::LaneChangeHoldReason value) {
   _builder.setDataField< ::cereal::ModelDataV2SP::LaneChangeHoldReason>(
       ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
+}
+
+inline float ModelDataV2SP::Reader::getBigLateReplyMs() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline float ModelDataV2SP::Builder::getBigLateReplyMs() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void ModelDataV2SP::Builder::setBigLateReplyMs(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint16_t ModelDataV2SP::Reader::getBigLateReplyCount() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t ModelDataV2SP::Builder::getBigLateReplyCount() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+}
+inline void ModelDataV2SP::Builder::setBigLateReplyCount( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint32_t BigModelReply::Reader::getFrameIdx() const {

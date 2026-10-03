@@ -74,9 +74,10 @@ class TestStatusdRun:
 
       def __getitem__(self, name):
         big = self.calls > 55
+        late = 40 < self.calls <= 50
         return {
           "modelV2": NS(big=big, modelExecutionTime=0.01, frameDropPerc=1.5),
-          "modelDataV2SP": NS(bigLatencyMs=40. if big else 0., cameraToModelMs=20.),
+          "modelDataV2SP": NS(bigLatencyMs=40. if big else 0., bigLateReplyMs=90. if late else 0., bigLateReplyCount=2 if late else 0, cameraToModelMs=20.),
           "bigModelReply": NS(telemetry=[1000, 2000, 3000, 6000]),
         }.get(name, NS())
 
@@ -91,5 +92,8 @@ class TestStatusdRun:
     assert model["bigEnabled"] is True and model["linkState"] == "connected"
     assert len(model["frames"]) == 50
     assert model["frames"][-5:] == [1] * 5 and model["frames"][-6] == 0
-    assert model["bigLatencyAvgMs"] == 40. and model["execAvgMs"] == 10. and model["frameDropPerc"] == 1.5
+    assert model["execAvgMs"] == 10. and model["frameDropPerc"] == 1.5
+    # 最近 50 帧：按时 5、迟到 10 帧各 2 个、其余没回；往返均/峰把迟到的也算进去 (5×40 + 10×90) / 15
+    assert (model["replyOnTime"], model["replyLate"], model["replyMissing"]) == (5, 20, 25)
+    assert model["bigLatencyAvgMs"] == 73.33 and model["bigLatencyMaxMs"] == 90.
     assert model["serverMs"] == {"recv": 1., "prep": 2., "htp": 3., "total": 6.}

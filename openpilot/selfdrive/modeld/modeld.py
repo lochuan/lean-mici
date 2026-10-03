@@ -431,6 +431,7 @@ def main(demo=False):
       mdv2sp_send.modelDataV2SP.bigActionT = [big_lat_action_t, big_long_action_t]
       mdv2sp_send.modelDataV2SP.desireClass = DH.desire
       mdv2sp_send.modelDataV2SP.bigLatencyMs = eof_to_reply_ms
+      mdv2sp_send.modelDataV2SP.bigLateReplyCount, mdv2sp_send.modelDataV2SP.bigLateReplyMs = latch.take_late_replies()
       mdv2sp_send.modelDataV2SP.cameraToModelMs = camera_to_model_ms
 
       fill_driving_model_data(drivingdata_send, modelv2_send)

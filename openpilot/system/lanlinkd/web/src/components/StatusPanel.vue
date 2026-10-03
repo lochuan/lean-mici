@@ -6,6 +6,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "@/lib/api";
+import { replyTimelinessText } from "@/lib/modelStatus";
 import type { DeviceStatus, ModelStatus } from "@/lib/schema";
 import Badge from "./ui/Badge.vue";
 
@@ -95,6 +96,7 @@ const modelFields = computed(() => {
   return [
     { label: "链路状态", value: LINK_TEXT[m?.linkState ?? ""] ?? (m?.linkState || "—") },
     { label: "大模型往返 均/峰", value: avgMax(m?.bigLatencyAvgMs, m?.bigLatencyMaxMs) },
+    { label: "REPLY 按时", value: replyTimelinessText(m) },
     { label: "相机→模型 均值", value: fmt(m?.cameraToModelAvgMs, "ms", 1) },
     { label: "模型执行 均/峰", value: avgMax(m?.execAvgMs, m?.execMaxMs) },
     { label: "丢帧率", value: fmt(m?.frameDropPerc, "%", 1) },

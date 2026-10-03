@@ -475,6 +475,10 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   rightLaneChangeBlock @8 :LaneChangeBlock;
   # 整车层面的请求保持原因，仅打灯请求期间有意义；无请求为 none。
   laneChangeHoldReason @9 :LaneChangeHoldReason;
+  # 截止后才到的 REPLY：自上一帧发布以来的个数，及其中最近一个的往返（ms）；随后发布的一帧上报一次，
+  # 0 = 没有迟到。warmup 头几帧不等 REPLY，不计。
+  bigLateReplyMs @10 :Float32;
+  bigLateReplyCount @11 :UInt16;
 
   enum LaneChangeBlock {
     none @0;

@@ -62,7 +62,8 @@ class StatusCache:
         m = sm['modelV2']
         sp = sm['modelDataV2SP']
         self._model_frames.append((int(bool(m.big)), float(sp.bigLatencyMs), float(sp.cameraToModelMs),
-                                   float(m.modelExecutionTime) * 1000, float(m.frameDropPerc)))
+                                   float(m.modelExecutionTime) * 1000, float(m.frameDropPerc), float(sp.bigLateReplyMs),
+                                   int(sp.bigLateReplyCount)))
       if sm.updated['bigModelReply']:
         self._server_telemetry = list(sm['bigModelReply'].telemetry)
       try:
