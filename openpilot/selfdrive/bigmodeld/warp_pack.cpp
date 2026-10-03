@@ -77,24 +77,6 @@ bool valid_src(const Nv12View& src, const float* mat) {
 
 }  // namespace
 
-bool warpPackNv12(const Nv12View& src, const float mat[9], uint8_t* out) {
-  if (!valid_src(src, mat) || !out) return false;
-
-  const int w = src.width, h = src.height;
-  float mu[9];
-  uv_mat(mat, mu);
-
-  // Y00, Y10, Y01, Y11（与 frames_to_tensor 的平面顺序一致）
-  warp_plane(src.y, w, h, src.stride_y, 1, 0, mat, 0, 0, 2, 2, kPackW, kPackH, kPackW, 1, out + 0 * kPackW * kPackH);
-  warp_plane(src.y, w, h, src.stride_y, 1, 0, mat, 0, 1, 2, 2, kPackW, kPackH, kPackW, 1, out + 1 * kPackW * kPackH);
-  warp_plane(src.y, w, h, src.stride_y, 1, 0, mat, 1, 0, 2, 2, kPackW, kPackH, kPackW, 1, out + 2 * kPackW * kPackH);
-  warp_plane(src.y, w, h, src.stride_y, 1, 0, mat, 1, 1, 2, 2, kPackW, kPackH, kPackW, 1, out + 3 * kPackW * kPackH);
-  // U, V（半分辨率网格，UV 交织平面取偶/奇字节）
-  warp_plane(src.uv, w / 2, h / 2, src.stride_uv, 2, 0, mu, 0, 0, 1, 1, kPackW, kPackH, kPackW, 1, out + 4 * kPackW * kPackH);
-  warp_plane(src.uv, w / 2, h / 2, src.stride_uv, 2, 1, mu, 0, 0, 1, 1, kPackW, kPackH, kPackW, 1, out + 5 * kPackW * kPackH);
-  return true;
-}
-
 bool warpNv12(const Nv12View& src, const float mat[9], const Nv12Out& dst) {
   if (!valid_src(src, mat) || !dst.y || !dst.uv) return false;
   if (dst.stride_y < kModelW || dst.stride_uv < kModelW) return false;

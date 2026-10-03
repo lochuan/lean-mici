@@ -13,14 +13,15 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 | 文件 | 职责 |
 |---|---|
 | `frame_codec.{h,cpp}` | BGM1 线协议 FRAME/REPLY/ERR 编解码（与 chipmunk `android/app/src/main/cpp/` 原样同源，勿改） |
-| `warp_pack.{h,cpp}` | NEON warp：`warpNv12` 相机帧 → 512×256 NV12（协议 v2 在 C4 上 warp；与 chipmunk 原样同源，勿改） |
+| `warp_pack.{h,cpp}` | NEON warp：`warpNv12` 相机帧 → 512×256 NV12（协议 v2 在 C4 上 warp，手机只做 pack） |
 | `frame_meta.{h,cpp}` | 帧头元数据：warp 矩阵 C++ 复刻 + MetaProvider（标定喂 rpyCalib，modeld 喂 desire/action_t） |
 | `frame_scheduler.{h,cpp}` | I 帧/丢帧状态机（纯逻辑事件输出，调用方执行 request_keyframe） |
 | `meta_cache.h` | 编码输出查表（FIFO/路）：miss 分类（stale 静默 / gap=断档上报），查不到不弹队 |
 | `uplink_sender.{h,cpp}` | 发送/重连状态机（可注入 socket/时钟） |
 | `frame_stages.h` | C4 本机分段计时（取帧/warp/配对/硬编/发送/等 REPLY，按 frame_idx 环形槽），随 bigModelReply 上报 |
 | `main.cc` | 进程组装：取帧/配对、V4L 编码、发送、REPLY 接收、标定线程 |
-| `gen_warp_golden.py` | warp golden 表生成（宿主测试对照 Python ≤1e-5） |
+| `gen_warp_golden.py` | 矩阵 golden 表生成（宿主测试对照 Python ≤1e-5） |
+| `make_warp_golden.py` · `fixtures/` | warp 对 tinygrad `make_frame_prepare` 的 golden 生成与数据（`test_warp_golden.cc` 对照） |
 | `server_locator.{h,cpp}` | 服务端定位（06 号）：手动 IP / 限 wlan0 子网的 mDNS 发现（avahi-browse） |
 | `test_bigmodeld.cc` | 宿主单测（无设备依赖，Mac/Linux 直接编译） |
 
@@ -115,6 +116,8 @@ clang++ -std=c++17 -O1 test_bigmodeld.cc frame_codec.cpp frame_meta.cpp \
 # warp 查找表（需 arm64/NEON，Apple Silicon 可直接编）
 clang++ -std=c++17 -O1 test_warp_lut.cc warp_pack.cpp frame_meta.cpp frame_codec.cpp \
         -o /tmp/test_warp_lut && /tmp/test_warp_lut
+# warpNv12 + pack 对 tinygrad golden（m3 逐位，m1/m2 仅零星 tie 翻转）
+clang++ -std=c++17 -O1 test_warp_golden.cc warp_pack.cpp -o /tmp/test_warp_golden && /tmp/test_warp_golden
 ```
 
 覆盖：状态机全转移（GOP20/wide 晚 10 帧、发送侧显式丢弃恢复、配对失败/时间槽空洞不恢复、时间槽编号）、
