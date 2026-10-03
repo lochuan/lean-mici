@@ -149,7 +149,7 @@ class BigReplyLatch:
       arrival_ns = nanos_since_boot()
       s = r.stages
       stages = {k: getattr(s, k) for k in BIGMODELD_STAGE_FIELDS}
-      self._on_reply(r.tEof, np.array(r.outputs[:BIG_OUTPUT_LEN], dtype=np.float32), arrival_ns, stages, r.receivedNs)
+      self._on_reply(r.tEof, np.array(r.outputs, dtype=np.float32)[:BIG_OUTPUT_LEN], arrival_ns, stages, r.receivedNs)
 
   def link_alive(self) -> bool:
     return time.monotonic() - self._last_seen < self.alive_s

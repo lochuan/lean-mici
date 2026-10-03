@@ -137,6 +137,39 @@ class _FakeSM:
     raise KeyError(k)
 
 
+class _OneReplySM:
+  """读线程接缝：给一条真 capnp reader（同 SubMaster 返回的类型），之后不再有消息。"""
+  def __init__(self, reply):
+    self._reply, self.updated = reply, {'bigModelReply': False}
+  def update(self, timeout=0.0):
+    self.updated = {'bigModelReply': self._reply is not None}
+    self._cur, self._reply = self._reply, None
+    if not self.updated['bigModelReply']:
+      time.sleep(min(timeout, 0.05))
+  def __getitem__(self, k):
+    return self._cur
+
+
+def test_big_reply_latch_reader_thread_consumes_real_capnp_reply():
+  # 回归：pycapnp 列表 reader 不支持切片，r.outputs[:N] 让读线程第一条 REPLY 就崩，
+  # 之后 link_alive 恒 False，每帧 linkDown 落小模型
+  import openpilot.cereal.messaging as messaging
+  msg = messaging.new_message('bigModelReply')
+  msg.bigModelReply.tEof = 123
+  msg.bigModelReply.outputs = [0.5] * 2070
+  msg.bigModelReply.stages.phoneTotalMs = 24.
+  msg.bigModelReply.receivedNs = 1
+  reader = messaging.log_from_bytes(msg.to_bytes()).bigModelReply
+  latch = BigReplyLatch(_OneReplySM(reader))
+  deadline = time.monotonic() + 2.
+  while not latch.link_alive() and time.monotonic() < deadline:
+    time.sleep(0.01)
+  assert latch.link_alive()
+  got, _, source = latch.wait_for(123, nanos_since_boot() + 1_000_000_000)
+  assert source == 'big' and got.shape == (2066,) and got[0] == 0.5
+  assert latch.take_stages()['phoneTotalMs'] == 24.
+
+
 def test_big_reply_latch():
   # C-3：读线程收帧即盖真实到达时刻（不被 model.run() 遮挡）、按 tEof 匹配、
   # 已到且按时零等待取、超时/迟到兜底、迟到 Condition 唤醒、链路存活门。
