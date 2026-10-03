@@ -141,6 +141,7 @@ class ModelState:
 
   def get_action_from_model(self, model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                             lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
+    lat_smooth_seconds = self.LAT_SMOOTH_SECONDS
     if 'action' not in model_output:
       plan = model_output['plan'][0]
       desired_accel = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
@@ -151,10 +152,11 @@ class ModelState:
     else:
       desired_accel = model_output['action'][0,1]
       desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
+      lat_smooth_seconds = BIG_LAT_SMOOTH_SECONDS  # 与 big_lat_action_t 里假设的平滑同值
     stop = should_stop(v_ego, desired_accel)
     desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, self.LONG_SMOOTH_SECONDS)
     if v_ego > MIN_LAT_CONTROL_SPEED:
-      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, self.LAT_SMOOTH_SECONDS)
+      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, lat_smooth_seconds)
     else:
       desired_curvature = prev_action.desiredCurvature
 

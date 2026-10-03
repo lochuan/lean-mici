@@ -357,3 +357,18 @@ def test_modeld_c3_wiring_source():
   assert "bigSource = frame.source" in src and "bigDeadlineMs = frame.deadline_ms" in src
   assert "latch.take_stages()" in src, "C4 分段随最新 REPLY 进 rlog"
   assert "latch.latency" not in src
+
+
+def test_big_action_curvature_smoothed_with_big_lat_smooth_seconds():
+  # action_t 里已按 BIG_LAT_SMOOTH_SECONDS 假设了平滑，输出侧必须真的平滑，否则低速 action/v² 的噪声原样进扭矩控制器
+  from openpilot.cereal import log
+  from openpilot.selfdrive.controls.lib.drive_helpers import smooth_value
+  from openpilot.selfdrive.modeld.modeld import ModelState, BIG_LAT_SMOOTH_SECONDS
+  state = SimpleNamespace(LAT_SMOOTH_SECONDS=0., LONG_SMOOTH_SECONDS=0.3)
+  prev = log.ModelDataV2.Action(desiredCurvature=0.0, desiredAcceleration=0.)
+  out = {'action': np.array([[0.1, 0.]])}
+  v_ego = 5.
+  action = ModelState.get_action_from_model(state, out, prev, 0.3, 0.3, v_ego)
+  raw = 0.1 / v_ego ** 2
+  assert action.desiredCurvature == np.float32(smooth_value(raw, 0.0, BIG_LAT_SMOOTH_SECONDS))
+  assert 0 < action.desiredCurvature < raw
