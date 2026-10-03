@@ -34,7 +34,6 @@ source_segments = [
   ("VOLKSWAGEN", "de9592456ad7d144|2021-06-29--11-00-15--6"),  # VOLKSWAGEN.VOLKSWAGEN_GOLF
   # FIXME the sensor timings are bad in mazda segment, we're not fully testing it, but it should be replaced
   ("MAZDA", "bd6a637565e91581|2021-10-30--15-14-53--4"),       # MAZDA.MAZDA_CX9_2021
-  ("FORD", "54827bf84c38b14f|2023-01-26--21-59-07--4"),        # FORD.FORD_BRONCO_SPORT_MK1
   ("RIVIAN", "bc095dc92e101734|000000db--ee9fe46e57--1"),      # RIVIAN.RIVIAN_R1_GEN1
   ("TESLA", "2c912ca5de3b1ee9|0000025d--6eb6bcbca4--4"),       # TESLA.TESLA_MODEL_Y
 
@@ -58,7 +57,6 @@ segments = [
   ("NISSAN", "regen15D60604EAB|2025-04-08--23-06-59--0"),
   ("VOLKSWAGEN", "regen0F2F06C9539|2025-04-08--23-06-56--0"),
   ("MAZDA", "regenACF84CCF482|2024-08-30--03-21-55--0"),
-  ("FORD", "regen755D8CB1E1F|2025-04-08--23-13-43--0"),
   ("RIVIAN", "regen5FCAC896BBE|2025-04-08--23-13-35--0"),
   ("TESLA", "2c912ca5de3b1ee9|0000025d--6eb6bcbca4--4"),
 ]

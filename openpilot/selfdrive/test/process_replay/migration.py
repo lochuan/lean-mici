@@ -9,7 +9,6 @@ from openpilot.cereal import messaging, log
 from opendbc.car.structs import car
 from opendbc.car.fingerprints import MIGRATION
 from opendbc.car.toyota.values import EPS_SCALE, ToyotaSafetyFlags
-from opendbc.car.ford.values import CAR as FORD, FordFlags, FordSafetyFlags
 from opendbc.car.hyundai.values import HyundaiSafetyFlags
 from opendbc.car.gm.values import GMSafetyFlags
 from openpilot.selfdrive.modeld.constants import ModelConstants
@@ -315,9 +314,6 @@ def migrate_pandaStates(msgs):
     "CHEVROLET_VOLT": GMSafetyFlags.EV,
     "CHEVROLET_BOLT_EUV": GMSafetyFlags.EV | GMSafetyFlags.HW_CAM,
   }
-  # TODO: get new Ford route
-  safety_param_migration |= dict.fromkeys({p for p in FORD if not (p.config.flags & FordFlags.CANFD)}, FordSafetyFlags.LONG_CONTROL)
-
   # Migrate safety param base on carParams
   CP = next((m.carParams for _, m in msgs if m.which() == 'carParams'), None)
   assert CP is not None, "carParams message not found"
