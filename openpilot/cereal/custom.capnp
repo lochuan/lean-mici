@@ -479,6 +479,33 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   # 0 = 没有迟到。warmup 头几帧不等 REPLY，不计。
   bigLateReplyMs @10 :Float32;
   bigLateReplyCount @11 :UInt16;
+  # C4 本机分段：自上一帧发布以来最新收到的那个 REPLY（按时或迟到都算），没有 = 全 0
+  bigStages @12 :BigStageTimes;
+  bigSource @13 :BigSource;     # 本帧用没用上大模型，没用上的原因
+  bigDeadlineMs @14 :Float32;   # 本帧等 REPLY 的截止（相对 timestamp_eof，ms），0 = 没等
+
+  # 以 road timestamp_eof 为零点沿关键路径首尾相接：capture..replyWait 之和 = bigmodeld 收到 REPLY − eof，
+  # 再加 handoff = modeld 收到 − eof（即 bigLatencyMs）。phoneTotalMs 是 REPLY 带回的手机 recv+prep+htp。
+  struct BigStageTimes {
+    captureMs @0 :Float32;    # eof → VisionIPC 收到
+    warpMs @1 :Float32;
+    pairWaitMs @2 :Float32;   # warp 完 → 两路配齐提交编码
+    encodeMs @3 :Float32;     # 提交 → 两路都出包
+    sendMs @4 :Float32;       # 出包 → FRAME 写完 socket（含排队）
+    replyWaitMs @5 :Float32;  # 写完 → bigmodeld 收到 REPLY（网络 + 手机）
+    handoffMs @6 :Float32;    # bigmodeld 收到 → modeld 收到（msgq）
+    phoneTotalMs @7 :Float32;
+  }
+
+  enum BigSource {
+    off @0;
+    big @1;
+    warmup @2;
+    linkDown @3;    # 2 s 内没回音，不等
+    timeout @4;     # 截止前没到
+    late @5;        # 判定时已在手但过了截止
+    zeroOutput @6;  # 手机回了全零 outputs（解码跳帧/没推理）
+  }
 
   enum LaneChangeBlock {
     none @0;
@@ -509,6 +536,8 @@ struct BigModelReply @0xcb9fd56c7057593a {
   flags @2 :UInt16;
   outputs @3 :List(Float32);   # outputs[0:2066)
   telemetry @4 :List(UInt32);  # recv/prep/htp/total µs
+  stages @5 :ModelDataV2SP.BigStageTimes;  # bigmodeld 填 capture..replyWait、phoneTotal；handoff 由 modeld 填
+  receivedNs @6 :UInt64;                   # bigmodeld 收到 REPLY 的 nanos_since_boot（modeld 算 handoff）
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {

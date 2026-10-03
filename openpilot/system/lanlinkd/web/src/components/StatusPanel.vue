@@ -79,6 +79,29 @@ const thermal = computed(() => {
 const modelFrames = computed(() => model.value?.frames ?? []);
 const bigCount = computed(() => modelFrames.value.filter((f) => f === 1).length);
 
+const timing = computed(() => model.value?.timing ?? null);
+
+// C4 本机分段（缩进行 = 上一行的组成部分，不参与求和）
+const STAGE_ROWS = [
+  { key: "capture", label: "取帧（出图→收到）" },
+  { key: "warp", label: "warp" },
+  { key: "pairWait", label: "配对等待" },
+  { key: "encode", label: "硬编" },
+  { key: "send", label: "发送（含排队）" },
+  { key: "replyWait", label: "等 REPLY" },
+  { key: "network", label: "其中网络（−手机）", sub: true },
+  { key: "handoff", label: "转交 modeld" },
+  { key: "total", label: "合计（出图→modeld）", strong: true },
+] as const;
+
+const SOURCE_ROWS = [
+  { key: "linkDown", label: "链路断" },
+  { key: "timeout", label: "超时没回" },
+  { key: "late", label: "迟到" },
+  { key: "zeroOutput", label: "零输出" },
+  { key: "warmup", label: "warmup" },
+] as const;
+
 const LINK_TEXT: Record<string, string> = {
   connecting: "连接中",
   connected: "已连接",
@@ -162,6 +185,28 @@ function coreBarClass(load: number): string {
         </div>
       </div>
       <div v-if="!modelFrames.length" class="mt-3 text-[13px] text-sl-text-3">暂无模型帧（未行驶或 modeld 未运行）</div>
+
+      <div v-if="model?.bigEnabled && timing?.window" class="mt-4 border-t border-sl-border pt-3">
+        <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sl-text-3">
+          C4 分段耗时（最近 {{ timing.window }} 帧，p50 / p90 ms）
+          <span v-if="timing.deadlineMs != null" class="normal-case tracking-normal">· 截止 {{ timing.deadlineMs.toFixed(1) }}</span>
+        </div>
+        <table v-if="timing.stagesMs" class="sl-tabular w-full text-[12px]">
+          <tbody>
+            <tr v-for="r in STAGE_ROWS" :key="r.key" :class="'strong' in r ? 'font-semibold text-sl-text-1' : 'text-sl-text-2'">
+              <td class="py-0.5" :class="'sub' in r ? 'pl-4 text-sl-text-3' : ''">{{ r.label }}</td>
+              <td class="py-0.5 text-right">
+                {{ timing.stagesMs[r.key].p50.toFixed(1) }} / {{ timing.stagesMs[r.key].p90.toFixed(1) }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="text-[12px] text-sl-text-3">窗口内没有收到 REPLY</div>
+        <div class="sl-tabular mt-2 text-[11px] text-sl-text-3">
+          小模型原因：
+          <template v-for="(r, i) in SOURCE_ROWS" :key="r.key">{{ i ? " · " : "" }}{{ r.label }} {{ timing.sources[r.key] }}</template>
+        </div>
+      </div>
     </section>
   </div>
 </template>

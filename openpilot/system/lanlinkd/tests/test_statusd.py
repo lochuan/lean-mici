@@ -3,6 +3,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import patch
 
 from openpilot.system.lanlinkd import statusd
+from openpilot.system.lanlinkd.status_snapshot import STAGE_FIELDS
 from openpilot.system.lanlinkd.statusd import StatusCache
 
 
@@ -68,11 +69,14 @@ class TestStatusdRun:
       def update(self, timeout):
         self.calls += 1
         self.updated["modelV2"] = True
+        self.updated["modelDataV2SP"] = True
         if self.calls >= n:
           exit_event.set()
 
       def __getitem__(self, name):
-        return {"modelV2": NS(big=self.calls > 55)}.get(name, NS())
+        sp = NS(bigStages=NS(**dict.fromkeys(STAGE_FIELDS, 0.)), bigSource='timeout', bigLateReplyCount=0,
+                bigDeadlineMs=70.)
+        return {"modelV2": NS(big=self.calls > 55), "modelDataV2SP": sp}.get(name, NS())
 
     params = NS(get=lambda k: "connected" if k == "BigmodelLinkState" else None, get_bool=lambda k: k == "BigmodelToggle")
     cache = StatusCache({}, "tici", params=params)
@@ -83,4 +87,7 @@ class TestStatusdRun:
 
     model = cache.snapshot()["model"]
     # lanlink 只回答「大模型在不在工作」：开关、链路、最近 50 帧来源
+    timing = model.pop("timing")
     assert model == {"bigEnabled": True, "linkState": "connected", "frames": [0] * 45 + [1] * 5}
+    # 分段/原因窗口 = 最近 100 帧 modelDataV2SP
+    assert timing["window"] == 60 and timing["sources"]["timeout"] == 60 and timing["deadlineMs"] == 70.

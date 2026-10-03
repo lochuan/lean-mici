@@ -14,6 +14,8 @@ import numpy as np
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 
 BIG_OUTPUT_LEN = 2066
+# BigModelReply.stages 里 bigmodeld 填的字段（handoffMs 由 latch 补）
+BIGMODELD_STAGE_FIELDS = ('captureMs', 'warpMs', 'pairWaitMs', 'encodeMs', 'sendMs', 'replyWaitMs', 'phoneTotalMs')
 
 # timestamp_eof 是内核 SOF_BOOT_TS（CLOCK_BOOTTIME）；与它比较的"现在"必须同钟，
 # time.monotonic 不含挂起时长，设备挂起过就整体偏移。macOS 无 BOOTTIME（同 common/timing.h）
@@ -119,9 +121,11 @@ class BigReplyLatch:
     self._gave_up_t_eof = 0   # 最近一帧没用上 REPLY 的 tEof；tEof ≤ 它的 REPLY 一到就是迟到
     self._late_count = 0
     self._late_ms = 0.
+    self._stages: dict[str, float] | None = None
     threading.Thread(target=self._run, daemon=True).start()
 
-  def _on_reply(self, t_eof: int, outputs: np.ndarray, arrival_ns: int) -> None:
+  def _on_reply(self, t_eof: int, outputs: np.ndarray, arrival_ns: int,
+                stages: dict[str, float] | None = None, received_ns: int = 0) -> None:
     eof_to_reply_ms = (arrival_ns - t_eof) / 1e6
     with self._cv:
       if t_eof <= self._gave_up_t_eof:
@@ -129,6 +133,9 @@ class BigReplyLatch:
         self._late_ms = eof_to_reply_ms
       self._last = _Reply(t_eof, outputs, eof_to_reply_ms, arrival_ns)
       self._last_seen = time.monotonic()
+      if stages is not None:
+        # ponytail: 一帧周期内到两个 REPLY 只留最新的分段（罕见）
+        self._stages = {**stages, 'handoffMs': (arrival_ns - received_ns) / 1e6 if received_ns else 0.}
       self._cv.notify_all()
 
   def _run(self) -> None:
@@ -139,31 +146,41 @@ class BigReplyLatch:
       r = self._sm['bigModelReply']
       if len(r.outputs) < BIG_OUTPUT_LEN:  # 畸形帧别让 modeld 崩在路上
         continue
-      self._on_reply(r.tEof, np.array(r.outputs[:BIG_OUTPUT_LEN], dtype=np.float32), nanos_since_boot())
+      arrival_ns = nanos_since_boot()
+      s = r.stages
+      stages = {k: getattr(s, k) for k in BIGMODELD_STAGE_FIELDS}
+      self._on_reply(r.tEof, np.array(r.outputs[:BIG_OUTPUT_LEN], dtype=np.float32), arrival_ns, stages, r.receivedNs)
 
   def link_alive(self) -> bool:
     return time.monotonic() - self._last_seen < self.alive_s
 
-  def wait_for(self, t_eof: int, deadline_ns: int) -> tuple[np.ndarray | None, float]:
+  def wait_for(self, t_eof: int, deadline_ns: int) -> tuple[np.ndarray | None, float, str]:
     """要 tEof 匹配的当帧 REPLY：已到且按时立即返回（零等待），否则等到 deadline。
-    返回 (outputs[2066) f32, REPLY 往返 ms)；超时或迟到 (None, 0.)。结果一到就发，不等截止。
+    返回 (outputs[2066) f32, REPLY 往返 ms, 'big')；超时 (None, 0., 'timeout')、迟到 (None, 0., 'late')。
+    结果一到就发，不等截止。
     """
     with self._cv:
       while True:
         r = self._last
         if r is not None and r.t_eof == t_eof:
           if r.arrival_ns <= deadline_ns:
-            return r.outputs, r.eof_to_reply_ms
+            return r.outputs, r.eof_to_reply_ms, 'big'
           # 票面「按截止时刻择优」：迟到 REPLY（往返超预算）已在手也不用，落小模型兜底
           self._gave_up_t_eof = t_eof
           self._late_count += 1
           self._late_ms = r.eof_to_reply_ms
-          return None, 0.
+          return None, 0., 'late'
         now_ns = nanos_since_boot()
         if now_ns >= deadline_ns:
           self._gave_up_t_eof = t_eof
-          return None, 0.
+          return None, 0., 'timeout'
         self._cv.wait((deadline_ns - now_ns) / 1e9)
+
+  def take_stages(self) -> dict[str, float] | None:
+    """取走上次 take 以来最新收到的 REPLY 的 C4 分段（ModelDataV2SP.BigStageTimes 字段名 → ms）；没有 = None。"""
+    with self._cv:
+      stages, self._stages = self._stages, None
+      return stages
 
   def take_late_replies(self) -> tuple[int, float]:
     """取走自上次 take 起截止后才到的 REPLY：(个数, 最近一个的往返 ms)，每个只计一次；(0, 0.) = 没有迟到。"""
@@ -180,6 +197,8 @@ class FrameSelection(NamedTuple):
   desired_curvature: float
   desired_acceleration: float
   should_stop: bool
+  source: str          # ModelDataV2SP.BigSource
+  deadline_ms: float   # 等 REPLY 的截止（相对 eof），0 = 没等
 
 
 def select_frame(small_output: dict[str, np.ndarray], *, latch, enabled: bool, run_count: int,
@@ -194,14 +213,21 @@ def select_frame(small_output: dict[str, np.ndarray], *, latch, enabled: bool, r
   msgq, Cap'n Proto, model runner, or GPU to test.
   """
   raw: np.ndarray | None = None
-  eof_to_reply_ms = 0.
+  eof_to_reply_ms = deadline_ms = 0.
+  source = 'off' if not enabled else 'warmup'
   if enabled and run_count > warmup_frames:
-    deadline_ns = timestamp_eof + int((latency_ms + grace_ms) * 1e6)
-    if not latch.link_alive():
+    deadline_ms = latency_ms + grace_ms
+    deadline_ns = timestamp_eof + int(deadline_ms * 1e6)
+    alive = latch.link_alive()
+    if not alive:
       deadline_ns = current_time_ns()
-    raw, eof_to_reply_ms = latch.wait_for(timestamp_eof, deadline_ns)
+      deadline_ms = 0.
+    raw, eof_to_reply_ms, source = latch.wait_for(timestamp_eof, deadline_ns)
+    if not alive and raw is None:
+      source = 'linkDown'
   if raw is not None and not np.any(raw):
     raw = None
+    source = 'zeroOutput'
 
   big_output = parse_outputs(raw) if raw is not None else None
   model_output = blender.step(small_output, big_output)
@@ -217,4 +243,5 @@ def select_frame(small_output: dict[str, np.ndarray], *, latch, enabled: bool, r
     curvature = small_action.desiredCurvature
     acceleration = small_action.desiredAcceleration
     should_stop = small_action.shouldStop
-  return FrameSelection(model_output, big_output, eof_to_reply_ms, curvature, acceleration, should_stop)
+  return FrameSelection(model_output, big_output, eof_to_reply_ms, curvature, acceleration, should_stop,
+                        source, deadline_ms)

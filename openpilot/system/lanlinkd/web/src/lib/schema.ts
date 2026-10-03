@@ -155,6 +155,23 @@ export interface ModelStatus {
   bigEnabled?: boolean;
   linkState?: string; // BigmodelLinkState：connecting/connected/blip/restart/lost
   frames?: number[];
+  timing?: ModelTiming;
+}
+
+export interface P50P90 {
+  p50: number;
+  p90: number;
+}
+
+/** 最近 N 帧 C4 本机分段（eof 起沿关键路径首尾相接，total = 到 modeld 收到）与小模型原因计数 */
+export interface ModelTiming {
+  window: number;
+  stagesMs: Record<
+    "capture" | "warp" | "pairWait" | "encode" | "send" | "replyWait" | "network" | "handoff" | "total",
+    P50P90
+  > | null;
+  sources: Record<"off" | "big" | "warmup" | "linkDown" | "timeout" | "late" | "zeroOutput", number>;
+  deadlineMs: number | null;
 }
 
 export interface StatusSnapshot {

@@ -433,6 +433,11 @@ def main(demo=False):
       mdv2sp_send.modelDataV2SP.bigLatencyMs = eof_to_reply_ms
       mdv2sp_send.modelDataV2SP.bigLateReplyCount, mdv2sp_send.modelDataV2SP.bigLateReplyMs = latch.take_late_replies()
       mdv2sp_send.modelDataV2SP.cameraToModelMs = camera_to_model_ms
+      mdv2sp_send.modelDataV2SP.bigSource = frame.source
+      mdv2sp_send.modelDataV2SP.bigDeadlineMs = frame.deadline_ms
+      if (stages := latch.take_stages()) is not None:
+        for k, v in stages.items():
+          setattr(mdv2sp_send.modelDataV2SP.bigStages, k, v)
 
       fill_driving_model_data(drivingdata_send, modelv2_send)
       fill_pose_msg(posenet_send, blended, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, extrinsics_calibration_seen)

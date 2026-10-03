@@ -12,7 +12,7 @@
 //   取帧×2（state_mtx：配对/状态机/索引 + 编码缓冲池）、编码器 dequeue×2（输出回调：
 //   meta 缓存 → sender.submit_*）、writer（sender.step）、REPLY reader（read_some →
 //   parse → msgq）、标定/输入元数据（SubMaster → MetaProvider.set_rpy/set_model_inputs）。
-//   锁序：sender.mtx > state_mtx > {ev_mtx, meta 缓存, buf 池, seg 样本}（叶子锁，绝不反向嵌套）。
+//   锁序：sender.mtx > state_mtx > {ev_mtx, meta 缓存, buf 池, 分段计时}（叶子锁，绝不反向嵌套）。
 //   sender 事件回调在其锁内触发 ⇒ 回调只记账 + 推事件队列（ev_mtx），状态机转移与
 //   request_keyframe 在下一次组帧前由 drain_events_locked() 按序执行（事件仍落在
 //   「事件后的第一个提交帧」，且不会在回调里反向取 state_mtx）。
@@ -49,6 +49,7 @@
 #include "frame_codec.h"
 #include "frame_meta.h"
 #include "frame_scheduler.h"
+#include "frame_stages.h"
 #include "meta_cache.h"
 #include "pair_matcher.h"
 #include "server_locator.h"
@@ -299,6 +300,7 @@ class Bigmodeld {
         if (buf == nullptr) continue;
         // 上游覆盖/滞后（缓冲被新帧顶掉）：不进编码器；后续 SOF 可形成时间槽空洞
         if (buf->get_frame_id() != extra.frame_id) continue;
+        const uint64_t recv_ns = nanos_since_boot();
         // warp 进编码缓冲后立即可放回 VisionIPC 缓冲（配对等待不占上游缓冲）
         VisionBuf* dst = ctx_[sid].pool.acquire();
         float mat[9];
@@ -311,7 +313,7 @@ class Bigmodeld {
           ctx_[sid].pool.release(dst);
           continue;
         }
-        place_frame(sid, extra, dst, mat);
+        place_frame(sid, extra, dst, mat, recv_ns, nanos_since_boot());
       }
     }
   }
@@ -394,6 +396,7 @@ class Bigmodeld {
           fail("首条消息不是 HELLO");
           break;
         } else if (type == bgm1::kTypeReply) {
+          const uint64_t reply_ns = nanos_since_boot();
           bgm1::Reply r;
           if (bgm1::parse_reply(buf.data(), need, &r) != bgm1::Err::kOk) {
             fail("REPLY 解析失败");
@@ -411,6 +414,18 @@ class Bigmodeld {
           for (size_t i = 0; i < bgm1::kReplyOutputsCount; i++) outs.set(i, r.outputs[i]);
           auto tel = br.initTelemetry(bgm1::kReplyTelemetryCount);
           for (size_t i = 0; i < bgm1::kReplyTelemetryCount; i++) tel.set(i, r.telemetry[i]);
+          br.setReceivedNs(reply_ns);
+          auto st = br.initStages();
+          st.setPhoneTotalMs(r.telemetry[3] / 1e3f);
+          StageMs s;
+          if (stages_.on_reply(FrameIdx{r.frame_idx}, reply_ns, &s)) {
+            st.setCaptureMs(s.capture);
+            st.setWarpMs(s.warp);
+            st.setPairWaitMs(s.pair_wait);
+            st.setEncodeMs(s.encode);
+            st.setSendMs(s.send);
+            st.setReplyWaitMs(s.reply_wait);
+          }
           pm_.send("bigModelReply", msg);
         } else {
           bgm1::ErrMsg e;
@@ -459,6 +474,7 @@ class Bigmodeld {
     VisionIpcBufExtra extra = {};
     VisionBuf* buf = nullptr;
     float mat[9] = {0};  // 本帧 warp 实际用的矩阵（帧头遥测记它，不在配对时重读标定）
+    uint64_t recv_ns = 0, warped_ns = 0;  // 分段计时：VisionIPC 收到 / warp 完
   };
 
   void init_encoder(StreamId sid) {
@@ -493,13 +509,16 @@ class Bigmodeld {
   // 配对键 = timestamp_sof 邻近（见 pair_matcher.h：真机实测两路 frame_id 是各自
   // 独立的出帧计数器、持续漂移，不能作配对键）。配对死亡只计数/日志，不上报调度器；
   // road 死亡帧的 SOF 仍参与时间槽编号，wide 死亡帧不参与编号。
-  void place_frame(StreamId sid, const VisionIpcBufExtra& extra, VisionBuf* buf, const float mat[9]) {
+  void place_frame(StreamId sid, const VisionIpcBufExtra& extra, VisionBuf* buf, const float mat[9],
+                   uint64_t recv_ns, uint64_t warped_ns) {
     std::lock_guard<std::mutex> lk(state_mtx_);
     drain_events_locked();
 
     const bool is_road = (sid == kRoad);
     Slot slot{extra, buf};
     std::memcpy(slot.mat, mat, sizeof slot.mat);
+    slot.recv_ns = recv_ns;
+    slot.warped_ns = warped_ns;
     bgm::PairMatcher<Slot>::Frame f{extra.frame_id, extra.timestamp_sof, slot};
     bgm::PairMatcher<Slot>::Actions a = matcher_.push(is_road, f);
 
@@ -561,6 +580,7 @@ class Bigmodeld {
     om.frame_id = CamFrameId{wide.extra.frame_id};
     ctx_[kWide].meta.push(om);
 
+    stages_.on_submit(frame_idx, road.extra.timestamp_eof, road.recv_ns, road.warped_ns, nanos_since_boot());
     // 两路同时提交编码；缓冲由 input_done_callback 归还池
     ctx_[kRoad].enc->encode_frame(road.buf, &road.extra);
     ctx_[kWide].enc->encode_frame(wide.buf, &wide.extra);
@@ -635,7 +655,8 @@ class Bigmodeld {
         LOGW("bigmodeld: 序列头门丢弃（非双路 IDR 对不开流）frame_idx=%u", u32(e.frame_idx));
         break;
       case UplinkEvent::kFrameSent:
-        break;  // 发送段报表在 writer 线程锁外做（见 writer_thread）
+        stages_.on_sent(e.frame_idx, nanos_since_boot());
+        break;
     }
     std::lock_guard<std::mutex> lk(ev_mtx_);
     evs_.push_back(e);
@@ -704,6 +725,7 @@ class Bigmodeld {
     }
 
     const OutMeta& om = r.om;
+    stages_.on_encoded(om.frame_idx, nanos_since_boot());
     // 命中前缀死条目（FIFO 下输出已丢）同样 = 码流断档：上报 + 关门（各路 dedup 到 frame_idx）
     if (!r.dead.empty()) {
       LOGE("bigmodeld: %s 编码输出缺帧 %zu 个（frame_idx=%u 起）码流断档",
@@ -753,6 +775,7 @@ class Bigmodeld {
   TcpSocket sock_;
   std::unique_ptr<UplinkSender> sender_;
   PubMaster pm_{{"bigModelReply"}};  // 04 号 C：REPLY 经 msgq 转交 modeld
+  FrameStageLog stages_;  // C4 本机分段计时（随 REPLY 上报）
 
   // 06 号：链路状态（HELLO instance_id 对比 → blip/restart）→ Param "BigmodelLinkState"（07 号读）
   LinkStateTracker link_;

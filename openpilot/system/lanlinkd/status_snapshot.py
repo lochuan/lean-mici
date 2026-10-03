@@ -1,4 +1,6 @@
 """状态快照与设备能力的纯转换函数。services/params/消息对象均为 duck-type。"""
+import math
+
 from openpilot.cereal import messaging, custom
 from opendbc.car.structs import car
 from openpilot.common.swaglog import cloudlog
@@ -86,9 +88,58 @@ def build_snapshot(services: dict, version_info: dict, capabilities: dict) -> di
   }
 
 
-def build_model_status(frames, big_enabled: bool, link_state: str) -> dict:
-  """最近 N 帧 modelV2.big（1 = 大模型出的帧）-> 模型来源卡片：只回答大模型在不在工作。"""
-  return {"bigEnabled": big_enabled, "linkState": link_state, "frames": list(frames)}
+def build_model_status(frames, big_enabled: bool, link_state: str, timing_frames=()) -> dict:
+  """最近 N 帧 modelV2.big（1 = 大模型出的帧）-> 模型来源卡片；timing = C4 本机分段与小模型原因。"""
+  return {"bigEnabled": big_enabled, "linkState": link_state, "frames": list(frames),
+          "timing": build_model_timing(timing_frames)}
+
+
+# ModelDataV2SP.BigStageTimes 字段 / BigSource 枚举（与 custom.capnp 同序）
+STAGE_FIELDS = ('captureMs', 'warpMs', 'pairWaitMs', 'encodeMs', 'sendMs', 'replyWaitMs', 'handoffMs', 'phoneTotalMs')
+BIG_SOURCES = ('off', 'big', 'warmup', 'linkDown', 'timeout', 'late', 'zeroOutput')
+_C4_STAGES = ('capture', 'warp', 'pairWait', 'encode', 'send', 'replyWait')
+
+
+def timing_frame(sp) -> tuple:
+  """modelDataV2SP -> (分段 ms dict, bigSource, 迟到 REPLY 个数, 截止 ms)。"""
+  return ({k: float(getattr(sp.bigStages, k)) for k in STAGE_FIELDS}, str(sp.bigSource),
+          int(sp.bigLateReplyCount), float(sp.bigDeadlineMs))
+
+
+def _p50_p90(xs: list[float]) -> dict:
+  xs = sorted(xs)
+  pick = lambda q: round(xs[max(math.ceil(q * len(xs)) - 1, 0)], 2)  # noqa: E731  最近邻秩
+  return {"p50": pick(0.5), "p90": pick(0.9)}
+
+
+def build_model_timing(frames) -> dict:
+  """最近 N 帧 timing_frame -> 各段 p50/p90（只算带分段的帧）、小模型原因计数、截止 p50。
+  迟到 REPLY 在随后一帧上报，对应的帧当时判了 timeout：计数从 timeout 挪到 late（近似，可跨窗口边界）。"""
+  frames = list(frames)
+  rows: dict[str, list[float]] = {k: [] for k in (*_C4_STAGES, 'network', 'handoff', 'total')}
+  for stages, *_ in frames:
+    if stages['replyWaitMs'] <= 0:
+      continue
+    for k in _C4_STAGES:
+      rows[k].append(stages[k + 'Ms'])
+    rows['network'].append(max(stages['replyWaitMs'] - stages['phoneTotalMs'], 0.))
+    rows['handoff'].append(stages['handoffMs'])
+    rows['total'].append(sum(stages[k + 'Ms'] for k in (*_C4_STAGES, 'handoff')))
+  sources = dict.fromkeys(BIG_SOURCES, 0)
+  for _, src, *_ in frames:
+    if src in sources:
+      sources[src] += 1
+  late_total = sum(f[2] for f in frames)  # 已在手的迟到（source=late）同帧也计进 bigLateReplyCount
+  arrived_after_timeout = max(late_total - sources['late'], 0)
+  sources['timeout'] -= min(arrived_after_timeout, sources['timeout'])
+  sources['late'] = max(late_total, sources['late'])
+  deadlines = [f[3] for f in frames if f[3] > 0]
+  return {
+    "window": len(frames),
+    "stagesMs": {k: _p50_p90(v) for k, v in rows.items()} if rows['total'] else None,
+    "sources": sources,
+    "deadlineMs": _p50_p90(deadlines)["p50"] if deadlines else None,
+  }
 
 
 _CAP_KEYS = (

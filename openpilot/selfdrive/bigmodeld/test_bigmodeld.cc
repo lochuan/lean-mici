@@ -15,6 +15,7 @@
 #include "frame_codec.h"
 #include "frame_meta.h"
 #include "frame_scheduler.h"
+#include "frame_stages.h"
 #include "meta_cache.h"
 #include "pair_matcher.h"
 #include "server_locator.h"
@@ -1307,7 +1308,47 @@ static void test_sender_dropped_window_not_cross_connection() {
   CHECK(sent1 && sent2);
 }
 
+// =====================================================================
+// FrameStageLog：C4 本机分段（road 关键路径，各段首尾相接）
+// =====================================================================
+static void test_frame_stages_telescope() {
+  FrameStageLog log;
+  const uint64_t ms = 1'000'000;
+  const FrameIdx k{7};
+  StageMs s;
+  CHECK(!log.on_reply(k, 99 * ms, &s));  // 没提交过：不报
+  log.on_submit(k, 100 * ms, 120 * ms, 121 * ms, 125 * ms);  // eof / recv / warp 完 / 配对提交
+  log.on_encoded(k, 128 * ms);
+  log.on_encoded(k, 127 * ms);  // 两路取晚的
+  CHECK(!log.on_reply(k, 160 * ms, &s));  // 还没写完：不报
+  log.on_sent(k, 130 * ms);
+  CHECK(log.on_reply(k, 160 * ms, &s));
+  CHECK_NEAR(s.capture, 20, 1e-6);
+  CHECK_NEAR(s.warp, 1, 1e-6);
+  CHECK_NEAR(s.pair_wait, 4, 1e-6);
+  CHECK_NEAR(s.encode, 3, 1e-6);
+  CHECK_NEAR(s.send, 2, 1e-6);
+  CHECK_NEAR(s.reply_wait, 30, 1e-6);
+  CHECK_NEAR(s.capture + s.warp + s.pair_wait + s.encode + s.send + s.reply_wait, 60, 1e-6);
+  CHECK(!log.on_reply(k, 161 * ms, &s));  // 每帧只报一次
+}
+
+static void test_frame_stages_ring_no_mismatch() {
+  FrameStageLog log;
+  StageMs s;
+  log.on_submit(FrameIdx{1}, 1, 2, 3, 4);
+  log.on_encoded(FrameIdx{1}, 5);
+  log.on_sent(FrameIdx{1}, 6);
+  log.on_submit(FrameIdx{1 + FrameStageLog::kSlots}, 10, 20, 30, 40);  // 同槽新帧顶掉旧帧
+  CHECK(!log.on_reply(FrameIdx{1}, 7, &s));                           // 旧帧 REPLY 不许配到新帧
+  log.on_encoded(FrameIdx{1}, 8);                                     // 旧帧迟到事件不污染新帧
+  log.on_sent(FrameIdx{1}, 9);
+  CHECK(!log.on_reply(FrameIdx{1 + FrameStageLog::kSlots}, 50, &s));  // 新帧还没编码/写完
+}
+
 int main() {
+  test_frame_stages_telescope();
+  test_frame_stages_ring_no_mismatch();
   test_sched_gop();
   test_sched_drop();
   test_sched_drop_dedup();

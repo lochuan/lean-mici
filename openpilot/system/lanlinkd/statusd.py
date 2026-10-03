@@ -7,11 +7,12 @@ from openpilot.cereal import messaging
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.system.lanlinkd.status_snapshot import (
-  build_capabilities, build_model_status, build_models_download, build_snapshot)
+  build_capabilities, build_model_status, build_models_download, build_snapshot, timing_frame)
 
 # carParams 移除（capabilities 不再依赖实时 CP）；modelManagerSP 新增（模型下载进度）
-SERVICES = ['deviceState', 'carState', 'pandaStates', 'gpsLocation', 'modelManagerSP', 'modelV2']
+SERVICES = ['deviceState', 'carState', 'pandaStates', 'gpsLocation', 'modelManagerSP', 'modelV2', 'modelDataV2SP']
 MODEL_FRAMES = 50  # 最近 50 帧（20Hz ≈ 2.5s）的模型来源
+TIMING_FRAMES = 100  # 分段耗时/小模型原因窗口（≈5s）
 
 _CAP_PARAM_KEYS = (
   "IsReleaseSpBranch", "IsDevelopmentBranch", "ToyotaEnforceStockLongitudinal",
@@ -34,6 +35,7 @@ class StatusCache:
     self._download: dict | None = None
     self._cap_inputs: tuple | None = None
     self._model_frames: deque[int] = deque(maxlen=MODEL_FRAMES)
+    self._timing_frames: deque[tuple] = deque(maxlen=TIMING_FRAMES)
 
   def _capabilities_from_params(self) -> dict:
     """输入（CP/CPSP bytes、bundle、相关 bool params）不变则复用上次结果。"""
@@ -58,13 +60,15 @@ class StatusCache:
       sm.update(1000)
       if sm.updated['modelV2']:
         self._model_frames.append(int(bool(sm['modelV2'].big)))
+      if sm.updated['modelDataV2SP']:
+        self._timing_frames.append(timing_frame(sm['modelDataV2SP']))
       try:
         caps = self._capabilities_from_params()
         download = build_models_download(sm["modelManagerSP"])
         snap = build_snapshot({name: sm[name] for name in SERVICES}, self._version_info, caps)
         snap["model"] = build_model_status(
           self._model_frames, bool(self._params.get_bool("BigmodelToggle")),
-          str(self._params.get("BigmodelLinkState") or ""))
+          str(self._params.get("BigmodelLinkState") or ""), self._timing_frames)
       except Exception:
         cloudlog.exception("lanlink statusd: snapshot build failed")
         continue

@@ -151,20 +151,20 @@ def test_big_reply_latch():
   latch._on_reply(t_eof, raw, t_eof + 25_000_000)     # 到达 = eof+25 ms
   assert latch.link_alive()
 
-  got, eof_to_reply_ms = latch.wait_for(t_eof, nanos_since_boot() + 10_000_000_000)
+  got, eof_to_reply_ms, _ = latch.wait_for(t_eof, nanos_since_boot() + 10_000_000_000)
   assert got is raw and eof_to_reply_ms == 25.                  # 已到且按时：零等待取
 
-  got, eof_to_reply_ms = latch.wait_for(t_eof + 1, nanos_since_boot())
+  got, eof_to_reply_ms, _ = latch.wait_for(t_eof + 1, nanos_since_boot())
   assert got is None and eof_to_reply_ms == 0.                  # 不匹配 + 过期 → 兜底
 
   # 迟到 REPLY 已在手也不用（按截止时刻择优）
   late_eof = t_eof + 1_000_000
   latch._on_reply(late_eof, raw, late_eof + 60_000_000)          # 到达 = eof+60 ms
-  got, eof_to_reply_ms = latch.wait_for(late_eof, late_eof + 40_000_000)   # deadline = eof+40 ms
+  got, eof_to_reply_ms, _ = latch.wait_for(late_eof, late_eof + 40_000_000)   # deadline = eof+40 ms
   assert got is None and eof_to_reply_ms == 0.
 
   threading.Timer(0.05, latch._on_reply, args=(t_eof + 2, raw, nanos_since_boot())).start()
-  got, eof_to_reply_ms = latch.wait_for(t_eof + 2, nanos_since_boot() + 5_000_000_000)
+  got, eof_to_reply_ms, _ = latch.wait_for(t_eof + 2, nanos_since_boot() + 5_000_000_000)
   assert got is raw                                   # 等 Condition，一到即醒
 
   latch.alive_s = 0.0
@@ -200,6 +200,32 @@ def test_big_reply_latch_counts_late_replies():
   assert latch.take_late_replies() == (0, 0.)
 
 
+def test_big_reply_latch_wait_for_reports_reason():
+  latch = BigReplyLatch(_FakeSM())
+  raw = np.ones(2066, dtype=np.float32)
+  t_eof = nanos_since_boot() - 200_000_000
+  latch._on_reply(t_eof, raw, t_eof + 25_000_000)
+  assert latch.wait_for(t_eof, t_eof + 70_000_000)[2] == 'big'
+  late = t_eof + 1_000_000
+  latch._on_reply(late, raw, late + 80_000_000)
+  assert latch.wait_for(late, late + 70_000_000)[2] == 'late'
+  assert latch.wait_for(t_eof + 2_000_000, nanos_since_boot())[2] == 'timeout'
+
+
+def test_big_reply_latch_take_stages():
+  # 最新收到的 REPLY 的 C4 分段（按时/迟到都报），modeld 补 handoff = 收到 − bigmodeld 收到；每个只报一次
+  latch = BigReplyLatch(_FakeSM())
+  raw = np.ones(2066, dtype=np.float32)
+  assert latch.take_stages() is None
+  t_eof = nanos_since_boot() - 200_000_000
+  stages = {'captureMs': 20., 'warpMs': .3, 'pairWaitMs': 1., 'encodeMs': 2., 'sendMs': .5,
+            'replyWaitMs': 30., 'phoneTotalMs': 24.}
+  latch._on_reply(t_eof, raw, t_eof + 56_000_000, stages=stages, received_ns=t_eof + 54_000_000)
+  got = latch.take_stages()
+  assert got == {**stages, 'handoffMs': 2.}
+  assert latch.take_stages() is None
+
+
 class _FakeReplySelector:
   def __init__(self, *, alive, result):
     self.alive = alive
@@ -215,7 +241,7 @@ class _FakeReplySelector:
 
 
 def test_select_frame_obeys_warmup_enable_and_link_gates():
-  latch = _FakeReplySelector(alive=True, result=(np.ones(2), 25.))
+  latch = _FakeReplySelector(alive=True, result=(np.ones(2), 25., 'big'))
   small = {"plan": np.array([2.], dtype=np.float32)}
   blender = SourceBlender(fade_frames=2)
   action_calls = []
@@ -237,23 +263,32 @@ def test_select_frame_obeys_warmup_enable_and_link_gates():
   assert latch.waited == []
   assert first.big_output is None and first.eof_to_reply_ms == 0.
   assert second.big_output is None and second.model_output is small
+  assert (first.source, first.deadline_ms) == ('warmup', 0.)
+  assert (second.source, second.deadline_ms) == ('off', 0.)
 
   selected = select(enabled=True, run_count=5)
   assert latch.waited == [(1_000_000_000, 1_070_000_000)]
   assert selected.big_output["plan"][0] == 1.
   np.testing.assert_allclose(selected.model_output["plan"], [1.5])
   assert selected.eof_to_reply_ms == 25.
+  assert (selected.source, selected.deadline_ms) == ('big', 70.)
   assert selected.desired_curvature == 1.5 and selected.desired_acceleration == -1.5
   assert selected.should_stop is True  # weight=.5 selects the big-model stop bit
   assert action_calls[-2][1:] == (0.1, 0.2) and action_calls[-1][1:] == (0.3, 0.4)
 
+  for reason in ('timeout', 'late'):
+    latch.result = (None, 0., reason)
+    assert select(enabled=True, run_count=5).source == reason
+
   latch.alive = False
-  select(enabled=True, run_count=5)
+  latch.result = (None, 0., 'timeout')
+  down = select(enabled=True, run_count=5)
   assert latch.waited[-1] == (1_000_000_000, 9_000_000_000)
+  assert (down.source, down.deadline_ms) == ('linkDown', 0.)
 
 
 def test_select_frame_rejects_zero_reply():
-  latch = _FakeReplySelector(alive=True, result=(np.zeros(2066, dtype=np.float32), 12.))
+  latch = _FakeReplySelector(alive=True, result=(np.zeros(2066, dtype=np.float32), 12., 'big'))
   small = {"plan": np.array([1.], dtype=np.float32)}
   frame = select_frame(small, latch=latch, enabled=True, run_count=5, timestamp_eof=1, latency_ms=22.,
                        grace_ms=48., warmup_frames=4, current_time_ns=lambda: 10, blender=SourceBlender(),
@@ -263,6 +298,7 @@ def test_select_frame_rejects_zero_reply():
                        parse_outputs=lambda raw: {"plan": raw})
   assert frame.big_output is None and frame.eof_to_reply_ms == 12.
   assert frame.model_output is small
+  assert frame.source == 'zeroOutput'
 
 
 def test_modeld_c3_wiring_source():
@@ -285,4 +321,6 @@ def test_modeld_c3_wiring_source():
   assert "monotonic_ns" not in inspect.getsource(BigReplyLatch)
   assert "latency.update(camera_to_model_ms)" in src
   assert "cameraToModelMs = camera_to_model_ms" in src
+  assert "bigSource = frame.source" in src and "bigDeadlineMs = frame.deadline_ms" in src
+  assert "latch.take_stages()" in src, "C4 分段随最新 REPLY 进 rlog"
   assert "latch.latency" not in src
