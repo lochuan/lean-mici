@@ -56,14 +56,8 @@ ARTIFACT_PATHS: tuple[str, ...] = (
 DATA_ARTIFACT_GLOBS: tuple[str, ...] = (
   "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunkmanifest",
   "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk*",
-  # eagled's YOLO pkl is compiled on-device too (first boot, see
-  # selfdrive/eagled/SConscript); its .tinygrad_pin sidecar records the
-  # tinygrad revision the kernels were built against and must ship with it.
-  "openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl",
-  "openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl.tinygrad_pin",
   # pkl 输入指纹旁路文件：随发布树落到设备后成为已跟踪文件，下次源同步
   # 若不在白名单会被当作过期文件删掉，pkl 缓存永远不命中、每次重编。
-  "openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl.inputs_fp",
   "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.inputs_fp",
 )
 
@@ -245,7 +239,7 @@ def inputs_fingerprint(files: Iterable[str | Path], extras: Iterable[str] = ()) 
 def params_keys_from_header(header_text: str) -> list[str]:
   """Parse every param key registered in ``params_keys.h``.
 
-  Entries look like ``{"AvoidanceEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},``;
+  Entries look like ``{"BluetoothEnabled", {PERSISTENT, BOOL, "0"}},``;
   comment lines that merely mention a `{"Name", {` shape must not match, so the
   pattern anchors on the statement start (leading whitespace + brace).
   """

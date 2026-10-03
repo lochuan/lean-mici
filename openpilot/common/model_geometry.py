@@ -4,10 +4,9 @@
 - 相机系（modelV2 原生）：x 以挡风玻璃后方相机为原点、向前为正，y 右正。
 - 车体系（规范）：x 以前保险杠为原点（dRel 语义），y 左正（yRel 语义）。
 - 安装偏移 camera_to_front：相机在前保险杠后方多远。相机系地面点比车体系
-  远，故车体系 x = 相机系 x - camera_to_front（与 projection.py 的
-  ``dRel = x_v - camera_to_front`` 同一语义）。
+  远，故车体系 x = 相机系 x - camera_to_front。
 
-消费方（eagled 判定、lanlinkd 展示、车内 UI）一律经本模块取几何，
+消费方（车内 UI）一律经本模块取几何，
 不在各自路径里手写换算——坐标语义只在这一处。
 """
 from __future__ import annotations
@@ -24,7 +23,7 @@ CAMERA_TO_FRONT_MAX = 2.5
 def read_camera_to_front(params) -> float:
   """安装偏移的唯一读点（票 #6）：Params 键 ``CameraToFront``，未落盘回退出厂默认。
 
-  消费方（eagled 判定、lanlinkd 展示、车内 UI）每帧经本函数取值——保存新值
+  消费方（车内 UI）每帧经本函数取值——保存新值
   下一帧即生效，任何地方不得再直读常量或另设读点。params duck-typed（只要有
   ``get(key)``，返回 str/bytes/float/None 皆可）。通用 params API 能绕过写点
   落盘任意值，故越界值钳到物理区间、非有限值回退出厂默认。

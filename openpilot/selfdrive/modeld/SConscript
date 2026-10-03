@@ -100,7 +100,7 @@ if not os.getenv('SKIP_TINYGRAD_COMPILE'):
   # failed write leaves the cores offline with no signal.
   #
   # Building on CPUs 0-3 is slower but works (measured on 4 cores: supercombo
-  # ~2 min, YOLO26n ~7.5 min). To bring CPU 4 up by hand:
+  # ~2 min). To bring CPU 4 up by hand:
   #   echo 1 | sudo tee /sys/devices/system/cpu/cpu4/online
   taskset = 'taskset -c 4 ' if arch == 'comma_arm64' and _cpu_usable(4) else ''
   cmd = (f'{cmd_flags} {mac_brew_string} {taskset}python3 {modeld_dir}/compile_modeld.py '

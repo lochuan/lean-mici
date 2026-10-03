@@ -174,7 +174,6 @@ class TestSourceSyncPlan(unittest.TestCase):
     with tempfile.TemporaryDirectory() as td:
       repo = Path(td)
       fps = [
-        "openpilot/selfdrive/eagled/models/yolo_tinygrad.pkl.inputs_fp",
         "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.inputs_fp",
       ]
       for fp in fps:
@@ -780,27 +779,23 @@ class TestParamsKeyGate(unittest.TestCase):
 
   HEADER_SAMPLE = """
   // comment with {"NotAKey", {PERSISTENT, BOOL}} inside
-  {"AvoidanceEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
-  {"AvoidanceLaneEdgeMargin", {PERSISTENT, FLOAT, "0.3"}},
-  {"AvoidanceEgoHalfWidth", {PERSISTENT, FLOAT, "0.9"}},  // trailing comment
-  {"AvoidanceLaneProbMin", {PERSISTENT, FLOAT, "0.6"}},
-  {"AvoidanceLaneStdMax", {PERSISTENT, FLOAT, "0.3"}},
+  {"BluetoothEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+  {"BluetoothAudioAddress", {PERSISTENT, STRING}},  // trailing comment
+  {"BootCount", {PERSISTENT, INT}},
   """
 
   def test_parses_every_key_line_ignoring_comments(self):
     keys = release_lib.params_keys_from_header(self.HEADER_SAMPLE)
     self.assertEqual(keys, [
-      "AvoidanceEnabled", "AvoidanceLaneEdgeMargin", "AvoidanceEgoHalfWidth",
-      "AvoidanceLaneProbMin", "AvoidanceLaneStdMax",
+      "BluetoothEnabled", "BluetoothAudioAddress", "BootCount",
     ])
 
   def test_real_header_parses_to_known_keys(self):
     """Regex 对真实头文件不能失手：已知键必须解析出来，且全表非空。"""
     header = REPO_ROOT / "openpilot/common/params_keys.h"
     keys = release_lib.params_keys_from_header(header.read_text())
-    self.assertIn("AvoidanceEnabled", keys)
-    self.assertIn("AvoidanceLaneEdgeMargin", keys)
-    self.assertIn("LaneChangeNearZone", keys)
+    self.assertIn("BluetoothEnabled", keys)
+    self.assertIn("BootCount", keys)
     self.assertGreater(len(keys), 100)
 
   def test_missing_keys_is_header_minus_compiled(self):

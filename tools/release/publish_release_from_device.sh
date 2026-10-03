@@ -24,10 +24,7 @@ SKIP_TESTS=0
 echo "[-] Mac 侧单测（--skip-tests 跳过）"
 if [ "$SKIP_TESTS" -eq 0 ]; then
   (cd "$ROOT" && uv run --extra testing --with pytest --with opencv-python-headless pytest -q \
-    openpilot/selfdrive/eagled/tests \
-    openpilot/selfdrive/controls/tests/test_avoidance_fusion.py \
     openpilot/selfdrive/controls/tests/test_desire_helper.py \
-    openpilot/system/lanlinkd/tests/test_lanes.py \
     tools/release/test_release_lib.py)
 fi
 
@@ -80,11 +77,8 @@ ssh "$DEVICE" 'pgrep -f "[m]anager.py" >/dev/null && ! pgrep -f "/usr/comma/[r]e
 echo "[ok] manager 运行中"
 ssh "$DEVICE" "cd /data/openpilot && PYTHONPATH=/data/openpilot /usr/local/venv/bin/python -W ignore -c '
 from openpilot.common.params import Params
-Params().check_key(\"AvoidanceLaneEdgeMargin\")
+Params().check_key(\"BluetoothEnabled\")
 print(\"[ok] params 键抽查\")
-from openpilot.cereal import services
-assert services.SERVICE_LIST[\"eagleDebug\"].should_log is True
-print(\"[ok] eagleDebug 落盘开关\")
 '"
 
 echo "[ok] $RELEASE_BRANCH = ${RELEASE_SHA} 已部署（设备重启完成）"

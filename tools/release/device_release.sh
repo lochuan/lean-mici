@@ -179,8 +179,8 @@ rebuild_native() {
   # 不会进二进制 —— 2026-09-24 的 libparams_c.so 键表滞后就是这一类。
   # checkout -- . 恢复了 SConstruct/SConscript；SKIP_CAPNP_REGEN=1：lean AGNOS
   # 没有 capnpc 工具链，gen/cpp 已随 lean-master 跟踪（2026-09-24 起）。
-  # 显式列出 ARTIFACT_PATHS 目标：默认全量会把 eagled 的 yolo pkl 也拉进图里，
-  # 而它的 onnx 源在扁平树被剥离，且 pkl 由本脚本自己的步骤重编。
+  # 显式列出 ARTIFACT_PATHS 目标：默认全量会把需在设备上编译的
+  # pkl 也拉进图里，而它们由本脚本自己的步骤重编。
   # 若某次改动动了 .capnp schema，必须先在 Mac 侧重新生成 gen/cpp 再提交，
   # 否则这里的编译用的是旧生成物 —— 目前没有工具能拦这个类别。
   wake_cpu_cores
@@ -197,32 +197,6 @@ rebuild_native() {
       /usr/local/venv/bin/scons -j8 $ART_TARGETS
   ) || die "native 全量重建失败，拒绝发布"
   echo "[ok] native 全量重建完成 T=$SECONDS"
-}
-
-compile_yolo_pkl() {
-  YOLO_DIR="openpilot/selfdrive/eagled/models"
-  YOLO_PKL="$SRC/$YOLO_DIR/yolo_tinygrad.pkl"
-  YOLO_ONNX="$SRC/$YOLO_DIR/yolo26n-bdd7-fp32-384x640.onnx"
-  [ -f "$YOLO_ONNX" ] || die "yolo onnx 缺失：$YOLO_ONNX —— $SRC_BRANCH 应 tracked 此文件，前置同步步应已落盘"
-  YOLO_FP=$(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py fingerprint \
-    --extra "yolo-pkl-v1" --extra "pin=$TG_SHA" \
-    "$YOLO_ONNX" "$SRC/$YOLO_DIR/compile_yolo_onnx.py")
-  if pkl_cache_hit "$YOLO_PKL" "$YOLO_FP"; then
-    echo "[ok] yolo pkl 输入未变，跳过重编 T=$SECONDS"
-    return
-  fi
-  wake_cpu_cores
-  (
-    cd "$SRC"
-    DEV=QCOM:IR3 IMAGE=1 FLOAT16=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1 PARALLEL=0 \
-    PYTHONPATH="$SRC/tinygrad_repo:$SRC" \
-    /usr/local/venv/bin/python "$SRC/$YOLO_DIR/compile_yolo_onnx.py" "$YOLO_ONNX" "$YOLO_PKL"
-  ) || die "yolo pkl 编译失败，拒绝发布"
-  # 不按 driving 的 get_chunk_targets 切块：yolo pkl ~13MB 远低于按 onnx 估算的
-  # 切块上限（2*onnx+10MB ≈ 29MB），且运行时 TinygradRunner 按单文件直读，
-  # 切块反而会破坏加载。模型长大越过上限时需连同运行时加载器一起改造。
-  echo "$YOLO_FP" > "$YOLO_PKL.inputs_fp"
-  echo "[ok] yolo pkl 重编译完成 T=$SECONDS"
 }
 
 compile_driving_pkl() {
@@ -359,7 +333,6 @@ run_stage "同步 $SRC_BRANCH 源内容到设备树（结构性防漂移：发�
 run_stage "Materialize tinygrad at the $SRC_BRANCH gitlink" materialize_tinygrad
 run_stage "Materialize 构建 gitlink（msgq/rednose/panda；扁平树只带运行时子集）" materialize_gitlinks
 run_stage "全量重建 native 产物（ARTIFACT_PATHS）" rebuild_native
-run_stage "eagled YOLO pkl（输入指纹未变则跳过重编）" compile_yolo_pkl
 run_stage "内置 driving 模型（输入指纹未变则跳过重编）" compile_driving_pkl
 run_stage "capnp schema/gen 一致性门禁" check_schema_stamp
 run_stage "params 键表门禁：params_keys.h 的每个键必须已编译进 libparams_c.so" check_params_keys

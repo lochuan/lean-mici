@@ -15,21 +15,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AthenadPid", {PERSISTENT, INT}},
     {"AthenadUploadQueue", {PERSISTENT, JSON}},
     {"AthenadRecentlyViewedRoutes", {PERSISTENT, STRING}},
-    {"AvoidanceEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
-    {"AvoidanceMinConfidence", {PERSISTENT, FLOAT}},
-    {"AvoidanceEgoHalfWidth", {PERSISTENT, FLOAT, "0.9"}},  // 自车半宽 m（车道内避让：贴线上限）
-    {"AvoidanceLaneProbMin", {PERSISTENT, FLOAT, "0.6"}},   // 车道线置信门下限
-    {"AvoidanceLaneStdMax", {PERSISTENT, FLOAT, "0.3"}},   // 车道线方差门上限
-    {"LaneChangeNearZone", {PERSISTENT, FLOAT, "6.0"}},    // 变道近区硬拦距离 m
-    {"AvoidanceLaneEdgeMargin", {PERSISTENT, FLOAT, "0.15"}},    // 贴线余量 m（车道内避让）
-    {"AvoidanceVruTriggerLineDistance", {PERSISTENT, FLOAT, "1.0"}},      // 弱势交通参与者触发线距 m
-    {"AvoidanceVehicleTriggerLineDistance", {PERSISTENT, FLOAT, "0.5"}},  // 机动车触发线距 m
-    {"AvoidanceMaxRange", {PERSISTENT, FLOAT, "60.0"}},          // 避让目标距离上限 m
-    {"AvoidanceMinSpeedKph", {PERSISTENT, FLOAT, "15.0"}},       // 避让车速下限 km/h
-    {"AvoidanceLateralRate", {PERSISTENT, FLOAT, "0.3"}},        // 车道内偏移横向速率 m/s
-    {"AvoidanceTimeWindow", {PERSISTENT, FLOAT, "4.0"}},         // 到达时间窗口 s
-    {"AvoidanceHoldMax", {PERSISTENT, FLOAT, "5.0"}},            // 并行保持最长时限 s
-    {"AvoidanceVisionTargetSpeed", {PERSISTENT, FLOAT, "5.0"}},  // 纯视觉目标假设对地速度 m/s
     {"BigmodelServerHost", {PERSISTENT | BACKUP, STRING, ""}},  // 06/07 号：手动 IP；空 = mDNS 自动发现
     {"BigmodelToggle", {PERSISTENT | BACKUP, BOOL}},          // 07 号：「远程大模型」开关（仅 offroad 可改；默认关，同 AdbEnabled）
     {"BigmodelLinkState", {CLEAR_ON_MANAGER_START | DONT_LOG, STRING, ""}},  // 06 号：bigmodeld 写的链路状态串
