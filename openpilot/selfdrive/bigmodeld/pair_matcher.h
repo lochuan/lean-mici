@@ -85,8 +85,6 @@ class PairMatcher {
     return a;
   }
 
-  void reset() { slots_[0] = slots_[1] = Slot(); }
-
   // 测试/统计用：槽内是否有未决帧
   bool has_pending(bool is_road) const { return slots_[is_road ? 0 : 1].has; }
 

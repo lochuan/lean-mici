@@ -5,8 +5,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 在取帧线程按标定矩阵 warp 成模型视图 512×256 NV12（协议 v2，App 只做 pack），
 用 `logger_lib` 的 `V4LEncoder` 双路硬编（HEVC Main、VBR、无 B 帧、GOP 20、venus realtime 优先级、
 默认每路 2 Mb/s 可调），按 10 号布局组 FRAME 经 TCP 发出（road 出包即发）。不落盘、不进 loggerd（编码输出
-回调 ⇒ 不建 PubMaster ⇒ loggerd 无编码数据）。线协议见 `1b-model-qnn` 仓库
-`.scratch/big-model-offload-v1/spec.md`「线协议」，`frame_codec.{h,cpp}` 与 App 服务端共用同一实现。
+回调 ⇒ 不建 PubMaster ⇒ loggerd 无编码数据）。`frame_codec.{h,cpp}` 与 chipmunk App 的 `frame_codec.h` 为同一线协议的两份镜像，改一边须同步另一边。
 
 ## 模块
 
@@ -89,9 +88,8 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
    双路 IDR 对吃掉）；miss 分类 `kStaleMiss`（旧连接/已清/已弹的迟到输出，静默）vs
    `kGapMiss`（输出被吞=码流断档，上报新序列 + `notify_stream_gap()` 关门），
    命中前缀死条目同断档一并上报。口径详见 `meta_cache.h` 头注释。
-8. **TODO(04 号)**：desire[8]/action_t[2] 现置零——权威在 modeld 的 DesireHelper 与 13 号
-   延迟公式，待经 msgq 接线；REPLY 的 outputs[0:2066) 与遥测已直接经 msgq 转交 modeld。
-   另（06 号）：连接建立后服务端先发 HELLO（ver + instance_id + max_frame，无鉴权——
+8. desire[8]/action_t[2] 由 bigmodeld 订阅 msgq 填入 FRAME 头；REPLY 的 outputs[0:2066) 与遥测经 msgq 转交 modeld。
+   连接（06 号）：连接建立后服务端先发 HELLO（ver + instance_id + max_frame，无鉴权——
    05 号握手/HMAC/配对已随 ADR-0003 撤销）；`instance_id` 区分服务端重启/网络闪断，
    状态串写 Param `BigmodelLinkState`（07 号读）。连接目标 = 手动 IP（Params
    `BigmodelServerHost` 非空）或 mDNS 自动发现（限 wlan0 子网，见 `server_locator.h`）。
@@ -100,8 +98,6 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 
 - **设备（comma_arm64）**：`scons -j8`（SConstruct 已注册，仅 comma_arm64 构建；
   `system/loggerd/SConscript` 已 `Export('logger_lib')` 供本目录链接）。
-- **快速迭代**：可走 21 号先例 g++ 直构（`prototypes/21/venus/build.sh` 样板，
-  `-I/data/openpilot -I…/openpilot -I…/msgq_repo`）。
 - CLI：`bigmodeld [--host HOST|auto] [--port PORT] [--bitrate BPS]`；`--host` 缺省读
   Params `BigmodelServerHost`（空 = mDNS 自动发现，限 wlan0 子网）。联调用
   `--host 127.0.0.1`（`adb reverse`）、2'000'000 bps/路。

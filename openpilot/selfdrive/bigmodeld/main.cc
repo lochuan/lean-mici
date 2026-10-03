@@ -691,9 +691,6 @@ class Bigmodeld {
           // 编码输出被吞（情形 C）：无 frame_idx 键、无重复上报，不去重
           s = sched_.on_stream_gap();
           break;
-        case UplinkEvent::kFrameSent:
-          s = sched_.on_frame_sent(e.frame_idx);
-          break;
         default:
           break;
       }

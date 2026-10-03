@@ -98,7 +98,3 @@ SchedStep FrameScheduler::on_stream_gap() {
   return start_new_sequence(true);
 }
 
-SchedStep FrameScheduler::on_frame_sent(FrameIdx frame_idx) {
-  (void)frame_idx;
-  return SchedStep{};
-}

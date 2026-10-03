@@ -15,7 +15,7 @@
 //    160  ..  road 段（road_len = MsgHdr.len，HEVC Annex-B 码流；v2 = warp 后 512×256 NV12 编码）
 //     ..   4  wide_len u32
 //     ..  ..  wide 段（HEVC Annex-B 码流）
-//     ..  16  MAC 位（HMAC-SHA256 截断 16 B；本阶段填零不校验，05 号开启）
+//     ..  16  MAC 位（HMAC-SHA256 截断 16 B；保留位，恒填零不校验；HMAC 已随 ADR-0003 撤销）
 //
 //   线长 = 160 + road_len + 4 + wide_len + 16。
 //
@@ -25,7 +25,7 @@
 //     16   8  t_eof u64（回显）
 //     24 8264  outputs[0:2066) f32
 //   8288  16  遥测 u32×4：srv_recv_us、srv_prep_us、srv_htp_us、srv_total_us
-//   8304  16  MAC 位（本阶段填零不校验，05 号开启）
+//   8304  16  MAC 位（保留位，恒填零不校验；HMAC 已随 ADR-0003 撤销）
 //   线长 = 24 + 8280 + 16 = 8320。
 //
 //   ERR（type 0x7F，09 号 §2）：MsgHdr（len=8）‖ code u32 ‖ detail u32 ‖ MAC（零），线长 40。

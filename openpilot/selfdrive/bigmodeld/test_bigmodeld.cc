@@ -164,18 +164,6 @@ static void test_sched_submit_time_slot_hole() {
   }
 }
 
-// 发出序列的时间槽空洞不是码流断档，不触发恢复
-static void test_sched_sent_time_slot_hole() {
-  FrameScheduler s;
-  s.on_connect();
-
-  CHECK(!s.on_frame_sent(FrameIdx{0}).any());
-  CHECK(!s.on_frame_sent(FrameIdx{1}).any());
-  CHECK(!s.on_frame_sent(FrameIdx{3}).any());  // 时间槽 2 为空，但码流没有断
-  CHECK(!s.on_frame_sent(FrameIdx{4}).any());
-  CHECK(!s.on_frame_sent(FrameIdx{6}).any());
-}
-
 // 50 ms 一个时间槽；SOF 100 ms 跳跃对应 +2。重连重置时间基准。
 static void test_frame_indexer() {
   constexpr uint64_t t0 = 1000000000ULL;
@@ -353,8 +341,6 @@ static void test_sender_queue_overwrite() {
                      drop_step = sched.on_frame_dropped(e.frame_idx);
                    } else if (e.ev == UplinkEvent::kHeadBarrier) {
                      sched.on_frame_dropped(e.frame_idx);
-                   } else if (e.ev == UplinkEvent::kFrameSent) {
-                     sched.on_frame_sent(e.frame_idx);
                    }
                  });
   CHECK(s.step());
@@ -1354,7 +1340,6 @@ int main() {
   test_sched_drop_dedup();
   test_sched_stream_gap_no_dedup();
   test_sched_submit_time_slot_hole();
-  test_sched_sent_time_slot_hole();
   test_frame_indexer();
 
   test_sender_road_out_goes();

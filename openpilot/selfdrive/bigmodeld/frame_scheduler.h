@@ -70,9 +70,6 @@ class FrameScheduler {
   // （main.cc 合成，跨路 frame_id 不入 frame_idx 键空间），每次都开新序列。
   SchedStep on_stream_gap();
 
-  // 实际发出只作事件通知；frame_idx 时间槽空洞不代表码流断档。
-  SchedStep on_frame_sent(FrameIdx frame_idx);
-
  private:
   SchedStep start_new_sequence(bool drop_detected);
   bool drop_already_reported(FrameIdx frame_idx);
