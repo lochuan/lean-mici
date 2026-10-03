@@ -10,6 +10,7 @@
 # 环境: DEVICE=comma@10.0.0.27 可覆盖
 #       SRC_BRANCH / RELEASE_BRANCH 透传给设备侧 device_release.sh
 #       （缺省 lean-master / lean-release；如 SRC_BRANCH=big-uplink RELEASE_BRANCH=big-release）
+#       ADB_SERIAL=55873f9 走 adb 隧道（DEVICE=c4usb → localhost:2222）时设上，重启后自动重建转发
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
@@ -64,8 +65,19 @@ done
 ssh "$DEVICE" "cd /data/openpilot && git fetch -q origin $RELEASE_BRANCH && git checkout -q --force -B $RELEASE_BRANCH FETCH_HEAD"
 
 echo "[-] 重启 + 上机验证"
-ssh "$DEVICE" 'sudo systemctl restart comma'
-sleep 40
+# 必须整机重启：systemctl restart comma 不清内核的 touch_count，开机累计 >4 次触摸时
+# comma.sh 会进 tap-reset 界面，openpilot 起不来（2026-10-03 踩过）。
+ssh "$DEVICE" 'sudo reboot' || true
+sleep 30
+for _ in $(seq 36); do
+  [ -n "${ADB_SERIAL:-}" ] && adb -s "$ADB_SERIAL" forward tcp:2222 tcp:22 >/dev/null 2>&1 || true
+  ssh -o ConnectTimeout=5 "$DEVICE" true 2>/dev/null && break
+  sleep 5
+done
+sleep 30
+ssh "$DEVICE" 'pgrep -f "[m]anager.py" >/dev/null && ! pgrep -f "/usr/comma/[r]eset" >/dev/null' \
+  || { echo "[x] 重启后 manager 未运行（或卡在 reset 界面）"; exit 1; }
+echo "[ok] manager 运行中"
 ssh "$DEVICE" "cd /data/openpilot && PYTHONPATH=/data/openpilot /usr/local/venv/bin/python -W ignore -c '
 from openpilot.common.params import Params
 Params().check_key(\"AvoidanceLaneEdgeMargin\")
