@@ -111,6 +111,9 @@ cd openpilot/selfdrive/bigmodeld
 clang++ -std=c++17 -O1 test_bigmodeld.cc frame_codec.cpp frame_meta.cpp \
         frame_scheduler.cpp uplink_sender.cpp server_locator.cpp \
         -o /tmp/test_bigmodeld && /tmp/test_bigmodeld
+# warp 查找表（需 arm64/NEON，Apple Silicon 可直接编）
+clang++ -std=c++17 -O1 test_warp_lut.cc warp_pack.cpp frame_meta.cpp frame_codec.cpp \
+        -o /tmp/test_warp_lut && /tmp/test_warp_lut
 ```
 
 覆盖：状态机全转移（GOP20/wide 晚 10 帧、发送侧显式丢弃恢复、配对失败/时间槽空洞不恢复、时间槽编号）、

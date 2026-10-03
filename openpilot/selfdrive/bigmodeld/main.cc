@@ -75,7 +75,7 @@ constexpr int kSchedFifoPrio = 53;
 // writer/reply 线程：core 3 有 pandad（FIFO 54，常驻 ~36%）抢占 → 编码完到 send 等 1～8 ms；
 // core 2 只有 RT 5 的 locationd 系（台架 A/B/A：RTT p90 62.4→56.2 ms）。EINVAL（离线核）容忍
 const std::vector<int> kCpuAffinity = {2};
-// capture 线程做 warp（~2.3 ms/路）：两路分到两颗大核并行，FIFO 50 低于 CTRL_LOW 51 不抢 control/planner
+// capture 线程做 warp（查找表 ~0.3 ms/路，标定变化那帧建表 ~1 ms）：两路分到两颗大核并行，FIFO 50 低于 CTRL_LOW 51 不抢 control/planner
 // （core 4 = controlsd/card，5 = plannerd/radard，6 = camerad，7 = modeld）
 constexpr int kCaptureFifoPrio = 50;
 const std::vector<int> kCaptureCore[2] = {{5}, {4}};
@@ -281,6 +281,7 @@ class Bigmodeld {
 
     VisionStreamType type = sid == kRoad ? VISION_STREAM_NARROW_ROAD : VISION_STREAM_WIDE_ROAD;
     VisionIpcClient vipc("camerad", type, false);
+    chipmunk::WarpLut warp_lut;  // 本线程独占：标定不变时每帧只按表取像素
     bool inited = false;
 
     while (!do_exit) {
@@ -304,7 +305,7 @@ class Bigmodeld {
         meta_.warp(sid == kWide, mat);
         const chipmunk::Nv12View src{buf->y, buf->uv, (int)buf->width, (int)buf->height,
                                      (int)buf->stride, (int)buf->stride};
-        if (!chipmunk::warpNv12(src, mat, chipmunk::Nv12Out{dst->y, dst->uv, (int)dst->stride, (int)dst->stride})) {
+        if (!warp_lut.warp(src, mat, chipmunk::Nv12Out{dst->y, dst->uv, (int)dst->stride, (int)dst->stride})) {
           LOGE("bigmodeld: %s warp 失败（源 %zux%zu stride %zu）", sid == kRoad ? "road" : "wide",
                buf->width, buf->height, buf->stride);
           ctx_[sid].pool.release(dst);

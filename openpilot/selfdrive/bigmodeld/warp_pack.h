@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace chipmunk {
 
@@ -45,7 +46,21 @@ struct Nv12Out {
 
 // C4 侧 warp：同一矩阵语义，输出 512×256 NV12 而非 packed6。
 // 不变量：warpPackNv12(I, warpNv12(src, M)) == warpPackNv12(src, M)（逐位，单测钉住），
-// 故手机只需 identity warpPackNv12 做 pack。本文件 C4（bigmodeld）与 App 原样同源。
+// 故手机只需 identity warpPackNv12 做 pack。本文件 C4（bigmodeld）与 App 同源（WarpLut 仅 C4 有）。
 bool warpNv12(const Nv12View& src, const float mat[9], const Nv12Out& dst);
+
+// warpNv12 的查找表版（仅 C4）：矩阵与源几何（宽高/行跨）不变时复用逐像素源偏移表，
+// 每帧只做按表取像素（C4 0.32 ms vs 现算 1.9 ms）；变了才重建（~1 ms，标定约每 5 s 一次）。
+// 输出与 warpNv12 逐位一致（同一份索引数学，test_warp_lut.cc 钉住）。非线程安全：每路一个实例。
+class WarpLut {
+ public:
+  bool warp(const Nv12View& src, const float mat[9], const Nv12Out& dst);
+
+ private:
+  bool built_ = false;
+  float mat_[9] = {};
+  int geom_[4] = {};  // width, height, stride_y, stride_uv
+  std::vector<uint32_t> y_, uv_;  // Y 512×256 / UV 256×128 源字节偏移（UV 存 U，V = U+1）
+};
 
 }  // namespace chipmunk
