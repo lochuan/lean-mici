@@ -72,7 +72,9 @@ const size_t kEncUvOffset = kEncStride * VENUS_Y_SCANLINES(COLOR_FMT_NV12, chipm
 const size_t kEncBufSize = VENUS_BUFFER_SIZE(COLOR_FMT_NV12, chipmunk::kModelW, chipmunk::kModelH);
 constexpr int kEncPoolDepth = 6;   // 每路编码缓冲池（1 配对槽 + ≤5 在编码器在途）
 constexpr int kSchedFifoPrio = 53;
-const std::vector<int> kCpuAffinity = {3};  // 仿 encoderd.cc:216；EINVAL（离线核）容忍
+// writer/reply 线程：core 3 有 pandad（FIFO 54，常驻 ~36%）抢占 → 编码完到 send 等 1～8 ms；
+// core 2 只有 RT 5 的 locationd 系（台架 A/B/A：RTT p90 62.4→56.2 ms）。EINVAL（离线核）容忍
+const std::vector<int> kCpuAffinity = {2};
 // capture 线程做 warp（~2.3 ms/路）：两路分到两颗大核并行，FIFO 50 低于 CTRL_LOW 51 不抢 control/planner
 // （core 4 = controlsd/card，5 = plannerd/radard，6 = camerad，7 = modeld）
 constexpr int kCaptureFifoPrio = 50;
