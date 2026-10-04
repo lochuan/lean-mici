@@ -3427,8 +3427,8 @@ public:
 
   inline  ::int16_t getSafetyParam() const;
 
-  inline bool hasNeuralNetworkLateralControl() const;
-  inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Reader getNeuralNetworkLateralControl() const;
+  inline bool hasNeuralNetworkLateralControlDEPRECATED() const;
+  inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Reader getNeuralNetworkLateralControlDEPRECATED() const;
 
   inline bool getPcmCruiseSpeed() const;
 
@@ -3470,12 +3470,12 @@ public:
   inline  ::int16_t getSafetyParam();
   inline void setSafetyParam( ::int16_t value);
 
-  inline bool hasNeuralNetworkLateralControl();
-  inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Builder getNeuralNetworkLateralControl();
-  inline void setNeuralNetworkLateralControl( ::cereal::CarParamsSP::NeuralNetworkLateralControl::Reader value);
-  inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Builder initNeuralNetworkLateralControl();
-  inline void adoptNeuralNetworkLateralControl(::capnp::Orphan< ::cereal::CarParamsSP::NeuralNetworkLateralControl>&& value);
-  inline ::capnp::Orphan< ::cereal::CarParamsSP::NeuralNetworkLateralControl> disownNeuralNetworkLateralControl();
+  inline bool hasNeuralNetworkLateralControlDEPRECATED();
+  inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Builder getNeuralNetworkLateralControlDEPRECATED();
+  inline void setNeuralNetworkLateralControlDEPRECATED( ::cereal::CarParamsSP::NeuralNetworkLateralControl::Reader value);
+  inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Builder initNeuralNetworkLateralControlDEPRECATED();
+  inline void adoptNeuralNetworkLateralControlDEPRECATED(::capnp::Orphan< ::cereal::CarParamsSP::NeuralNetworkLateralControl>&& value);
+  inline ::capnp::Orphan< ::cereal::CarParamsSP::NeuralNetworkLateralControl> disownNeuralNetworkLateralControlDEPRECATED();
 
   inline bool getPcmCruiseSpeed();
   inline void setPcmCruiseSpeed(bool value);
@@ -3504,7 +3504,7 @@ public:
   inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
       : _typeless(kj::mv(typeless)) {}
 
-  inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Pipeline getNeuralNetworkLateralControl();
+  inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Pipeline getNeuralNetworkLateralControlDEPRECATED();
 private:
   ::capnp::AnyPointer::Pipeline _typeless;
   friend class ::capnp::PipelineHook;
@@ -7955,41 +7955,41 @@ inline void CarParamsSP::Builder::setSafetyParam( ::int16_t value) {
       ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
 }
 
-inline bool CarParamsSP::Reader::hasNeuralNetworkLateralControl() const {
+inline bool CarParamsSP::Reader::hasNeuralNetworkLateralControlDEPRECATED() const {
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline bool CarParamsSP::Builder::hasNeuralNetworkLateralControl() {
+inline bool CarParamsSP::Builder::hasNeuralNetworkLateralControlDEPRECATED() {
   return !_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Reader CarParamsSP::Reader::getNeuralNetworkLateralControl() const {
+inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Reader CarParamsSP::Reader::getNeuralNetworkLateralControlDEPRECATED() const {
   return ::capnp::_::PointerHelpers< ::cereal::CarParamsSP::NeuralNetworkLateralControl>::get(_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Builder CarParamsSP::Builder::getNeuralNetworkLateralControl() {
+inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Builder CarParamsSP::Builder::getNeuralNetworkLateralControlDEPRECATED() {
   return ::capnp::_::PointerHelpers< ::cereal::CarParamsSP::NeuralNetworkLateralControl>::get(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 #if !CAPNP_LITE
-inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Pipeline CarParamsSP::Pipeline::getNeuralNetworkLateralControl() {
+inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Pipeline CarParamsSP::Pipeline::getNeuralNetworkLateralControlDEPRECATED() {
   return  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Pipeline(_typeless.getPointerField(0));
 }
 #endif  // !CAPNP_LITE
-inline void CarParamsSP::Builder::setNeuralNetworkLateralControl( ::cereal::CarParamsSP::NeuralNetworkLateralControl::Reader value) {
+inline void CarParamsSP::Builder::setNeuralNetworkLateralControlDEPRECATED( ::cereal::CarParamsSP::NeuralNetworkLateralControl::Reader value) {
   ::capnp::_::PointerHelpers< ::cereal::CarParamsSP::NeuralNetworkLateralControl>::set(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), value);
 }
-inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Builder CarParamsSP::Builder::initNeuralNetworkLateralControl() {
+inline  ::cereal::CarParamsSP::NeuralNetworkLateralControl::Builder CarParamsSP::Builder::initNeuralNetworkLateralControlDEPRECATED() {
   return ::capnp::_::PointerHelpers< ::cereal::CarParamsSP::NeuralNetworkLateralControl>::init(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void CarParamsSP::Builder::adoptNeuralNetworkLateralControl(
+inline void CarParamsSP::Builder::adoptNeuralNetworkLateralControlDEPRECATED(
     ::capnp::Orphan< ::cereal::CarParamsSP::NeuralNetworkLateralControl>&& value) {
   ::capnp::_::PointerHelpers< ::cereal::CarParamsSP::NeuralNetworkLateralControl>::adopt(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::cereal::CarParamsSP::NeuralNetworkLateralControl> CarParamsSP::Builder::disownNeuralNetworkLateralControl() {
+inline ::capnp::Orphan< ::cereal::CarParamsSP::NeuralNetworkLateralControl> CarParamsSP::Builder::disownNeuralNetworkLateralControlDEPRECATED() {
   return ::capnp::_::PointerHelpers< ::cereal::CarParamsSP::NeuralNetworkLateralControl>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
