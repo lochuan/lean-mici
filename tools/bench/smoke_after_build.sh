@@ -4,6 +4,7 @@
 # 抓的是 "sunnypilot Unavailable" 这一类：card 等进程启动即崩、被 manager 反复拉起。
 #
 # 用法: tools/bench/smoke_after_build.sh        （发布重启后设备在线即可）
+# 退出码: 0 通过；1 失败；3 没接 jungle（调用方按跳过处理）
 # 环境: DEVICE=comma@10.0.0.27 可覆盖；SETTLE=45 onroad 后等待秒数；WATCH=20 稳定性观察秒数
 set -uo pipefail
 
@@ -31,7 +32,10 @@ REPLAY_PID=$!
 echo "[-] 等设备进 onroad"
 for _ in $(seq 60); do
   [ "$(remote 'cat /data/params/d/IsOffroad' 2>/dev/null)" = "0" ] && break
-  kill -0 "$REPLAY_PID" 2>/dev/null || fail "回放进程退出: $(tail -2 /tmp/jungle_replay.log)"
+  kill -0 "$REPLAY_PID" 2>/dev/null || {
+    grep -q "没找到 jungle" /tmp/jungle_replay.log && { REPLAY_PID=""; exit 3; }
+    fail "回放进程退出: $(tail -2 /tmp/jungle_replay.log)"
+  }
   sleep 2
 done
 [ "$(remote 'cat /data/params/d/IsOffroad' 2>/dev/null)" = "0" ] || fail "120 秒内没进 onroad"

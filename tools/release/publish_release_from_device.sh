@@ -6,7 +6,9 @@
 # 中继三步（取 relstage / push fork / 设备消费）→ 重启 → 上机验证。
 # 发布从此就是这一条命令（纯 Python 改动约 3 分钟；换 pin/换模型才走全量重编）。
 #
-# 用法: tools/release/publish_release_from_device.sh [--skip-tests]
+# 用法: tools/release/publish_release_from_device.sh [--skip-tests] [--skip-smoke]
+#       末尾默认跑台架冒烟 tools/bench/smoke_after_build.sh（jungle 点火回放，验证核心进程 onroad 稳定）；
+#       没接 jungle 时自动跳过，--skip-smoke 强制跳过。
 # 环境: DEVICE=comma@10.0.0.27 可覆盖
 #       SRC_BRANCH / RELEASE_BRANCH 透传给设备侧 device_release.sh
 #       （缺省 lean-master / lean-release；如 SRC_BRANCH=big-uplink RELEASE_BRANCH=big-release）
@@ -19,7 +21,14 @@ DEVICE="${DEVICE:-comma@10.0.0.27}"
 SRC_BRANCH="${SRC_BRANCH:-lean-master}"
 RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
 SKIP_TESTS=0
-[ "${1:-}" = "--skip-tests" ] && SKIP_TESTS=1
+SKIP_SMOKE=0
+for arg in "$@"; do
+  case "$arg" in
+    --skip-tests) SKIP_TESTS=1 ;;
+    --skip-smoke) SKIP_SMOKE=1 ;;
+    *) echo "未知参数: $arg" >&2; exit 2 ;;
+  esac
+done
 
 echo "[-] Mac 侧单测（--skip-tests 跳过）"
 if [ "$SKIP_TESTS" -eq 0 ]; then
@@ -82,3 +91,14 @@ print(\"[ok] params 键抽查\")
 '"
 
 echo "[ok] $RELEASE_BRANCH = ${RELEASE_SHA} 已部署（设备重启完成）"
+
+if [ "$SKIP_SMOKE" -eq 0 ]; then
+  echo "[-] 台架冒烟（jungle 点火回放）"
+  rc=0
+  DEVICE="$DEVICE" "$ROOT/tools/bench/smoke_after_build.sh" || rc=$?
+  case "$rc" in
+    0) ;;
+    3) echo "[skip] 没接 jungle，跳过冒烟" ;;
+    *) echo "[x] 台架冒烟失败：$RELEASE_BRANCH 已部署但核心进程不稳定，见上方输出" >&2; exit 1 ;;
+  esac
+fi

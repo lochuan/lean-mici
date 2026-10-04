@@ -68,6 +68,22 @@ class TestPinIntact(unittest.TestCase):
     self.assertFalse(self._check(mutate="old"))
 
 
+class TestPublishRunsSmoke(unittest.TestCase):
+  """发布末尾必须跑台架冒烟：部署成功不等于 onroad 能起来（card 启动即崩那次，发布脚本照样报 ok）。"""
+
+  def setUp(self):
+    self.sh = (DEVICE.parent / "publish_release_from_device.sh").read_text()
+
+  def test_smoke_is_last_step_and_skippable(self):
+    self.assertIn("tools/bench/smoke_after_build.sh", self.sh)
+    self.assertIn("--skip-smoke", self.sh)
+    self.assertGreater(self.sh.rindex("smoke_after_build.sh"), self.sh.index("已部署（设备重启完成）"))
+
+  def test_smoke_failure_fails_publish_but_missing_jungle_only_skips(self):
+    self.assertIn("3) echo \"[skip]", self.sh)
+    self.assertIn("exit 1", self.sh[self.sh.rindex("smoke_after_build.sh"):])
+
+
 class TestPklCacheHit(unittest.TestCase):
   """driving pkl 编完即切块、原文件删掉：缓存判定必须认切块产物，否则每次发版白编 ~11 分钟。"""
 
