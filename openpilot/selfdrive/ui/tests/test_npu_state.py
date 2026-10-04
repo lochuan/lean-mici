@@ -23,7 +23,7 @@ def test_offroad_is_orange_even_with_stale_connected():
     assert npu_color(False, link) == "orange", f"link={link}"
 
 
-def test_big_frame_window_needs_full_window_and_95_percent():
+def test_big_frame_window_needs_full_window_and_45_of_50():
   from openpilot.selfdrive.ui.sunnypilot.npu_state import BigFrameWindow
   w = BigFrameWindow()
   for _ in range(49):
@@ -31,10 +31,10 @@ def test_big_frame_window_needs_full_window_and_95_percent():
   assert not w.mostly_big()  # 不足 50 帧不显示
   w.push(True)
   assert w.mostly_big()
-  w.push(False)
-  w.push(False)  # 窗口内 48/50 = 96%
+  for _ in range(5):
+    w.push(False)  # 窗口内 45/50
   assert w.mostly_big()
-  w.push(False)  # 47/50 = 94%
+  w.push(False)  # 44/50
   assert not w.mostly_big()
   w.clear()
   assert not w.mostly_big()

@@ -18,11 +18,11 @@ def npu_color(started: bool, link_state: str) -> str:
 
 
 BIG_FRAME_WINDOW = 50   # 最近 50 帧（20Hz ≈ 2.5s），同 lanlinkd 的 MODEL_FRAMES
-BIG_FRAME_MIN_SHARE = 0.95
+BIG_FRAME_MIN_SHARE = 0.9   # 45/50
 
 
 class BigFrameWindow:
-  """最近 50 帧 modelV2.big；窗口满且大模型占比 ≥95% 才算「大模型在工作」。"""
+  """最近 50 帧 modelV2.big；窗口满且大模型占比 ≥90%（45/50） 才算「大模型在工作」。"""
   def __init__(self):
     self._frames: deque[bool] = deque(maxlen=BIG_FRAME_WINDOW)
 
