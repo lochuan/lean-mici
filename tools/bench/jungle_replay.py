@@ -43,29 +43,29 @@ def main() -> None:
   jungles = PandaJungle.list()
   if not jungles:
     sys.exit("没找到 jungle")
-  j = PandaJungle(jungles[0])
+  jungle = PandaJungle(jungles[0])
 
   if "--off" in sys.argv:
-    j.set_ignition(False)
+    jungle.set_ignition(False)
     print("ignition off")
     return
 
   frames = pickle.load(lzma.open(FRAMES))
   for bus in [0, 1, 2, 3, 0xFFFF]:
-    j.can_clear(bus)
+    jungle.can_clear(bus)
   for bus in [0, 1, 2]:
-    j.set_can_speed_kbps(bus, 500)
-  j.set_ignition(True)
-  j.set_panda_power(True)
-  j.set_can_loopback(False)
+    jungle.set_can_speed_kbps(bus, 500)
+  jungle.set_ignition(True)
+  jungle.set_panda_power(True)
+  jungle.set_can_loopback(False)
   print("replaying", len(frames), "frames @100Hz", flush=True)
   t0, i = time.monotonic(), 0
   while True:
     try:
-      j.can_send_many(frames[i % len(frames)])
+      jungle.can_send_many(frames[i % len(frames)])
     except usb1.USBErrorTimeout:
       pass
-    j.can_recv()
+    jungle.can_recv()
     i += 1
     time.sleep(max(0.0, t0 + i * 0.01 - time.monotonic()))
 

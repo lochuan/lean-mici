@@ -152,7 +152,7 @@ write_pin() {  # write_pin <name> <sha> <物化目录>
   echo "$2" > "$PIN_DIR/${1}.sha"
 }
 pin_intact() {  # pin_intact <name> <sha>
-  [ "$(cat "$PIN_DIR/${1}.sha" 2>/dev/null)" = "$2" ] &&
+  [ "$(cat "$PIN_DIR/${1}.sha" 2>/dev/null)" = "$2" ] && [ -s "$PIN_DIR/${1}.manifest" ] &&
     (cd "$SRC/$1" && sha1sum -c --quiet "$PIN_DIR/${1}.manifest" >/dev/null 2>&1)
 }
 materialize_repo() {
