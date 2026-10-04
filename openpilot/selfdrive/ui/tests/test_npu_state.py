@@ -21,3 +21,20 @@ def test_offroad_is_orange_even_with_stale_connected():
   # BigmodelLinkState 是 CLEAR_ON_MANAGER_START、offroad 保留上趟旧值——必须按 started 门控
   for link in ("connected", "blip", "restart", "lost", ""):
     assert npu_color(False, link) == "orange", f"link={link}"
+
+
+def test_big_frame_window_needs_full_window_and_95_percent():
+  from openpilot.selfdrive.ui.sunnypilot.npu_state import BigFrameWindow
+  w = BigFrameWindow()
+  for _ in range(49):
+    w.push(True)
+  assert not w.mostly_big()  # 不足 50 帧不显示
+  w.push(True)
+  assert w.mostly_big()
+  w.push(False)
+  w.push(False)  # 窗口内 48/50 = 96%
+  assert w.mostly_big()
+  w.push(False)  # 47/50 = 94%
+  assert not w.mostly_big()
+  w.clear()
+  assert not w.mostly_big()
