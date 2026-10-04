@@ -99,7 +99,7 @@ sync_sources() {
   cd "$SRC"
   # 设备到 GitHub 的 TLS 偶发握手失败（fake-IP 代理链路），重试 3 次。
   # 重试尽失败不直接拒：ref 验证行才是门（ref 可能是上轮 fetch 留下的）。
-  git_fetch_retry fetch origin "$SRC_BRANCH:refs/remotes/origin/$SRC_BRANCH" 2>/dev/null || true
+  git_fetch_retry fetch -4 origin "$SRC_BRANCH:refs/remotes/origin/$SRC_BRANCH" 2>/dev/null || true
   git rev-parse -q --verify "$SRC_REF" >/dev/null || die "$SRC_BRANCH fetch 失败（3 次重试后）"
   # 运行时产物 + flat-tree 结构条目是源树之外的预期内容。
   ART_EXPECT=$(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py source-sync-allowlist)
@@ -129,7 +129,7 @@ materialize_tinygrad() {
   fi
   rm -rf /data/tg_materialize && git init -q /data/tg_materialize
   git -C /data/tg_materialize remote add origin https://github.com/tinygrad/tinygrad.git
-  git_fetch_retry -C /data/tg_materialize fetch -q --depth=1 origin "$TG_SHA" || die "tinygrad fetch 失败（3 次重试后）"
+  git_fetch_retry -C /data/tg_materialize fetch -4 -q --depth=1 origin "$TG_SHA" || die "tinygrad fetch 失败（3 次重试后）"
   git -C /data/tg_materialize checkout -q FETCH_HEAD
   rm -rf "$SRC/tinygrad_repo" && cp -a /data/tg_materialize "$SRC/tinygrad_repo" && rm -rf "$SRC/tinygrad_repo/.git"
   echo "$TG_SHA" > "$SRC/tinygrad_repo/TINYGRAD_PIN"
@@ -167,7 +167,7 @@ materialize_repo() {
   local tmp="/tmp/mat_${name%_repo}"
   rm -rf "$tmp" && git init -q "$tmp"
   git -C "$tmp" remote add origin "$url"
-  git_fetch_retry -C "$tmp" fetch -q --depth=1 origin "$sha" || die "$name fetch 失败（3 次重试后）"
+  git_fetch_retry -C "$tmp" fetch -4 -q --depth=1 origin "$sha" || die "$name fetch 失败（3 次重试后）"
   git -C "$tmp" checkout -q FETCH_HEAD
   rm -rf "$SRC/$name" && cp -a "$tmp" "$SRC/$name" && rm -rf "$SRC/$name/.git"
   write_pin "$name" "$sha" "$SRC/$name"
