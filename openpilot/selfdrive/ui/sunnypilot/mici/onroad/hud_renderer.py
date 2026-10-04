@@ -31,9 +31,11 @@ class HudRendererSP(HudRenderer):
   def _render(self, rect: rl.Rectangle) -> None:
     super()._render(rect)
     self.blind_spot_indicators.render(rect)
-    # 左上角与 set speed 同位，set speed 显示的那 2.5 s 让位
-    if ui_state.bigmodel_enabled and self._big_frames.mostly_big() and not self.drawing_top_icons():
-      rl.draw_texture_ex(self._txt_npu_green, rl.Vector2(rect.x + 20, rect.y + 14), 0.0, 1.0, rl.WHITE)
+    # 右下角与左下角方向盘对称；盲区指示亮起时让位
+    if ui_state.bigmodel_enabled and self._big_frames.mostly_big() and not self._has_blind_spot_detected():
+      tex = self._txt_npu_green
+      rl.draw_texture_ex(tex, rl.Vector2(rect.x + rect.width - 21 - tex.width, rect.y + rect.height - 14 - tex.height),
+                         0.0, 1.0, rl.WHITE)
 
   def _has_blind_spot_detected(self) -> bool:
 
