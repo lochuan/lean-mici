@@ -144,14 +144,23 @@ materialize_tinygrad() {
 # scons 死在 No tool module 'cython'。pin 一致还必须验 canary 文件在位。
 # canary = 该 repo 的构建关键文件。发布 commit 不再带 pin。
 PIN_DIR=/data/matpins
+# pin = sha + 物化时每个文件的 sha1 清单。只比 sha/canary 会漏掉"flat 树 git reset 把
+# repo 内文件换回旧内容、pin 不变"（2026-10-04：旧 opendbc structs.py 被当新的发出去，card 起不来）。
+write_pin() {  # write_pin <name> <sha> <物化目录>
+  mkdir -p "$PIN_DIR"
+  (cd "$3" && find . -type f -not -path './.git/*' -not -name '*.pyc' -print0 | sort -z | xargs -0 sha1sum) > "$PIN_DIR/${1}.manifest"
+  echo "$2" > "$PIN_DIR/${1}.sha"
+}
+pin_intact() {  # pin_intact <name> <sha>
+  [ "$(cat "$PIN_DIR/${1}.sha" 2>/dev/null)" = "$2" ] &&
+    (cd "$SRC/$1" && sha1sum -c --quiet "$PIN_DIR/${1}.manifest" >/dev/null 2>&1)
+}
 materialize_repo() {
   local name="$1" url="$2" canary="$3"
-  local sha pin cur
+  local sha
   sha=$(git -C "$SRC" rev-parse "$SRC_REF:$name")
-  pin="$PIN_DIR/${name}.sha"
-  cur="$(cat "$pin" 2>/dev/null || true)"
   rm -f "$SRC/$name/.materialized_sha"   # 旧版 repo 内 pin 退役
-  if [ "$cur" = "$sha" ] && [ -e "$SRC/$name/$canary" ]; then
+  if pin_intact "$name" "$sha" && [ -e "$SRC/$name/$canary" ]; then
     echo "[ok] $name 已在 $sha"
     return
   fi
@@ -161,8 +170,7 @@ materialize_repo() {
   git_fetch_retry -C "$tmp" fetch -q --depth=1 origin "$sha" || die "$name fetch 失败（3 次重试后）"
   git -C "$tmp" checkout -q FETCH_HEAD
   rm -rf "$SRC/$name" && cp -a "$tmp" "$SRC/$name" && rm -rf "$SRC/$name/.git"
-  mkdir -p "$PIN_DIR"
-  echo "$sha" > "$pin"
+  write_pin "$name" "$sha" "$SRC/$name"
   echo "[ok] $name materialized at $sha"
 }
 
