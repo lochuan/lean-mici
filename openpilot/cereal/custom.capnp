@@ -364,7 +364,7 @@ struct CarParamsSP @0x80ae746ee2596b11 {
   intelligentCruiseButtonManagementAvailable @4 :Bool;
   enableGasInterceptor @5 :Bool;
 
-  neuralNetworkLateralControl @2 :NeuralNetworkLateralControl;
+  neuralNetworkLateralControlDEPRECATED @2 :NeuralNetworkLateralControl;
 
   struct NeuralNetworkLateralControl {
     model @0 :Model;

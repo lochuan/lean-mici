@@ -291,11 +291,6 @@
          "type": "capability",
          "field": "torque_allowed",
          "equals": true
-        },
-        {
-         "type": "param",
-         "key": "NeuralNetworkLateralControl",
-         "equals": false
         }
        ]
       }
@@ -328,11 +323,6 @@
          "enablement": [
           {
            "type": "offroad_only"
-          },
-          {
-           "type": "param",
-           "key": "NeuralNetworkLateralControl",
-           "equals": false
           }
          ]
         },
@@ -608,47 +598,6 @@
          "type": "param",
          "key": "ShowAdvancedControls",
          "equals": true
-        }
-       ]
-      }
-     ]
-    },
-    {
-     "id": "lateral_control",
-     "title": "横向控制",
-     "items": [
-      {
-       "key": "NeuralNetworkLateralControl",
-       "widget": "toggle",
-       "title": "神经网络横向控制 (NNLC)",
-       "visibility": [
-        {
-         "type": "not",
-         "condition": {
-          "type": "capability",
-          "field": "steer_control_type",
-          "equals": "angle"
-         }
-        }
-       ],
-       "enablement": [
-        {
-         "type": "offroad_only"
-        },
-        {
-         "type": "capability",
-         "field": "torque_allowed",
-         "equals": true
-        },
-        {
-         "type": "param",
-         "key": "EnforceTorqueControl",
-         "equals": false
-        },
-        {
-         "type": "param",
-         "key": "LateralJerkTorqueController",
-         "equals": false
         }
        ]
       }

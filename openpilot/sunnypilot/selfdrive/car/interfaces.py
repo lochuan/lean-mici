@@ -10,7 +10,6 @@ from opendbc.car import structs
 from opendbc.car.interfaces import CarInterfaceBase
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
-from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.helpers import get_nn_model_path
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.helpers import set_speed_limit_assist_availability
 
 
@@ -24,26 +23,6 @@ def _enforce_torque_lateral_control(CP: structs.CarParams, params: Params | None
   return enabled
 
 
-def _initialize_neural_network_lateral_control(CP: structs.CarParams, CP_SP: structs.CarParamsSP,
-                                               params: Params | None = None, enabled: bool = False) -> bool:
-  if params is None:
-    params = Params()
-
-  nnlc_model_path, nnlc_model_name, exact_match = get_nn_model_path(CP)
-
-  if nnlc_model_name == "MOCK":
-    cloudlog.error({"nnlc event": "car doesn't match any Neural Network model"})
-
-  if nnlc_model_name != "MOCK" and CP.steerControlType != structs.CarParams.SteerControlType.angle:
-    enabled = params.get_bool("NeuralNetworkLateralControl")
-
-  CP_SP.neuralNetworkLateralControl.model.path = nnlc_model_path
-  CP_SP.neuralNetworkLateralControl.model.name = nnlc_model_name
-  CP_SP.neuralNetworkLateralControl.fuzzyFingerprint = not exact_match
-
-  return enabled
-
-
 def _initialize_intelligent_cruise_button_management(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params | None = None) -> None:
   if params is None:
     params = Params()
@@ -53,8 +32,8 @@ def _initialize_intelligent_cruise_button_management(CP: structs.CarParams, CP_S
     CP_SP.pcmCruiseSpeed = False
 
 
-def _initialize_torque_lateral_control(CI: CarInterfaceBase, CP: structs.CarParams, enforce_torque: bool, nnlc_enabled: bool) -> None:
-  if nnlc_enabled or enforce_torque:
+def _initialize_torque_lateral_control(CI: CarInterfaceBase, CP: structs.CarParams, enforce_torque: bool) -> None:
+  if enforce_torque:
     CI.configure_torque_tune(CP.carFingerprint, CP.lateralTuning)
 
 
@@ -62,14 +41,8 @@ def _cleanup_unsupported_params(CP: structs.CarParams, CP_SP: structs.CarParamsS
   if params is None:
     params = Params()
 
-  if params.get_bool("LateralJerkTorqueController") and params.get_bool("NeuralNetworkLateralControl"):
-    cloudlog.warning("LateralJerkTorqueController and NeuralNetworkLateralControl both enabled, disabling both")
-    params.put_bool("LateralJerkTorqueController", False, block=True)
-    params.put_bool("NeuralNetworkLateralControl", False, block=True)
-
   if CP.steerControlType == structs.CarParams.SteerControlType.angle:
     cloudlog.warning("SteerControlType is angle, cleaning up params")
-    params.remove("NeuralNetworkLateralControl")
     params.remove("EnforceTorqueControl")
     params.remove("LateralJerkTorqueController")
 
@@ -89,9 +62,8 @@ def _cleanup_unsupported_params(CP: structs.CarParams, CP_SP: structs.CarParamsS
 
 def setup_interfaces(CI: CarInterfaceBase, params: Params | None = None) -> None:
   enforce_torque = _enforce_torque_lateral_control(CI.CP, params)
-  nnlc_enabled = _initialize_neural_network_lateral_control(CI.CP, CI.CP_SP, params)
   _initialize_intelligent_cruise_button_management(CI.CP, CI.CP_SP, params)
-  _initialize_torque_lateral_control(CI, CI.CP, enforce_torque, nnlc_enabled)
+  _initialize_torque_lateral_control(CI, CI.CP, enforce_torque)
   _cleanup_unsupported_params(CI.CP, CI.CP_SP)
 
 

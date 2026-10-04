@@ -9,7 +9,7 @@ import numpy as np
 from openpilot.cereal import log, messaging
 from opendbc.car.structs import car
 from opendbc.car.car_helpers import interfaces
-from opendbc.car.honda.values import CAR as HONDA
+from opendbc.car.toyota.values import CAR as TOYOTA
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
@@ -22,13 +22,12 @@ from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.common.test import OpenpilotTestCase
 
 
-def _make_controller(enhanced=False, nnlc=False):
+def _make_controller(enhanced=False):
   params = Params()
   params.put_bool("EnforceTorqueControl", True, block=True)
   params.put_bool("LateralJerkTorqueController", enhanced, block=True)
-  params.put_bool("NeuralNetworkLateralControl", nnlc, block=True)
 
-  car_name = HONDA.HONDA_CIVIC
+  car_name = TOYOTA.TOYOTA_COROLLA_TSS2
   CarInterface = interfaces[car_name]
   CP = CarInterface.get_non_essential_params(car_name)
   CP_SP = CarInterface.get_non_essential_params_sp(CP, car_name)
@@ -73,37 +72,24 @@ def _run_update(controller, VM):
 
 
 class TestLatControlTorqueExt(OpenpilotTestCase):
-  def test_init_enhanced_only(self):
-    controller, VM, _ = _make_controller(enhanced=True, nnlc=False)
+  def test_init_enhanced(self):
+    controller, VM, _ = _make_controller(enhanced=True)
     assert controller.extension._jerk_aware_enabled
-    assert not controller.extension.enabled  # NNLC disabled
 
-  def test_init_nnlc_only(self):
-    controller, VM, _ = _make_controller(enhanced=False, nnlc=True)
+  def test_init_plain(self):
+    controller, VM, _ = _make_controller(enhanced=False)
     assert not controller.extension._jerk_aware_enabled
-    assert controller.extension.enabled
 
-  def test_init_neither(self):
-    controller, VM, _ = _make_controller(enhanced=False, nnlc=False)
-    assert not controller.extension._jerk_aware_enabled
-    assert not controller.extension.enabled
+  def test_no_nnlc(self):
+    controller, VM, _ = _make_controller(enhanced=True)
+    assert not hasattr(controller.extension, "update_neural_network_feedforward")
 
-  def test_init_both_no_crash(self):
-    controller, VM, _ = _make_controller(enhanced=True, nnlc=True)
-    assert not controller.extension._jerk_aware_enabled
-    assert not controller.extension.enabled
-
-  def test_update_enhanced_only(self):
-    controller, VM, _ = _make_controller(enhanced=True, nnlc=False)
+  def test_update_enhanced(self):
+    controller, VM, _ = _make_controller(enhanced=True)
     output_torque, _, pid_log = _run_update(controller, VM)
     assert pid_log.active
 
-  def test_update_neither(self):
-    controller, VM, _ = _make_controller(enhanced=False, nnlc=False)
-    output_torque, _, pid_log = _run_update(controller, VM)
-    assert pid_log.active
-
-  def test_update_both_no_crash(self):
-    controller, VM, _ = _make_controller(enhanced=True, nnlc=True)
+  def test_update_plain(self):
+    controller, VM, _ = _make_controller(enhanced=False)
     output_torque, _, pid_log = _run_update(controller, VM)
     assert pid_log.active
