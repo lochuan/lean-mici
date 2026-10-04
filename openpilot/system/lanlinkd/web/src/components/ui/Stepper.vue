@@ -64,14 +64,14 @@ const pct = computed(() => {
 
 const display = computed(() => formatSliderValue(local.value, props.step));
 const btn =
-  "grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-sl-surface-3 ring-1 ring-inset " +
+  "grid h-8 w-8 sm:h-10 sm:w-10 shrink-0 place-items-center rounded-lg bg-sl-surface-3 ring-1 ring-inset " +
   "ring-sl-border text-sl-text-1 transition-colors hover:bg-sl-border " +
   "disabled:pointer-events-none disabled:opacity-30 active:scale-95";
 </script>
 
 <template>
   <div class="flex flex-col items-stretch gap-2">
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-1.5 sm:gap-2">
       <button
         type="button"
         :class="btn"
@@ -85,12 +85,12 @@ const btn =
       <div
         :class="
           cn(
-            'min-w-[104px] rounded-lg bg-sl-bg px-3 py-2 text-center ring-1 ring-inset ring-sl-border',
+            'min-w-[64px] sm:min-w-[104px] rounded-lg bg-sl-bg px-2 sm:px-3 py-1.5 sm:py-2 text-center ring-1 ring-inset ring-sl-border',
             props.disabled && 'opacity-40',
           )
         "
       >
-        <span class="sl-tabular text-[15px] font-semibold text-sl-text-1">{{ display }}</span>
+        <span class="sl-tabular text-sm sm:text-[15px] font-semibold text-sl-text-1">{{ display }}</span>
         <span v-if="props.unit" class="ml-1 text-xs text-sl-text-3">{{ props.unit }}</span>
       </div>
 

@@ -12,7 +12,7 @@ import {
   SelectViewport,
 } from "reka-ui";
 import { Check, ChevronDown } from "lucide-vue-next";
-import { cn } from "@/lib/utils";
+import { cn, optionMatches } from "@/lib/utils";
 import type { OptionChoice } from "@/lib/schema";
 
 const props = defineProps<{
@@ -28,7 +28,7 @@ const props = defineProps<{
 const emit = defineEmits<{ commit: [string] }>();
 
 const label = computed(
-  () => props.options.find((o) => String(o.value) === props.modelValue)?.label ?? "--",
+  () => props.options.find((o) => optionMatches(o.value, props.modelValue))?.label ?? "--",
 );
 
 const stateOf = (v: string) => props.optionState?.[v] ?? { disabled: false, reason: "" };

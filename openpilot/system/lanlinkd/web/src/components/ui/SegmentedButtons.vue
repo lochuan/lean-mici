@@ -7,8 +7,9 @@
  * 无 vehicle bus 的 tesla 上只剩「退出」可选）。被禁的按钮保留在原位并置灰，
  * 这样用户能看到"有这个模式但我的车不支持"，而不是选项凭空少了几个。
  */
+import { computed } from "vue";
 import { ToggleGroupItem, ToggleGroupRoot } from "reka-ui";
-import { cn } from "@/lib/utils";
+import { cn, optionMatches } from "@/lib/utils";
 import type { OptionChoice } from "@/lib/schema";
 
 const props = defineProps<{
@@ -21,19 +22,28 @@ const props = defineProps<{
 
 const emit = defineEmits<{ commit: [string] }>();
 
+// reka 的 ToggleGroup 把 "" 当成"无选中"，所以空值选项（如"默认"）用占位 key 代替
+const EMPTY = "__empty__";
+const keyOf = (v: number | string) => (String(v) === "" ? EMPTY : String(v));
+const selectedKey = computed(() => {
+  const hit = props.options.find((o) => optionMatches(o.value, props.modelValue));
+  return hit ? keyOf(hit.value) : "";
+});
+
 const stateOf = (v: string) => props.optionState?.[v] ?? { disabled: false, reason: "" };
 
 function onPick(v: unknown): void {
-  const value = String(v ?? "");
-  if (!value || props.disabled || props.pending || stateOf(value).disabled || value === props.modelValue) return;
-  emit("commit", value);
+  const key = String(v ?? "");
+  const opt = props.options.find((o) => keyOf(o.value) === key);
+  if (!opt || props.disabled || props.pending || stateOf(String(opt.value)).disabled || key === selectedKey.value) return;
+  emit("commit", String(opt.value));
 }
 </script>
 
 <template>
   <ToggleGroupRoot
     type="single"
-    :model-value="props.modelValue"
+    :model-value="selectedKey"
     :disabled="props.disabled || props.pending"
     :class="
       cn(
@@ -45,8 +55,8 @@ function onPick(v: unknown): void {
   >
     <ToggleGroupItem
       v-for="opt in props.options"
-      :key="String(opt.value)"
-      :value="String(opt.value)"
+      :key="keyOf(opt.value)"
+      :value="keyOf(opt.value)"
       :disabled="props.disabled || props.pending || stateOf(String(opt.value)).disabled"
       :title="stateOf(String(opt.value)).reason"
       :class="
@@ -56,7 +66,7 @@ function onPick(v: unknown): void {
           'data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:shadow-sm',
           'data-[state=off]:text-muted-foreground hover:data-[state=off]:bg-sl-surface-3 hover:data-[state=off]:text-sl-text-1',
           'disabled:pointer-events-none disabled:opacity-35',
-          props.pending && String(opt.value) === props.modelValue && 'animate-pulse',
+          props.pending && keyOf(opt.value) === selectedKey && 'animate-pulse',
         )
       "
     >

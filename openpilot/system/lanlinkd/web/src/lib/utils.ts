@@ -36,3 +36,11 @@ export function formatSliderValue(value: number, step: number | undefined): stri
   const decimals = (String(s).split(".")[1] ?? "").length;
   return value.toFixed(decimals);
 }
+
+/** 选项值是否等于设备上存的原始字符串。数值选项要按数值比：schema 里的 1.0
+ *  经 JS 变成 "1"，设备上存的是 "1.0"，字符串比较永远对不上（选中态不亮）。 */
+export function optionMatches(optValue: number | string, raw: string): boolean {
+  if (String(optValue) === raw) return true;
+  if (raw === "" || optValue === "") return false;
+  return Number(optValue) === Number(raw);
+}
