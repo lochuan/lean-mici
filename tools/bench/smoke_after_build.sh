@@ -42,15 +42,12 @@ done
 
 echo "[-] 等 ${SETTLE}s 让进程起来"
 sleep "$SETTLE"
-declare -A before
-for p in $PROCS; do
-  before[$p]="$(pids "$p")"
-  [ -n "${before[$p]}" ] || fail "$p 没在跑"
-done
+snapshot() { for p in $PROCS; do echo "$p $(pids "$p")"; done; }
+before="$(snapshot)"
+echo "$before"
+echo "$before" | awk 'NF < 2 { print $1 " 没在跑"; bad = 1 } END { exit bad }' || fail "有核心进程没在跑"
 
 echo "[-] 观察 ${WATCH}s，pid 不得变化（变了 = 被 manager 反复拉起）"
 sleep "$WATCH"
-for p in $PROCS; do
-  [ "$(pids "$p")" = "${before[$p]}" ] || fail "$p 重启过"
-done
+[ "$(snapshot)" = "$before" ] || fail "核心进程 pid 变了（被重启过）"
 echo "PASS: $PROCS 稳定运行 $((SETTLE + WATCH))s"
