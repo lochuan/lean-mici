@@ -188,7 +188,7 @@ def test_model_timing_stages_sources_and_deadline():
     return {**dict.fromkeys(STAGE_FIELDS, 0.), **kw}
 
   def rep(rw):
-    return st(captureMs=20., warpMs=.5, pairWaitMs=1., encodeMs=2., sendMs=.5, replyWaitMs=rw, handoffMs=1., phoneTotalMs=24.)
+    return st(captureMs=20., warpMs=.5, pairWaitMs=1., encodeMs=2., sendMs=.5, replyWaitMs=rw, phoneTotalMs=24.)
   frames = [(rep(30.), 'big', 0, 70.), (rep(40.), 'big', 0, 70.), (st(), 'timeout', 0, 70.),
             (st(), 'timeout', 0, 70.), (rep(80.), 'big', 1, 70.), (st(), 'zeroOutput', 0, 70.),
             (st(), 'linkDown', 0, 0.), (st(), 'warmup', 0, 0.), (st(), 'late', 1, 70.)]  # 已在手的迟到同帧也报 bigLateReplyCount
@@ -198,8 +198,8 @@ def test_model_timing_stages_sources_and_deadline():
   assert s["replyWait"] == {"p50": 40., "p90": 80.}    # 有分段的 3 帧，最近邻秩
   assert s["capture"] == {"p50": 20., "p90": 20.}
   assert s["network"] == {"p50": 16., "p90": 56.}      # 等 REPLY − 手机 total
-  assert s["total"] == {"p50": 65., "p90": 105.}       # eof → modeld 收到 = C4 各段 + handoff
-  assert list(s) == ["capture", "warp", "pairWait", "encode", "send", "replyWait", "network", "handoff", "total"]
+  assert s["total"] == {"p50": 64., "p90": 104.}       # eof → bigmodeld 收到 REPLY = C4 各段之和
+  assert list(s) == ["capture", "warp", "pairWait", "encode", "send", "replyWait", "network", "total"]
   # 迟到总数 = Σ bigLateReplyCount；其中判定后才到的那些从「超时没回」挪走（已在手的不重复计）
   assert t["sources"] == {"off": 0, "big": 3, "warmup": 1, "linkDown": 1, "timeout": 1, "late": 2, "zeroOutput": 1}
   assert t["deadlineMs"] == 70.

@@ -90,8 +90,7 @@ const STAGE_ROWS = [
   { key: "send", label: "发送（含排队）" },
   { key: "replyWait", label: "等 REPLY" },
   { key: "network", label: "其中网络（−手机）", sub: true },
-  { key: "handoff", label: "转交 modeld" },
-  { key: "total", label: "合计（出图→modeld）", strong: true },
+  { key: "total", label: "合计（出图→收到 REPLY）", strong: true },
 ] as const;
 
 const SOURCE_ROWS = [

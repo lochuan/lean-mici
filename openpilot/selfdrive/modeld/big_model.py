@@ -14,8 +14,10 @@ import numpy as np
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 
 BIG_OUTPUT_LEN = 2066
-# BigModelReply.stages 里 bigmodeld 填的字段（handoffMs 由 latch 补）
 BIGMODELD_STAGE_FIELDS = ('captureMs', 'warpMs', 'pairWaitMs', 'encodeMs', 'sendMs', 'replyWaitMs', 'phoneTotalMs')
+# BigModelReply.flags：手机新建序列 / t-4 用了零图（chipmunk bgm1_server.cpp）
+REPLY_FLAG_SEQ_RESET = 1 << 0
+REPLY_FLAG_ZERO_PAIR = 1 << 1
 
 # timestamp_eof 是内核 SOF_BOOT_TS（CLOCK_BOOTTIME）；与它比较的"现在"必须同钟，
 # time.monotonic 不含挂起时长，设备挂起过就整体偏移。macOS 无 BOOTTIME（同 common/timing.h）
@@ -101,6 +103,7 @@ class _Reply(NamedTuple):
   outputs: np.ndarray
   eof_to_reply_ms: float
   arrival_ns: int
+  warming: bool = False
 
 
 class BigReplyLatch:
@@ -112,9 +115,11 @@ class BigReplyLatch:
   内没回音就只捡不等，保 20 Hz 不塌（不 modeldLagging）；一有回音自恢复。
   ponytail: 只缓存最新一帧（msgq 语义，不重试不补发），迟到旧帧不参与匹配。
   """
-  def __init__(self, sm, alive_s: float = 2.0):
+  def __init__(self, sm, alive_s: float = 2.0, warmup_replies: int = 0):
     self._sm = sm
     self.alive_s = alive_s
+    self._warmup_replies = warmup_replies  # 手机新建序列后头 N 个 REPLY 不用（模型时序状态刚清空）
+    self._replies_since_reset = warmup_replies
     self._cv = threading.Condition()
     self._last: _Reply | None = None
     self._last_seen = 0.0
@@ -125,17 +130,19 @@ class BigReplyLatch:
     threading.Thread(target=self._run, daemon=True).start()
 
   def _on_reply(self, t_eof: int, outputs: np.ndarray, arrival_ns: int,
-                stages: dict[str, float] | None = None, received_ns: int = 0) -> None:
+                stages: dict[str, float] | None = None, flags: int = 0) -> None:
     eof_to_reply_ms = (arrival_ns - t_eof) / 1e6
     with self._cv:
+      self._replies_since_reset = 0 if flags & REPLY_FLAG_SEQ_RESET else self._replies_since_reset + 1
+      warming = bool(flags & REPLY_FLAG_ZERO_PAIR) or self._replies_since_reset < self._warmup_replies
       if t_eof <= self._gave_up_t_eof:
         self._late_count += 1
         self._late_ms = eof_to_reply_ms
-      self._last = _Reply(t_eof, outputs, eof_to_reply_ms, arrival_ns)
+      self._last = _Reply(t_eof, outputs, eof_to_reply_ms, arrival_ns, warming)
       self._last_seen = time.monotonic()
       if stages is not None:
         # ponytail: 一帧周期内到两个 REPLY 只留最新的分段（罕见）
-        self._stages = {**stages, 'handoffMs': (arrival_ns - received_ns) / 1e6 if received_ns else 0.}
+        self._stages = stages
       self._cv.notify_all()
 
   def _run(self) -> None:
@@ -149,14 +156,15 @@ class BigReplyLatch:
       arrival_ns = nanos_since_boot()
       s = r.stages
       stages = {k: getattr(s, k) for k in BIGMODELD_STAGE_FIELDS}
-      self._on_reply(r.tEof, np.array(r.outputs, dtype=np.float32)[:BIG_OUTPUT_LEN], arrival_ns, stages, r.receivedNs)
+      self._on_reply(r.tEof, np.array(r.outputs, dtype=np.float32)[:BIG_OUTPUT_LEN], arrival_ns, stages, r.flags)
 
   def link_alive(self) -> bool:
     return time.monotonic() - self._last_seen < self.alive_s
 
   def wait_for(self, t_eof: int, deadline_ns: int) -> tuple[np.ndarray | None, float, str]:
     """要 tEof 匹配的当帧 REPLY：已到且按时立即返回（零等待），否则等到 deadline。
-    返回 (outputs[2066) f32, REPLY 往返 ms, 'big')；超时 (None, 0., 'timeout')、迟到 (None, 0., 'late')。
+    返回 (outputs[2066) f32, REPLY 往返 ms, 'big')；超时 (None, 0., 'timeout')、迟到 (None, 0., 'late')；
+    手机刚新建序列的 REPLY 按时到也不用：(None, REPLY 往返 ms, 'warmup')。
     结果一到就发，不等截止。
     """
     with self._cv:
@@ -164,6 +172,8 @@ class BigReplyLatch:
         r = self._last
         if r is not None and r.t_eof == t_eof:
           if r.arrival_ns <= deadline_ns:
+            if r.warming:
+              return None, r.eof_to_reply_ms, 'warmup'
             return r.outputs, r.eof_to_reply_ms, 'big'
           # 票面「按截止时刻择优」：迟到 REPLY（往返超预算）已在手也不用，落小模型兜底
           self._gave_up_t_eof = t_eof
@@ -204,8 +214,7 @@ class FrameSelection(NamedTuple):
 def select_frame(small_output: dict[str, np.ndarray], *, latch, enabled: bool, run_count: int,
                  timestamp_eof: int, latency_ms: float, grace_ms: float, warmup_frames: int,
                  current_time_ns: Callable[[], int],
-                 blender: SourceBlender, action_for: Callable, small_action_t: tuple[float, float],
-                 big_action_t: tuple[float, float],
+                 blender: SourceBlender, action_for: Callable, action_t: tuple[float, float],
                  parse_outputs: Callable[[np.ndarray], dict[str, np.ndarray]] = parse_big_outputs) -> FrameSelection:
   """Choose, blend, and derive this frame's action through one host-testable seam.
 
@@ -231,10 +240,10 @@ def select_frame(small_output: dict[str, np.ndarray], *, latch, enabled: bool, r
 
   big_output = parse_outputs(raw) if raw is not None else None
   model_output = blender.step(small_output, big_output)
-  small_action = action_for(small_output, *small_action_t)
+  small_action = action_for(small_output, *action_t)
   big_leg = big_output if big_output is not None else blender.big_last
   if big_leg is not None and blender.w > 0.0:
-    big_action = action_for(big_leg, *big_action_t)
+    big_action = action_for(big_leg, *action_t)
     weight = blender.w
     curvature = (1. - weight) * small_action.desiredCurvature + weight * big_action.desiredCurvature
     acceleration = (1. - weight) * small_action.desiredAcceleration + weight * big_action.desiredAcceleration

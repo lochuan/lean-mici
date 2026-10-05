@@ -38,13 +38,9 @@ SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
 LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
-# 04 号 C-2：大模型 action_t 用 chestnut 公式（bundle overrides 实测 lat=.1/long=.3，
-# research/02 §4），独立于上面的小模型口径（票面「小模型公式不变」）
-BIG_LAT_SMOOTH_SECONDS = 0.1
-BIG_LONG_SMOOTH_SECONDS = 0.3
 # 04 号 C-3：大模型 REPLY 截止 = timestamp_eof + L̂ + 48ms（ADR-0001），L̂ 滑动中位 [15,35] 初值 22
 BIG_REPLY_GRACE_MS = 48.
-BIG_WARMUP_FRAMES = 4  # modeld 重启后头 4 帧按超时帧（票面）
+BIG_WARMUP_FRAMES = 5  # modeld 重启 / 手机新建序列后头 5 帧（0.25 s）按小模型帧
 MIN_LAT_CONTROL_SPEED = 0.3
 
 
@@ -141,7 +137,6 @@ class ModelState:
 
   def get_action_from_model(self, model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                             lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
-    lat_smooth_seconds = self.LAT_SMOOTH_SECONDS
     if 'action' not in model_output:
       plan = model_output['plan'][0]
       desired_accel = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
@@ -152,11 +147,10 @@ class ModelState:
     else:
       desired_accel = model_output['action'][0,1]
       desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
-      lat_smooth_seconds = BIG_LAT_SMOOTH_SECONDS  # 与 big_lat_action_t 里假设的平滑同值
     stop = should_stop(v_ego, desired_accel)
     desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, self.LONG_SMOOTH_SECONDS)
     if v_ego > MIN_LAT_CONTROL_SPEED:
-      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, lat_smooth_seconds)
+      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, self.LAT_SMOOTH_SECONDS)
     else:
       desired_curvature = prev_action.desiredCurvature
 
@@ -255,7 +249,7 @@ def main(demo=False):
   sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "carControl", "lateralDelay"])
   # 04 号 C-3：bigModelReply 独立订阅——latch 读线程收帧即盖到达时刻，主循环不碰 sm 的 updated 语义
   sm_big = SubMaster(["bigModelReply"])
-  latch = BigReplyLatch(sm_big)
+  latch = BigReplyLatch(sm_big, warmup_replies=BIG_WARMUP_FRAMES)
   latency = LatencyEstimator()  # L̂：喂 modeld 收帧时刻 − timestamp_eof（ADR-0001），不喂 REPLY 往返
   blender = SourceBlender()
 
@@ -368,10 +362,6 @@ def main(demo=False):
     action_delay = DT_MDL / 2 # middle of the interval between model output (current state) and next frame (expected state)
     lat_action_t = lat_delay + frame_delay + action_delay
     long_action_t = long_delay + frame_delay + action_delay
-    # 04 号 C-3：大路 action_t = chestnut 公式（lat 走 get_lat_delay，受 LagdToggle 控制），
-    # 与 mdv2sp.bigActionT 同一口径；小模型公式不变（票面不变量）
-    big_lat_action_t = model.lat_delay + BIG_LAT_SMOOTH_SECONDS + frame_delay + action_delay
-    big_long_action_t = CP.longitudinalActuatorDelay + BIG_LONG_SMOOTH_SECONDS + frame_delay + action_delay
     inputs: dict[str, np.ndarray] = {
       'desire_pulse': vec_desire,
       'traffic_convention': traffic_convention,
@@ -396,7 +386,7 @@ def main(demo=False):
         warmup_frames=BIG_WARMUP_FRAMES, current_time_ns=nanos_since_boot, blender=blender,
         action_for=lambda output, lat_t, long_t, prev_action=prev_action, v_ego=v_ego:
           model.get_action_from_model(output, prev_action, lat_t, long_t, v_ego),
-        small_action_t=(lat_action_t, long_action_t), big_action_t=(big_lat_action_t, big_long_action_t))
+        action_t=(lat_action_t, long_action_t))
       blended, big_out, eof_to_reply_ms = frame.model_output, frame.big_output, frame.eof_to_reply_ms
       if SEND_RAW_PRED and 'raw_pred' not in blended:
         blended = {**blended, 'raw_pred': model_output['raw_pred']}  # raw_pred 恒为小模型调试输出
@@ -423,9 +413,9 @@ def main(demo=False):
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
       # 04 号 C-2：大模型输入元数据上行（bigmodeld 帧头 desire/action_t 的来源）。
-      # action_t = chestnut 公式（lat 走 get_lat_delay，受 LagdToggle 控制；13 号/research/02 §4）；
+      # action_t 与小模型同值（和上游 chestnut 一致）；
       # desireClass = DH.desire 电平，pulse 边沿由 bigmodeld 生成（msgq 电平采样不怕迟到漏沿）
-      mdv2sp_send.modelDataV2SP.bigActionT = [big_lat_action_t, big_long_action_t]
+      mdv2sp_send.modelDataV2SP.bigActionT = [lat_action_t, long_action_t]
       mdv2sp_send.modelDataV2SP.desireClass = DH.desire
       mdv2sp_send.modelDataV2SP.bigLatencyMs = eof_to_reply_ms
       mdv2sp_send.modelDataV2SP.bigLateReplyCount, mdv2sp_send.modelDataV2SP.bigLateReplyMs = latch.take_late_replies()

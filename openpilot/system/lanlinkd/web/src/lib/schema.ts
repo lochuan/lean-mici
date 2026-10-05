@@ -155,7 +155,7 @@ export interface P50P90 {
 export interface ModelTiming {
   window: number;
   stagesMs: Record<
-    "capture" | "warp" | "pairWait" | "encode" | "send" | "replyWait" | "network" | "handoff" | "total",
+    "capture" | "warp" | "pairWait" | "encode" | "send" | "replyWait" | "network" | "total",
     P50P90
   > | null;
   sources: Record<"off" | "big" | "warmup" | "linkDown" | "timeout" | "late" | "zeroOutput", number>;

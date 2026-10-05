@@ -95,7 +95,7 @@ def build_model_status(frames, big_enabled: bool, link_state: str, timing_frames
 
 
 # ModelDataV2SP.BigStageTimes 字段 / BigSource 枚举（与 custom.capnp 同序）
-STAGE_FIELDS = ('captureMs', 'warpMs', 'pairWaitMs', 'encodeMs', 'sendMs', 'replyWaitMs', 'handoffMs', 'phoneTotalMs')
+STAGE_FIELDS = ('captureMs', 'warpMs', 'pairWaitMs', 'encodeMs', 'sendMs', 'replyWaitMs', 'phoneTotalMs')
 BIG_SOURCES = ('off', 'big', 'warmup', 'linkDown', 'timeout', 'late', 'zeroOutput')
 _C4_STAGES = ('capture', 'warp', 'pairWait', 'encode', 'send', 'replyWait')
 
@@ -116,15 +116,14 @@ def build_model_timing(frames) -> dict:
   """最近 N 帧 timing_frame -> 各段 p50/p90（只算带分段的帧）、小模型原因计数、截止 p50。
   迟到 REPLY 在随后一帧上报，对应的帧当时判了 timeout：计数从 timeout 挪到 late（近似，可跨窗口边界）。"""
   frames = list(frames)
-  rows: dict[str, list[float]] = {k: [] for k in (*_C4_STAGES, 'network', 'handoff', 'total')}
+  rows: dict[str, list[float]] = {k: [] for k in (*_C4_STAGES, 'network', 'total')}
   for stages, *_ in frames:
     if stages['replyWaitMs'] <= 0:
       continue
     for k in _C4_STAGES:
       rows[k].append(stages[k + 'Ms'])
     rows['network'].append(max(stages['replyWaitMs'] - stages['phoneTotalMs'], 0.))
-    rows['handoff'].append(stages['handoffMs'])
-    rows['total'].append(sum(stages[k + 'Ms'] for k in (*_C4_STAGES, 'handoff')))
+    rows['total'].append(sum(stages[k + 'Ms'] for k in _C4_STAGES))
   sources = dict.fromkeys(BIG_SOURCES, 0)
   for _, src, *_ in frames:
     if src in sources:

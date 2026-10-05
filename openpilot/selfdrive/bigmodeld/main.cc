@@ -404,19 +404,15 @@ class Bigmodeld {
             fail("REPLY 解析失败");
             break;
           }
-          // 04 号 C：REPLY 经 msgq 转交 modeld（outputs[0:2066) 与遥测原样镜像，
+          // 04 号 C：REPLY 经 msgq 转交 modeld（outputs[0:2066) 与 flags 原样镜像，
           // 逐帧都发——App 侧解码跳帧的全零 outputs 也发，落回小模型由 modeld 判）
           MessageBuilder msg;
           auto evt = msg.initEvent();
           auto br = evt.initBigModelReply();
-          br.setFrameIdx(r.frame_idx);
           br.setTEof(r.t_eof);
           br.setFlags(r.flags);
           auto outs = br.initOutputs(bgm1::kReplyOutputsCount);
           for (size_t i = 0; i < bgm1::kReplyOutputsCount; i++) outs.set(i, r.outputs[i]);
-          auto tel = br.initTelemetry(bgm1::kReplyTelemetryCount);
-          for (size_t i = 0; i < bgm1::kReplyTelemetryCount; i++) tel.set(i, r.telemetry[i]);
-          br.setReceivedNs(reply_ns);
           auto st = br.initStages();
           st.setPhoneTotalMs(r.telemetry[3] / 1e3f);
           StageMs s;

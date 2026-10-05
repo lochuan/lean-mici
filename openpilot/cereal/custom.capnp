@@ -468,21 +468,17 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   desireClass @4 :UInt8;         # DH.desire 电平（log.Desire 索引），bigmodeld 生成 pulse 边沿
   bigLatencyMs @5 :Float32;      # C-3：REPLY 到达 − timestamp_eof（ms），0 = 本帧没等到
   cameraToModelMs @6 :Float32;   # 帧出图（timestamp_eof）→ modeld 收帧（ms），ADR-0001 的 L_n，喂 L̂
-  # 已删除（曾为 HUD 的变道拦截原因）：占位保序号，不能留空号，勿复用
-  retired7 @7 :Void;
-  retired8 @8 :Void;
-  retired9 @9 :Void;
   # 截止后才到的 REPLY：自上一帧发布以来的个数，及其中最近一个的往返（ms）；随后发布的一帧上报一次，
   # 0 = 没有迟到。warmup 头几帧不等 REPLY，不计。
-  bigLateReplyMs @10 :Float32;
-  bigLateReplyCount @11 :UInt16;
+  bigLateReplyMs @7 :Float32;
+  bigLateReplyCount @8 :UInt16;
   # C4 本机分段：自上一帧发布以来最新收到的那个 REPLY（按时或迟到都算），没有 = 全 0
-  bigStages @12 :BigStageTimes;
-  bigSource @13 :BigSource;     # 本帧用没用上大模型，没用上的原因
-  bigDeadlineMs @14 :Float32;   # 本帧等 REPLY 的截止（相对 timestamp_eof，ms），0 = 没等
+  bigStages @9 :BigStageTimes;
+  bigSource @10 :BigSource;     # 本帧用没用上大模型，没用上的原因
+  bigDeadlineMs @11 :Float32;   # 本帧等 REPLY 的截止（相对 timestamp_eof，ms），0 = 没等
 
   # 以 road timestamp_eof 为零点沿关键路径首尾相接：capture..replyWait 之和 = bigmodeld 收到 REPLY − eof，
-  # 再加 handoff = modeld 收到 − eof（即 bigLatencyMs）。phoneTotalMs 是 REPLY 带回的手机 recv+prep+htp。
+  # phoneTotalMs 是 REPLY 带回的手机 recv+prep+htp。
   struct BigStageTimes {
     captureMs @0 :Float32;    # eof → VisionIPC 收到
     warpMs @1 :Float32;
@@ -490,8 +486,7 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
     encodeMs @3 :Float32;     # 提交 → 两路都出包
     sendMs @4 :Float32;       # 出包 → FRAME 写完 socket（含排队）
     replyWaitMs @5 :Float32;  # 写完 → bigmodeld 收到 REPLY（网络 + 手机）
-    handoffMs @6 :Float32;    # bigmodeld 收到 → modeld 收到（msgq）
-    phoneTotalMs @7 :Float32;
+    phoneTotalMs @6 :Float32;
   }
 
   enum BigSource {
@@ -512,14 +507,11 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
 }
 
 struct BigModelReply @0xcb9fd56c7057593a {
-  # 04 号：BGM1 REPLY → modeld 转交（字段与 REPLY 线布局一一对应，见 bigmodeld/frame_codec.h）
-  frameIdx @0 :UInt32;
-  tEof @1 :UInt64;
-  flags @2 :UInt16;
-  outputs @3 :List(Float32);   # outputs[0:2066)
-  telemetry @4 :List(UInt32);  # recv/prep/htp/total µs
-  stages @5 :ModelDataV2SP.BigStageTimes;  # bigmodeld 填 capture..replyWait、phoneTotal；handoff 由 modeld 填
-  receivedNs @6 :UInt64;                   # bigmodeld 收到 REPLY 的 nanos_since_boot（modeld 算 handoff）
+  # 04 号：BGM1 REPLY → modeld 转交（字段取自 REPLY 线布局，见 bigmodeld/frame_codec.h）
+  tEof @0 :UInt64;
+  flags @1 :UInt16;            # bit0 = 手机新建序列，bit1 = t-4 用了零图
+  outputs @2 :List(Float32);   # outputs[0:2066)
+  stages @3 :ModelDataV2SP.BigStageTimes;  # bigmodeld 填 capture..replyWait、phoneTotal
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {
