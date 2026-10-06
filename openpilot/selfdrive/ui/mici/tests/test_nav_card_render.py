@@ -399,6 +399,9 @@ class RecordingRenderer:
   def set_can_draw_top_icons(self, value):
     pass
 
+  def drawing_top_icons(self):
+    return False
+
   def set_wheel_critical_icon(self, value):
     pass
 
@@ -415,6 +418,7 @@ def road_view_calls(monkeypatch, alert):
   view._model_renderer = RecordingRenderer("model", calls)
   view._alert_renderer = RecordingRenderer("alert", calls, alert=alert)
   view._hud_renderer = RecordingRenderer("hud", calls)
+  view._long_indicator = SimpleNamespace(set_should_draw=lambda value: None, render=lambda rect: None)
   view._confidence_ball = RecordingRenderer("ball", calls)
   view._fade_texture = None
   monkeypatch.setattr(ui_state, "started", True, raising=False)
