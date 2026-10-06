@@ -76,12 +76,16 @@ constexpr int kSchedFifoPrio = 53;
 // writer/reply 线程：core 3 有 pandad（FIFO 54，常驻 ~36%）抢占 → 编码完到 send 等 1～8 ms；
 // core 2 只有 RT 5 的 locationd 系（台架 A/B/A：RTT p90 62.4→56.2 ms）。EINVAL（离线核）容忍
 const std::vector<int> kCpuAffinity = {2};
-// capture 线程做 warp（查找表 ~0.3 ms/路，标定变化那帧建表 ~1 ms）：两路分到两颗 isolcpus 大核并行。
-// core 4/5 上有 FIFO 53 的 controlsd/card/ui，capture 排队使取帧 p50 比 camerad 出帧晚 ~7 ms；
-// core 7 原属 modeld（lean 下闲置），core 6 与 camerad（TS，~5%）同核，FIFO 50 的短突发可抢占它
-// （台架 road→7、wide→6：RTT p50 63.7→57.9 ms，取帧 29.5→23.0 ms）
+// capture 线程做 warp（查找表 ~0.3 ms/路，标定变化那帧建表 ~1 ms），FIFO 50。
+// core 4/5 上有 FIFO 53 的 controlsd/card/ui，capture 排队使取帧 p50 比 camerad 出帧晚 ~7 ms。
+// core 7 有 modeld（FIFO 54，每帧跑 ~9.6 ms）：road 在此每帧排队 ~4.3 ms，取帧 p50 30.1 ms（modeld 24.4 ms）。
+// core 6 有 camerad（TS）：wide 的短突发抢占它，让 road 帧对所有订阅者晚 ~0.7 ms；road 也放这里则 modeld 晚 ~1 ms。
+// road→core 2（RT 5 的 locationd 系 + 本进程 writer/reply，帧到达时都被抢占或错开）、wide→core 6，
+// 台架 jungle 实测：取帧 p50 30.1→24.5 ms，大模型 REPLY p50 54.6→49.6 ms / p99 61.2→53.9 ms，
+// modeld 收帧不变，locationd inputsOK 无异常。wide 也放 core 2 只再快 ~0.7 ms，却让 FIFO 50 线程
+// 更多压在 locationd 所在核（eagled 曾因高优先级拖慢 sensord 致 locationdTemporaryError），不取。
 constexpr int kCaptureFifoPrio = 50;
-const std::vector<int> kCaptureCore[2] = {{7}, {6}};
+const std::vector<int> kCaptureCore[2] = {{2}, {6}};
 
 enum StreamId { kRoad = 0, kWide = 1 };
 

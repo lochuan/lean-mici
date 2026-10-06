@@ -27,7 +27,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 ## 实现口径
 
 1. **编码前配对**：两路 VisionIPC 线程收帧→`warpNv12` 写进 512×256 编码缓冲（venus 对齐、
-   `VENUS_BUFFER_SIZE`，21 号 EINVAL 坑；取帧线程 road→core 7、wide→core 6（isolcpus 大核，避开 core 4/5 上 FIFO 53 的 control/ui）、FIFO 50，warp ~2.3 ms/路）→按 `timestamp_sof` 邻近配对
+   `VENUS_BUFFER_SIZE`，21 号 EINVAL 坑；取帧线程 road→core 2、wide→core 6（避开 core 4/5 上 FIFO 53 的 control/ui 与 core 7 上 FIFO 54 的 modeld）、FIFO 50，warp ~2.3 ms/路）→按 `timestamp_sof` 邻近配对
    （单槽/流，10 ms 容差）→两路同时 `encode_frame`。未配对死亡帧只计数/`LOGW` 并归还缓冲，
    不进编码器、不上报调度器；缺半帧不会中断码流。
    拷贝后的 VisionIPC 缓冲立即可复用（配对等待不占上游缓冲）。
