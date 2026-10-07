@@ -2331,6 +2331,7 @@ struct LateralTorqueParameters @0xe61690eb0b091692 {
   speedBinFrictions @16 :List(Float32);
   speedBinValid @17 :List(Bool);
   speedBinPoints @18 :List(List(List(Float32)));  # per-bin point buckets for cache
+  speedBinCalPerc @19 :List(Int8);
 }
 
 struct LateralDelay @0x98dfdb22c44df8d4 {

@@ -162,12 +162,48 @@ export interface ModelTiming {
   deadlineMs: number | null;
 }
 
+/** 单个速度档（m/s）的自整定结果；calPerc 为该档学习进度（旧缓存无此字段时为 null） */
+export interface TorqueBin {
+  center: number;
+  lo: number;
+  hi: number;
+  latAccelFactor: number;
+  friction: number;
+  valid: boolean;
+  calPerc: number | null;
+}
+
+/** torqued 的 lateralTorqueParameters（实时消息或 LiveTorqueParameters 落盘缓存） */
+export interface TorqueLearned {
+  valid: boolean;
+  useParams: boolean;
+  latAccelFactor: number;
+  friction: number;
+  latAccelOffset: number;
+  latAccelFactorRaw: number;
+  frictionRaw: number;
+  calPerc: number;
+  totalPoints: number;
+  decay: number;
+  resets: number;
+  bins: TorqueBin[];
+}
+
+/** 横向扭矩自整定卡片（status_snapshot.build_torque_status） */
+export interface TorqueStatus {
+  source: "live" | "cache" | "none";
+  learned: TorqueLearned | null;
+  offline: { lateralControl: string; latAccelFactor: number | null; friction: number | null };
+  toggles: { EnforceTorqueControl: boolean; LiveTorqueParamsToggle: boolean; SpeedDependentTorqueToggle: boolean };
+}
+
 export interface StatusSnapshot {
   stale?: boolean;
   paramsVersion?: string | null;
   system?: { version?: string; branch?: string; commit?: string; ignition?: boolean };
   device?: DeviceStatus;
   model?: ModelStatus;
+  torque?: TorqueStatus;
   capabilities?: Capabilities;
 }
 

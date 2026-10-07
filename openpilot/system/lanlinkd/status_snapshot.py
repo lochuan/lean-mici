@@ -1,9 +1,11 @@
 """状态快照与设备能力的纯转换函数。services/params/消息对象均为 duck-type。"""
 import math
 
-from openpilot.cereal import messaging, custom
+from openpilot.cereal import messaging, custom, log
 from opendbc.car.structs import car
 from openpilot.common.swaglog import cloudlog
+from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import (
+  DEFAULT_SPEED_BIN_BOUNDS, DEFAULT_SPEED_BIN_CENTERS, TorqueEstimatorExt)
 
 
 def _get(obj, path: str, default):
@@ -139,6 +141,80 @@ def build_model_timing(frames) -> dict:
     "sources": sources,
     "deadlineMs": _p50_p90(deadlines)["p50"] if deadlines else None,
   }
+
+
+def _bin_bounds(centers: list[float]) -> list[tuple[float, float]]:
+  """速度档边界（m/s），与 torqued_ext._post_reset 同口径：默认档用固定边界，车型配置的档由中心推出。"""
+  if len(centers) == len(DEFAULT_SPEED_BIN_CENTERS) and all(
+      abs(c - d) < 0.01 for c, d in zip(centers, DEFAULT_SPEED_BIN_CENTERS, strict=True)):
+    return [(float(lo), float(hi)) for lo, hi in DEFAULT_SPEED_BIN_BOUNDS]
+  return TorqueEstimatorExt._centers_to_bounds(centers)
+
+
+def _f(v, digits: int = 4) -> float:
+  return round(float(v), digits)
+
+
+def torque_params_dict(ltp) -> dict:
+  """lateralTorqueParameters（实时消息或 LiveTorqueParameters 缓存）-> 纯 dict，脱离 capnp 生命周期。"""
+  centers = [float(c) for c in _list(_get(ltp, "speedBinCenters", []))]
+  lafs = _list(_get(ltp, "speedBinLatAccelFactors", []))
+  frictions = _list(_get(ltp, "speedBinFrictions", []))
+  valid = _list(_get(ltp, "speedBinValid", []))
+  cal = _list(_get(ltp, "speedBinCalPerc", []))
+  bins = []
+  if centers and len(lafs) == len(frictions) == len(valid) == len(centers):
+    for i, (lo, hi) in enumerate(_bin_bounds(centers)):
+      bins.append({"center": _f(centers[i], 2), "lo": _f(lo, 2), "hi": _f(hi, 2),
+                   "latAccelFactor": _f(lafs[i]), "friction": _f(frictions[i]),
+                   "valid": bool(valid[i]), "calPerc": int(cal[i]) if i < len(cal) else None})
+  return {
+    "valid": bool(_get(ltp, "valid", False)),
+    "useParams": bool(_get(ltp, "useParams", False)),
+    "latAccelFactor": _f(_get(ltp, "latAccelFactorFiltered", 0.0)),
+    "friction": _f(_get(ltp, "frictionCoefficientFiltered", 0.0)),
+    "latAccelOffset": _f(_get(ltp, "latAccelOffsetFiltered", 0.0)),
+    "latAccelFactorRaw": _f(_get(ltp, "latAccelFactorRaw", 0.0)),
+    "frictionRaw": _f(_get(ltp, "frictionCoefficientRaw", 0.0)),
+    "calPerc": int(_get(ltp, "calPerc", 0)),
+    "totalPoints": int(_get(ltp, "totalBucketPoints", 0)),
+    "decay": _f(_get(ltp, "decay", 0.0), 1),
+    "resets": int(_get(ltp, "maxResets", 0)),
+    "bins": bins,
+  }
+
+
+def torque_params_from_cache(cache_bytes) -> dict | None:
+  """LiveTorqueParameters param（torqued 行驶中每 60s 落盘的整条 Event）-> torque_params_dict。"""
+  if not cache_bytes:
+    return None
+  try:
+    with log.Event.from_bytes(bytes(cache_bytes)) as evt:
+      return torque_params_dict(evt.lateralTorqueParameters)
+  except Exception:
+    cloudlog.exception("lanlink torque: LiveTorqueParameters 解析失败")
+    return None
+
+
+def offline_torque_from_cp(cp_bytes) -> dict:
+  """CarParamsPersistent -> 横向控制方式与车型出厂（离线）扭矩参数。"""
+  out = {"lateralControl": "", "latAccelFactor": None, "friction": None}
+  if not cp_bytes:
+    return out
+  try:
+    CP = messaging.log_from_bytes(bytes(cp_bytes), car.CarParams)
+    out["lateralControl"] = str(CP.lateralTuning.which())
+    if out["lateralControl"] == "torque":
+      out["latAccelFactor"] = _f(CP.lateralTuning.torque.latAccelFactor)
+      out["friction"] = _f(CP.lateralTuning.torque.friction)
+  except Exception:
+    cloudlog.exception("lanlink torque: CarParamsPersistent 解析失败")
+  return out
+
+
+def build_torque_status(learned: dict | None, source: str, offline: dict, toggles: dict) -> dict:
+  """自整定卡片：source = live（torqued 实时）/ cache（上次行驶落盘）/ none。"""
+  return {"source": source if learned else "none", "learned": learned, "offline": offline, "toggles": toggles}
 
 
 _CAP_KEYS = (

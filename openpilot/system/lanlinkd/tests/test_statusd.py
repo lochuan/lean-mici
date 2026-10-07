@@ -91,3 +91,58 @@ class TestStatusdRun:
     assert model == {"bigEnabled": True, "linkState": "connected", "frames": [0] * 45 + [1] * 5}
     # 分段/原因窗口 = 最近 100 帧 modelDataV2SP
     assert timing["window"] == 60 and timing["sources"]["timeout"] == 60 and timing["deadlineMs"] == 70.
+
+
+class TestTorqueStatus:
+  @staticmethod
+  def _ltp(laf):
+    return NS(valid=True, useParams=True, latAccelFactorFiltered=laf, frictionCoefficientFiltered=0.1,
+              latAccelOffsetFiltered=0., latAccelFactorRaw=laf, frictionCoefficientRaw=0.1, calPerc=100,
+              totalBucketPoints=4000., decay=50., maxResets=1., speedBinCenters=[], speedBinLatAccelFactors=[],
+              speedBinFrictions=[], speedBinValid=[], speedBinCalPerc=[])
+
+  def _run(self, live_calls, cache_laf, clock=None):
+    exit_event = threading.Event()
+    ltp = self._ltp(2.2)
+
+    class FakeSubMaster:
+      def __init__(self, services):
+        self.updated = dict.fromkeys(services, False)
+        self.calls = 0
+
+      def update(self, timeout):
+        self.calls += 1
+        self.updated["lateralTorqueParameters"] = self.calls in live_calls
+        if clock is not None:
+          clock["t"] += 10.0  # 每轮推进 10s（> TORQUE_LIVE_TIMEOUT）
+        if self.calls >= 2:
+          exit_event.set()
+
+      def __getitem__(self, name):
+        return ltp if name == "lateralTorqueParameters" else NS()
+
+    cache_bytes = b"cache"
+    params = NS(get=lambda k: cache_bytes if k == "LiveTorqueParameters" else None,
+                get_bool=lambda k: k == "SpeedDependentTorqueToggle")
+    cache = StatusCache({}, "tici", params=params)
+    with patch.object(statusd.messaging, "SubMaster", FakeSubMaster), \
+         patch.object(statusd, "build_snapshot", lambda *a: {}), \
+         patch.object(statusd, "build_capabilities", lambda *a, **k: {}), \
+         patch.object(statusd, "torque_params_from_cache", lambda b: statusd.torque_params_dict(self._ltp(cache_laf))), \
+         patch.object(statusd.time, "monotonic", (lambda: clock["t"]) if clock is not None else statusd.time.monotonic):
+      cache.run(exit_event)
+    return cache.snapshot()["torque"]
+
+  def test_live_message_wins(self):
+    t = self._run(live_calls={1, 2}, cache_laf=2.9)
+    assert t["source"] == "live" and t["learned"]["latAccelFactor"] == 2.2
+    assert t["toggles"] == {"EnforceTorqueControl": False, "LiveTorqueParamsToggle": False, "SpeedDependentTorqueToggle": True}
+
+  def test_parked_falls_back_to_saved_cache(self):
+    t = self._run(live_calls=set(), cache_laf=2.9)
+    assert t["source"] == "cache" and t["learned"]["latAccelFactor"] == 2.9
+
+  def test_stale_live_falls_back_to_cache(self):
+    # 第 1 轮收到实时消息，第 2 轮没有且已过 10s：torqued 停了（熄火），改读落盘缓存
+    t = self._run(live_calls={1}, cache_laf=2.9, clock={"t": 0.0})
+    assert t["source"] == "cache"

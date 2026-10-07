@@ -211,3 +211,55 @@ def test_model_timing_stages_sources_and_deadline():
   stages = NS(**st(captureMs=3.))
   sp = NS(bigStages=stages, bigSource='timeout', bigLateReplyCount=2, bigDeadlineMs=66.)
   assert timing_frame(sp) == (st(captureMs=3.), 'timeout', 2, 66.)
+
+
+def _ltp(**kw):
+  base = NS(valid=True, useParams=True, latAccelFactorFiltered=2.5, frictionCoefficientFiltered=0.1,
+            latAccelOffsetFiltered=0.01, latAccelFactorRaw=2.6, frictionCoefficientRaw=0.11, calPerc=80,
+            totalBucketPoints=3200., decay=55., maxResets=1., speedBinCenters=[], speedBinLatAccelFactors=[],
+            speedBinFrictions=[], speedBinValid=[], speedBinCalPerc=[])
+  return NS(**{**vars(base), **kw})
+
+
+def test_torque_params_dict_global_and_bins():
+  from openpilot.system.lanlinkd.status_snapshot import torque_params_dict
+  d = torque_params_dict(_ltp(speedBinCenters=[6.5, 10.0, 15.0], speedBinLatAccelFactors=[2.0, 2.4, 2.8],
+                              speedBinFrictions=[0.12, 0.1, 0.09], speedBinValid=[True, False, False],
+                              speedBinCalPerc=[100, 40, 0]))
+  # 车型配置的档：边界与 torqued_ext._centers_to_bounds 同口径（首尾 5 / 40，中间取中点）
+  assert d["latAccelFactor"] == 2.5 and d["friction"] == 0.1 and d["calPerc"] == 80 and d["totalPoints"] == 3200
+  assert d["useParams"] is True and d["resets"] == 1
+  # 边界与 torqued_ext._centers_to_bounds 同口径：首尾 5 / 40，中间取中点
+  assert [(b["lo"], b["hi"]) for b in d["bins"]] == [(5.0, 8.25), (8.25, 12.5), (12.5, 40.0)]
+  assert d["bins"][0] == {"center": 6.5, "lo": 5.0, "hi": 8.25, "latAccelFactor": 2.0, "friction": 0.12,
+                          "valid": True, "calPerc": 100}
+
+
+def test_torque_params_dict_default_bins_use_fixed_bounds():
+  from openpilot.system.lanlinkd.status_snapshot import torque_params_dict
+  from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import DEFAULT_SPEED_BIN_BOUNDS, DEFAULT_SPEED_BIN_CENTERS
+  n = len(DEFAULT_SPEED_BIN_CENTERS)
+  d = torque_params_dict(_ltp(speedBinCenters=DEFAULT_SPEED_BIN_CENTERS, speedBinLatAccelFactors=[2.5] * n,
+                              speedBinFrictions=[0.1] * n, speedBinValid=[False] * n, speedBinCalPerc=[0] * n))
+  # 未配置车型 torqued 用固定边界（5–8, 8–12, ...），不是中心中点
+  assert [(b["lo"], b["hi"]) for b in d["bins"]] == [(float(lo), float(hi)) for lo, hi in DEFAULT_SPEED_BIN_BOUNDS]
+
+
+def test_torque_params_dict_without_bins_or_cal_perc():
+  from openpilot.system.lanlinkd.status_snapshot import torque_params_dict
+  assert torque_params_dict(_ltp())["bins"] == []
+  # 旧缓存没有 speedBinCalPerc：其余照常，进度为 None
+  d = torque_params_dict(_ltp(speedBinCenters=[10.0], speedBinLatAccelFactors=[2.4], speedBinFrictions=[0.1],
+                              speedBinValid=[False], speedBinCalPerc=[]))
+  assert d["bins"][0]["calPerc"] is None
+  # 长度不一致（损坏）不出分档
+  assert torque_params_dict(_ltp(speedBinCenters=[10.0, 20.0], speedBinLatAccelFactors=[2.4]))["bins"] == []
+
+
+def test_torque_status_source_none_without_data():
+  from openpilot.system.lanlinkd.status_snapshot import build_torque_status, offline_torque_from_cp, torque_params_from_cache
+  assert torque_params_from_cache(None) is None
+  assert torque_params_from_cache(b"garbage") is None
+  offline = offline_torque_from_cp(None)
+  assert offline == {"lateralControl": "", "latAccelFactor": None, "friction": None}
+  assert build_torque_status(None, "cache", offline, {})["source"] == "none"
