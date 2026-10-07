@@ -352,6 +352,22 @@
          ]
         },
         {
+         "key": "SpeedDependentTorqueToggle",
+         "widget": "toggle",
+         "title": "按车速分段自整定 (Beta)",
+         "description": "在不同车速档分别学习横向加速度系数和摩擦，行驶中按车速插值使用。改善低速和高速转向手感的一致性；每个速度档需要积累足够数据后才生效，未学好的档沿用全局自整定值。",
+         "enablement": [
+          {
+           "type": "offroad_only"
+          },
+          {
+           "type": "param",
+           "key": "LiveTorqueParamsToggle",
+           "equals": true
+          }
+         ]
+        },
+        {
          "key": "CustomTorqueParams",
          "widget": "toggle",
          "title": "启用自定义整定",

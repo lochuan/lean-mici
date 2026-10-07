@@ -64,6 +64,7 @@ class LatControlTorque(LatControl):
     # Override torque params from extension
     if self.extension.update_override_torque_params(self.torque_params):
       self.update_limits()
+      self.extension.update_limits()
 
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     pid_log.version = VERSION
