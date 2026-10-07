@@ -13,12 +13,11 @@ DEVICE="${DEVICE:-comma@10.0.0.27}"
 SETTLE="${SETTLE:-45}"
 WATCH="${WATCH:-20}"
 PROCS="selfdrive.car.card selfdrive.controls.controlsd selfdrive.selfdrived.selfdrived selfdrive.modeld.modeld selfdrive.controls.plannerd selfdrive.controls.radard"
-PY="$ROOT/.venv/bin/python"
 REPLAY_PID=""
 
 stop() {
   [ -n "$REPLAY_PID" ] && kill "$REPLAY_PID" 2>/dev/null && wait "$REPLAY_PID" 2>/dev/null
-  "$PY" "$ROOT/tools/bench/jungle_replay.py" --off >/dev/null 2>&1
+  "$ROOT/tools/bench/jungle_replay.sh" --off >/dev/null 2>&1
 }
 trap stop EXIT
 fail() { echo "FAIL: $*"; exit 1; }
@@ -26,7 +25,7 @@ remote() { ssh -o ConnectTimeout=5 "$DEVICE" "$@"; }
 pids() { remote "ps -eo pid,cmd | grep -F 'openpilot.$1' | grep -v grep | awk '{print \$1}' | head -1"; }
 
 remote true || fail "设备连不上: $DEVICE"
-"$PY" "$ROOT/tools/bench/jungle_replay.py" > /tmp/jungle_replay.log 2>&1 &
+"$ROOT/tools/bench/jungle_replay.sh" > /tmp/jungle_replay.log 2>&1 &
 REPLAY_PID=$!
 
 echo "[-] 等设备进 onroad"
