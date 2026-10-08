@@ -34,6 +34,14 @@ class TestDeviceReleaseShellBoilerplate(unittest.TestCase):
     self.assertEqual(self.src.count("for i in 1 2 3"), 1,
                      "fetch 重试循环必须只在 git_fetch_retry 里出现一次")
 
+  def test_fetch_failure_must_reject(self):
+    """fetch 失败 = 拒发：|| true 会吞掉失败继续用旧 ref 发版（2026-10-08 schema 门禁误放行实录）。"""
+    fn = re.search(r"^sync_sources\(\) \{.*?^\}", self.src, re.M | re.S)
+    self.assertTrue(fn, "sync_sources 必须定义")
+    body = fn.group(0)
+    self.assertNotIn("|| true", body, "sync_sources 里 fetch 失败不得被 || true 吞掉")
+    self.assertIn("ls-remote", body, "必须比对远端 tip 防止旧 ref 发版")
+
   def test_no_handwritten_failure_wrappers(self):
     self.assertNotIn("|| { echo", self.src, "失败话术走 run_stage/die，不得手写 || { echo; exit 1; }")
     self.assertNotIn("exit 1; }", self.src)

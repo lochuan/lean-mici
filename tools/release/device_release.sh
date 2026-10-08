@@ -98,9 +98,18 @@ check_prereqs() {
 sync_sources() {
   cd "$SRC"
   # 设备到 GitHub 的 TLS 偶发握手失败（fake-IP 代理链路），重试 3 次。
-  # 重试尽失败不直接拒：ref 验证行才是门（ref 可能是上轮 fetch 留下的）。
-  git_fetch_retry fetch -4 origin "$SRC_BRANCH:refs/remotes/origin/$SRC_BRANCH" 2>/dev/null || true
-  git rev-parse -q --verify "$SRC_REF" >/dev/null || die "$SRC_BRANCH fetch 失败（3 次重试后）"
+  # fetch 失败 = 拒发：ref 可能是上轮留下的旧值，用旧树发版会导致 schema/gen 不一致类问题。
+  git_fetch_retry fetch -4 origin "$SRC_BRANCH:refs/remotes/origin/$SRC_BRANCH" 2>/dev/null \
+    || die "$SRC_BRANCH fetch 失败（3 次重试后），拒绝用可能过期的 ref 发版"
+  git rev-parse -q --verify "$SRC_REF" >/dev/null || die "$SRC_BRANCH ref 不存在"
+  # 二次校验：本地 ref 必须等于远端 tip，防止 fetch 成功但 ref 被并发修改。
+  local remote_sha local_sha
+  remote_sha=$(git ls-remote origin "$SRC_BRANCH" | awk '{print $1}') \
+    || die "ls-remote $SRC_BRANCH 失败，无法验证 ref 是否最新"
+  local_sha=$(git rev-parse "$SRC_REF")
+  [ "$remote_sha" = "$local_sha" ] \
+    || die "本地 $SRC_REF ($local_sha) ≠ 远端 ($remote_sha)，拒绝发版"
+  echo "[ok] 同步 $SRC_BRANCH @ ${local_sha:0:12}"
   # 运行时产物 + flat-tree 结构条目是源树之外的预期内容。
   ART_EXPECT=$(/usr/local/venv/bin/python /tmp/relhelper/release_lib.py source-sync-allowlist)
   git checkout "$SRC_REF" -- .
