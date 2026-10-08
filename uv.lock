@@ -887,7 +887,7 @@ requires-dist = [
     { name = "requests" },
     { name = "ruff", marker = "extra == 'testing'" },
     { name = "sanic" },
-    { name = "scons", specifier = "==4.10.1" },
+    { name = "scons" },
     { name = "sentry-sdk" },
     { name = "setproctitle" },
     { name = "sounddevice" },
