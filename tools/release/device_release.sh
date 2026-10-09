@@ -104,7 +104,7 @@ sync_sources() {
   git rev-parse -q --verify "$SRC_REF" >/dev/null || die "$SRC_BRANCH ref 不存在"
   # 二次校验：本地 ref 必须等于远端 tip，防止 fetch 成功但 ref 被并发修改。
   local remote_sha local_sha
-  remote_sha=$(git ls-remote origin "$SRC_BRANCH" | awk '{print $1}') \
+  remote_sha=$(git ls-remote origin "refs/heads/$SRC_BRANCH" | awk '{print $1}') \
     || die "ls-remote $SRC_BRANCH 失败，无法验证 ref 是否最新"
   local_sha=$(git rev-parse "$SRC_REF")
   [ "$remote_sha" = "$local_sha" ] \

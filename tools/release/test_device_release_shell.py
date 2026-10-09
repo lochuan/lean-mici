@@ -42,6 +42,25 @@ class TestDeviceReleaseShellBoilerplate(unittest.TestCase):
     self.assertNotIn("|| true", body, "sync_sources 里 fetch 失败不得被 || true 吞掉")
     self.assertIn("ls-remote", body, "必须比对远端 tip 防止旧 ref 发版")
 
+  def test_remote_tip_ignores_branches_with_same_suffix(self):
+    """ls-remote 按后缀匹配：origin 另有 vultr/lean-master 时只认 refs/heads/lean-master（2026-10-09 误拒发版实录）。"""
+    line = re.search(r'remote_sha=\$\((.*)\) \\$', self.src, re.M)
+    self.assertTrue(line, "sync_sources 必须用 remote_sha=$(...) 取远端 tip")
+    with tempfile.TemporaryDirectory() as td:
+      def git(*args, cwd=td):
+        return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+      origin = f"{td}/origin"
+      git("init", "-q", "-b", "lean-master", origin)
+      git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "a", cwd=origin)
+      want = git("rev-parse", "HEAD", cwd=origin)
+      git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "b", cwd=origin)
+      git("branch", "vultr/lean-master", cwd=origin)
+      git("reset", "-q", "--hard", want, cwd=origin)
+      git("clone", "-q", origin, f"{td}/clone")
+      got = subprocess.run(["bash", "-c", line.group(1)], cwd=f"{td}/clone", env={"SRC_BRANCH": "lean-master", "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"},
+                           check=True, capture_output=True, text=True).stdout.strip()
+      self.assertEqual(got, want)
+
   def test_no_handwritten_failure_wrappers(self):
     self.assertNotIn("|| { echo", self.src, "失败话术走 run_stage/die，不得手写 || { echo; exit 1; }")
     self.assertNotIn("exit 1; }", self.src)
