@@ -21,6 +21,7 @@ from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
+from openpilot.selfdrive.modeld.camera_offset_helper import CameraOffsetHelper
 from openpilot.selfdrive.modeld.big_model import (SourceBlender, BigReplyLatch, LatencyEstimator,
                                                   nanos_since_boot, select_frame)
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, nv12_copy_size, MODELD_INPUTS
@@ -272,6 +273,7 @@ def main(demo=False):
   buf_main, buf_extra = None, None
   meta_main = FrameMeta()
   meta_extra = FrameMeta()
+  camera_offset_helper = CameraOffsetHelper()
 
   if demo:
     CP = get_demo_car_params()
@@ -337,6 +339,10 @@ def main(demo=False):
       has_wide_camera = use_extra_client or main_wide_camera
       extra_intrinsics = dc.wide_road.intrinsics if has_wide_camera else dc.narrow_road.intrinsics
       model_transform_extra = get_warp_matrix(device_from_calib_euler, extra_intrinsics, True).astype(np.float32)
+      camera_offset_helper.set_offset(params.get("CameraOffset", return_default=True))
+      model_transform_main, model_transform_extra = camera_offset_helper.update(model_transform_main, model_transform_extra,
+                                                                                 main_intrinsics, extra_intrinsics,
+                                                                                 sm["extrinsicsCalibration"])
       extrinsics_calibration_seen = True
 
     traffic_convention = np.zeros(2)
