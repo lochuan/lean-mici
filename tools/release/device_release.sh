@@ -117,6 +117,11 @@ checkout_source() {
 build() {
   wake_cpu_cores
   cd "$BUILD"
+  # rednose 生成的 EKF 代码（car/pose/live）并行编译会被 lowmemorykiller 杀掉（Error -9，
+  # 2026-10-09 冷缓存首编实录）：同上游 CI，locationd 先 -j1 单独编，其余再 -j8
+  PYTHONPATH="$BUILD:$BUILD/openpilot" scons -j1 --minimal cache_size_limit="$SCONS_CACHE_LIMIT" \
+    openpilot/selfdrive/locationd openpilot/sunnypilot/selfdrive/locationd \
+    || die "scons 构建 locationd 失败，拒绝发布"
   PYTHONPATH="$BUILD:$BUILD/openpilot" scons -j8 --minimal cache_size_limit="$SCONS_CACHE_LIMIT" \
     || die "scons 构建失败，拒绝发布"
   echo "[ok] 构建完成 T=$SECONDS"
