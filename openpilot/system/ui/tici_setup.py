@@ -31,6 +31,8 @@ BUTTON_HEIGHT = 160
 BUTTON_SPACING = 50
 
 OPENPILOT_URL = "https://openpilot.comma.ai"
+# 默认安装：自建分发服务（装 lochuan/lean-mici @ lean-release-c3x），见 all-in-one/installer/README.md。
+TOYOPILOT_INSTALLER_URL = "https://tp.diaperastiko.top/c3x"
 USER_AGENT = f"AGNOSSetup-{HARDWARE.get_os_version()}"
 
 INSTALLER_DESTINATION_PATH = "/tmp/installer"
@@ -79,7 +81,7 @@ class Setup(Widget):
     self._getting_started_body_label = Label("Before we get on the road, let's finish installation and cover some details.",
                                              BODY_FONT_SIZE, text_alignment=TextAlignment.LEFT, text_padding=20)
 
-    self._software_selection_openpilot_button = ButtonRadio("openpilot", self.checkmark, font_size=BODY_FONT_SIZE, text_padding=80)
+    self._software_selection_openpilot_button = ButtonRadio("ToyoPilot", self.checkmark, font_size=BODY_FONT_SIZE, text_padding=80)
     self._software_selection_custom_software_button = ButtonRadio("Custom Software", self.checkmark, font_size=BODY_FONT_SIZE, text_padding=80)
     self._software_selection_continue_button = Button("Continue", self._software_selection_continue_button_callback,
                                                       button_style=ButtonStyle.PRIMARY)
@@ -185,7 +187,7 @@ class Setup(Widget):
   def _network_setup_continue_button_callback(self):
     self.stop_network_check_thread.set()
     if self._software_selection_openpilot_button.selected:
-      self.download(OPENPILOT_URL)
+      self.download(TOYOPILOT_INSTALLER_URL)
     else:
       self.state = SetupState.CUSTOM_SOFTWARE
 

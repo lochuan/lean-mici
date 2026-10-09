@@ -33,6 +33,9 @@ from openpilot.selfdrive.ui.mici.widgets.button import BigButton, GreyBigButton
 NetworkType = log.DeviceState.NetworkType
 
 OPENPILOT_URL = "https://openpilot.comma.ai"
+# 默认安装：自建分发服务按路径发打好补丁的 installer（装 lochuan/lean-mici @ lean-release），
+# 安装目标在服务端改，不用重建 AGNOS。见 all-in-one/installer/README.md。
+TOYOPILOT_INSTALLER_URL = "https://tp.diaperastiko.top/c4"
 # 连通性探测：国内直连地址（HTTP 免疫时钟错误导致的 TLS 失败，204 响应快）。
 # 不可用于下载——setup 下载 openpilot 本体仍走 OPENPILOT_URL。
 CONNECTIVITY_CHECK_URL = "http://wifi.vivo.com.cn/generate_204"
@@ -132,7 +135,7 @@ class SoftwareSelectionPage(NavWidget):
                use_custom_software_callback: Callable):
     super().__init__()
 
-    self._openpilot_slider = self._child(LargerSlider("slide to install\nopenpilot", use_openpilot_callback))
+    self._openpilot_slider = self._child(LargerSlider("slide to install\nToyoPilot", use_openpilot_callback))
     self._openpilot_slider.set_enabled(lambda: self.enabled and not self.is_dismissing)
     self._custom_software_slider = self._child(LargerSlider("slide to install\ncustom software", use_custom_software_callback, green=False, shimmer_offset=0.4))
     self._custom_software_slider.set_enabled(lambda: self.enabled and not self.is_dismissing)
@@ -324,7 +327,7 @@ class NetworkSetupPageBase(Scroller):
 
     self._waiting_button = BigPillButton("connect to\ncontinue", disabled_background=True)
     self._waiting_button.set_click_callback(on_waiting_click)
-    self._continue_button = BigPillButton("install openpilot", green=True)
+    self._continue_button = BigPillButton("install ToyoPilot", green=True)
     self._continue_button.set_click_callback(lambda: continue_callback(self._custom_software))
 
     self._scroller.add_widgets([
@@ -406,7 +409,7 @@ class NetworkSetupPageBase(Scroller):
 
   def set_custom_software(self, custom_software: bool):
     self._custom_software = custom_software
-    self._continue_button.set_text("install openpilot" if not custom_software else "choose software")
+    self._continue_button.set_text("install ToyoPilot" if not custom_software else "choose software")
     self._continue_button.set_green(not custom_software)
 
   def _update_state(self):
@@ -487,7 +490,7 @@ class Setup(Widget):
 
   def _network_setup_continue_callback(self, custom_software: bool):
     if not custom_software:
-      self._download(OPENPILOT_URL)
+      self._download(TOYOPILOT_INSTALLER_URL)
     else:
       def handle_keyboard_result(text):
         url = text.strip()
