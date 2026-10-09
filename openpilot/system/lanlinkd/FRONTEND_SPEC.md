@@ -160,5 +160,5 @@ aside       background #181818   border-right 1px #2c2c2c
 
 设备无 Node、无 CI 构建步骤，`release_files.py` 只发 `git ls-files` 的
 已 tracked 文件 → **Vite 产物 `dist/` 必须提交进仓库**，并加**源码 hash
-陈旧校验**（仿 `release_lib.py` 的 `native_hash`）：源码改了没重新构建就报错，
+陈旧校验**：源码改了没重新构建就报错，
 不允许设备静默跑旧 UI。

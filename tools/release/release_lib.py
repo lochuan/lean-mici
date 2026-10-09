@@ -1,555 +1,40 @@
 #!/usr/bin/env python3
-"""Shared helpers for building and validating lean releases.
+"""Helpers for the device-built lean release (called by device_release.sh).
 
-This module owns the release artifact model. The shell scripts in this
-directory orchestrate Git, SSH, SCons, and OrbStack; this module decides
-which files may ship, how they are hashed, and when ``prebuilt`` is valid.
+The release tree is the clean build tree (/data/build) stripped to runtime
+files. Its completeness comes from the build itself (a full ``scons`` in a
+tree that ``git clean`` resets to the source commit), so this module only
+owns what the stripped tree cannot derive on its own: the tinygrad pin, and
+the publish gate on the stage tree.
 """
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import re
-import hashlib
-import shutil
-import struct
 import subprocess
 import sys
-from collections.abc import Iterable
 from pathlib import Path
-from typing import NamedTuple
-
-
-# Every native runtime artifact that must be built on comma hardware.
-# These paths are relative to the repository root.
-ARTIFACT_PATHS: tuple[str, ...] = (
-  "msgq_repo/msgq/ipc_pyx.so",
-  "msgq_repo/msgq/visionipc/visionipc_pyx.so",
-  "openpilot/common/libparams_c.so",
-  "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so",
-  "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libacados.so",
-  "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libacados_ocp_solver_long.so",
-  "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libblasfeo.so",
-  "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libhpipm.so",
-  "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libqpOASES_e.so.3.1",
-  "openpilot/selfdrive/locationd/models/generated/libcar.so",
-  "openpilot/selfdrive/locationd/models/generated/libpose.so",
-  "openpilot/selfdrive/pandad/pandad",
-  "openpilot/sunnypilot/selfdrive/locationd/locationd",
-  "openpilot/selfdrive/bigmodeld/bigmodeld",
-  "openpilot/sunnypilot/selfdrive/locationd/models/generated/liblive.so",
-  "openpilot/system/camerad/camerad",
-  "openpilot/system/loggerd/bootlog",
-  "openpilot/system/loggerd/loggerd",
-  # panda 固件（Cortex-M 裸机 .bin，非 ELF）：pandad 运行时按 McuType.H7 读
-  # board/obj 两份做 DFU 恢复与刷写验签——漏登记 = 发布树缺固件，panda 进
-  # DFU 后永久恢复不了。由根 SConstruct 的 panda/SConscript 构建（debug 证书）。
-  "panda/board/obj/bootstub.panda_h7.bin",
-  "panda/board/obj/panda_h7.bin.signed",
-  "rednose_repo/rednose/helpers/ekf_sym_pyx.so",
-)
-
-# Non-ELF runtime artifacts that must also be produced on comma hardware.
-# The built-in driving model pkl holds tinygrad JIT kernels compiled for the
-# device's QCOM backend, so a container/mac build (DEV=CPU) is not usable.
-# These are validated by checksum only; is_arm64_elf() does not apply.
-DATA_ARTIFACT_GLOBS: tuple[str, ...] = (
-  "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunkmanifest",
-  "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk*",
-  # pkl 输入指纹旁路文件：随发布树落到设备后成为已跟踪文件，下次源同步
-  # 若不在白名单会被当作过期文件删掉，pkl 缓存永远不命中、每次重编。
-  "openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.inputs_fp",
-)
-
-# Build inputs that can invalidate the native artifact set.
-NATIVE_INPUT_PATHS: tuple[str, ...] = (
-  "SConstruct",
-  "site_scons",
-  "openpilot/common",
-  "openpilot/cereal",
-  "openpilot/selfdrive/bigmodeld",
-  "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib",
-  "openpilot/selfdrive/locationd/models/generated",
-  "openpilot/selfdrive/pandad",
-  "openpilot/sunnypilot/selfdrive/locationd",
-  "openpilot/system/camerad",
-  "openpilot/system/loggerd",
-  "msgq_repo",
-  "opendbc_repo",
-  "rednose_repo",
-  "panda",
-  # Inputs that determine the built-in driving model pkl. Without these, a
-  # model or compiler change would silently ship a stale pkl.
-  "openpilot/selfdrive/modeld/SConscript",
-  "openpilot/selfdrive/modeld/compile_modeld.py",
-  "openpilot/selfdrive/modeld/get_model_metadata.py",
-  "openpilot/selfdrive/modeld/helpers.py",
-  "openpilot/selfdrive/modeld/models",
-  "tinygrad_repo",
-)
-
-PREBUILT_DIR = Path("release/prebuilt/arm64")
-MANIFEST_NAME = "MANIFEST"
-
-# Flat-tree runtime entries lean-master does not track (its *_repo paths are
-# gitlinks): the runtime import symlinks, the earned prebuilt marker and the
-# retired-overlay marker that still ships. The device-tree sync gate
-# (device_release.sh AM whitelist) must pass these, or a flat-consumer device
-# cannot publish at all.
-FLAT_TREE_ENTRIES: tuple[str, ...] = (
-  "msgq", "opendbc", "rednose", "tinygrad", "prebuilt", ".overlay_init",
-)
-
-
-class SourceSyncPlan(NamedTuple):
-  delete_paths: tuple[str, ...]
-  reject_paths: tuple[str, ...]
-
-
-def plan_source_sync(device_paths: Iterable[str], source_paths: Iterable[str], changed_paths: Iterable[str],
-                     allowed_paths: Iterable[str]) -> SourceSyncPlan:
-  """Decide stale tracked files to delete and non-artifact diffs to reject."""
-  device, source, changed, allowed = map(set, (device_paths, source_paths, changed_paths, allowed_paths))
-  delete_paths = device - source - allowed
-  reject_paths = changed - allowed - delete_paths
-  return SourceSyncPlan(tuple(sorted(delete_paths)), tuple(sorted(reject_paths)))
-
-
-def source_sync_allowlist(repo_root: Path) -> tuple[str, ...]:
-  """Return structural entries and present runtime data artifacts for source sync."""
-  allowed = set(ARTIFACT_PATHS) | set(FLAT_TREE_ENTRIES)
-  for pattern in DATA_ARTIFACT_GLOBS:
-    allowed.update(str(path.relative_to(repo_root)) for path in repo_root.glob(pattern))
-  return tuple(sorted(allowed))
-
-
-def _run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-  return subprocess.run(
-    cmd,
-    cwd=cwd,
-    check=True,
-    text=True,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.STDOUT,
-  )
-
-
-def _run_with_stdin(
-  cmd: list[str],
-  cwd: Path | None,
-  input: str,
-) -> str:
-  result = subprocess.run(
-    cmd,
-    cwd=cwd,
-    input=input,
-    text=True,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-    check=True,
-  )
-  return result.stdout
-
-
-def compute_native_hash(repo_root: Path, commit: str) -> str:
-  """Hash the Git tree entries for every native build input."""
-  tree = _run(
-    ["git", "ls-tree", "-r", commit, "--", *NATIVE_INPUT_PATHS],
-    cwd=repo_root,
-  )
-  hashed = _run_with_stdin(
-    ["git", "hash-object", "--stdin"],
-    cwd=repo_root,
-    input=tree.stdout,
-  )
-  return hashed.strip()
-
-
-# Marker proving an artifact was built with __COMMA_HARDWARE__ undefined.
-#
-# common/hardware/hw.h selects paths at COMPILE time. With __COMMA_HARDWARE__ the
-# Hardware::PC() branch is dead and paths are "/data/params" / "/data/media".
-# Without it the binary bakes in Path::comma_home() == "$HOME/.comma".
-# SConstruct defines that flag only when the BUILD MACHINE has /AGNOS, so a
-# container build silently produces PC paths while still being a valid ARM64 ELF.
-#
-# This is how a container-built pandad reached a car: it read
-# /home/comma/.comma/params/d/ while card wrote /data/params/d/, so the OBD
-# multiplexing handshake never completed, no CarParams was ever published, and
-# the UI sat at "sunnypilot unavailable, waiting to start".
-#
-# is_arm64_elf() cannot catch this (a container ARM64 build passes), so every
-# native artifact is additionally screened for this marker.
-PC_PATH_MARKER = b"/.comma"
-
-
-def has_pc_paths(path: Path) -> bool:
-  """Return True when a native artifact has PC (non-device) paths compiled in."""
-  try:
-    return PC_PATH_MARKER in path.read_bytes()
-  except OSError:
-    return False
-
-
-def is_arm64_elf(path: Path) -> bool:
-  """Return True when ``path`` is a 64-bit little-endian ARM ELF."""
-  try:
-    with path.open("rb") as f:
-      header = f.read(20)
-  except OSError:
-    return False
-  if len(header) < 20:
-    return False
-  if header[:4] != b"\x7fELF":
-    return False
-  if header[4] != 2:  # ELFCLASS64
-    return False
-  if header[5] != 1:  # ELFDATA2LSB
-    return False
-  machine = struct.unpack_from("<H", header, 18)[0]
-  return machine == 183  # EM_AARCH64
-
-
-def sha256_file(path: Path) -> str:
-  digest = hashlib.sha256()
-  with path.open("rb") as f:
-    for chunk in iter(lambda: f.read(1024 * 1024), b""):
-      digest.update(chunk)
-  return digest.hexdigest()
-
-
-def inputs_fingerprint(files: Iterable[str | Path], extras: Iterable[str] = ()) -> str:
-  """文件内容 + 附加串的稳定指纹(与顺序无关);缺文件抛 FileNotFoundError。
-
-  pkl 缓存判据:pkl 只依赖 tinygrad pin、onnx、编译脚本与编译参数,输入不变
-  则指纹不变(2026-09-25 议定:省掉每次发布 ~20 分钟的无谓重编)。
-  """
-  digest = hashlib.sha256()
-  for name in sorted(str(f) for f in files):
-    path = Path(name)
-    if not path.is_file():
-      raise FileNotFoundError(name)
-    digest.update(sha256_file(path).encode())
-  for extra in sorted(extras):
-    digest.update(b"\x00extra\x00")
-    digest.update(extra.encode())
-  return digest.hexdigest()
-
-
-def params_keys_from_header(header_text: str) -> list[str]:
-  """Parse every param key registered in ``params_keys.h``.
-
-  Entries look like ``{"BluetoothEnabled", {PERSISTENT, BOOL, "0"}},``;
-  comment lines that merely mention a `{"Name", {` shape must not match, so the
-  pattern anchors on the statement start (leading whitespace + brace).
-  """
-  return re.findall(r'^\s*\{\s*"([A-Za-z0-9_]+)"\s*,\s*\{', header_text, re.MULTILINE)
-
-
-def missing_compiled_keys(header_keys: Iterable[str], compiled_keys: Iterable[str]) -> list[str]:
-  """Header-registered keys absent from the compiled key table, header order.
-
-  2026-09-24 incident: a params_keys.h-only change reached the device through
-  the flat-tree release (no scons step, runtime prebuilt marker skips build.py),
-  so libparams_c.so kept the old key table and lanlink disabled the five new
-  avoidance/lane-change settings with "此版本固件未提供该设置". This difference
-  is the publish gate for that whole failure class.
-
-  ``compiled_keys`` accepts ``str`` or ``bytes``: ``Params.all_keys()`` returns
-  the compiled table as bytes (ctypes string buffers), the header parser gives
-  str.
-  """
-  compiled = {key.decode() if isinstance(key, bytes) else str(key) for key in compiled_keys}
-  return [key for key in header_keys if key not in compiled]
-
-
-def load_schema_registry(src_root: str | Path = ".") -> tuple[str, ...]:
-  """cereal schema 的唯一登记表（openpilot/cereal/schemas.py，仓库相对路径）。
-
-  按文件路径加载而不是 ``import openpilot.cereal.schemas``：本模块在设备上以
-  /tmp/relhelper/release_lib.py 单文件形态运行，包 import 会拖出
-  openpilot/cereal/__init__ 的 capnp 解析链；登记表是纯数据，按文件取即可。
-  """
-  path = Path(src_root) / "openpilot" / "cereal" / "schemas.py"
-  spec = importlib.util.spec_from_file_location("cereal_schemas", path)
-  if spec is None or spec.loader is None:
-    raise FileNotFoundError(f"schema registry not loadable: {path}")
-  mod = importlib.util.module_from_spec(spec)
-  spec.loader.exec_module(mod)
-  return tuple(mod.SCHEMAS)
-
-
-def check_params_keys(src_root: str | Path, compiled_keys: Iterable[str | bytes]) -> list[str]:
-  """params 键表门禁的全部判定：``src_root`` 的 params_keys.h 中未编译进
-  键表的键（header 顺序）。2026-09-24 事故的 publish gate，见
-  :func:`missing_compiled_keys`。"""
-  header_text = (Path(src_root) / "openpilot" / "common" / "params_keys.h").read_text()
-  return missing_compiled_keys(params_keys_from_header(header_text), compiled_keys)
-
-
-SCHEMA_STAMP_NAME = ".schema.sha"
-
-
-def stamp_schemas(gen_dir: str | Path, schema_files: Iterable[str | Path]) -> str:
-  """给 checked-in 的 gen/ 盖 schema 指纹(重生成后调用)。返回指纹。"""
-  fp = inputs_fingerprint(schema_files)
-  stamp = Path(gen_dir) / SCHEMA_STAMP_NAME
-  stamp.write_text(fp + "\n")
-  return fp
-
-
-def check_schema_stamp(gen_dir: str | Path, schema_files: Iterable[str | Path]) -> tuple[bool, str]:
-  """校验 gen/ 的 .schema.sha 与 schema 内容一致。
-
-  设备无 capnpc,SKIP_CAPNP_REGEN=1 编译的是 checked-in 生成物 —— schema 改了
-  忘记 Mac 侧重生成会静默编译旧结构(params 键表事故的同类缺口)。
-  """
-  stamp = Path(gen_dir) / SCHEMA_STAMP_NAME
-  if not stamp.is_file():
-    return False, f"schema stamp missing: {stamp} — 用 tools/release/regen_cereal_gen.sh 重生成 gen/ 后提交"
-  want = stamp.read_text().strip()
-  try:
-    got = inputs_fingerprint(schema_files)
-  except FileNotFoundError as exc:
-    return False, f"schema file missing: {exc}"
-  if got != want:
-    return False, f"gen/ 与 schema mismatch(stamp={want[:12]}… current={got[:12]}…) — schema 改动后忘记重生成 gen/cpp"
-  return True, "ok"
-
-
-def write_manifest(dest: Path, source_commit: str, native_hash: str, files: list[str],
-                   data_files: list[str] | None = None) -> None:
-  """Write ``PREBUILT_MANIFEST`` for artifacts already staged under ``dest``."""
-  data_files = data_files or []
-  lines = [
-    f"source_commit={source_commit}",
-    f"native_hash={native_hash}",
-    f"files={' '.join(files)}",
-  ]
-  if data_files:
-    lines.append(f"data_files={' '.join(data_files)}")
-  for rel in [*files, *data_files]:
-    path = dest / rel
-    if not path.is_file():
-      raise FileNotFoundError(f"missing artifact: {rel}")
-    lines.append(f"sha256.{rel}={sha256_file(path)}")
-  (dest / MANIFEST_NAME).write_text("\n".join(lines) + "\n")
-
-
-def read_manifest(path: Path) -> dict[str, str]:
-  """Parse a ``PREBUILT_MANIFEST`` file into a dictionary."""
-  manifest: dict[str, str] = {}
-  for line in path.read_text().splitlines():
-    if not line or line.startswith("#"):
-      continue
-    if "=" not in line:
-      raise ValueError(f"invalid manifest line: {line}")
-    key, value = line.split("=", 1)
-    manifest[key] = value
-  return manifest
-
-
-def validate_artifact(path: Path, expected_sha256: str | None = None, require_elf: bool = True) -> tuple[bool, str]:
-  """Validate one device-built artifact.
-
-  ``require_elf`` is False for data artifacts (e.g. the model pkl chunks),
-  which are checksum-verified but are not ELF files.
-  """
-  if not path.is_file():
-    return False, f"missing artifact: {path}"
-  if require_elf and not is_arm64_elf(path):
-    return False, f"not an ARM64 ELF: {path}"
-  if require_elf and has_pc_paths(path):
-    return False, (
-      f"PC-built artifact (contains {PC_PATH_MARKER.decode()} path): {path}; "
-      "it was cross-built without __COMMA_HARDWARE__ and would read "
-      "$HOME/.comma/params instead of /data/params. Rebuild it on the device."
-    )
-  if expected_sha256 is not None:
-    actual = sha256_file(path)
-    if actual != expected_sha256:
-      return False, f"checksum mismatch: {path}"
-  return True, "ok"
-
-
-def overlay_prebuilt(repo_root: Path, worktree: Path) -> tuple[bool, str]:
-  """Validate and overlay device-built artifacts into a release worktree.
-
-  Returns ``(True, "ok")`` when the release ships the prebuilt artifacts.
-  Any validation failure returns ``(False, reason)`` and leaves the worktree
-  without copied native artifacts. The ``prebuilt`` marker itself is never
-  shipped: the device earns it at runtime via ``build.py`` (see
-  launch_chffrplus.sh).
-  """
-  prebuilt_root = worktree / PREBUILT_DIR
-  manifest_path = prebuilt_root / MANIFEST_NAME
-  if not manifest_path.is_file():
-    return False, f"missing manifest: {manifest_path}"
-
-  try:
-    manifest = read_manifest(manifest_path)
-  except (OSError, ValueError) as exc:
-    return False, f"invalid manifest: {exc}"
-
-  current_hash = compute_native_hash(repo_root, "HEAD")
-  if manifest.get("native_hash") != current_hash:
-    return False, (
-      "native hash mismatch: "
-      f"manifest={manifest.get('native_hash')} current={current_hash}"
-    )
-
-  files = manifest.get("files", "").split()
-  if not files:
-    return False, "manifest has no artifact files"
-  data_files = manifest.get("data_files", "").split()
-  # The built-in driving model pkl is required: without it modeld has no
-  # fallback and a device with no downloaded model cannot start at all.
-  if not any("driving_tinygrad.pkl" in f for f in data_files):
-    return False, (
-      "manifest has no driving model pkl; refresh release/prebuilt from a device build"
-    )
-
-  staged: list[tuple[Path, Path]] = []
-  for rel, require_elf in [*((f, True) for f in files), *((f, False) for f in data_files)]:
-    src = prebuilt_root / rel
-    expected = manifest.get(f"sha256.{rel}")
-    ok, reason = validate_artifact(src, expected, require_elf=require_elf)
-    if not ok:
-      return False, reason
-    staged.append((src, worktree / rel))
-
-  for src, dst in staged:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dst)
-
-  # NOTE: the `prebuilt` marker is NEVER shipped. The device earns it at
-  # runtime: launch_chffrplus.sh runs build.py on first boot and touches the
-  # marker only after a successful build. Shipping it here would skip that
-  # build on fresh installs and brick manager at `import msgq` (the
-  # 2026-09-21 fresh-install incident).
-  shutil.rmtree(worktree / "release/prebuilt")
-  return True, "ok"
-
-
-def _chunk_name(name: str, idx: int, num_chunks: int) -> str:
-  """Mirror of ``openpilot.common.file_chunker.get_chunk_name``.
-
-  Duplicated rather than imported to keep this script stdlib-only: it runs
-  standalone (and inside the build container) without the openpilot package on
-  sys.path. Keep in sync with file_chunker.
-  """
-  return f"{name}.chunk{idx + 1:02d}of{num_chunks:02d}"
-
-
-def find_data_artifacts(root: Path) -> list[str]:
-  """Non-ELF data artifacts under ``root``, as relative paths.
-
-  Chunk sets are resolved through each ``*.chunkmanifest`` rather than by
-  globbing ``chunk*``. ``chunk_file`` names chunks ``chunkNNofMM`` where MM is
-  an *estimate*, so when the estimate changes between builds the previous set
-  is left behind (e.g. a 74MB pkl writes chunk01of02+chunk02of02 while an older
-  86MB build's chunk01of03..chunk03of03 stay on disk). Globbing picked those up
-  too, shipping ~91MB of dead weight and listing it in the manifest. Honouring
-  the manifest count keeps only the set that ``open_file_chunked`` will read.
-  """
-  found: set[str] = set()
-  for pattern in DATA_ARTIFACT_GLOBS:
-    if pattern.endswith(".chunkmanifest"):
-      for manifest in root.glob(pattern):
-        if not manifest.is_file():
-          continue
-        found.add(str(manifest.relative_to(root)))
-        base = manifest.with_suffix("")  # strip .chunkmanifest
-        try:
-          num_chunks = int(manifest.read_text().strip())
-        except ValueError:
-          continue
-        for i in range(num_chunks):
-          chunk = base.parent / _chunk_name(base.name, i, num_chunks)
-          if chunk.is_file():
-            found.add(str(chunk.relative_to(root)))
-    elif "chunk*" in pattern:
-      continue  # covered by the chunkmanifest branch above
-    else:
-      for path in root.glob(pattern):
-        if path.is_file():
-          found.add(str(path.relative_to(root)))
-  return sorted(found)
-
-
-def stale_data_artifacts(root: Path) -> list[str]:
-  """Chunk files under ``root`` that no ``*.chunkmanifest`` claims."""
-  keep = set(find_data_artifacts(root))
-  stale: set[str] = set()
-  for pattern in DATA_ARTIFACT_GLOBS:
-    for path in root.glob(pattern):
-      if path.is_file() and (rel := str(path.relative_to(root))) not in keep:
-        stale.add(rel)
-  return sorted(stale)
-
-
-# A git-lfs pointer file is ASCII and short; real binary media never is.
-LFS_POINTER_MAGIC = b"version https://git-lfs.github.com/spec/v1"
-LFS_POINTER_MAX_SIZE = 200
-MEDIA_SUFFIXES = (
-  ".png", ".jpg", ".jpeg", ".svg", ".ttf", ".otf", ".wav", ".mp3", ".mp4",
-  ".so", ".bin",
-)
-
-
-def find_lfs_pointers(tree: Path) -> list[str]:
-  """Return relative paths in ``tree`` that are git-lfs pointers pretending
-  to be binary media.
-
-  Fresh clones on devices without a matching .gitattributes rule check out
-  these files as 130-byte pointer stubs; the first consumer that opens them
-  fails (ZeroDivisionError in the UI texture loader for the horizontal scroll
-  indicator was the first casualty). The release tree must never ship them.
-  """
-  pointers: list[str] = []
-  for path in sorted(tree.rglob("*")):
-    if not path.is_file() or path.is_symlink():
-      continue
-    if path.suffix.lower() not in MEDIA_SUFFIXES:
-      continue
-    try:
-      if path.stat().st_size <= LFS_POINTER_MAX_SIZE:
-        with open(path, "rb") as f:
-          if f.read(len(LFS_POINTER_MAGIC)) == LFS_POINTER_MAGIC:
-            pointers.append(str(path.relative_to(tree)))
-    except OSError:
-      continue
-  return pointers
-
-
-def _repo_root() -> Path:
-  result = _run(["git", "rev-parse", "--show-toplevel"])
-  return Path(result.stdout.strip())
-
 
 TINYGRAD_PIN_FILE = "TINYGRAD_PIN"
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
+# GitHub rejects files over 100 MB; stay under it with the same margin as upstream's build_stripped.sh.
+MAX_FILE_BYTES = 95 * 1024 * 1024
 
-def stamp_tinygrad_pin(stage: Path, source_repo: Path, treeish: str = "HEAD") -> str:
-  """Record the tinygrad_repo revision pinned by ``treeish`` into the staged
-  flat tree.
 
-  The pin is read from the gitlink (``git ls-tree``), never from a rev-parse
-  inside tinygrad_repo: the device tree may be a flat consumer without
-  tinygrad_repo/.git, where rev-parse falls through to the parent repo and
-  yields the release commit — a garbage pin that would break the selector's
-  four-layer gating.
+def stamp_tinygrad_pin(stage: Path, source_repo: Path) -> str:
+  """Record the tinygrad_repo revision pinned by ``source_repo``'s HEAD into the staged tree.
 
-  The published flat tree strips tinygrad_repo/.git (the runtime pin gating of
-  the model selector reads that path), so the release process stamps the pin
-  here — it is the gating's structural input and must ship with the tree.
+  The published tree strips tinygrad_repo/.git, and the model selector's runtime
+  gating (openpilot/sunnypilot/models/tinygrad_ref.py) falls back to this file.
+  The pin is read from the gitlink (``git ls-tree``), the source of truth.
   """
-  result = _run(["git", "-C", str(source_repo), "ls-tree", treeish, "tinygrad_repo"])
+  result = subprocess.run(["git", "-C", str(source_repo), "ls-tree", "HEAD", "tinygrad_repo"],
+                          check=True, capture_output=True, text=True)
   fields = result.stdout.split()
   if len(fields) < 3 or fields[0] != "160000" or fields[1] != "commit":
     raise ValueError(
-      f"tinygrad_repo is not a gitlink in {source_repo} ({treeish}): {result.stdout.strip()!r}")
+      f"tinygrad_repo is not a gitlink in {source_repo}: {result.stdout.strip()!r}")
   sha = fields[2]
   dest = stage / "tinygrad_repo" / TINYGRAD_PIN_FILE
   dest.parent.mkdir(parents=True, exist_ok=True)
@@ -557,246 +42,45 @@ def stamp_tinygrad_pin(stage: Path, source_repo: Path, treeish: str = "HEAD") ->
   return sha
 
 
-def stage_tinygrad_pin(stage: Path) -> str | None:
-  """Resolve the staged flat tree's tinygrad pin. None when absent/malformed
-  (the release gate treats None as fatal: an ungated selector must not ship)."""
+def read_stage_tinygrad_pin(stage: Path) -> str | None:
+  """Resolve the staged tree's tinygrad pin; None when absent or malformed."""
   try:
-    with open(stage / "tinygrad_repo" / TINYGRAD_PIN_FILE) as f:
-      sha = f.read().strip()
-    return sha if _SHA_RE.match(sha) else None
+    sha = (stage / "tinygrad_repo" / TINYGRAD_PIN_FILE).read_text().strip()
   except OSError:
     return None
+  return sha if _SHA_RE.match(sha) else None
 
 
-def check_flat_tree(tree: Path) -> list[str]:
-  """Stage 树发布门禁的全部判据（fix/release-stages ②）：返回问题清单，空 = 通过。
-
-  两条判据，原先埋在 device_release.sh 的 heredoc 里、测试够不着：
-
-  * **PC 路径守卫**：扁平树里所有 ELF 都不得含 ``/.comma`` 编译路径（09-11 交叉
-    构建事故的回归防线；设备本树构建的结构性产物，此处为回归防线）。非 ELF 文件
-    里出现 ``/.comma`` 是正常源码，不查。
-  * **tinygrad pin 可解析**：发布树剥了 ``.git``，pin 解析不出 = 选择器四层门控
-    全失效，拒绝发布。
-  """
-  problems: list[str] = []
-  for p in sorted(tree.rglob("*")):
-    if not p.is_file() or p.is_symlink():
-      continue
-    try:
-      with p.open("rb") as f:
-        if f.read(4) != b"\x7fELF":
-          continue
-    except OSError:
-      continue
-    if has_pc_paths(p):
-      problems.append(f"PC-built ELF in release tree: {p.relative_to(tree)}")
-  if stage_tinygrad_pin(tree) is None:
-    problems.append("stage tree cannot resolve its tinygrad pin; refusing to publish")
+def check_stage(stage: Path) -> list[str]:
+  """Publish gate on the stage tree; returns problems, empty = pass."""
+  problems = []
+  if read_stage_tinygrad_pin(stage) is None:
+    problems.append("stage tree cannot resolve its tinygrad pin")
+  for p in sorted(stage.rglob("*")):
+    if p.is_file() and not p.is_symlink() and p.stat().st_size > MAX_FILE_BYTES:
+      problems.append(f"file exceeds GitHub's size limit: {p.relative_to(stage)}")
   return problems
 
 
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   sub = parser.add_subparsers(dest="command", required=True)
-
-  hash_parser = sub.add_parser("hash", help="print the native input hash")
-  hash_parser.add_argument("commit", nargs="?", default="HEAD")
-
-  sub.add_parser("artifact-paths", help="print native artifact paths")
-  sub.add_parser("source-sync-allowlist", help="print runtime paths allowed by the source sync gate")
-  sync_plan = sub.add_parser("plan-source-sync", help="plan stale-file deletion and non-artifact diff rejection")
-  sync_plan.add_argument("source_ref")
-  sub.add_parser("schema-paths", help="print the capnp schema registry (openpilot/cereal/schemas.py)")
-  sub.add_parser("data-artifact-globs", help="print non-ELF data artifact globs")
-  sub.add_parser("flat-tree-entries", help="print flat-tree structural entries lean-master does not track")
-  sub.add_parser("validate-artifacts", help="validate staged prebuilt artifacts")
-
-  flat_check = sub.add_parser("check-flat-tree", help="stage tree publish gate (PC-path ELFs + tinygrad pin)")
-  flat_check.add_argument("tree")
-
-  key_check = sub.add_parser("check-params-keys", help="publish gate: every params_keys.h key compiled into libparams_c")
-  key_check.add_argument("src_root")
-
-  fp_parser = sub.add_parser("fingerprint", help="stable fingerprint of file contents + extras (pkl cache key)")
-  fp_parser.add_argument("files", nargs="+")
-  fp_parser.add_argument("--extra", action="append", default=[], help="extra string mixed into the fingerprint")
-
-  stamp_parser = sub.add_parser("stamp-schemas", help="write gen/.schema.sha for the capnp schemas")
-  stamp_parser.add_argument("gen_dir")
-  stamp_parser.add_argument("schemas", nargs="+")
-
-  schema_check = sub.add_parser("check-schema-stamp", help="verify gen/ matches the capnp schemas (publish gate)")
-  schema_check.add_argument("gen_dir")
-  schema_check.add_argument("schemas", nargs="*",
-                            help="omit to use the openpilot/cereal/schemas.py registry")
-  schema_check.add_argument("--root", default=".",
-                            help="tree root holding openpilot/cereal/schemas.py (device: $SRC)")
-  sweep_parser = sub.add_parser(
-    "sweep-lfs-pointers",
-    help="fail if binary media in a tree checkout are lfs pointer stubs",
-  )
-  sweep_parser.add_argument("tree")
-
-  manifest_parser = sub.add_parser(
-    "write-manifest",
-    help="write PREBUILT_MANIFEST for staged artifacts",
-  )
-  manifest_parser.add_argument("source_commit")
-  manifest_parser.add_argument("native_hash")
-
-  overlay_parser = sub.add_parser(
-    "overlay",
-    help="validate and overlay prebuilt artifacts into a release worktree",
-  )
-  overlay_parser.add_argument("worktree")
-
+  stamp = sub.add_parser("stamp-tinygrad-pin", help="write the tinygrad pin from the source gitlink into the stage")
+  stamp.add_argument("stage")
+  stamp.add_argument("source_repo")
+  check = sub.add_parser("check-stage", help="publish gate: tinygrad pin resolvable, no oversized files")
+  check.add_argument("stage")
   args = parser.parse_args()
-  # _repo_root() 只在需要 git 仓库的命令里取：门禁类命令跑在 $STAGE（git init 之前
-  # 的裸目录，2026-09-30 实录拒发），无条件取会在那里崩。
 
-  if args.command == "hash":
-    print(compute_native_hash(_repo_root(), args.commit))
+  if args.command == "stamp-tinygrad-pin":
+    sha = stamp_tinygrad_pin(Path(args.stage), Path(args.source_repo))
+    print(f"[ok] tinygrad pin stamped: {sha[:7]}")
     return 0
 
-  if args.command == "artifact-paths":
-    for rel in ARTIFACT_PATHS:
-      print(rel)
-    return 0
-
-  if args.command == "source-sync-allowlist":
-    for rel in source_sync_allowlist(_repo_root()):
-      print(rel)
-    return 0
-
-  if args.command == "plan-source-sync":
-    root = _repo_root()
-    device_paths = [p for p in _run(["git", "ls-files", "-z"], cwd=root).stdout.split("\0") if p]
-    source_paths = [p for p in _run(["git", "ls-tree", "-r", "-z", "--name-only", args.source_ref], cwd=root).stdout.split("\0") if p]
-    changed_paths = [p for p in _run(["git", "diff", "--name-only", "-z", "--diff-filter=AM", args.source_ref], cwd=root).stdout.split("\0") if p]
-    allowed_paths = [p for p in sys.stdin.read().splitlines() if p]
-    plan = plan_source_sync(device_paths, source_paths, changed_paths, allowed_paths)
-    for path in plan.delete_paths:
-      print(f"D\t{path}")
-    for path in plan.reject_paths:
-      print(f"R\t{path}")
-    return 0
-
-  if args.command == "check-flat-tree":
-    problems = check_flat_tree(Path(args.tree))
-    for p in problems:
-      print(p, file=sys.stderr)
-    return 1 if problems else 0
-
-  if args.command == "schema-paths":
-    for rel in load_schema_registry():
-      print(rel)
-    return 0
-
-  if args.command == "check-params-keys":
-    src = Path(args.src_root)
-    sys.path.insert(0, str(src))
-    from openpilot.common.params import Params
-    missing = check_params_keys(src, Params().all_keys())
-    if missing:
-      print("params_keys.h 中未编译进 libparams_c.so 的键:", *missing, sep="\n  ", file=sys.stderr)
-      return 1
-    print("[ok] params key gate passed")
-    return 0
-
-  if args.command == "data-artifact-globs":
-    for pattern in DATA_ARTIFACT_GLOBS:
-      print(pattern)
-    return 0
-
-  if args.command == "flat-tree-entries":
-    for entry in FLAT_TREE_ENTRIES:
-      print(entry)
-    return 0
-
-  if args.command == "fingerprint":
-    try:
-      print(inputs_fingerprint(args.files, args.extra))
-    except FileNotFoundError as exc:
-      print(f"fingerprint input missing: {exc}", file=sys.stderr)
-      return 1
-    return 0
-
-  if args.command == "stamp-schemas":
-    try:
-      print(stamp_schemas(args.gen_dir, args.schemas))
-    except FileNotFoundError as exc:
-      print(f"schema file missing: {exc}", file=sys.stderr)
-      return 1
-    return 0
-
-  if args.command == "check-schema-stamp":
-    schemas = args.schemas or [str(Path(args.root) / rel) for rel in load_schema_registry(args.root)]
-    ok, reason = check_schema_stamp(args.gen_dir, schemas)
-    if not ok:
-      print(reason, file=sys.stderr)
-      return 1
-    print(f"[ok] schema stamp: {reason}")
-    return 0
-
-  if args.command == "validate-artifacts":
-    prebuilt_root = _repo_root() / PREBUILT_DIR
-    manifest_path = prebuilt_root / MANIFEST_NAME
-    try:
-      manifest = read_manifest(manifest_path)
-    except (OSError, ValueError) as exc:
-      print(f"invalid manifest: {exc}", file=sys.stderr)
-      return 1
-    files = manifest.get("files", "").split()
-    if not files:
-      print("manifest has no artifact files", file=sys.stderr)
-      return 1
-    data_files = manifest.get("data_files", "").split()
-    failed = False
-    for rel, require_elf in [*((f, True) for f in files), *((f, False) for f in data_files)]:
-      ok, reason = validate_artifact(
-        prebuilt_root / rel,
-        manifest.get(f"sha256.{rel}"),
-        require_elf=require_elf,
-      )
-      if not ok:
-        print(reason, file=sys.stderr)
-        failed = True
-    return 1 if failed else 0
-
-  if args.command == "write-manifest":
-    prebuilt_root = _repo_root() / PREBUILT_DIR
-    write_manifest(
-      prebuilt_root,
-      args.source_commit,
-      args.native_hash,
-      list(ARTIFACT_PATHS),
-      find_data_artifacts(prebuilt_root),
-    )
-    return 0
-
-  if args.command == "overlay":
-    ok, reason = overlay_prebuilt(_repo_root(), Path(args.worktree))
-    if not ok:
-      print(reason, file=sys.stderr)
-      return 1
-    print("prebuilt shipped")
-    return 0
-
-  if args.command == "sweep-lfs-pointers":
-    pointers = find_lfs_pointers(Path(args.tree))
-    if pointers:
-      for rel in pointers[:20]:
-        print(f"LFS pointer stub shipped as media: {rel}", file=sys.stderr)
-      print(
-        f"{len(pointers)} pointer stub(s): run `git lfs fetch && git lfs checkout` in the "
-        "clone, and ensure .gitattributes rules cover these suffixes.",
-        file=sys.stderr,
-      )
-      return 1
-    return 0
-
-  raise AssertionError(f"unhandled command: {args.command}")
+  problems = check_stage(Path(args.stage))
+  for problem in problems:
+    print(problem, file=sys.stderr)
+  return 1 if problems else 0
 
 
 if __name__ == "__main__":

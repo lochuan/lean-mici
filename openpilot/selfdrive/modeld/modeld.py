@@ -60,11 +60,6 @@ def _pkl_exists(path):
   cannot start"). Seen on-device with 77 manifest stubs and zero chunks in
   /data/media/0/models, which is a recoverable state -- the built-in pkl was
   right there.
-
-  NOTE: this duplicates a little of common/file_chunker rather than living
-  there, because openpilot/common is in release_lib's NATIVE_INPUT_PATHS and
-  touching it invalidates every prebuilt artifact, forcing a full on-device
-  rebuild. modeld.py is not a native input.
   """
   if os.path.isfile(path):
     return True

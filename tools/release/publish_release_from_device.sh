@@ -2,9 +2,9 @@
 #
 # publish_release_from_device.sh — 一键发布编排器（Mac 侧）。
 #
-# 固化流程（2026-09-25）：Mac 单测 → 辅助文件 → 设备侧 nohup 发布 → 轮询 →
-# 中继三步（取 relstage / push fork / 设备消费）→ 重启 → 上机验证。
-# 发布从此就是这一条命令（纯 Python 改动约 3 分钟；换 pin/换模型才走全量重编）。
+# 流程：Mac 单测 → scp device_release.sh → 设备侧 nohup 构建（/data/build 干净构建树 +
+# scons 全量，未变部分走 /data/scons_cache）→ 轮询 → 中继三步（取 relstage / push fork /
+# 设备消费）→ 重启 → 上机验证。
 #
 # 用法: tools/release/publish_release_from_device.sh [--skip-tests] [--skip-smoke]
 #       末尾默认跑台架冒烟 tools/bench/smoke_after_build.sh（jungle 点火回放，验证核心进程 onroad 稳定）；
@@ -37,15 +37,11 @@ if [ "$SKIP_TESTS" -eq 0 ]; then
     tools/release/test_release_lib.py)
 fi
 
-echo "[-] 推送发布辅助文件（/tmp 随设备重启被清——先建目录，勿省）"
-ssh "$DEVICE" 'mkdir -p /tmp/relhelper'
-scp -q "$DIR/release_lib.py" "$DEVICE:/tmp/relhelper/"
+echo "[-] 推送设备侧发布脚本（构建树 /data/build 由它 checkout，release_lib.py 从构建树调用）"
 scp -q "$DIR/device_release.sh" "$DEVICE:/tmp/device_release.sh"
 
-echo "[-] 设备侧发布（nohup + 轮询；含 scons/键表门禁/schema 门禁/打包）"
-# 清树：上一次发布/调试留下的同步状态会让前提检查（树必须干净）误判。
-# reset 绝不接管道（SIGPIPE 会掐死 reset，见 ADR 发布基建三连坑）。
-ssh "$DEVICE" 'cd /data/openpilot && git reset -q --hard HEAD 2>/dev/null; (setsid nohup env SRC_BRANCH='"$SRC_BRANCH"' RELEASE_BRANCH='"$RELEASE_BRANCH"' bash /tmp/device_release.sh > /tmp/release.log 2>&1 & echo $! > /tmp/release.pid)'
+echo "[-] 设备侧发布（nohup + 轮询；checkout 构建树 → scons 全量构建 → 剥离 → 打包）"
+ssh "$DEVICE" '(setsid nohup env SRC_BRANCH='"$SRC_BRANCH"' RELEASE_BRANCH='"$RELEASE_BRANCH"' bash /tmp/device_release.sh > /tmp/release.log 2>&1 & echo $! > /tmp/release.pid)'
 while ssh -o ConnectTimeout=10 "$DEVICE" 'kill -0 "$(cat /tmp/release.pid)" 2>/dev/null'; do
   sleep 20
 done
