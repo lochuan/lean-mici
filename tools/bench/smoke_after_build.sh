@@ -49,4 +49,5 @@ echo "$before" | awk 'NF < 2 { print $1 " 没在跑"; bad = 1 } END { exit bad }
 echo "[-] 观察 ${WATCH}s，pid 不得变化（变了 = 被 manager 反复拉起）"
 sleep "$WATCH"
 [ "$(snapshot)" = "$before" ] || fail "核心进程 pid 变了（被重启过）"
+kill -0 "$REPLAY_PID" 2>/dev/null || fail "回放中途退出: $(tail -2 /tmp/jungle_replay.log)"
 echo "PASS: $PROCS 稳定运行 $((SETTLE + WATCH))s"

@@ -23,7 +23,8 @@ export PYTHONPATH="$CACHE${PYTHONPATH:+:$PYTHONPATH}"
 # 取自 Sienna route 00000052--696b66504b--17，约 60 秒，48~64 km/h
 export FRAMES="$ROOT/tools/bench/sienna_can_loop.xz"
 
-exec "$ROOT/.venv/bin/python" - "$@" <<'PY'
+# -P：python - 会把当前目录放到 sys.path[0]，在仓库根运行时仓库的 panda/ 会盖过上面的旧库
+exec "$ROOT/.venv/bin/python" -P - "$@" <<'PY'
 import ctypes
 import lzma
 import os
