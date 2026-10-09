@@ -19,7 +19,7 @@ export QCOM_PRIORITY=12
 export DISABLE_DRIVER=1
 
 if [ -z "$AGNOS_VERSION" ]; then
-  export AGNOS_VERSION="19.6.26"
+  export AGNOS_VERSION="19.6.27"
 fi
 
 if [ -z "$AGNOS_ACCEPTED_VERSIONS" ]; then
