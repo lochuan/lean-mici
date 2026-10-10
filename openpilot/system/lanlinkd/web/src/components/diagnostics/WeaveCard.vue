@@ -64,7 +64,7 @@ const details = computed(() => {
         <rect v-if="traceVals.length" x="0" :y="yOf(meanM + NORMAL_BAND_M)" :width="W"
               :height="yOf(meanM - NORMAL_BAND_M) - yOf(meanM + NORMAL_BAND_M)"
               fill="var(--color-sl-accent)" fill-opacity="0.12" />
-        <line x1="0" :y1="yOf(0)" :x2="W" :y2="yOf(0)" stroke="var(--color-sl-border-strong)" stroke-dasharray="3 4"
+        <line x1="0" :y1="yOf(0)" :x2="W" :y2="yOf(0)" stroke="var(--color-sl-lane-center)" stroke-width="2.5" stroke-dasharray="8 5"
               vector-effect="non-scaling-stroke" />
         <polyline v-for="(seg, k) in segments" :key="k"
                   :points="(seg.length > 1 ? seg : [seg[0], { x: seg[0].x + 0.5, y: seg[0].y }]).map((p) => `${p.x},${p.y}`).join(' ')"
@@ -81,6 +81,6 @@ const details = computed(() => {
       <span>{{ driving ? "30 秒前" : "停车前 30 秒" }}</span>
       <span>{{ driving ? "现在" : "停车时" }}</span>
     </div>
-    <div class="mt-1 text-[11px] text-sl-text-3">虚线 = 车道中心；浅绿色带 = 平均位置 ±15 cm 的正常晃动；线断开处是弯道、变道或车道线不清的时段</div>
+    <div class="mt-1 text-[11px] text-sl-text-3">洋红色虚线 = 车道中心；浅绿色带 = 平均位置 ±15 cm 的正常晃动；线断开处是弯道、变道或车道线不清的时段</div>
   </DiagCard>
 </template>

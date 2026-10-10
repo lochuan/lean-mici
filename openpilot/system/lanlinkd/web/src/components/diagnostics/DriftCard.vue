@@ -82,7 +82,7 @@ const details = computed(() => {
         <line :x1="CENTER_X - LANE_HALF" y1="0" :x2="CENTER_X - LANE_HALF" y2="180" stroke="var(--color-sl-text-2)" stroke-width="3" />
         <line :x1="CENTER_X + LANE_HALF" y1="0" :x2="CENTER_X + LANE_HALF" y2="180" stroke="var(--color-sl-text-2)" stroke-width="3" stroke-dasharray="18 12" />
         <!-- 车道中心 -->
-        <line :x1="CENTER_X" y1="0" :x2="CENTER_X" y2="180" stroke="var(--color-sl-text-3)" stroke-width="1" stroke-dasharray="2 4" />
+        <line :x1="CENTER_X" y1="0" :x2="CENTER_X" y2="180" stroke="var(--color-sl-lane-center)" stroke-width="3" stroke-dasharray="10 6" />
 
         <!-- 简化车形（车头朝上） -->
         <g :opacity="hasData ? 1 : 0.35" :transform="`translate(${carX - CENTER_X} 0)`">
