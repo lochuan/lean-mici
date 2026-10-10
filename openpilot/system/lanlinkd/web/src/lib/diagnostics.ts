@@ -217,12 +217,12 @@ export function torqueOffsetTiltDeg(latAccelOffset: number): number {
 export function driftChecklist(d: DriftDiag): CheckItem[] {
   const items: CheckItem[] = [];
 
-  const zero = d.angleOffsetDeg;
+  const wheelZeroDeg = d.angleOffsetDeg;
   const zeroItem = (state: CheckState, text: string): CheckItem => ({ id: "zero", label: "方向盘零点", state, text });
   if (d.angleOffsetValid === false) items.push(zeroItem("bad", "零点学习结果无效，方向盘角度传感器可能有问题"));
-  else if (zero === null) items.push(zeroItem("unknown", "还没有数据"));
-  else if (Math.abs(zero) < 2) items.push(zeroItem("ok", `正常（${fmtDeg(zero)}）`));
-  else items.push(zeroItem(Math.abs(zero) < 5 ? "warn" : "bad", `偏了 ${fmtDeg(zero)}，建议做四轮定位或方向盘回正`));
+  else if (wheelZeroDeg === null) items.push(zeroItem("unknown", "还没有数据"));
+  else if (Math.abs(wheelZeroDeg) < 2) items.push(zeroItem("ok", `正常（${fmtDeg(wheelZeroDeg)}）`));
+  else items.push(zeroItem(Math.abs(wheelZeroDeg) < 5 ? "warn" : "bad", `偏了 ${fmtDeg(wheelZeroDeg)}，建议做四轮定位或方向盘回正`));
 
   if (d.accurateAngle !== "n/a") {
     const label = "Toyota 高精度转角";
@@ -306,6 +306,16 @@ export function traceSegments(trace: (number | null)[]): { i: number; v: number 
   });
   if (current.length) segments.push(current);
   return segments;
+}
+
+/** 画龙折线图的纵轴范围（米）：盖住车道中心、所有点和均值 ±bandM 的正常带，上下各留 10%。
+ *  不以车道中心对称：车整体偏一侧时，对称会让半张图空着、摆动被压扁。 */
+export function traceYRange(values: number[], bandM: number): { meanM: number; loM: number; hiM: number } {
+  const meanM = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  const lo = Math.min(0, meanM - bandM, ...values);
+  const hi = Math.max(0, meanM + bandM, ...values);
+  const pad = (hi - lo) * 0.1;
+  return { meanM, loM: lo - pad, hiM: hi + pad };
 }
 
 // ---- 转向能力 / EPS ----

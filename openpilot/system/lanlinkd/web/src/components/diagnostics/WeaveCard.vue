@@ -4,29 +4,25 @@
  *  车整体偏一侧属于“跑偏”，不在这里算；这里只看围绕自身位置的左右摆。 */
 import { computed } from "vue";
 import type { WeaveDiag } from "@/lib/schema";
-import { fmtDuration, toneColor, traceSegments, weaveView } from "@/lib/diagnostics";
+import { fmtDuration, toneColor, traceSegments, traceYRange, weaveView } from "@/lib/diagnostics";
 import DiagCard from "./DiagCard.vue";
 
-const props = defineProps<{ weave: WeaveDiag }>();
+// 停车后 trace 冻结在上次行驶的最后 30 秒，时间轴文案要跟着变
+const props = defineProps<{ weave: WeaveDiag; driving: boolean }>();
+const traceWindowText = computed(() => (props.driving ? "最近 30 秒" : "停车前 30 秒"));
 
 const view = computed(() => weaveView(props.weave));
 const statColor = computed(() => toneColor(view.value.tone));
 
 // ---- 折线图几何：横轴 = 时间（左旧右新），纵轴 = 横向位置（偏右朝上）----
 const W = 300;
-const MID = 50;
-const HALF_H = 42;
+const H = 100;
 const NORMAL_BAND_M = 0.15;
 
 const traceVals = computed(() => props.weave.trace.filter((v): v is number => v !== null));
-const meanM = computed(() =>
-  traceVals.value.length ? traceVals.value.reduce((a, b) => a + b, 0) / traceVals.value.length : 0,
-);
-const rangeM = computed(() => {
-  const peak = Math.max(0, ...traceVals.value.map(Math.abs));
-  return Math.max(0.3, peak * 1.15, Math.abs(meanM.value) + NORMAL_BAND_M + 0.05);
-});
-const yOf = (m: number) => MID - (m / rangeM.value) * HALF_H;
+const yRange = computed(() => traceYRange(traceVals.value, NORMAL_BAND_M));
+const meanM = computed(() => yRange.value.meanM);
+const yOf = (m: number) => ((yRange.value.hiM - m) / (yRange.value.hiM - yRange.value.loM)) * H;
 const xOf = (i: number) => (i / Math.max(1, props.weave.trace.length - 1)) * W;
 
 const segments = computed(() =>
@@ -62,30 +58,29 @@ const details = computed(() => {
     </div>
 
     <!-- 绘图区横向拉伸（preserveAspectRatio=none，线宽不随缩放），文字标签用 HTML 叠加：手机和桌面字号一致 -->
-    <div class="relative mt-3 h-[112px]">
-      <svg :viewBox="`0 0 ${W} 100`" preserveAspectRatio="none" class="absolute inset-0 h-full w-full"
-           role="img" aria-label="最近 30 秒车道内横向位置">
+    <div class="relative mt-3 h-[136px]">
+      <svg :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none" class="absolute inset-x-0 top-3 bottom-3 h-[calc(100%-1.5rem)] w-full"
+           role="img" :aria-label="`${traceWindowText}车道内横向位置`">
         <rect v-if="traceVals.length" x="0" :y="yOf(meanM + NORMAL_BAND_M)" :width="W"
               :height="yOf(meanM - NORMAL_BAND_M) - yOf(meanM + NORMAL_BAND_M)"
               fill="var(--color-sl-accent)" fill-opacity="0.12" />
-        <line x1="0" :y1="MID" :x2="W" :y2="MID" stroke="var(--color-sl-border-strong)" stroke-dasharray="3 4"
+        <line x1="0" :y1="yOf(0)" :x2="W" :y2="yOf(0)" stroke="var(--color-sl-border-strong)" stroke-dasharray="3 4"
               vector-effect="non-scaling-stroke" />
         <polyline v-for="(seg, k) in segments" :key="k"
                   :points="(seg.length > 1 ? seg : [seg[0], { x: seg[0].x + 0.5, y: seg[0].y }]).map((p) => `${p.x},${p.y}`).join(' ')"
                   fill="none" stroke="var(--color-sl-info)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
                   vector-effect="non-scaling-stroke" />
       </svg>
-      <span class="absolute left-1 top-0 text-[10px] text-sl-text-3">偏右</span>
-      <span class="absolute bottom-0 left-1 text-[10px] text-sl-text-3">偏左</span>
-      <span class="absolute right-1 text-[10px] text-sl-text-3" :style="{ top: `calc(${MID}% - 15px)` }">车道中心</span>
+      <span class="absolute left-1 -top-0.5 text-[10px] leading-none text-sl-text-3">偏右</span>
+      <span class="absolute -bottom-0.5 left-1 text-[10px] leading-none text-sl-text-3">偏左</span>
       <div v-if="!segments.length" class="absolute inset-0 grid place-items-center px-6 text-center text-[12px] text-sl-text-3">
-        最近 30 秒没有可用的直道数据
+        {{ traceWindowText }}没有可用的直道数据
       </div>
     </div>
     <div class="mt-0.5 flex justify-between text-[10px] text-sl-text-3">
-      <span>30 秒前</span>
-      <span>现在</span>
+      <span>{{ driving ? "30 秒前" : "停车前 30 秒" }}</span>
+      <span>{{ driving ? "现在" : "停车时" }}</span>
     </div>
-    <div class="mt-1 text-[11px] text-sl-text-3">浅绿色带 = 平均位置 ±15 cm 的正常晃动；线断开处是弯道、变道或车道线不清的时段</div>
+    <div class="mt-1 text-[11px] text-sl-text-3">虚线 = 车道中心；浅绿色带 = 平均位置 ±15 cm 的正常晃动；线断开处是弯道、变道或车道线不清的时段</div>
   </DiagCard>
 </template>

@@ -48,7 +48,7 @@ const driving = computed(() => report.value?.drive.started ?? false);
     <template v-if="report">
       <CameraCard :camera="report.camera" />
       <DriftCard :drift="report.drift" />
-      <WeaveCard :weave="report.weave" />
+      <WeaveCard :weave="report.weave" :driving="driving" />
       <SteeringCard :steering="report.steering" />
     </template>
     <div v-else class="sl-card px-5 py-6 text-center text-[13px] text-sl-text-3">

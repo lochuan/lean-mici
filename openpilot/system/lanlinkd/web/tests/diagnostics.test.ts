@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cameraView, driftChecklist, driftView, driveText, fmtDuration, steeringView, suggestCameraOffset,
-  toneColor, torqueOffsetTiltDeg, traceSegments, weaveView,
+  toneColor, torqueOffsetTiltDeg, traceSegments, traceYRange, weaveView,
 } from "../src/lib/diagnostics";
 import type { CameraDiag, DriftDiag, SteeringDiag, WeaveDiag } from "../src/lib/schema";
 
@@ -215,6 +215,31 @@ describe("traceSegments", () => {
       [{ i: 4, v: -0.1 }, { i: 5, v: 0 }],
     ]);
     expect(traceSegments([])).toEqual([]);
+  });
+});
+
+describe("traceYRange", () => {
+  it("fits the data instead of mirroring around lane center", () => {
+    // 实车回放：一直在车道中心左侧 0–36 cm
+    const r = traceYRange([0, -0.1, -0.2, -0.36, -0.17], 0.15);
+    expect(r.meanM).toBeCloseTo(-0.166, 3);
+    expect(r.loM).toBeLessThan(-0.36);
+    expect(r.loM).toBeGreaterThan(-0.45);
+    expect(r.hiM).toBeGreaterThanOrEqual(0);
+    expect(r.hiM).toBeLessThan(0.1);
+  });
+
+  it("always shows lane center and the whole normal band", () => {
+    const r = traceYRange([0.3, 0.32, 0.28], 0.15);
+    expect(r.loM).toBeLessThan(0);
+    expect(r.hiM).toBeGreaterThan(0.3 + 0.15);
+  });
+
+  it("no data: band around zero, no NaN", () => {
+    const r = traceYRange([], 0.15);
+    expect(r).toEqual({ meanM: 0, loM: expect.any(Number), hiM: expect.any(Number) });
+    expect(r.loM).toBeLessThan(-0.15);
+    expect(r.hiM).toBeGreaterThan(0.15);
   });
 });
 

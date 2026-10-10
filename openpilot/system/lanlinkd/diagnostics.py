@@ -84,13 +84,15 @@ def _weave_window(ts: list[float], ys: list[float]) -> tuple[float, float | None
 
 
 class _DriveStats:
-  """本次行驶的累计量；新行驶开始时整个替换。"""
+  """本次行驶的累计量；新行驶开始时整个替换。
+
+  ponytail: 只在内存、仅本次行驶，设备重启即丢；需要跨行驶对比时，再把汇总落盘到新的 param。"""
 
   def __init__(self):
     self.drift_s = 0.0
     self.car_offset_sum = 0.0
     self.plan_offset_sum = 0.0
-    self.drift_n = 0
+    self.drift_samples = 0
     self.segment_t: list[float] = []
     self.segment_y: list[float] = []
     self.windows: list[tuple[float, float | None]] = []
@@ -98,7 +100,7 @@ class _DriveStats:
     self.trace_bucket: int | None = None
     self.last_model_t: float | None = None
     self.last_controls_t: float | None = None
-    self.control = ""
+    self.lateral_control = ""
     self.active_s = 0.0
     self.curve_s = 0.0
     self.saturated_curve_s = 0.0
@@ -118,7 +120,7 @@ class Diagnostics:
     self._ended_at: float | None = None
     self._stats = _DriveStats()
     self._live: dict[str, tuple[float, object]] = {}
-    self._memo: dict = {}
+    self._parsed_params: dict = {}
 
   # ---- 输入 ----
 
@@ -142,66 +144,66 @@ class Diagnostics:
       self._on_model(sm["modelV2"], sm["carState"], sm["carControl"], sm["controlsState"], now)
 
   def _on_car_state(self, cs, cc) -> None:
-    st = self._stats
-    st.car_state_seen = True
+    stats = self._stats
+    stats.car_state_seen = True
     if abs(cs.steeringAngleOffsetDeg) > 1e-3:
-      st.accurate_angle = True
-    if cs.steerFaultTemporary and not st.prev_temp_fault and cc.enabled:
-      st.eps_temp_faults += 1
-    st.prev_temp_fault = bool(cs.steerFaultTemporary)
+      stats.accurate_angle = True
+    if cs.steerFaultTemporary and not stats.prev_temp_fault and cc.enabled:
+      stats.eps_temp_faults += 1
+    stats.prev_temp_fault = bool(cs.steerFaultTemporary)
     if cs.steerFaultPermanent:
-      st.eps_permanent = True
+      stats.eps_permanent = True
 
   def _on_controls(self, ctl, cs, cc, now: float) -> None:
-    st = self._stats
-    dt = DT_CTRL if st.last_controls_t is None else min(max(now - st.last_controls_t, 0.0), 5 * DT_CTRL)
-    st.last_controls_t = now
+    stats = self._stats
+    dt = DT_CTRL if stats.last_controls_t is None else min(max(now - stats.last_controls_t, 0.0), 5 * DT_CTRL)
+    stats.last_controls_t = now
     if not cc.latActive or cs.vEgo < MIN_STEER_SPEED:
       return
     kind = ctl.lateralControlState.which()
     state = getattr(ctl.lateralControlState, kind)
-    st.control = {"torqueState": "torque", "angleState": "angle"}.get(kind, "")
-    v2 = cs.vEgo ** 2
-    st.active_s += dt
-    lat_accel = abs(ctl.curvature) * v2
-    st.max_lat_accel = lat_accel if st.max_lat_accel is None else max(st.max_lat_accel, lat_accel)
-    if abs(ctl.desiredCurvature) * v2 > CURVE_LAT_ACCEL:
-      st.curve_s += dt
+    stats.lateral_control = {"torqueState": "torque", "angleState": "angle"}.get(kind, "")
+    v_ego_sq = cs.vEgo ** 2
+    stats.active_s += dt
+    lat_accel = abs(ctl.curvature) * v_ego_sq
+    stats.max_lat_accel = lat_accel if stats.max_lat_accel is None else max(stats.max_lat_accel, lat_accel)
+    if abs(ctl.desiredCurvature) * v_ego_sq > CURVE_LAT_ACCEL:
+      stats.curve_s += dt
       if state.saturated:
-        st.saturated_curve_s += dt
+        stats.saturated_curve_s += dt
     if kind == "torqueState":
-      st.usage[min(int(abs(state.output) * USAGE_BINS), USAGE_BINS - 1)] += dt
+      stats.usage[min(int(abs(state.output) * USAGE_BINS), USAGE_BINS - 1)] += dt
 
   def _on_model(self, model, cs, cc, ctl, now: float) -> None:
-    st = self._stats
-    dt = DT_MDL if st.last_model_t is None else min(max(now - st.last_model_t, 0.0), 2 * DT_MDL)
-    gap = st.last_model_t is not None and now - st.last_model_t > 4 * DT_MDL
-    st.last_model_t = now
+    stats = self._stats
+    dt = DT_MDL if stats.last_model_t is None else min(max(now - stats.last_model_t, 0.0), 2 * DT_MDL)
+    gap = stats.last_model_t is not None and now - stats.last_model_t > 4 * DT_MDL
+    stats.last_model_t = now
     offsets = self._straight_offsets(model, cs, cc, ctl)
 
     bucket = math.floor(now / TRACE_DT)
-    if st.trace_bucket is None or bucket > st.trace_bucket:
-      missing = 0 if st.trace_bucket is None else min(bucket - st.trace_bucket - 1, TRACE_LEN)
-      st.trace.extend([None] * missing)
-      st.trace.append(None if offsets is None else round(offsets[0], 3))
-      st.trace_bucket = bucket
+    if stats.trace_bucket is None or bucket > stats.trace_bucket:
+      missing = 0 if stats.trace_bucket is None else min(bucket - stats.trace_bucket - 1, TRACE_LEN)
+      stats.trace.extend([None] * missing)
+      stats.trace.append(None if offsets is None else round(offsets[0], 3))
+      stats.trace_bucket = bucket
 
     if offsets is None or gap:
-      st.segment_t.clear()
-      st.segment_y.clear()
+      stats.segment_t.clear()
+      stats.segment_y.clear()
       if offsets is None:
         return
     car_offset, plan_offset = offsets
-    st.drift_s += dt
-    st.drift_n += 1
-    st.car_offset_sum += car_offset
-    st.plan_offset_sum += plan_offset
-    st.segment_t.append(now)
-    st.segment_y.append(car_offset)
-    if st.segment_t[-1] - st.segment_t[0] >= WEAVE_WINDOW_S - 1e-6:
-      st.windows.append(_weave_window(st.segment_t, st.segment_y))
-      st.segment_t.clear()
-      st.segment_y.clear()
+    stats.drift_s += dt
+    stats.drift_samples += 1
+    stats.car_offset_sum += car_offset
+    stats.plan_offset_sum += plan_offset
+    stats.segment_t.append(now)
+    stats.segment_y.append(car_offset)
+    if stats.segment_t[-1] - stats.segment_t[0] >= WEAVE_WINDOW_S - 1e-6:
+      stats.windows.append(_weave_window(stats.segment_t, stats.segment_y))
+      stats.segment_t.clear()
+      stats.segment_y.clear()
 
   @staticmethod
   def _straight_offsets(model, cs, cc, ctl) -> tuple[float, float] | None:
@@ -234,13 +236,13 @@ class Diagnostics:
     live = self._live.get(service)
     if live is not None and now - live[0] < LIVE_TIMEOUT:
       return "live", live[1]
-    msg = _cached_service_msg(params, key, service, self._memo)
+    msg = _cached_service_msg(params, key, service, self._parsed_params)
     return ("cache", msg) if msg is not None else (None, None)
 
   def report(self, params, torque_learned: dict | None, now: float) -> dict:
     """params：任何带 .get(key) 的对象（Params 或 PARAM_KEYS 的 dict 快照）。"""
-    st = self._stats
-    cp = _car_params(params, self._memo)
+    stats = self._stats
+    car_params = _car_params(params, self._parsed_params)
     if self._started_at is None:
       seconds = 0.0
     else:
@@ -264,22 +266,22 @@ class Diagnostics:
 
     _, vehicle_params = self._fresh_or_cached("vehicleParameters", "LiveParametersV2", params, now)
     _, lateral_delay = self._fresh_or_cached("lateralDelay", "LiveDelay", params, now)
-    brand = str(cp.brand) if cp is not None else ""
+    brand = str(car_params.brand) if car_params is not None else ""
     if brand != "toyota":
-      accurate = "n/a"
-    elif not st.car_state_seen:
-      accurate = "unknown"
+      accurate_angle_state = "n/a"
+    elif not stats.car_state_seen:
+      accurate_angle_state = "unknown"
     else:
-      accurate = "ready" if st.accurate_angle else "pending"
+      accurate_angle_state = "ready" if stats.accurate_angle else "pending"
 
-    windows = st.windows
+    windows = stats.windows
     p2ps = [w[0] for w in windows]
     periods = [w[1] for w in windows if w[1] is not None]
     weave_windows = sum(1 for p2p, period in windows if p2p >= WEAVE_P2P_M and period is not None
                         and WEAVE_PERIOD_RANGE[0] <= period <= WEAVE_PERIOD_RANGE[1])
 
     def mean_drift_sample(total: float) -> float | None:
-      return round(total / st.drift_n, 4) if st.drift_n else None
+      return round(total / stats.drift_samples, 4) if stats.drift_samples else None
 
     def rounded_or_none(v, digits=3):
       return None if v is None else round(float(v), digits)
@@ -288,32 +290,32 @@ class Diagnostics:
       "drive": {"started": self._started, "seconds": round(seconds, 1)},
       "camera": camera,
       "drift": {
-        "seconds": round(st.drift_s, 2),
-        "carOffsetM": mean_drift_sample(st.car_offset_sum),
-        "planOffsetM": mean_drift_sample(st.plan_offset_sum),
+        "seconds": round(stats.drift_s, 2),
+        "carOffsetM": mean_drift_sample(stats.car_offset_sum),
+        "planOffsetM": mean_drift_sample(stats.plan_offset_sum),
         "angleOffsetDeg": rounded_or_none(vehicle_params.angleOffsetAverageDeg) if vehicle_params is not None else None,
         "angleOffsetValid": bool(vehicle_params.angleOffsetAverageValid) if vehicle_params is not None else None,
-        "accurateAngle": accurate,
+        "accurateAngle": accurate_angle_state,
         "latAccelOffset": rounded_or_none(torque_learned.get("latAccelOffset"), 4) if torque_learned else None,
       },
       "weave": {
-        "seconds": round(st.drift_s, 2),
+        "seconds": round(stats.drift_s, 2),
         "windows": len(windows),
         "weaveWindows": weave_windows,
         "medianP2pM": rounded_or_none(np.median(p2ps)) if p2ps else None,
         "medianPeriodS": rounded_or_none(np.median(periods), 2) if periods else None,
-        "trace": list(st.trace),
+        "trace": list(stats.trace),
         "lateralDelayS": rounded_or_none(lateral_delay.lateralDelay) if lateral_delay is not None else None,
-        "factoryDelayS": rounded_or_none(cp.steerActuatorDelay) if cp is not None else None,
+        "factoryDelayS": rounded_or_none(car_params.steerActuatorDelay) if car_params is not None else None,
       },
       "steering": {
-        "control": st.control,
-        "activeSeconds": round(st.active_s, 2),
-        "curveSeconds": round(st.curve_s, 2),
-        "saturatedCurveSeconds": round(st.saturated_curve_s, 2),
-        "usage": [round(u, 2) for u in st.usage] if st.control == "torque" else None,
-        "epsTempFaults": st.eps_temp_faults,
-        "epsPermanent": st.eps_permanent,
-        "maxLatAccel": rounded_or_none(st.max_lat_accel),
+        "control": stats.lateral_control,
+        "activeSeconds": round(stats.active_s, 2),
+        "curveSeconds": round(stats.curve_s, 2),
+        "saturatedCurveSeconds": round(stats.saturated_curve_s, 2),
+        "usage": [round(u, 2) for u in stats.usage] if stats.lateral_control == "torque" else None,
+        "epsTempFaults": stats.eps_temp_faults,
+        "epsPermanent": stats.eps_permanent,
+        "maxLatAccel": rounded_or_none(stats.max_lat_accel),
       },
     }
