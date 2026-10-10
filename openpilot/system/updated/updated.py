@@ -24,7 +24,7 @@ LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
 STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
 
 # 连通性探测：国内直连地址（快、HTTP 免疫时钟错误导致的 TLS 失败）。
-# 只用于 has_internet 判定；更新本体仍走 git fetch（github）。
+# 只用于 has_internet 判定；更新本体仍走 git fetch origin（GitHub 或 Gitee，取决于安装入口 /c4 还是 /c4cn）。
 CONNECTIVITY_CHECK_URL = "http://wifi.vivo.com.cn/generate_204"
 
 OVERLAY_UPPER = os.path.join(STAGING_ROOT, "upper")
