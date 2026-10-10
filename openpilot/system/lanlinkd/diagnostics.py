@@ -38,6 +38,9 @@ TRACE_LEN = 120  # 30 s
 # 转向
 MIN_STEER_SPEED = 5.0
 CURVE_LAT_ACCEL = 1.0
+# 与各 LatControl 的 sat_check_min_speed 一致：低于它（或扶着方向盘）不判饱和，弯道也不计入分母
+SAT_CHECK_MIN_SPEED = {"angleState": 5.0, "curvatureState": 5.0}
+DEFAULT_SAT_CHECK_MIN_SPEED = 10.0
 USAGE_BINS = 5
 
 
@@ -167,7 +170,8 @@ class Diagnostics:
     stats.active_s += dt
     lat_accel = abs(ctl.curvature) * v_ego_sq
     stats.max_lat_accel = lat_accel if stats.max_lat_accel is None else max(stats.max_lat_accel, lat_accel)
-    if abs(ctl.desiredCurvature) * v_ego_sq > CURVE_LAT_ACCEL:
+    saturation_checkable = cs.vEgo > SAT_CHECK_MIN_SPEED.get(kind, DEFAULT_SAT_CHECK_MIN_SPEED) and not cs.steeringPressed
+    if saturation_checkable and abs(ctl.desiredCurvature) * v_ego_sq > CURVE_LAT_ACCEL:
       stats.curve_s += dt
       if state.saturated:
         stats.saturated_curve_s += dt
@@ -297,6 +301,7 @@ class Diagnostics:
         "angleOffsetValid": bool(vehicle_params.angleOffsetAverageValid) if vehicle_params is not None else None,
         "accurateAngle": accurate_angle_state,
         "latAccelOffset": rounded_or_none(torque_learned.get("latAccelOffset"), 4) if torque_learned else None,
+        "torqueCalPerc": int(torque_learned["calPerc"]) if torque_learned and torque_learned.get("calPerc") is not None else None,
       },
       "weave": {
         "seconds": round(stats.drift_s, 2),

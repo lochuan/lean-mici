@@ -1,6 +1,7 @@
 /** 诊断页的纯逻辑：把 /api/diagnostics 的原始数据变成“结论 + 语气 + 建议 + 画图用的数值”。
  *
- * 阈值是默认值，待实车调参。符号约定与后端一致：
+ * 阈值按 2026-10-09 实车路试（Sienna）校准过一轮：只验证了“正常驾驶不误报”，画龙、饱和还没有真实样本。
+ * 符号约定与后端一致：
  *  - 车道内位置 / 规划位置：>0 偏右
  *  - 相机 pitch >0 朝下，yaw >0 朝左
  *  - CameraOffset >0 = 设备装在中线左侧
@@ -38,9 +39,14 @@ function progressFor(have: number, need: number, what: string): Progress {
   return { pct, text: rem > 0 ? `再开约 ${remText}${what}后出结果` : "正在统计，稍后出结果" };
 }
 
+/** 文案里显示的角度绝对值：一位小数 */
+function shownDeg(v: number): number {
+  return Number(Math.abs(v).toFixed(1));
+}
+
 /** 角度文案：一位小数，整数不带 .0（“约 2°”而不是“约 2.0°”） */
 function fmtDeg(v: number): string {
-  return `${Number(Math.abs(v).toFixed(1))}°`;
+  return `${shownDeg(v)}°`;
 }
 
 function absCm(m: number): number {
@@ -161,7 +167,8 @@ export interface DriftView extends Verdict {
   progress: Progress | null;
 }
 
-const DRIFT_MIN_S = 60;
+/** 任取 60 s 直道均值可达 24 cm，180 s 后才稳定 */
+const DRIFT_MIN_S = 180;
 const DRIFT_CENTERED_M = 0.1;
 const DRIFT_PLAN_SHARE = 0.6;
 
@@ -214,6 +221,10 @@ export function torqueOffsetTiltDeg(latAccelOffset: number): number {
   return (Math.atan(latAccelOffset / GRAVITY_MS2) * 180) / Math.PI;
 }
 
+/** 方向盘零点：实车 1.5–2.4° 是常态（换到车轮约 0.1°，paramsd 已补偿）；openpilot 到 10° 才判无效 */
+const WHEEL_ZERO_OK_DEG = 4;
+const WHEEL_ZERO_BAD_DEG = 8;
+
 export function driftChecklist(d: DriftDiag): CheckItem[] {
   const items: CheckItem[] = [];
 
@@ -221,8 +232,12 @@ export function driftChecklist(d: DriftDiag): CheckItem[] {
   const zeroItem = (state: CheckState, text: string): CheckItem => ({ id: "zero", label: "方向盘零点", state, text });
   if (d.angleOffsetValid === false) items.push(zeroItem("bad", "零点学习结果无效，方向盘角度传感器可能有问题"));
   else if (wheelZeroDeg === null) items.push(zeroItem("unknown", "还没有数据"));
-  else if (Math.abs(wheelZeroDeg) < 2) items.push(zeroItem("ok", `正常（${fmtDeg(wheelZeroDeg)}）`));
-  else items.push(zeroItem(Math.abs(wheelZeroDeg) < 5 ? "warn" : "bad", `偏了 ${fmtDeg(wheelZeroDeg)}，建议做四轮定位或方向盘回正`));
+  // 按显示的取整值判定，免得同样显示“4°”一次正常一次偏了
+  else if (shownDeg(wheelZeroDeg) < WHEEL_ZERO_OK_DEG) items.push(zeroItem("ok", `正常（${fmtDeg(wheelZeroDeg)}）`));
+  else {
+    const state = shownDeg(wheelZeroDeg) < WHEEL_ZERO_BAD_DEG ? "warn" : "bad";
+    items.push(zeroItem(state, `偏了 ${fmtDeg(wheelZeroDeg)}，建议做四轮定位或方向盘回正`));
+  }
 
   if (d.accurateAngle !== "n/a") {
     const label = "Toyota 高精度转角";
@@ -234,7 +249,9 @@ export function driftChecklist(d: DriftDiag): CheckItem[] {
 
   const label = "扭矩偏置";
   if (d.latAccelOffset === null) items.push({ id: "torqueOffset", label, state: "unknown", text: "还没有学习数据" });
-  else {
+  else if (d.torqueCalPerc !== null && d.torqueCalPerc < 100) {
+    items.push({ id: "torqueOffset", label, state: "unknown", text: `学习中（${Math.round(d.torqueCalPerc)}%）` });
+  } else {
     const tilt = torqueOffsetTiltDeg(d.latAccelOffset);
     items.push(
       Math.abs(tilt) > 1
@@ -257,8 +274,10 @@ export interface WeaveView extends Verdict {
   periodS: number | null;
 }
 
-/** 至少评估过这么多个 10 s 连续直道窗口才下结论（约 1 分钟） */
-const WEAVE_MIN_WINDOWS = 6;
+/** 至少评估过这么多个 10 s 连续直道窗口才下结论（约 2 分钟）；6 个时 1 个窗口就是 17%，太粗 */
+const WEAVE_MIN_WINDOWS = 12;
+/** 画龙窗口少于这个数一律算稳定：单个窗口可能只是一次避让或路面 */
+const WEAVE_MIN_WEAVING_WINDOWS = 2;
 
 export function weaveView(w: WeaveDiag): WeaveView {
   const amplitudeCm = w.medianP2pM === null ? null : absCm(w.medianP2pM);
@@ -279,7 +298,7 @@ export function weaveView(w: WeaveDiag): WeaveView {
   const share = w.weaveWindows / w.windows;
   const weavePct = Math.round(share * 100);
   const base = { progress: null, weavePct, amplitudeCm, periodS };
-  if (share < 0.05) {
+  if (share < 0.05 || w.weaveWindows < WEAVE_MIN_WEAVING_WINDOWS) {
     return { ...base, tone: "accent", badge: "稳定", headline: "直道上走得很稳", advice: null };
   }
   if (share < 0.2) {
@@ -374,7 +393,7 @@ export function steeringView(s: SteeringDiag): SteeringView {
   if (share === null) {
     return {
       ...base, tone: "muted", badge: "数据不足", headline: "还在收集弯道数据",
-      advice: "开启辅助驾驶过弯时计入",
+      advice: "开启辅助驾驶过弯时计入；低速路口转弯不计",
     };
   }
   if (share < STEER_SATURATION_OK) {

@@ -346,6 +346,7 @@ export interface DriftDiag {
   angleOffsetValid: boolean | null;
   accurateAngle: "ready" | "pending" | "unknown" | "n/a";  // Toyota 高精度转角；非 Toyota 为 n/a；本次没收到 carState 为 unknown
   latAccelOffset: number | null;   // m/s²，torqued 学到的偏置
+  torqueCalPerc: number | null;    // torqued 学习进度 0–100；<100 时偏置还不可信
 }
 export interface WeaveDiag {
   seconds: number;                 // 直道样本秒数（与 drift 同口径）

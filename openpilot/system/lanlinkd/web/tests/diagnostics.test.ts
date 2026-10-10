@@ -14,8 +14,8 @@ function cam(over: Partial<CameraDiag> = {}): CameraDiag {
 
 function drift(over: Partial<DriftDiag> = {}): DriftDiag {
   return {
-    seconds: 120, carOffsetM: 0.02, planOffsetM: 0.01, angleOffsetDeg: 0.5, angleOffsetValid: true,
-    accurateAngle: "ready", latAccelOffset: 0, ...over,
+    seconds: 300, carOffsetM: 0.02, planOffsetM: 0.01, angleOffsetDeg: 0.5, angleOffsetValid: true,
+    accurateAngle: "ready", latAccelOffset: 0, torqueCalPerc: 100, ...over,
   };
 }
 
@@ -119,10 +119,11 @@ describe("suggestCameraOffset", () => {
 
 describe("driftView", () => {
   it("not enough straight-road samples shows progress", () => {
-    const v = driftView(drift({ seconds: 15, carOffsetM: 0.3 }));
+    const v = driftView(drift({ seconds: 45, carOffsetM: 0.3 }));
     expect(v).toMatchObject({ tone: "muted", cause: null });
     expect(v.progress?.pct).toBe(25);
-    expect(v.progress?.text).toContain("45 秒");
+    expect(v.progress?.text).toContain("3 分钟");
+    expect(driftView(drift({ seconds: 120, carOffsetM: 0.3 })).tone).toBe("muted");
     expect(driftView(drift({ carOffsetM: null })).cause).toBeNull();
   });
 
@@ -154,11 +155,13 @@ describe("driftChecklist", () => {
     expect(driftChecklist(drift()).map((c) => c.state)).toEqual(["ok", "ok", "ok"]);
   });
 
-  it("steering wheel zero: <2° ok, 2–5° warn, invalid bad, missing unknown", () => {
-    expect(byId(drift({ angleOffsetDeg: -1.9 })).zero.state).toBe("ok");
-    expect(byId(drift({ angleOffsetDeg: 3 })).zero.state).toBe("warn");
-    expect(byId(drift({ angleOffsetDeg: 3 })).zero.text).toContain("四轮定位");
-    expect(byId(drift({ angleOffsetDeg: 6 })).zero.state).toBe("bad");
+  it("steering wheel zero: <4° ok, 4–8° warn, invalid bad, missing unknown", () => {
+    expect(byId(drift({ angleOffsetDeg: -2.4 })).zero.state).toBe("ok");
+    expect(byId(drift({ angleOffsetDeg: 3.94 })).zero).toMatchObject({ state: "ok", text: "正常（3.9°）" });
+    // 判定和显示用同一个取整值：显示 4° 就不能判正常
+    expect(byId(drift({ angleOffsetDeg: 3.96 })).zero).toMatchObject({ state: "warn" });
+    expect(byId(drift({ angleOffsetDeg: 5 })).zero.text).toContain("四轮定位");
+    expect(byId(drift({ angleOffsetDeg: 9 })).zero.state).toBe("bad");
     expect(byId(drift({ angleOffsetValid: false })).zero.state).toBe("bad");
     expect(byId(drift({ angleOffsetDeg: null, angleOffsetValid: null })).zero.state).toBe("unknown");
   });
@@ -177,11 +180,19 @@ describe("driftChecklist", () => {
     expect(warn.text).toContain("1.8°");
     expect(byId(drift({ latAccelOffset: null })).torqueOffset.state).toBe("unknown");
   });
+
+  it("torque offset still learning is not reported as fine", () => {
+    // 重学期间偏置为 0，不能显示“正常”
+    expect(byId(drift({ latAccelOffset: 0, torqueCalPerc: 18 })).torqueOffset).toMatchObject({
+      state: "unknown", text: "学习中（18%）",
+    });
+    expect(byId(drift({ latAccelOffset: 0.1, torqueCalPerc: null })).torqueOffset.state).toBe("ok");
+  });
 });
 
 describe("weaveView", () => {
   it("not enough data", () => {
-    expect(weaveView(weave({ seconds: 30, windows: 3 })).tone).toBe("muted");
+    expect(weaveView(weave({ seconds: 60, windows: 6 })).tone).toBe("muted");
     expect(weaveView(weave({ windows: 0 })).progress).not.toBeNull();
   });
 
@@ -189,14 +200,17 @@ describe("weaveView", () => {
     // 直道都是几秒长的短段：样本够 90 秒，但连续 10 秒的窗口只有 2 个 → 仍在收集，进度按窗口算
     const v = weaveView(weave({ seconds: 90, windows: 2, weaveWindows: 0 }));
     expect(v.tone).toBe("muted");
-    expect(v.progress?.pct).toBe(33);
+    expect(v.progress?.pct).toBe(17);
     expect(v.progress?.text).toContain("连续");
-    expect(weaveView(weave({ seconds: 60, windows: 6, weaveWindows: 0 })).tone).toBe("accent");
+    expect(weaveView(weave({ seconds: 120, windows: 12, weaveWindows: 0 })).tone).toBe("accent");
   });
 
   it("stable / slight / obvious by share of weaving windows", () => {
     expect(weaveView(weave({ weaveWindows: 1, windows: 30 }))).toMatchObject({ tone: "accent", badge: "稳定" });
     expect(weaveView(weave({ weaveWindows: 3, windows: 30 }))).toMatchObject({ tone: "warn", badge: "轻微摆动" });
+    // 单个窗口不算：12 个里有 1 个也是 8%，只凭一个窗口就报警太敏感
+    expect(weaveView(weave({ weaveWindows: 1, windows: 12 }))).toMatchObject({ tone: "accent" });
+    expect(weaveView(weave({ weaveWindows: 2, windows: 30 }))).toMatchObject({ tone: "warn" });
     expect(weaveView(weave({ weaveWindows: 6, windows: 30 }))).toMatchObject({ tone: "danger", badge: "明显画龙" });
   });
 

@@ -180,10 +180,11 @@ class TestDrift:
     d = Drive()
     params = FakeParams({"LiveParametersV2": event_bytes("vehicleParameters", angleOffsetAverageDeg=1.5,
                                                          angleOffsetAverageValid=True)})
-    drift = d.report(params, torque={"latAccelOffset": 0.12})["drift"]
+    drift = d.report(params, torque={"latAccelOffset": 0.12, "calPerc": 18})["drift"]
     assert drift["angleOffsetDeg"] == pytest.approx(1.5)
     assert drift["angleOffsetValid"] is True
     assert drift["latAccelOffset"] == pytest.approx(0.12)
+    assert drift["torqueCalPerc"] == 18
     d.sm.msgs["vehicleParameters"] = NS(angleOffsetAverageDeg=-3.0, angleOffsetAverageValid=False)
     d.sm.updated["vehicleParameters"] = True
     d.diag.update(d.sm, d.now)
@@ -191,6 +192,7 @@ class TestDrift:
     assert drift["angleOffsetDeg"] == pytest.approx(-3.0)
     assert drift["angleOffsetValid"] is False
     assert drift["latAccelOffset"] is None
+    assert drift["torqueCalPerc"] is None
 
   def test_accurate_angle(self):
     toyota = FakeParams({"CarParamsPersistent": cp_bytes(brand="toyota")})
@@ -282,6 +284,20 @@ class TestSteering:
     assert s["saturatedCurveSeconds"] == pytest.approx(5.0, abs=0.05)
     assert s["usage"] == pytest.approx([10.0, 0, 0, 0, 10.0], abs=0.05)
     assert s["maxLatAccel"] == pytest.approx(0.004 * 400, abs=1e-3)
+
+  def test_curves_counted_only_where_saturation_is_judged(self):
+    d = Drive()
+    controls(d, 100, desired=0.02, v=8.0)  # 路口转弯 1.28 m/s²
+    d.sm.msgs["carState"].steeringPressed = True
+    controls(d, 100, desired=0.005)
+    d.sm.msgs["carState"].steeringPressed = False
+    controls(d, 100, desired=0.01, v=12.0)
+    assert d.report()["steering"]["curveSeconds"] == pytest.approx(1.0, abs=0.05)
+
+  def test_angle_control_judges_saturation_from_5_ms(self):
+    d = Drive()
+    controls(d, 100, kind="angleState", desired=0.02, v=8.0)
+    assert d.report()["steering"]["curveSeconds"] == pytest.approx(1.0, abs=0.05)
 
   def test_usage_bin_edges(self):
     d = Drive()
