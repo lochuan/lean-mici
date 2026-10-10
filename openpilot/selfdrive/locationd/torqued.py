@@ -8,7 +8,7 @@ from openpilot.cereal import log
 from opendbc.car.structs import car
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.params import Params
-from openpilot.common.realtime import config_realtime_process, DT_MDL
+from openpilot.common.realtime import config_realtime_process, drop_realtime, DT_MDL
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.locationd.helpers import PointBuckets, ParameterEstimator, PoseCalibrator, Pose
@@ -255,8 +255,24 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     return msg
 
 
+REALTIME_CORES = [0, 1, 2, 3]
+REALTIME_PRIORITY = 5
+POINTS_CACHE_PERIOD_FRAMES = int(60 / DT_MDL)
+
+
+def write_points_cache(params, estimator, valid):
+  # 带点的消息要 100+ ms CPU（按车速分段后点数翻几倍）。以 FIFO 跑会抢占同核的 sensord，
+  # 陀螺仪样本超时被 locationd 丢弃 → locationdTemporaryError。缓存不需要实时，临时降为普通调度。
+  drop_realtime()
+  try:
+    msg = estimator.get_msg(valid=valid, with_points=True)
+    params.put("LiveTorqueParameters", msg.to_bytes())
+  finally:
+    config_realtime_process(REALTIME_CORES, REALTIME_PRIORITY)
+
+
 def main(demo=False):
-  config_realtime_process([0, 1, 2, 3], 5)
+  config_realtime_process(REALTIME_CORES, REALTIME_PRIORITY)
 
   DEBUG = bool(int(os.getenv("DEBUG", "0")))
 
@@ -281,9 +297,8 @@ def main(demo=False):
       pm.send('lateralTorqueParameters', estimator.get_msg(valid=sm.all_checks(), with_points=DEBUG))
 
     # Cache points every 60 seconds while onroad
-    if sm.frame % 240 == 0:
-      msg = estimator.get_msg(valid=sm.all_checks(), with_points=True)
-      params.put("LiveTorqueParameters", msg.to_bytes())
+    if sm.frame % POINTS_CACHE_PERIOD_FRAMES == 0:
+      write_points_cache(params, estimator, sm.all_checks())
 
 
 if __name__ == "__main__":
