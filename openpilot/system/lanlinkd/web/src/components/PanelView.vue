@@ -8,6 +8,7 @@ import WifiPanel from "./WifiPanel.vue";
 import SoftwarePanel from "./SoftwarePanel.vue";
 import VehiclePanel from "./VehiclePanel.vue";
 import StatusPanel from "./StatusPanel.vue";
+import DiagnosticsPanel from "./diagnostics/DiagnosticsPanel.vue";
 import Badge from "./ui/Badge.vue";
 import { itemState } from "@/lib/itemState";
 import { store } from "@/lib/store";
@@ -44,6 +45,8 @@ const showBrand = computed(() => brandSettings.value && props.panel.id === "togg
     <VehiclePanel v-if="panel.id === 'vehicle'" />
     <!-- 状态页：遥测 + 模型来源，整个面板都是自定义组件 -->
     <StatusPanel v-else-if="panel.id === 'status'" />
+    <!-- 诊断页：相机 / 跑偏 / 画龙 / 转向，自己轮询 /api/diagnostics -->
+    <DiagnosticsPanel v-else-if="panel.id === 'diagnostics'" />
     <!-- 连接页：WiFi 在上、蓝牙在下，走各自 RPC 的自定义面板 -->
     <template v-else-if="panel.id === 'bluetooth'">
       <WifiPanel />

@@ -7,12 +7,15 @@ from collections import deque
 from openpilot.cereal import messaging
 from openpilot.common.swaglog import cloudlog
 
+from openpilot.system.lanlinkd.diagnostics import PARAM_KEYS as DIAGNOSTICS_PARAM_KEYS, Diagnostics
 from openpilot.system.lanlinkd.status_snapshot import (
   build_capabilities, build_model_status, build_snapshot, build_torque_status, offline_torque_from_cp,
   timing_frame, torque_params_dict, torque_params_from_cache)
 
 # carParams 移除（capabilities 不再依赖实时 CP）
-SERVICES = ['deviceState', 'carState', 'pandaStates', 'gpsLocation', 'modelV2', 'modelDataV2SP', 'lateralTorqueParameters']
+SERVICES = ['deviceState', 'carState', 'pandaStates', 'gpsLocation', 'modelV2', 'modelDataV2SP', 'lateralTorqueParameters',
+            # 诊断页（diagnostics.py）
+            'controlsState', 'carControl', 'vehicleParameters', 'extrinsicsCalibration', 'lateralDelay']
 MODEL_FRAMES = 50  # 最近 50 帧（20Hz ≈ 2.5s）的模型来源
 TIMING_FRAMES = 100  # 分段耗时/小模型原因窗口（≈5s）
 
@@ -45,6 +48,8 @@ class StatusCache:
     self._torque_cache: dict | None = None
     self._offline_cp_bytes = None
     self._offline_torque: dict = offline_torque_from_cp(None)
+    self._diag = Diagnostics()
+    self._diag_error_logged = False
 
   def _capabilities_from_params(self) -> dict:
     """输入（CP/CPSP bytes、bundle、相关 bool params）不变则复用上次结果。"""
@@ -87,6 +92,7 @@ class StatusCache:
         self._model_frames.append(int(bool(sm['modelV2'].big)))
       if sm.updated['modelDataV2SP']:
         self._timing_frames.append(timing_frame(sm['modelDataV2SP']))
+      self._update_diagnostics(sm)
       if sm.updated['lateralTorqueParameters']:
         self._torque_live = torque_params_dict(sm['lateralTorqueParameters'])
         self._torque_live_t = time.monotonic()
@@ -102,6 +108,23 @@ class StatusCache:
         continue
       with self._lock:
         self._snapshot = snap
+
+  def _update_diagnostics(self, sm) -> None:
+    """诊断统计出错只记一次日志，不能拖垮状态快照。锁：report() 在 HTTP 线程读同一份累计量。"""
+    with self._lock:
+      try:
+        self._diag.update(sm, time.monotonic())
+      except Exception:
+        if not self._diag_error_logged:
+          cloudlog.exception("lanlink statusd: diagnostics update failed")
+          self._diag_error_logged = True
+
+  def diagnostics(self) -> dict:
+    # param 读盘放在锁外：锁内只做统计汇总，不阻塞状态循环
+    param_values = {k: self._params.get(k) for k in DIAGNOSTICS_PARAM_KEYS}
+    with self._lock:
+      learned = (self._snapshot.get("torque") or {}).get("learned")
+      return self._diag.report(param_values, learned, time.monotonic())
 
   def snapshot(self) -> dict:
     with self._lock:

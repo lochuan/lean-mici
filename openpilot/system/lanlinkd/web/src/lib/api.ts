@@ -6,7 +6,7 @@
  *  - blocked param 返回 403 而非静默跳过（与上游不同，见 FRONTEND_SPEC.md §1）
  */
 import type {
-  BluetoothStatus, Capabilities, ParamValues, SettingsSchema,
+  BluetoothStatus, Capabilities, DiagnosticsReport, ParamValues, SettingsSchema,
   SoftwareStatus, StatusSnapshot, VehicleState, WifiStatus,
 } from "./schema";
 
@@ -44,6 +44,8 @@ export const api = {
   capabilities: () => request<Capabilities>("/api/capabilities"),
   allParams: () => request<ParamValues>("/api/params/_all"),
   status: () => request<StatusSnapshot>("/api/status"),
+  // 诊断页单独轮询，不并入 /api/status
+  diagnostics: () => request<DiagnosticsReport>("/api/diagnostics"),
 
   // ---- 单 key 写 ----
   putParam: (key: string, value: string) =>

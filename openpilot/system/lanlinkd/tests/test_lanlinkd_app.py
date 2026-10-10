@@ -113,7 +113,7 @@ class TestOpenSurface:
   @pytest.mark.parametrize("path", [
     "/api/params", "/api/params/_all", "/api/params/TestToggle", "/api/models",
     "/api/status", "/api/capabilities", "/api/settings_ui", "/api/logs",
-    "/api/vehicle", "/api/bluetooth",
+    "/api/vehicle", "/api/bluetooth", "/api/diagnostics",
   ])
   def test_read_endpoints_need_no_token(self, app, path):
     _, r = app.test_client.get(path)
@@ -231,6 +231,15 @@ class TestBootstrapRoute:
     # 与 /api/status 的 paramsVersion 同源同形：App 靠它判断是否重新 bootstrap
     _, st = app.test_client.get("/api/status")
     assert r.json["paramsVersion"] == st.json["paramsVersion"]
+
+
+class TestDiagnosticsRoute:
+  def test_returns_cache_report(self, app, monkeypatch):
+    report = {"drive": {"started": False, "seconds": 0}, "camera": None}
+    monkeypatch.setattr(mod.StatusCache, "diagnostics", lambda self: report)
+    _, r = app.test_client.get("/api/diagnostics")
+    assert r.status == 200
+    assert r.json == report
 
 
 class TestStaticRoutes:

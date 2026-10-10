@@ -216,6 +216,9 @@ class LanlinkApp:
     snap["paramsVersion"] = params_api.to_str(self.params.get(params_api.VERSION_KEY))
     return json_response(snap)
 
+  async def diagnostics(self, request: Request) -> HTTPResponse:
+    return json_response(self.cache.diagnostics())
+
   async def bootstrap(self, request: Request) -> HTTPResponse:
     # 进「车机」页一次拿全三份数据：各字段与原接口同形（App 一次请求渲染首屏）
     return json_response({
@@ -281,6 +284,7 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("GET", "/api/software", "software_get"),
   ("POST", "/api/software/<action:str>", "software_action"),
   ("GET", "/api/status", "status"),
+  ("GET", "/api/diagnostics", "diagnostics"),
   ("GET", "/api/bootstrap", "bootstrap"),
   ("GET", "/api/capabilities", "capabilities"),
   ("GET", "/api/settings_ui", "settings_ui"),

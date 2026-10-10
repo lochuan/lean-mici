@@ -319,3 +319,51 @@ export interface SoftwareStatus {
   availableBranches: string[];
   offroad: boolean;
 }
+
+/** /api/diagnostics：诊断页（相机安装、跑偏、画龙、转向能力）。
+ *  行驶统计只算本次行驶（started 由假变真时清零，停车后保留）。 */
+export interface DiagnosticsReport {
+  drive: { started: boolean; seconds: number };   // seconds = 本次行驶已过秒数（未行驶过为 0）
+  camera: CameraDiag | null;                       // 从未标定过（无缓存也无实时）为 null
+  drift: DriftDiag;
+  weave: WeaveDiag;
+  steering: SteeringDiag;
+}
+export interface CameraDiag {
+  source: "live" | "cache";
+  calStatus: "uncalibrated" | "calibrated" | "invalid" | "recalibrating";
+  calPerc: number;                 // 0–100
+  pitchDeg: number;                // >0 设备朝下
+  yawDeg: number;                  // >0 设备朝左
+  limits: { pitchUpDeg: number; pitchDownDeg: number; yawDeg: number };  // 均为正数
+  cameraOffsetM: number;           // 当前 CameraOffset，>0 = 设备在中线左侧
+}
+export interface DriftDiag {
+  seconds: number;                 // 有效直道样本秒数
+  carOffsetM: number | null;       // 平均，>0 车偏右；无样本 null
+  planOffsetM: number | null;      // 平均，>0 规划偏右
+  angleOffsetDeg: number | null;   // paramsd angleOffsetAverageDeg（实时或缓存）
+  angleOffsetValid: boolean | null;
+  accurateAngle: "ready" | "pending" | "unknown" | "n/a";  // Toyota 高精度转角；非 Toyota 为 n/a；本次没收到 carState 为 unknown
+  latAccelOffset: number | null;   // m/s²，torqued 学到的偏置
+}
+export interface WeaveDiag {
+  seconds: number;                 // 直道样本秒数（与 drift 同口径）
+  windows: number;                 // 已评估的 10 s 窗口数
+  weaveWindows: number;            // 其中判为画龙的窗口数
+  medianP2pM: number | null;       // 各窗口峰峰值中位数
+  medianPeriodS: number | null;    // 各窗口周期中位数（无法估计周期的窗口不计）
+  trace: (number | null)[];        // 最近 30 s，4 Hz，共 120 点，米，>0 偏右；null = 不满足采样条件
+  lateralDelayS: number | null;    // lagd 学到的横向延迟
+  factoryDelayS: number | null;    // CarParams.steerActuatorDelay
+}
+export interface SteeringDiag {
+  control: "torque" | "angle" | "";
+  activeSeconds: number;           // 横向控制激活且车速 > 5 m/s 的秒数
+  curveSeconds: number;            // 其中弯道秒数
+  saturatedCurveSeconds: number;   // 弯道且饱和的秒数
+  usage: number[] | null;          // torque 控制：|output| 五档 [0,.2) [.2,.4) [.4,.6) [.6,.8) [.8,1] 的秒数；angle 为 null
+  epsTempFaults: number;
+  epsPermanent: boolean;
+  maxLatAccel: number | null;      // 激活时达到的最大 |curvature·v²|，m/s²
+}

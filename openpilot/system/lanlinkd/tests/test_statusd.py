@@ -146,3 +146,55 @@ class TestTorqueStatus:
     # 第 1 轮收到实时消息，第 2 轮没有且已过 10s：torqued 停了（熄火），改读落盘缓存
     t = self._run(live_calls={1}, cache_laf=2.9, clock={"t": 0.0})
     assert t["source"] == "cache"
+
+
+class TestDiagnostics:
+  def _run(self, steps, params):
+    """steps：每轮 SubMaster.update 后置为 updated 的服务集合；消息由 msgs 提供。"""
+    exit_event = threading.Event()
+    msgs = {
+      "deviceState": NS(started=True),
+      "carState": NS(vEgo=20.0, leftBlinker=False, rightBlinker=False, steeringPressed=False,
+                     steerFaultTemporary=False, steerFaultPermanent=False, steeringAngleOffsetDeg=0.0),
+      "carControl": NS(latActive=True, enabled=True),
+      "controlsState": NS(desiredCurvature=0.0, curvature=0.0,
+                          lateralControlState=NS(which=lambda: "torqueState", torqueState=NS(saturated=False, output=0.1))),
+      "modelV2": NS(big=False),
+    }
+
+    class FakeSubMaster:
+      def __init__(self, services):
+        self.updated = dict.fromkeys(services, False)
+        self.calls = 0
+
+      def update(self, timeout):
+        for k in self.updated:
+          self.updated[k] = k in steps[self.calls]
+        self.calls += 1
+        if self.calls >= len(steps):
+          exit_event.set()
+
+      def __getitem__(self, name):
+        return msgs.get(name, NS())
+
+    cache = StatusCache({}, "tici", params=params)
+    with patch.object(statusd.messaging, "SubMaster", FakeSubMaster), \
+         patch.object(statusd, "build_snapshot", lambda *a: {}), \
+         patch.object(statusd, "build_capabilities", lambda *a, **k: {}):
+      cache.run(exit_event)
+    return cache
+
+  def test_loop_feeds_drive_diagnostics(self):
+    params = NS(get=lambda k: None, get_bool=lambda k: False)
+    steps = [{"deviceState"}] + [{"carState", "carControl", "controlsState"}] * 10
+    report = self._run(steps, params).diagnostics()
+    assert report["drive"]["started"] is True
+    assert report["steering"]["control"] == "torque"
+    assert report["steering"]["activeSeconds"] > 0
+
+  def test_broken_message_does_not_stop_status_loop(self):
+    # modelV2 缺车道线等字段：诊断统计抛异常，但状态快照仍照常产出
+    params = NS(get=lambda k: None, get_bool=lambda k: False)
+    cache = self._run([{"deviceState"}, {"modelV2"}, {"modelV2"}], params)
+    assert "torque" in cache.snapshot()
+    assert cache.diagnostics()["drift"]["seconds"] == 0

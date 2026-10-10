@@ -18,6 +18,7 @@ import {
   Package,
   Settings2,
   SlidersHorizontal,
+  Stethoscope,
 } from "lucide-vue-next";
 import { cn } from "@/lib/utils";
 import { panels } from "@/lib/store";
@@ -39,6 +40,7 @@ const ICONS: Record<string, unknown> = {
   developer: Code2,
   vehicle: Car,
   status: Activity,
+  diagnostics: Stethoscope,
 };
 
 const iconFor = (p: Panel) => ICONS[p.icon ?? ""] ?? Settings2;
