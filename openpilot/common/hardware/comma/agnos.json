@@ -56,7 +56,7 @@
   },
   {
     "name": "boot",
-    "url": "https://tp.diaperastiko.top/agnos/19.6.27/boot-86275abcfd705451a58f5e248f6bcbcc16c6e4284713887efba09a8456251eed.img.xz",
+    "url": "https://dl.diaperastiko.top/agnos/19.6.27/boot-86275abcfd705451a58f5e248f6bcbcc16c6e4284713887efba09a8456251eed.img.xz",
     "hash": "86275abcfd705451a58f5e248f6bcbcc16c6e4284713887efba09a8456251eed",
     "hash_raw": "86275abcfd705451a58f5e248f6bcbcc16c6e4284713887efba09a8456251eed",
     "size": 49043456,
@@ -67,7 +67,7 @@
   },
   {
     "name": "system",
-    "url": "https://tp.diaperastiko.top/agnos/19.6.27/system-c61253f8f20f5d34efeeda70e0362bf02332eaaeb6bf1d04d654a8e19e52cec1.img.xz",
+    "url": "https://dl.diaperastiko.top/agnos/19.6.27/system-c61253f8f20f5d34efeeda70e0362bf02332eaaeb6bf1d04d654a8e19e52cec1.img.xz",
     "hash": "9cad0b63a1ffafd4f4be7484dc035d7b12a650eb254becadc5362ca4772e9459",
     "hash_raw": "c61253f8f20f5d34efeeda70e0362bf02332eaaeb6bf1d04d654a8e19e52cec1",
     "size": 4718592000,
