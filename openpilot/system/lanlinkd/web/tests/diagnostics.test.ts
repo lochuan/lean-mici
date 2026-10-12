@@ -76,14 +76,44 @@ describe("cameraView", () => {
 
   it("device facing left and down → turn right and tilt up", () => {
     const v = cameraView(cam({ yawDeg: 2.5, pitchDeg: 6 }));
-    expect(v.adjust).toBe("往右转约 2.5°、往上抬约 6°");
-    // 瞄准点：朝左 → 左（x<0），朝下 → 下（y>0）
-    expect(v.aim).toEqual({ x: -2.5, y: 6 });
+    expect(v.adjust).toBe("镜头朝向往右转约 2.5°、往上抬约 6°");
+    // 10 m × tan(2.5°) ≈ 44 cm，10 m × tan(6°) ≈ 105 cm
+    expect(v.aimShift).toBe("相当于正前方 10 米处的瞄准点往右移约 44 cm、往上移约 105 cm");
   });
 
   it("device facing right and up → turn left and tilt down; axes inside the ideal zone are not mentioned", () => {
-    expect(cameraView(cam({ yawDeg: -3.5, pitchDeg: -1 })).adjust).toBe("往左转约 3.5°");
-    expect(cameraView(cam({ yawDeg: 0.3, pitchDeg: -4.44 })).adjust).toBe("往下压约 4.4°");
+    const left = cameraView(cam({ yawDeg: -3.5, pitchDeg: -1 }));
+    expect(left.adjust).toBe("镜头朝向往左转约 3.5°");
+    expect(left.aimShift).toBe("相当于正前方 10 米处的瞄准点往左移约 61 cm");
+    const down = cameraView(cam({ yawDeg: 0.3, pitchDeg: -4.44 }));
+    expect(down.adjust).toBe("镜头朝向往下压约 4.4°");
+    expect(down.aimShift).toBe("相当于正前方 10 米处的瞄准点往下移约 78 cm");
+  });
+
+  it("no adjustment text when good", () => {
+    expect(cameraView(cam({ yawDeg: 1, pitchDeg: 1 }))).toMatchObject({ adjust: null, aimShift: null });
+  });
+
+  it("reminds that calibration only updates while driving", () => {
+    expect(cameraView(cam({ yawDeg: 2.4 })).advice).toContain("停车时数字不会变");
+  });
+
+  it("diagram angles: clockwise on screen is positive, top view nose up, side view nose right", () => {
+    const v = cameraView(cam({ yawDeg: 2.5, pitchDeg: 1 }));
+    // 俯视：朝左 = 逆时针（<0）；侧视：朝下 = 顺时针（>0）
+    expect(v.diagrams).toEqual({
+      top: { deg: -2.5, min: -3.96, max: 3.96, facing: "偏左 2.5°", needsTurn: true },
+      side: { deg: 1, min: -5.2, max: 9.7, facing: "偏下 1°", needsTurn: false },
+    });
+    const up = cameraView(cam({ yawDeg: -0.02, pitchDeg: -2.6 })).diagrams!;
+    expect(up.top).toMatchObject({ facing: "正", needsTurn: false });
+    // 2.6 / 5.2 正好 0.5：与文字建议同一判据
+    expect(up.side).toMatchObject({ facing: "偏上 2.6°", needsTurn: true });
+  });
+
+  it("no diagrams without a finished calibration", () => {
+    expect(cameraView(null).diagrams).toBeNull();
+    expect(cameraView(cam({ calStatus: "recalibrating", calPerc: 10 })).diagrams).toBeNull();
   });
 });
 

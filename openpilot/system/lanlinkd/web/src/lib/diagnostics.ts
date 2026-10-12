@@ -63,27 +63,51 @@ export function driveText(drive: DiagnosticsReport["drive"]): string {
 
 // ---- 相机安装角度 ----
 
+/** 示意图上的一个转角（度，真实值，未放大）：屏幕上顺时针为正；min/max 是允许范围 */
+export interface MountAngle {
+  deg: number;
+  min: number;
+  max: number;
+  /** 现状，如“偏左 2.1°”；不足 0.05° 为“正” */
+  facing: string;
+  /** 与 adjust 同一判据：该轴需要调整时为 true，示意图据此画“往哪边转”的箭头 */
+  needsTurn: boolean;
+}
+
 export interface CameraView extends Verdict {
   /** 标定中的进度 0–100；已完成为 null */
   progress: number | null;
-  /** 当前朝向在瞄准框里的位置（度）：x 向右为正，y 向下为正 */
-  aim: { x: number; y: number } | null;
-  /** 调整方向，如“往右转约 1.5°、往上抬约 2°”；良好时为 null */
+  /** 俯视图（车头朝上，看 yaw）与侧视图（车头朝右，看 pitch）；标定未完成为 null */
+  diagrams: { top: MountAngle; side: MountAngle } | null;
+  /** 调整方向，如“镜头朝向往右转约 1.5°、往上抬约 2°”；良好时为 null */
   adjust: string | null;
+  /** 换算成实物距离，如“相当于正前方 10 米处的瞄准点往右移约 26 cm”；良好时为 null */
+  aimShift: string | null;
 }
 
-/** 角度 / 限值 低于此为良好；瞄准框里的“理想范围”也按它画 */
+/** 角度 / 限值 低于此为良好；示意图里的“理想范围”也按它画 */
 export const CAMERA_GOOD = 0.5;
 const CAMERA_BAD = 0.8;
+
+/** 瞄准点换算的参照距离 */
+const AIM_REF_M = 10;
+const RECAL_HINT = "调好后在直路上以 50 km/h 以上开一会儿会重新标定，停车时数字不会变";
+
+function facingText(deg: number, positiveWord: string, negativeWord: string): string {
+  return shownDeg(deg) === 0 ? "正" : `${deg > 0 ? positiveWord : negativeWord} ${fmtDeg(deg)}`;
+}
+
+function aimShiftCm(deg: number): number {
+  return Math.round(AIM_REF_M * Math.tan((Math.abs(deg) * Math.PI) / 180) * 100);
+}
 
 export function cameraView(cam: CameraDiag | null): CameraView {
   if (!cam) {
     return {
       tone: "muted", badge: "无数据", headline: "还没有相机标定数据",
-      advice: "开车上路后会自动开始标定", progress: null, aim: null, adjust: null,
+      advice: "开车上路后会自动开始标定", progress: null, diagrams: null, adjust: null, aimShift: null,
     };
   }
-  const aim = { x: -cam.yawDeg, y: cam.pitchDeg };
   if (cam.calStatus === "uncalibrated" || cam.calStatus === "recalibrating") {
     const perc = Math.round(Math.min(100, Math.max(0, cam.calPerc)));
     return {
@@ -91,40 +115,66 @@ export function cameraView(cam: CameraDiag | null): CameraView {
       badge: `标定中 ${perc}%`,
       headline: cam.calStatus === "recalibrating" ? "正在重新标定相机" : "相机标定中",
       advice: "在路况良好的直路上以 50 km/h 以上开一会儿就能完成",
-      progress: perc, aim: null, adjust: null,
+      progress: perc, diagrams: null, adjust: null, aimShift: null,
     };
   }
-
   const yawRatio = Math.abs(cam.yawDeg) / cam.limits.yawDeg;
   const pitchLimit = cam.pitchDeg > 0 ? cam.limits.pitchDownDeg : cam.limits.pitchUpDeg;
   const pitchRatio = Math.abs(cam.pitchDeg) / pitchLimit;
   const worst = Math.max(yawRatio, pitchRatio);
 
+  const diagrams = {
+    top: {
+      deg: -cam.yawDeg, min: -cam.limits.yawDeg, max: cam.limits.yawDeg,
+      facing: facingText(cam.yawDeg, "偏左", "偏右"), needsTurn: yawRatio >= CAMERA_GOOD,
+    },
+    side: {
+      deg: cam.pitchDeg, min: -cam.limits.pitchUpDeg, max: cam.limits.pitchDownDeg,
+      facing: facingText(cam.pitchDeg, "偏下", "偏上"), needsTurn: pitchRatio >= CAMERA_GOOD,
+    },
+  };
+
   const steps: string[] = [];
-  if (yawRatio >= CAMERA_GOOD) steps.push(`${cam.yawDeg > 0 ? "往右转" : "往左转"}约 ${fmtDeg(cam.yawDeg)}`);
-  if (pitchRatio >= CAMERA_GOOD) steps.push(`${cam.pitchDeg > 0 ? "往上抬" : "往下压"}约 ${fmtDeg(cam.pitchDeg)}`);
-  const adjust = steps.length ? steps.join("、") : null;
+  const shifts: string[] = [];
+  if (diagrams.top.needsTurn) {
+    const turnRight = cam.yawDeg > 0;
+    steps.push(`${turnRight ? "往右转" : "往左转"}约 ${fmtDeg(cam.yawDeg)}`);
+    // 朝左（yaw>0）要往右转，瞄准点随之右移
+    shifts.push(`${turnRight ? "往右" : "往左"}移约 ${aimShiftCm(cam.yawDeg)} cm`);
+  }
+  if (diagrams.side.needsTurn) {
+    const tiltUp = cam.pitchDeg > 0;
+    steps.push(`${tiltUp ? "往上抬" : "往下压"}约 ${fmtDeg(cam.pitchDeg)}`);
+    shifts.push(`${tiltUp ? "往上" : "往下"}移约 ${aimShiftCm(cam.pitchDeg)} cm`);
+  }
+  const adjust = steps.length ? `镜头朝向${steps.join("、")}` : null;
+  const aimShift = shifts.length ? `相当于正前方 ${AIM_REF_M} 米处的瞄准点${shifts.join("、")}` : null;
 
   if (cam.calStatus === "invalid") {
     return {
       tone: "danger", badge: "需调整", headline: "标定失败：安装角度超出允许范围",
-      advice: "按图中箭头方向调整设备，调好后会自动重新标定",
-      progress: null, aim, adjust,
+      advice: `按图中箭头方向转动设备。${RECAL_HINT}`,
+      progress: null, diagrams, adjust, aimShift,
     };
   }
   if (worst >= CAMERA_BAD) {
     return {
       tone: "danger", badge: "需调整", headline: "安装角度接近允许范围边缘",
-      advice: "建议按图中箭头方向调整，否则容易标定失败、影响居中", progress: null, aim, adjust,
+      advice: `建议按图中箭头方向调整，否则容易标定失败、影响居中。${RECAL_HINT}`,
+      progress: null, diagrams, adjust, aimShift,
     };
   }
   if (worst >= CAMERA_GOOD) {
     return {
       tone: "warn", badge: "建议调整", headline: "安装角度可用，但不够正",
-      advice: "不影响使用，有空可以按图中箭头方向调一下", progress: null, aim, adjust,
+      advice: `不影响使用，有空可以按图中箭头方向调一下。${RECAL_HINT}`,
+      progress: null, diagrams, adjust, aimShift,
     };
   }
-  return { tone: "accent", badge: "良好", headline: "安装角度良好", advice: null, progress: null, aim, adjust: null };
+  return {
+    tone: "accent", badge: "良好", headline: "安装角度良好", advice: null, progress: null,
+    diagrams, adjust: null, aimShift: null,
+  };
 }
 
 // ---- 量一量：建议的 CameraOffset ----
