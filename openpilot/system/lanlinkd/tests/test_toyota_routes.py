@@ -48,3 +48,22 @@ class TestSessionRoutes:
     # 绕过 session 直接置 param 会停 pandad 却没有人接管 panda
     _, r = app.test_client.put("/api/params/LanLinkDiagMode", json={"value": "1"})
     assert r.status == 403
+
+
+class TestRequiresSession:
+  @pytest.mark.parametrize("method,path", [
+    ("post", "/api/toyota/customizations/scan"),
+    ("post", "/api/toyota/customizations/10000/preview"),
+    ("post", "/api/toyota/customizations/10000/write"),
+    ("post", "/api/toyota/backups/0123456789ab/restore"),
+  ])
+  def test_bus_operations_need_diag_mode(self, app, method, path):
+    _, r = getattr(app.test_client, method)(path, json={"option": 0, "before": "00"})
+    assert r.status in (404, 409)
+    assert "error" in r.json
+
+  def test_backups_listing_works_without_session(self, app, tmp_path):
+    app.ctx.state.toyota.backups.directory = str(tmp_path)
+    _, r = app.test_client.get("/api/toyota/backups")
+    assert r.status == 200
+    assert r.json == {"backups": []}

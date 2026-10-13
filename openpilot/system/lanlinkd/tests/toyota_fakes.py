@@ -105,3 +105,27 @@ class FakePanda:
     tx, sub = key
     data = (bytes([sub]) if sub is not None else b"") + frame
     self._rx.append((tx + 8, data.ljust(8, b"\x00"), self.bus))
+
+
+class FakeBodyEcu(FakeEcu):
+  """有内存的 Toyota 定制 ECU：A803 报掩码，21 读压缩数据，3B 按掩码写回。"""
+
+  def __init__(self, memory: dict[int, bytes], masks: dict[int, bytes], reject_writes: bytes | None = None):
+    super().__init__(handler=self._handle)
+    self.memory = dict(memory)    # 本地 ID → 压缩数据
+    self.masks = dict(masks)      # 本地 ID → A803 掩码
+    self.reject_writes = reject_writes
+
+  def _handle(self, request: bytes):
+    if request == b"\x3e":
+      return b"\x7e"
+    if request == b"\xa8\x03":
+      return b"\xe8\x03" + b"".join(bytes([i, len(m)]) + m for i, m in self.masks.items())
+    if len(request) == 2 and request[0] == 0x21 and request[1] in self.memory:
+      return b"\x61" + request[1:2] + self.memory[request[1]]
+    if len(request) > 2 and request[0] == 0x3B and request[1] in self.masks:
+      if self.reject_writes:
+        return self.reject_writes
+      self.memory[request[1]] = bytes(b for b, m in zip(request[2:], self.masks[request[1]], strict=True) if m)
+      return [b"\x7f\x3b\x78", b"\x7b" + request[1:2]]
+    return b"\x7f" + request[:1] + b"\x11"

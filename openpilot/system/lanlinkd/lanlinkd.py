@@ -228,6 +228,21 @@ class LanlinkApp:
   async def toyota_session_exit(self, request: Request) -> HTTPResponse:
     return await self._toyota("session_exit")
 
+  async def toyota_customizations_scan(self, request: Request) -> HTTPResponse:
+    return await self._toyota("customizations_scan")
+
+  async def toyota_customization_preview(self, request: Request, uid: str) -> HTTPResponse:
+    return await self._toyota("customization_preview", uid, self._body(request))
+
+  async def toyota_customization_write(self, request: Request, uid: str) -> HTTPResponse:
+    return await self._toyota("customization_write", uid, self._body(request))
+
+  async def toyota_backups(self, request: Request) -> HTTPResponse:
+    return await self._toyota("backups_list")
+
+  async def toyota_backup_restore(self, request: Request, backup_id: str) -> HTTPResponse:
+    return await self._toyota("backup_restore", backup_id)
+
   # ---- status / capabilities / settings / logs ----
   async def status(self, request: Request) -> HTTPResponse:
     snap = self.cache.snapshot()
@@ -304,6 +319,11 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("GET", "/api/toyota/session", "toyota_session_get"),
   ("POST", "/api/toyota/session/enter", "toyota_session_enter"),
   ("POST", "/api/toyota/session/exit", "toyota_session_exit"),
+  ("POST", "/api/toyota/customizations/scan", "toyota_customizations_scan"),
+  ("POST", "/api/toyota/customizations/<uid:str>/preview", "toyota_customization_preview"),
+  ("POST", "/api/toyota/customizations/<uid:str>/write", "toyota_customization_write"),
+  ("GET", "/api/toyota/backups", "toyota_backups"),
+  ("POST", "/api/toyota/backups/<backup_id:str>/restore", "toyota_backup_restore"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/diagnostics", "diagnostics"),
   ("GET", "/api/bootstrap", "bootstrap"),
