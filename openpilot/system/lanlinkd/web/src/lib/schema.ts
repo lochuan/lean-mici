@@ -378,7 +378,7 @@ export interface BsmDiag {
   watchSeconds: number;            // 本次行驶车速 ≥ 16 km/h 的秒数（BSM 只在此车速以上工作）
 }
 
-// ---- 丰田诊断（/api/toyota/*，契约见 .scratch/toyota-diag/spec.md §3）----
+// ---- TechStream 丰田诊断（/api/toyota/*，契约见 .scratch/toyota-diag/spec.md §3）----
 
 export interface ToyotaSession {
   state: "idle" | "entering" | "active";

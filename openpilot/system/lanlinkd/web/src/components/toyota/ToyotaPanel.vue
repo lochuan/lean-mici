@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 丰田诊断页：顶部会话条 + 四个标签页。
+/** TechStream（丰田诊断）页：顶部会话条 + 四个标签页。
  *
  * 会话状态每 2 s 轮询 /api/toyota/session（浏览器页面不可见时暂停）。
  * 只有 active 时标签页可用；进入诊断模式会暂停 openpilot，所以先弹确认框。

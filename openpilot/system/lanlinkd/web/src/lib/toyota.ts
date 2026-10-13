@@ -1,4 +1,4 @@
-/** 丰田诊断页的纯逻辑：hex 差异高亮、定制项分组、PID 勾选、会话状态与倒计时。
+/** TechStream（丰田诊断）页的纯逻辑：hex 差异高亮、定制项分组、PID 勾选、会话状态与倒计时。
  *  接口契约见 .scratch/toyota-diag/spec.md §3。 */
 import type { Tone } from "./diagnostics";
 import type { ToyotaCustomizationItem, ToyotaPidGroup, ToyotaSession } from "./schema";

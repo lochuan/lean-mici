@@ -1753,10 +1753,10 @@
   },
   {
    "id": "toyota",
-   "label": "丰田诊断",
+   "label": "TechStream",
    "icon": "toyota",
    "order": 10,
-   "description": "进入诊断模式后读写车辆定制项、读清故障码、查看实时数据",
+   "description": "丰田车辆诊断与定制：进入诊断模式后读写定制项、读清故障码、查看实时数据",
    "sections": []
   },
   {
