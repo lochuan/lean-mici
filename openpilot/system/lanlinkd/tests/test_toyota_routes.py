@@ -56,9 +56,11 @@ class TestRequiresSession:
     ("post", "/api/toyota/customizations/10000/preview"),
     ("post", "/api/toyota/customizations/10000/write"),
     ("post", "/api/toyota/backups/0123456789ab/restore"),
+    ("post", "/api/toyota/dtc/scan"),
+    ("post", "/api/toyota/dtc/clear"),
   ])
   def test_bus_operations_need_diag_mode(self, app, method, path):
-    _, r = getattr(app.test_client, method)(path, json={"option": 0, "before": "00"})
+    _, r = getattr(app.test_client, method)(path, json={"option": 0, "before": "00", "ecus": ["7E0"]})
     assert r.status in (404, 409)
     assert "error" in r.json
 

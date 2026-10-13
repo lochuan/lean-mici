@@ -6,7 +6,7 @@ body 为 None 表示 204。协议细节见 toyota/ 下各模块和 .scratch/toyo
 import subprocess
 from collections.abc import Callable
 
-from openpilot.system.lanlinkd.toyota import catalog, customization
+from openpilot.system.lanlinkd.toyota import catalog, customization, dtc
 from openpilot.system.lanlinkd.toyota.backups import BackupStore
 from openpilot.system.lanlinkd.toyota.link import NoResponseError
 from openpilot.system.lanlinkd.toyota.session import DiagSession, SessionError, car_is_parked
@@ -79,10 +79,12 @@ def _backup_view(backup: dict) -> dict:
 
 class ToyotaDiagApi:
   def __init__(self, session: DiagSession, backup_dir: str,
-               customization_items: Callable[[], list[dict]] = catalog.customization_items):
+               customization_items: Callable[[], list[dict]] = catalog.customization_items,
+               dtc_targets: Callable[[], list[dict]] = catalog.dtc_targets):
     self.session = session
     self.backups = BackupStore(backup_dir)
     self._customization_items = customization_items
+    self._dtc_targets = dtc_targets
 
   def _item_and_option(self, uid: str, body: dict, writing: bool = True) -> tuple[dict, int]:
     item = next((i for i in self._customization_items() if str(i["uid"]) == uid), None)
@@ -145,3 +147,17 @@ class ToyotaDiagApi:
         raise RequestError(404, "备份不存在")
       return self.session.run(lambda link: customization.restore(link, backup))
     return _guarded(restore)
+
+  # ---- 故障码 ----
+  def dtc_scan(self):
+    return _guarded(lambda: {"ecus": self.session.run(
+      lambda link: dtc.scan(link, self._dtc_targets(), catalog.load("dtc_descriptions")))})
+
+  def dtc_clear(self, body: dict):
+    def clear():
+      targets = {t["ecu"]: t for t in self._dtc_targets()}
+      ecus = body.get("ecus")
+      if not isinstance(ecus, list) or not ecus or not all(isinstance(e, str) and e in targets for e in ecus):
+        raise RequestError(400, "ecus 无效")
+      return {"results": self.session.run(lambda link: [dtc.clear(link, targets[e]) for e in ecus])}
+    return _guarded(clear)

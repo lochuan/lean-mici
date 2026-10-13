@@ -17,7 +17,7 @@ class BackupStore:
     os.makedirs(self.directory, exist_ok=True)
     path = os.path.join(self.directory, f"{backup_id}.json")
     with open(path + ".tmp", "w") as f:
-      json.dump({**record, "id": backup_id, "time": time.time()}, f, ensure_ascii=False)
+      json.dump({**record, "id": backup_id, "time": time.time()}, f, ensure_ascii=False)  # noqa: TID251  备份时间给人看，要墙钟
     os.replace(path + ".tmp", path)
     return backup_id
 

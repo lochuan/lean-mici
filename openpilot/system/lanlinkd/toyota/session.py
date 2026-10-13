@@ -33,7 +33,7 @@ def car_is_parked(status_snapshot: dict) -> bool:
 
 class DiagSession:
   def __init__(self, params, open_link: Callable[[], object], pandad_running: Callable[[], bool],
-               is_parked: Callable[[], bool], clock: Callable[[], float] = time.time,
+               is_parked: Callable[[], bool], clock: Callable[[], float] = time.time,  # noqa: TID251  lastActivity 契约是 unix 秒
                sleep: Callable[[float], None] = time.sleep, idle_timeout_s: float = 900,
                pandad_stop_timeout_s: float = 15):
     self._params = params

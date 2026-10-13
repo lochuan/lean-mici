@@ -243,6 +243,12 @@ class LanlinkApp:
   async def toyota_backup_restore(self, request: Request, backup_id: str) -> HTTPResponse:
     return await self._toyota("backup_restore", backup_id)
 
+  async def toyota_dtc_scan(self, request: Request) -> HTTPResponse:
+    return await self._toyota("dtc_scan")
+
+  async def toyota_dtc_clear(self, request: Request) -> HTTPResponse:
+    return await self._toyota("dtc_clear", self._body(request))
+
   # ---- status / capabilities / settings / logs ----
   async def status(self, request: Request) -> HTTPResponse:
     snap = self.cache.snapshot()
@@ -324,6 +330,8 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/toyota/customizations/<uid:str>/write", "toyota_customization_write"),
   ("GET", "/api/toyota/backups", "toyota_backups"),
   ("POST", "/api/toyota/backups/<backup_id:str>/restore", "toyota_backup_restore"),
+  ("POST", "/api/toyota/dtc/scan", "toyota_dtc_scan"),
+  ("POST", "/api/toyota/dtc/clear", "toyota_dtc_clear"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/diagnostics", "diagnostics"),
   ("GET", "/api/bootstrap", "bootstrap"),

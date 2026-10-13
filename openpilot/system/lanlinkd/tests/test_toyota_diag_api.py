@@ -1,9 +1,11 @@
+import pytest
+
 from openpilot.system.lanlinkd import toyota_diag_api
 from openpilot.system.lanlinkd.toyota.link import DiagLink
 from openpilot.system.lanlinkd.toyota.session import SessionError
 
 from .test_toyota_customization import ITEM
-from .toyota_fakes import FakeBodyEcu, FakePanda
+from .toyota_fakes import FakeBodyEcu, FakeEcu, FakePanda
 
 
 class FakeSession:
@@ -114,3 +116,38 @@ class TestCustomizationEndpoints:
     _, api = make_active_api(tmp_path, ecus={})
     status, body = api.customization_preview("1", {"option": 1})
     assert status == 504 and "无响应" in body["error"]
+
+
+# ---- 故障码 ----
+
+DTC_TARGETS = [{"ecu": "7E0", "tx": 0x7E0, "sub": None, "name": "发动机"},
+               {"ecu": "750/40", "tx": 0x750, "sub": 0x40, "name": "车身"}]
+
+
+def make_dtc_api(tmp_path):
+  engine = FakeEcu({b"\x3e": b"\x7e", b"\x13": bytes.fromhex("5301 0133"), b"\x04": b"\x44"})
+  link = DiagLink(FakePanda({(0x7E0, None): engine}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+  return engine, toyota_diag_api.ToyotaDiagApi(ActiveSession(link), str(tmp_path), dtc_targets=lambda: DTC_TARGETS)
+
+
+class TestDtcEndpoints:
+  def test_scan_lists_responding_ecus(self, tmp_path):
+    _, api = make_dtc_api(tmp_path)
+    status, body = api.dtc_scan()
+    assert status == 200
+    assert [(e["ecu"], e["name"]) for e in body["ecus"]] == [("7E0", "发动机")]
+    assert body["ecus"][0]["dtcs"][0]["code"] == "P0133"
+
+  def test_clear_reports_each_ecu(self, tmp_path):
+    engine, api = make_dtc_api(tmp_path)
+    status, body = api.dtc_clear({"ecus": ["7E0", "750/40"]})
+    assert status == 200
+    assert body["results"][0] == {"ecu": "7E0", "ok": True}
+    assert body["results"][1]["ecu"] == "750/40" and body["results"][1]["ok"] is False
+    assert b"\x04" in engine.requests
+
+  @pytest.mark.parametrize("body", [{}, {"ecus": []}, {"ecus": "7E0"}, {"ecus": [1]}, {"ecus": ["7FF"]}])
+  def test_clear_rejects_bad_ecu_list(self, tmp_path, body):
+    engine, api = make_dtc_api(tmp_path)
+    assert api.dtc_clear(body)[0] == 400
+    assert b"\x04" not in engine.requests
