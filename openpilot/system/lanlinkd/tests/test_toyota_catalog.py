@@ -14,3 +14,10 @@ def test_ecu_names():
   assert catalog.ecu_name("750", "40").startswith("750/40 ")
   assert catalog.ecu_name("7E0", None).startswith("7E0 ")
   assert catalog.ecu_name("123", None) == "123"
+
+
+def test_every_ecu_has_chinese_name():
+  ecus = catalog.load("ecus")
+  untranslated = [e["name"]["en"] for e in ecus["direct"] + ecus["gateway"]
+                  if not any("一" <= ch <= "鿿" for ch in e["name"]["zh"])]
+  assert untranslated == []
