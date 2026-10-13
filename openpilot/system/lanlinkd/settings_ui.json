@@ -507,11 +507,11 @@
         },
         {
          "value": 0,
-         "label": "轻拨"
+         "label": "轻推"
         },
         {
          "value": 1,
-         "label": "免拨"
+         "label": "免推"
         },
         {
          "value": 2,
@@ -539,7 +539,7 @@
       {
        "key": "AutoLaneChangeBsmDelay",
        "widget": "toggle",
-       "title": "自动变道：盲区延迟",
+       "title": "BSM盲区延迟变道",
        "enablement": [
         {
          "type": "capability",
