@@ -1752,10 +1752,18 @@
    "sections": []
   },
   {
+   "id": "toyota",
+   "label": "丰田诊断",
+   "icon": "toyota",
+   "order": 10,
+   "description": "进入诊断模式后读写车辆定制项、读清故障码、查看实时数据",
+   "sections": []
+  },
+  {
    "id": "software",
    "label": "软件",
    "icon": "software",
-   "order": 10,
+   "order": 11,
    "sections": [
     {
      "id": "updates",
@@ -1784,7 +1792,7 @@
    "id": "vehicle",
    "label": "车辆",
    "icon": "vehicle",
-   "order": 11,
+   "order": 12,
    "sections": [
     {
      "title": "车辆",
@@ -1796,7 +1804,7 @@
    "id": "developer",
    "label": "开发者",
    "icon": "developer",
-   "order": 12,
+   "order": 13,
    "sections": [
     {
      "id": "connectivity",

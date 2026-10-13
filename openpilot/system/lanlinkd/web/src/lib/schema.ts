@@ -377,3 +377,40 @@ export interface BsmDiag {
   rightOccupied: boolean;
   watchSeconds: number;            // 本次行驶车速 ≥ 16 km/h 的秒数（BSM 只在此车速以上工作）
 }
+
+// ---- 丰田诊断（/api/toyota/*，契约见 .scratch/toyota-diag/spec.md §3）----
+
+export interface ToyotaSession {
+  state: "idle" | "entering" | "active";
+  error?: string;                  // 上次进入失败的原因（失败后 state 回到 idle）
+  idleTimeoutS: number;
+  lastActivity?: number;           // 设备 unix 秒
+  idleRemainingS?: number;         // 设备算好的空闲自动退出剩余秒数，active 后才有
+}
+export interface ToyotaCustomizationItem {
+  uid: number;
+  group: string;
+  name: string;
+  ecu: string;                     // 如 "750/40 车身控制"
+  options: { index: number; title: string }[];
+  current: number | null;          // null = 读到但未匹配任何选项
+  raw: string;                     // 读到的压缩数据 hex
+  writable: boolean;               // false：UID 10038 等数据库读写 ID 不一致的项
+}
+export interface ToyotaPreview { uid: number; before: string; after: string; payload: string }
+export interface ToyotaWriteResult { uid: number; backupId: string; verified: boolean; current: number | null }
+export interface ToyotaBackup {
+  id: string; time: number; uid: number; name: string; ecu: string; localId: string; data: string;
+}
+export interface ToyotaDtcEcu {
+  ecu: string; name: string; dtcs: { code: string; status: string; description: string }[];
+}
+export interface ToyotaDtcClearResult { ecu: string; ok: boolean; error?: string }
+export interface ToyotaPid { id: number; name: string; unit: string }
+export interface ToyotaPidGroup { ecu: string; pids: ToyotaPid[] }
+export interface ToyotaPidCatalog {
+  profile: { id: string; name: string };
+  profiles: { id: string; name: string }[];
+  groups: ToyotaPidGroup[];
+}
+export interface ToyotaPidValue { id: number; value: number | null; text: string; error?: string }

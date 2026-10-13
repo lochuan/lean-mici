@@ -7,7 +7,8 @@
  */
 import type {
   BluetoothStatus, Capabilities, DiagnosticsReport, ParamValues, SettingsSchema,
-  SoftwareStatus, StatusSnapshot, VehicleState, WifiStatus,
+  SoftwareStatus, StatusSnapshot, ToyotaBackup, ToyotaCustomizationItem, ToyotaDtcClearResult, ToyotaDtcEcu,
+  ToyotaPidCatalog, ToyotaPidValue, ToyotaPreview, ToyotaSession, ToyotaWriteResult, VehicleState, WifiStatus,
 } from "./schema";
 
 export class ApiError extends Error {
@@ -78,6 +79,27 @@ export const api = {
   software: () => request<SoftwareStatus>("/api/software"),
   softwareOp: (action: string) =>
     post<null>(`/api/software/${encodeURIComponent(action)}`),
+
+  // ---- toyota 诊断（非诊断模式下除 session 外一律 409 {"error": "请先进入诊断模式"}）----
+  toyotaSession: () => request<ToyotaSession>("/api/toyota/session"),
+  toyotaEnter: () => post<ToyotaSession>("/api/toyota/session/enter"),
+  toyotaExit: () => post<null>("/api/toyota/session/exit"),
+  toyotaScanCustomizations: () =>
+    post<{ items: ToyotaCustomizationItem[] }>("/api/toyota/customizations/scan"),
+  toyotaPreview: (uid: number, option: number) =>
+    post<ToyotaPreview>(`/api/toyota/customizations/${uid}/preview`, { option }),
+  toyotaWrite: (uid: number, option: number, before: string) =>
+    post<ToyotaWriteResult>(`/api/toyota/customizations/${uid}/write`, { option, before }),
+  toyotaBackups: () => request<{ backups: ToyotaBackup[] }>("/api/toyota/backups"),
+  toyotaRestore: (id: string) =>
+    post<{ verified: boolean }>(`/api/toyota/backups/${encodeURIComponent(id)}/restore`),
+  toyotaScanDtc: () => post<{ ecus: ToyotaDtcEcu[] }>("/api/toyota/dtc/scan"),
+  toyotaClearDtc: (ecus: string[]) =>
+    post<{ results: ToyotaDtcClearResult[] }>("/api/toyota/dtc/clear", { ecus }),
+  toyotaPids: () => request<ToyotaPidCatalog>("/api/toyota/pids"),
+  toyotaSelectPidProfile: (id: string) =>
+    request<null>("/api/toyota/pids/profile", { method: "PUT", body: JSON.stringify({ id }) }),
+  toyotaReadPids: (ids: number[]) => post<{ values: ToyotaPidValue[] }>("/api/toyota/pids/read", { ids }),
 
   // ---- logs ----
   logs: () => request<unknown>("/api/logs"),
