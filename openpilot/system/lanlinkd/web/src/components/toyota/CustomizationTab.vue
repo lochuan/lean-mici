@@ -106,7 +106,7 @@ async function confirmWrite(): Promise<void> {
     </p>
 
     <Accordion v-if="accordionEntries.length" :items="accordionEntries">
-      <template #item="{ item: entry }">
+      <template #default="{ item: entry }">
         <div class="divide-y divide-sl-border/70">
           <div v-for="it in itemsOf(entry.id)" :key="it.uid" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
             <div class="min-w-0 flex-1">

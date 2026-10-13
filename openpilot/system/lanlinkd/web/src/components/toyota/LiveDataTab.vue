@@ -134,7 +134,7 @@ onUnmounted(() => {
         没有匹配的数据项
       </p>
       <Accordion v-else :items="entries">
-        <template #item="{ item: entry }">
+        <template #default="{ item: entry }">
           <ul class="divide-y divide-sl-border/70">
             <li v-for="p in pidsOf(entry.id)" :key="p.id" class="flex items-center gap-3 py-2 text-[13px]">
               <Checkbox
