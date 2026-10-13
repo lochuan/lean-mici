@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 诊断卡片外壳：标题 + 状态徽章 + 一句结论 + 原因 / 建议 + （数据不足时的）进度 + 图 + 折叠的详细数据。
- *  四张卡片的骨架一致，图和额外内容经默认插槽传入。 */
+ *  各卡片的骨架一致，图和额外内容经默认插槽传入。 */
 import Accordion from "../ui/Accordion.vue";
 import Badge from "../ui/Badge.vue";
 import type { Progress, Verdict } from "@/lib/diagnostics";

@@ -1,4 +1,4 @@
-"""诊断页的数据：本次行驶统计（跑偏 / 画龙 / 转向）+ 学习参数（实时优先，停车读缓存）。
+"""诊断页的数据：本次行驶统计（跑偏 / 画龙 / 转向 / 盲区监测）+ 学习参数（实时优先，停车读缓存）。
 
 对外只有 Diagnostics.update(sm, now) 与 report(params, torque_learned, now)。
 约定：模型系 y 向右为正（ldw.py：左线 y[0] < 0），所有偏移 >0 表示偏右；
@@ -42,6 +42,9 @@ CURVE_LAT_ACCEL = 1.0
 SAT_CHECK_MIN_SPEED = {"angleState": 5.0, "curvatureState": 5.0}
 DEFAULT_SAT_CHECK_MIN_SPEED = 10.0
 USAGE_BINS = 5
+
+# 盲区监测：BSM 约 16 km/h 以上才工作（丰田手册），低于此车速不计入等待触发的时长
+BSM_MIN_SPEED = 16 / 3.6
 
 
 def _parse_param_memoized(params, key: str, parse, memo: dict):
@@ -114,6 +117,12 @@ class _DriveStats:
     self.prev_temp_fault = False
     self.car_state_seen = False
     self.accurate_angle = False
+    self.last_car_state_t: float | None = None
+    self.bsm_left_occupied = False
+    self.bsm_right_occupied = False
+    self.bsm_left_events = 0
+    self.bsm_right_events = 0
+    self.bsm_watch_s = 0.0
 
 
 class Diagnostics:
@@ -140,15 +149,23 @@ class Diagnostics:
       if sm.updated[service]:
         self._live[service] = (now, sm[service])
     if sm.updated["carState"]:
-      self._on_car_state(sm["carState"], sm["carControl"])
+      self._on_car_state(sm["carState"], sm["carControl"], now)
     if sm.updated["controlsState"]:
       self._on_controls(sm["controlsState"], sm["carState"], sm["carControl"], now)
     if sm.updated["modelV2"]:
       self._on_model(sm["modelV2"], sm["carState"], sm["carControl"], sm["controlsState"], now)
 
-  def _on_car_state(self, cs, cc) -> None:
+  def _on_car_state(self, cs, cc, now: float) -> None:
     stats = self._stats
+    dt = DT_CTRL if stats.last_car_state_t is None else min(max(now - stats.last_car_state_t, 0.0), 5 * DT_CTRL)
+    stats.last_car_state_t = now
     stats.car_state_seen = True
+    left, right = bool(cs.leftBlindspot), bool(cs.rightBlindspot)
+    stats.bsm_left_events += int(left and not stats.bsm_left_occupied)
+    stats.bsm_right_events += int(right and not stats.bsm_right_occupied)
+    stats.bsm_left_occupied, stats.bsm_right_occupied = left, right
+    if cs.vEgo >= BSM_MIN_SPEED:
+      stats.bsm_watch_s += dt
     if abs(cs.steeringAngleOffsetDeg) > 1e-3:
       stats.accurate_angle = True
     if cs.steerFaultTemporary and not stats.prev_temp_fault and cc.enabled:
@@ -322,5 +339,13 @@ class Diagnostics:
         "epsTempFaults": stats.eps_temp_faults,
         "epsPermanent": stats.eps_permanent,
         "maxLatAccel": rounded_or_none(stats.max_lat_accel),
+      },
+      "bsm": {
+        "available": bool(car_params.enableBsm) if car_params is not None else None,
+        "leftEvents": stats.bsm_left_events,
+        "rightEvents": stats.bsm_right_events,
+        "leftOccupied": stats.bsm_left_occupied,
+        "rightOccupied": stats.bsm_right_occupied,
+        "watchSeconds": round(stats.bsm_watch_s, 2),
       },
     }

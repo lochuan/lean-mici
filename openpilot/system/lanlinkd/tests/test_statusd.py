@@ -155,7 +155,8 @@ class TestDiagnostics:
     msgs = {
       "deviceState": NS(started=True),
       "carState": NS(vEgo=20.0, leftBlinker=False, rightBlinker=False, steeringPressed=False,
-                     steerFaultTemporary=False, steerFaultPermanent=False, steeringAngleOffsetDeg=0.0),
+                     steerFaultTemporary=False, steerFaultPermanent=False, steeringAngleOffsetDeg=0.0,
+                     leftBlindspot=False, rightBlindspot=False),
       "carControl": NS(latActive=True, enabled=True),
       "controlsState": NS(desiredCurvature=0.0, curvature=0.0,
                           lateralControlState=NS(which=lambda: "torqueState", torqueState=NS(saturated=False, output=0.1))),

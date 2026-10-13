@@ -6,7 +6,7 @@
  *  - 相机 pitch >0 朝下，yaw >0 朝左
  *  - CameraOffset >0 = 设备装在中线左侧
  */
-import type { CameraDiag, DiagnosticsReport, DriftDiag, SteeringDiag, WeaveDiag } from "./schema";
+import type { BsmDiag, CameraDiag, DiagnosticsReport, DriftDiag, SteeringDiag, WeaveDiag } from "./schema";
 
 /** 与 Badge 的 kind 对应：accent 正常 / warn 注意 / danger 需处理 / muted 数据不足 */
 export type Tone = "accent" | "warn" | "danger" | "muted";
@@ -458,6 +458,44 @@ export function steeringView(s: SteeringDiag): SteeringView {
   return {
     ...base, tone: "danger", badge: "经常不够", headline: "弯道里转向力经常不够",
     advice: "车在弯道里容易往外甩：过弯前减速，随时准备接管",
+  };
+}
+
+// ---- 盲区监测 BSM ----
+
+export interface BsmView extends Verdict {
+  progress: Progress | null;
+}
+
+/** 已识别 BSM 却一直没触发：车速 16 km/h 以上累计这么久仍为 0 次才提醒。
+ *  ponytail: 未经路试校准，有样本后再调 */
+const BSM_VERIFY_S = 600;
+
+export function bsmView(b: BsmDiag): BsmView {
+  if (b.available === null) {
+    return { tone: "muted", badge: "未知", headline: "还没识别过车型", advice: "启动车辆后再看", progress: null };
+  }
+  if (!b.available) {
+    return {
+      tone: "muted", badge: "未识别", headline: "本车没有识别到盲区监测（BSM）",
+      advice: "自动变道不会避让盲区来车，变道前请自己确认后方；如果车上确实有盲区监测（后视镜上有指示灯），熄火重启后再看",
+      progress: null,
+    };
+  }
+  if (b.leftEvents + b.rightEvents > 0) {
+    return { tone: "accent", badge: "正常", headline: "盲区监测正常工作", advice: null, progress: null };
+  }
+  if (b.watchSeconds < BSM_VERIFY_S) {
+    return {
+      tone: "muted", badge: "待验证", headline: "已识别，还没检测到旁车",
+      advice: "旁边车道有车经过时会计数；车速 16 km/h 以上才计入",
+      progress: progressFor(b.watchSeconds, BSM_VERIFY_S, "（16 km/h 以上）"),
+    };
+  }
+  return {
+    tone: "warn", badge: "未触发", headline: `已识别，但开了 ${fmtDuration(b.watchSeconds)} 还没检测到旁车`,
+    advice: "如果旁车经过时后视镜上的指示灯也不亮，检查车机设置里的盲区监测开关是否打开",
+    progress: null,
   };
 }
 

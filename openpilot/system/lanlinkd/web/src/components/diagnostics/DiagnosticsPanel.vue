@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 诊断页：相机安装 / 跑偏 / 画龙 / 转向能力。
+/** 诊断页：相机安装 / 跑偏 / 画龙 / 转向能力 / 盲区监测。
  *
  * 页面级 2s 轮询 /api/diagnostics（不并入 /api/status），失败保留上一帧。
  * 行驶统计只算本次行驶，停车后保留到下次启动。
@@ -8,6 +8,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "@/lib/api";
 import type { DiagnosticsReport } from "@/lib/schema";
 import { driveText } from "@/lib/diagnostics";
+import BsmCard from "./BsmCard.vue";
 import CameraCard from "./CameraCard.vue";
 import DriftCard from "./DriftCard.vue";
 import SteeringCard from "./SteeringCard.vue";
@@ -50,6 +51,7 @@ const driving = computed(() => report.value?.drive.started ?? false);
       <DriftCard :drift="report.drift" />
       <WeaveCard :weave="report.weave" :driving="driving" />
       <SteeringCard :steering="report.steering" />
+      <BsmCard :bsm="report.bsm" :driving="driving" />
     </template>
     <div v-else class="sl-card px-5 py-6 text-center text-[13px] text-sl-text-3">
       {{ failed ? "无法读取诊断数据，请确认设备在线" : "正在读取诊断数据…" }}

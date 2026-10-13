@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  cameraView, driftChecklist, driftView, driveText, fmtDuration, steeringView, suggestCameraOffset,
+  bsmView, cameraView, driftChecklist, driftView, driveText, fmtDuration, steeringView, suggestCameraOffset,
   toneColor, torqueOffsetTiltDeg, traceSegments, traceYRange, weaveView,
 } from "../src/lib/diagnostics";
-import type { CameraDiag, DriftDiag, SteeringDiag, WeaveDiag } from "../src/lib/schema";
+import type { BsmDiag, CameraDiag, DriftDiag, SteeringDiag, WeaveDiag } from "../src/lib/schema";
 
 function cam(over: Partial<CameraDiag> = {}): CameraDiag {
   return {
@@ -31,6 +31,10 @@ function steering(over: Partial<SteeringDiag> = {}): SteeringDiag {
     control: "torque", activeSeconds: 600, curveSeconds: 100, saturatedCurveSeconds: 0,
     usage: [300, 200, 50, 30, 20], epsTempFaults: 0, epsPermanent: false, maxLatAccel: 2.1, ...over,
   };
+}
+
+function bsm(over: Partial<BsmDiag> = {}): BsmDiag {
+  return { available: true, leftEvents: 0, rightEvents: 0, leftOccupied: false, rightOccupied: false, watchSeconds: 0, ...over };
 }
 
 describe("driveText", () => {
@@ -328,5 +332,23 @@ describe("display helpers", () => {
   it("toneColor maps to theme variables", () => {
     expect(toneColor("accent")).toBe("var(--color-sl-accent)");
     expect(toneColor("muted")).toBe("var(--color-sl-text-3)");
+  });
+});
+
+describe("bsmView", () => {
+  it("car never identified / BSM not identified", () => {
+    expect(bsmView(bsm({ available: null }))).toMatchObject({ tone: "muted", badge: "未知", progress: null });
+    expect(bsmView(bsm({ available: false, leftEvents: 3 }))).toMatchObject({ tone: "muted", badge: "未识别", progress: null });
+  });
+
+  it("any side triggered means working", () => {
+    expect(bsmView(bsm({ rightEvents: 1 }))).toMatchObject({ tone: "accent", badge: "正常", advice: null, progress: null });
+  });
+
+  it("no trigger yet: waiting with progress, warn after 10 minutes above BSM speed", () => {
+    const waiting = bsmView(bsm({ watchSeconds: 150 }));
+    expect(waiting).toMatchObject({ tone: "muted", badge: "待验证" });
+    expect(waiting.progress?.pct).toBe(25);
+    expect(bsmView(bsm({ watchSeconds: 600 }))).toMatchObject({ tone: "warn", badge: "未触发", progress: null });
   });
 });

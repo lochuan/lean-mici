@@ -1748,7 +1748,7 @@
    "label": "诊断",
    "icon": "diagnostics",
    "order": 9,
-   "description": "相机安装、跑偏、画龙、转向能力一页看懂",
+   "description": "相机安装、跑偏、画龙、转向能力、盲区监测一页看懂",
    "sections": []
   },
   {

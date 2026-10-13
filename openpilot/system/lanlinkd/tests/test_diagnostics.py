@@ -25,7 +25,8 @@ class FakeSM:
     self.msgs = {
       "deviceState": NS(started=True),
       "carState": NS(vEgo=25.0, leftBlinker=False, rightBlinker=False, steeringPressed=False,
-                     steerFaultTemporary=False, steerFaultPermanent=False, steeringAngleOffsetDeg=0.0),
+                     steerFaultTemporary=False, steerFaultPermanent=False, steeringAngleOffsetDeg=0.0,
+                     leftBlindspot=False, rightBlindspot=False),
       "carControl": NS(latActive=True, enabled=True),
       "controlsState": NS(desiredCurvature=0.0, curvature=0.0, lateralControlState=LateralControlState()),
       "modelV2": model(),
@@ -343,11 +344,45 @@ class TestSteering:
     assert d.report()["steering"]["epsPermanent"] is True
 
 
+def feed_car_state(d, n, *, v=20.0, left=False, right=False):
+  cs = d.sm.msgs["carState"]
+  cs.vEgo, cs.leftBlindspot, cs.rightBlindspot = v, left, right
+  for _ in range(n):
+    d.now += 0.01
+    d.sm.updated["carState"] = True
+    d.diag.update(d.sm, d.now)
+    d._clear()
+
+
+class TestBsm:
+  def test_available_from_car_params(self):
+    assert Drive().report()["bsm"]["available"] is None
+    for enabled in (True, False):
+      params = FakeParams({"CarParamsPersistent": cp_bytes(enableBsm=enabled)})
+      assert Drive().report(params)["bsm"]["available"] is enabled
+
+  def test_counts_rising_edges_per_side(self):
+    d = Drive()
+    for left in (False, True, True, False, True):
+      feed_car_state(d, 1, left=left)
+    feed_car_state(d, 1, right=True)
+    b = d.report()["bsm"]
+    assert (b["leftEvents"], b["rightEvents"]) == (2, 1)
+    assert (b["leftOccupied"], b["rightOccupied"]) == (False, True)
+
+  def test_watch_seconds_only_above_bsm_speed(self):
+    d = Drive()
+    feed_car_state(d, 100, v=4.0)  # 14.4 km/h：BSM 不工作
+    feed_car_state(d, 200, v=5.0)  # 18 km/h
+    assert d.report()["bsm"]["watchSeconds"] == pytest.approx(2.0, abs=0.05)
+
+
 class TestDriveLifecycle:
   def test_new_drive_resets_stats(self):
     d = Drive()
     d.frames(100)
     controls(d, 100)
+    feed_car_state(d, 1, left=True)
     d.sm.msgs["deviceState"] = NS(started=False)
     d.sm.updated["deviceState"] = True
     d.now += 1.0
@@ -366,6 +401,8 @@ class TestDriveLifecycle:
     assert fresh["drift"]["seconds"] == 0
     assert fresh["steering"]["activeSeconds"] == 0
     assert fresh["weave"]["trace"] == [None] * 120
+    assert fresh["bsm"]["leftEvents"] == 0
+    assert fresh["bsm"]["watchSeconds"] == 0
 
   def test_never_driven(self):
     diag = Diagnostics()

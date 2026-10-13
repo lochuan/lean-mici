@@ -328,6 +328,7 @@ export interface DiagnosticsReport {
   drift: DriftDiag;
   weave: WeaveDiag;
   steering: SteeringDiag;
+  bsm: BsmDiag;
 }
 export interface CameraDiag {
   source: "live" | "cache";
@@ -367,4 +368,12 @@ export interface SteeringDiag {
   epsTempFaults: number;
   epsPermanent: boolean;
   maxLatAccel: number | null;      // 激活时达到的最大 |curvature·v²|，m/s²
+}
+export interface BsmDiag {
+  available: boolean | null;       // CarParams.enableBsm；从没识别过车型为 null
+  leftEvents: number;              // 本次行驶左侧盲区触发次数（上升沿）
+  rightEvents: number;
+  leftOccupied: boolean;           // 最近一帧盲区是否有车；停车后是上次行驶最后一帧
+  rightOccupied: boolean;
+  watchSeconds: number;            // 本次行驶车速 ≥ 16 km/h 的秒数（BSM 只在此车速以上工作）
 }
