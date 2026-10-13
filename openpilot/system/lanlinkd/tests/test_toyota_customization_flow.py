@@ -52,8 +52,19 @@ class TestWrite:
       cz.write(link, ITEM, 1, "a020", store)
     assert err.value.nrc == 0x22
 
-  def test_restore_writes_backup_back(self, tmp_path):
+  def test_restore_backs_up_current_then_writes_backup_back(self, tmp_path):
     ecu, link, store = make(tmp_path=tmp_path)
     backup_id = cz.write(link, ITEM, 1, "a020", store)["backupId"]
-    assert cz.restore(link, store.get(backup_id)) == {"verified": True}
+    result = cz.restore(link, store.get(backup_id), store)
+    assert result["verified"]
+    assert ecu.memory[0x12] == bytes.fromhex("a020")
+    # 恢复也是一次写入：恢复前的数据（a000）同样留了备份，可以再恢复回去
+    assert store.get(result["backupId"])["data"] == "a000"
+
+  def test_failed_backup_blocks_write(self, tmp_path):
+    ecu, link, _ = make()
+    blocker = tmp_path / "not_a_dir"
+    blocker.write_text("")
+    with pytest.raises(cz.BackupError):
+      cz.write(link, ITEM, 1, "a020", BackupStore(str(blocker)))
     assert ecu.memory[0x12] == bytes.fromhex("a020")

@@ -1,3 +1,6 @@
+import sys
+import types
+
 import pytest
 
 from openpilot.system.lanlinkd import toyota_diag_api
@@ -92,7 +95,9 @@ class TestCustomizationEndpoints:
     status, listing = api.backups_list()
     assert [b["id"] for b in listing["backups"]] == [result["backupId"]]
     assert listing["backups"][0]["localId"] == "12"
-    assert api.backup_restore(result["backupId"]) == (200, {"verified": True})
+    status, restored = api.backup_restore(result["backupId"])
+    assert status == 200 and restored["verified"]
+    assert len(api.backups_list()[1]["backups"]) == 2   # 恢复前另存了一份
     assert ecu.memory[0x12] == bytes.fromhex("a020")
 
   def test_stale_before_is_409(self, tmp_path):
@@ -204,3 +209,20 @@ class TestPidEndpoints:
   def test_action_pid_cannot_be_read(self, tmp_path):
     _, body = make_pid_api(tmp_path).pids_read({"ids": [3]})
     assert body["values"][0]["value"] is None
+
+
+class TestOpenPandaLink:
+  def test_failed_setup_closes_panda(self, monkeypatch):
+    class BrokenPanda:
+      closed = False
+
+      def set_safety_mode(self, mode, param=0):
+        raise RuntimeError("usb gone")
+
+      def close(self):
+        BrokenPanda.closed = True
+
+    monkeypatch.setitem(sys.modules, "panda", types.SimpleNamespace(Panda=BrokenPanda))
+    with pytest.raises(RuntimeError):
+      toyota_diag_api.open_panda_link()
+    assert BrokenPanda.closed

@@ -1,7 +1,7 @@
 """LANLink 丰田诊断的 HTTP 适配层：参数校验 → toyota/* → (status, body)。
 
 方法都是阻塞的（等 pandad 退出、等 ECU 应答），lanlinkd 用 asyncio.to_thread 调用。
-body 为 None 表示 204。协议细节见 toyota/ 下各模块和 .scratch/toyota-diag/spec.md。
+body 为 None 表示 204。协议细节见 toyota/ 下各模块的文档字符串；前端契约类型见 web/src/lib/schema.ts。
 """
 import subprocess
 from collections.abc import Callable
@@ -35,7 +35,12 @@ def open_panda_link():
   from panda import Panda
 
   from openpilot.system.lanlinkd.toyota.link import DiagLink
-  return DiagLink(Panda(), CarParams.SafetyModel.elm327)
+  panda = Panda()
+  try:
+    return DiagLink(panda, CarParams.SafetyModel.elm327)
+  except Exception:
+    panda.close()  # 不关的话句柄占着 USB/SPI，pandad 恢复后连不上
+    raise
 
 
 def create(params, status_snapshot: Callable[[], dict]) -> "ToyotaDiagApi":
@@ -63,6 +68,8 @@ def _guarded(operation: Callable[[], dict | None], status: int = 200) -> tuple[i
     return 502, {"error": str(exc)}
   except customization.StaleDataError as exc:
     return 409, {"error": f"{exc}，请重新预览"}
+  except customization.BackupError as exc:
+    return 500, {"error": str(exc)}
   return (204, None) if body is None else (status, body)
 
 
@@ -100,11 +107,11 @@ class ToyotaDiagApi:
     self._default_profile_id = default_profile_id
     self._pid_profile_id: str | None = None  # 用户手动选的配置；None = 按 VIN 年份
 
-  def _item_and_option(self, uid: str, body: dict, writing: bool = True) -> tuple[dict, int]:
+  def _item_and_option(self, uid: str, body: dict) -> tuple[dict, int]:
     item = next((i for i in self._customization_items() if str(i["uid"]) == uid), None)
     if item is None:
       raise RequestError(404, "未知定制项")
-    if writing and item["readOnly"]:
+    if item["readOnly"]:
       raise RequestError(409, "该项读写 ID 不一致，已禁止写入")
     option = body.get("option")
     if not isinstance(option, int) or isinstance(option, bool) or not 0 <= option < len(item["options"]):
@@ -159,7 +166,7 @@ class ToyotaDiagApi:
       backup = self.backups.get(backup_id)
       if backup is None:
         raise RequestError(404, "备份不存在")
-      return self.session.run(lambda link: customization.restore(link, backup))
+      return self.session.run(lambda link: customization.restore(link, backup, self.backups))
     return _guarded(restore)
 
   # ---- 故障码 ----

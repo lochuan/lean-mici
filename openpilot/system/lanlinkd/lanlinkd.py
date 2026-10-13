@@ -59,6 +59,11 @@ class LanlinkApp:
     self.toyota = toyota_diag_api.create(self.params, self.cache.snapshot)
     threading.Thread(target=self.toyota.idle_watchdog, args=(self.exit_event,), name="lanlink_toyota_idle", daemon=True).start()
 
+  def close(self) -> None:
+    """进程退出前调用：停后台线程，并退出丰田诊断模式把 panda 还给 pandad（守护线程等不到）。"""
+    self.exit_event.set()
+    self.toyota.session.exit()
+
   # ---- helpers ----
   @staticmethod
   def _body(request: Request) -> dict:
@@ -385,12 +390,16 @@ def main() -> None:
   # 设备名 = hostname（AGNOS 上是 comma-<serial>）；TXT 带版本和设备名。
   device_name = socket.gethostname()
   mdns_proc = mdns.start(device_name, params_api.to_str(params.get("Version")) or "", device_name)
+  app = None
   try:
     # single_process=True 是必须的，不是调优：cache 状态线程 / WifiManager 单例
     # 是进程内状态，多 worker 会各起一套互相打架。详见模块 docstring。
-    create_app().run(host="0.0.0.0", port=8088, single_process=True, motd=False)
+    app = create_app()
+    app.run(host="0.0.0.0", port=8088, single_process=True, motd=False)
   finally:
     mdns.stop(mdns_proc)
+    if app is not None:
+      app.ctx.state.close()
 
 
 if __name__ == "__main__":

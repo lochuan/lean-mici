@@ -47,6 +47,7 @@ async function restore(): Promise<void> {
     const r = await api.toyotaRestore(b.id);
     toast(r.verified ? "已恢复，回读校验通过" : "已恢复，但回读校验未通过", r.verified ? "ok" : "warn");
     restoreOpen.value = false;
+    void load(); // 恢复前另存了一份当前数据
   } catch (e) {
     toast(errorText(e), "error");
   } finally {

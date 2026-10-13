@@ -92,7 +92,7 @@ export const api = {
     post<ToyotaWriteResult>(`/api/toyota/customizations/${uid}/write`, { option, before }),
   toyotaBackups: () => request<{ backups: ToyotaBackup[] }>("/api/toyota/backups"),
   toyotaRestore: (id: string) =>
-    post<{ verified: boolean }>(`/api/toyota/backups/${encodeURIComponent(id)}/restore`),
+    post<{ verified: boolean; backupId: string }>(`/api/toyota/backups/${encodeURIComponent(id)}/restore`),
   toyotaScanDtc: () => post<{ ecus: ToyotaDtcEcu[] }>("/api/toyota/dtc/scan"),
   toyotaClearDtc: (ecus: string[]) =>
     post<{ results: ToyotaDtcClearResult[] }>("/api/toyota/dtc/clear", { ecus }),

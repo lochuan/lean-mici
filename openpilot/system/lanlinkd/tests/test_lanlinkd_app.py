@@ -5,6 +5,7 @@ aiohttp 时代这一层零测试——框架迁移最容易改错的恰恰是路
 覆盖：路径参数、错误语义、静态文件穿越防护。
 """
 import os
+import types
 
 import pytest
 
@@ -307,7 +308,12 @@ class TestServerConfig:
     # 起服务拉起 _lanlink._tcp 发布；退出一起结束（广播消失，App 不连死服务）
     monkeypatch.setattr(mod, "Params", lambda: FakeParams({"LanLinkEnabled": True, "Version": "0.9.8"}))
 
+    closed = []
+
     class FakeApp:
+      # main() 退出时要 close()：退出丰田诊断模式，把 panda 还给 pandad
+      ctx = types.SimpleNamespace(state=types.SimpleNamespace(close=lambda: closed.append(True)))
+
       def run(self, **kwargs):
         pass
 
@@ -318,3 +324,4 @@ class TestServerConfig:
     mod.main()
     assert len(started) == 1, "启动时没有拉起 mDNS 发布"
     assert stopped == ["PROC"], "退出时没有结束 mDNS 发布"
+    assert closed == [True], "退出时没有收尾（诊断模式不退出，pandad 起不来）"

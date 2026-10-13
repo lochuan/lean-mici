@@ -77,6 +77,10 @@ class StaleDataError(Exception):
   """预览之后 ECU 里的数据变了，拒绝按旧预览写入。"""
 
 
+class BackupError(Exception):
+  """写前备份没存下来（如 /data 不可写）：不写入。"""
+
+
 def _address(item: dict) -> tuple[int, int | None]:
   return int(item["tx"], 16), int(item["sub"], 16) if item["sub"] else None
 
@@ -145,12 +149,22 @@ def write(link, item: dict, option_index: int, expected_before: str, backups) ->
     raise StaleDataError(f"ECU 当前数据 {before.hex()} 与预览时 {expected_before} 不一致")
   after = apply_option(item, before, option_index)
   mask = read_mask(link, item)
-  backup_id = backups.save({"uid": item["uid"], "name": item["name"], "tx": item["tx"], "sub": item["sub"],
-                            "readId": item["readId"], "writeId": item["writeId"], "data": before.hex(), "mask": mask.hex()})
+  backup_id = _backup(backups, item, before, mask)
   verified = _write_and_verify(link, item, after, mask)
   return {"backupId": backup_id, "verified": verified, "current": current_option(item, read_data(link, item))}
 
 
-def restore(link, backup: dict) -> dict:
+def _backup(backups, item: dict, data: bytes, mask: bytes) -> str:
+  try:
+    return backups.save({"uid": item["uid"], "name": item["name"], "tx": item["tx"], "sub": item["sub"],
+                         "readId": item["readId"], "writeId": item["writeId"], "data": data.hex(), "mask": mask.hex()})
+  except OSError as exc:
+    raise BackupError(f"写前备份失败，未写入：{exc}") from exc
+
+
+def restore(link, backup: dict, backups) -> dict:
+  """恢复也是写入：先把 ECU 当前数据另存一份备份，再写回备份数据并回读校验。"""
   item = {**backup, "readOnly": False}
-  return {"verified": _write_and_verify(link, item, bytes.fromhex(backup["data"]), bytes.fromhex(backup["mask"]))}
+  mask = bytes.fromhex(backup["mask"])
+  backup_id = _backup(backups, item, read_data(link, item), mask)
+  return {"backupId": backup_id, "verified": _write_and_verify(link, item, bytes.fromhex(backup["data"]), mask)}

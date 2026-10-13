@@ -54,8 +54,9 @@ def lanlink_run(started: bool, params: Params, CP: car.CarParams) -> bool:
   return params.get_bool("LanLinkEnabled")
 
 def pandad_run(started: bool, params: Params, CP: car.CarParams) -> bool:
-  # LANLink 丰田诊断模式期间让出 panda（lanlinkd 直连发诊断帧，见 system/lanlinkd/toyota/session.py）
-  return not params.get_bool("LanLinkDiagMode")
+  # LANLink 丰田诊断模式期间让出 panda（lanlinkd 直连发诊断帧，见 system/lanlinkd/toyota/session.py）。
+  # 也看 LanLinkEnabled：关掉 LanLink 时 lanlinkd 被停、没人再清诊断 param，pandad 不能因此一直不起
+  return not (params.get_bool("LanLinkDiagMode") and lanlink_run(started, params, CP))
 
 def bigmodeld_run(started: bool, params: Params, CP: car.CarParams) -> bool:
   # 07 号：「远程大模型」关闭时不启动上行进程，行为同 lean-master；默认关（同 AdbEnabled）

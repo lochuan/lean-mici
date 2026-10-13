@@ -37,12 +37,12 @@ class DiagLink:
     if heartbeat_thread:
       threading.Thread(target=self._heartbeat_loop, name="toyota_diag_heartbeat", daemon=True).start()
 
-  def request(self, tx: int, sub: int | None, payload: bytes, timeout: float | None = None) -> bytes:
+  def request(self, tx: int, sub: int | None, payload: bytes) -> bytes:
     """发一条诊断请求，返回 ECU 的最终响应（正响应或 7F 负响应，原样返回）。"""
     client = CanClient(self.panda.can_send, self.panda.can_recv, tx, tx + 8, self.bus, sub)
     message = IsoTpMessage(client, timeout=self.timeout)
     message.send(payload)
-    deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
+    deadline = time.monotonic() + self.timeout
     while True:
       response, _ = message.recv(timeout=0)
       now = time.monotonic()

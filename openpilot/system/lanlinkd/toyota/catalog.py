@@ -1,4 +1,4 @@
-"""懒加载 data/*.json（由 Car Scanner APK 转换，见 .scratch/toyota-diag/spec.md）。"""
+"""懒加载 data/*.json（由 Car Scanner APK 的定制项/ECU 表/故障码描述/PID 配置转换而来）。"""
 import json
 import os
 from functools import cache
@@ -43,10 +43,6 @@ def dtc_targets() -> list[dict]:
 
 def customization_items() -> list[dict]:
   return load("customizations")["items"]
-
-
-def customization_item(uid: int) -> dict | None:
-  return next((i for i in customization_items() if i["uid"] == uid), None)
 
 
 def group_title(group: str) -> str:
