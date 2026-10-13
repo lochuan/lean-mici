@@ -51,3 +51,7 @@ def customization_item(uid: int) -> dict | None:
 
 def group_title(group: str) -> str:
   return text(load("customizations")["groups"].get(group, {"en": group}))
+
+
+def pid_profiles() -> list[dict]:
+  return load("pid_profiles")

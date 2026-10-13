@@ -49,6 +49,11 @@ def _decode_car_params(raw) -> dict:
     return {}
 
 
+def car_vin(store) -> str:
+  """CarParamsPersistent 里的 VIN；没有指纹时为空串。"""
+  return _decode_car_params(store.get(CP_KEY)).get("vin", "")
+
+
 def load_car_list(path: str = CAR_LIST_PATH) -> dict:
   """可选车型表。文件缺失时返回 {}（车机上一定有，开发机上可能没有）。"""
   try:
