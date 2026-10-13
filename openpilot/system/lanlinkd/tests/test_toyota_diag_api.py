@@ -85,6 +85,8 @@ class TestCustomizationEndpoints:
     assert item["options"] == [{"index": 0, "title": "开"}, {"index": 1, "title": "关"}]
     assert item["ecu"].startswith("750/40")
     assert [i["writable"] for i in body["items"]] == [True, False]
+    assert body["ecus"][0]["ecu"].startswith("750/40") and body["ecus"][0]["status"] == "ok"
+    assert {k: body["ecus"][0][k] for k in ("total", "supported", "read")} == {"total": 2, "supported": 2, "read": 2}
 
   def test_preview_then_write_then_restore(self, tmp_path):
     ecu, api = make_active_api(tmp_path)

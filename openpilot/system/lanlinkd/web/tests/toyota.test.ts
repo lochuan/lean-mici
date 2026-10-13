@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   PID_SELECTION_LIMIT, countdownText, errorText, filterPidGroups, groupCustomizations, hexDiff,
-  idleRemainingS, sessionView, togglePid,
+  idleRemainingS, scanEcuText, scanSummary, sessionView, togglePid,
 } from "../src/lib/toyota";
-import type { ToyotaCustomizationItem, ToyotaPidGroup, ToyotaSession } from "../src/lib/schema";
+import type { ToyotaCustomizationItem, ToyotaPidGroup, ToyotaScanEcu, ToyotaSession } from "../src/lib/schema";
 import { ApiError } from "../src/lib/api";
 
 function item(over: Partial<ToyotaCustomizationItem>): ToyotaCustomizationItem {
@@ -163,5 +163,25 @@ describe("errorText", () => {
   it("普通 Error 取 message，其他转字符串", () => {
     expect(errorText(new Error("boom"))).toBe("boom");
     expect(errorText("x")).toBe("x");
+  });
+});
+
+describe("scanEcuText / scanSummary", () => {
+  const ecu = (over: Partial<ToyotaScanEcu>): ToyotaScanEcu =>
+    ({ ecu: "750/40 车身控制", status: "ok", total: 10, supported: 0, read: 0, ...over });
+
+  it("每种状态都说明卡在哪一步", () => {
+    expect(scanEcuText(ecu({ status: "offline" }))).toBe("无响应（不在线或未上电）");
+    expect(scanEcuText(ecu({ status: "silent" }))).toBe("在线，但不应答 A8 03");
+    expect(scanEcuText(ecu({ status: "rejected", nrc: "22" }))).toBe("拒绝 A8 03：NRC 22（条件不满足）");
+    expect(scanEcuText(ecu({ status: "rejected", nrc: "9A" }))).toBe("拒绝 A8 03：NRC 9A");
+    expect(scanEcuText(ecu({ status: "empty", response: "e803" }))).toBe("A8 03 应答里没有掩码：e803");
+    expect(scanEcuText(ecu({ status: "ok" }))).toBe("掩码表不含数据库里的 10 项");
+    expect(scanEcuText(ecu({ supported: 4, read: 3, readError: "nrc 22" }))).toBe("支持 4/10 项，读到 3 项（读值失败：nrc 22）");
+  });
+
+  it("汇总在线与提供定制项的 ECU 数", () => {
+    const ecus = [ecu({ status: "offline" }), ecu({ status: "rejected", nrc: "22" }), ecu({ supported: 2, read: 2 })];
+    expect(scanSummary(ecus)).toBe("3 个 ECU 地址，2 个在线，1 个提供了定制项");
   });
 });

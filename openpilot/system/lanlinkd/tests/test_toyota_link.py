@@ -8,6 +8,13 @@ from .toyota_fakes import FakeEcu, FakePanda
 ELM327 = 3  # 只用于断言透传
 
 
+class OneFramePerPollPanda(FakePanda):
+  """每次 can_recv 只交出一帧：模拟 ECU 按 STmin 逐帧发续帧。"""
+
+  def can_recv(self):
+    return [self._rx.pop(0)] if self._rx else []
+
+
 def make_link(ecus, **kwargs):
   panda = FakePanda(ecus)
   kwargs.setdefault("timeout", 0.05)
@@ -55,6 +62,15 @@ class TestRequest:
     _, link = make_link({})
     with pytest.raises(NoResponseError):
       link.request(0x7E0, None, b"\x3e")
+
+  def test_slow_multi_frame_response_is_not_a_timeout(self, monkeypatch):
+    # A8 03 的掩码表可达几十帧；ECU 逐帧慢慢发时，总耗时超过单次超时也不能当成无响应
+    response = b"\xe8\x03" + bytes(range(60))
+    panda = OneFramePerPollPanda({(0x7C0, None): FakeEcu({b"\xa8\x03": response})})
+    link = DiagLink(panda, elm327_mode=ELM327, heartbeat_thread=False, timeout=0.05)
+    clock = iter(range(100000))
+    monkeypatch.setattr(link_mod.time, "monotonic", lambda: next(clock) * 0.02)
+    assert link.request(0x7C0, None, b"\xa8\x03") == response
 
   def test_heartbeat_sent_while_waiting(self, monkeypatch):
     # 熄火时 panda 2 s 收不到心跳就进 SILENT；长等待期间也要续心跳

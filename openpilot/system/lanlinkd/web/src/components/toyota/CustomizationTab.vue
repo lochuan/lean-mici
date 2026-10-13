@@ -5,8 +5,8 @@ import { computed, ref } from "vue";
 import { Loader2, ScanSearch } from "lucide-vue-next";
 import { api } from "@/lib/api";
 import { toast } from "@/lib/store";
-import type { ToyotaCustomizationItem, ToyotaPreview, ToyotaWriteResult } from "@/lib/schema";
-import { errorText, groupCustomizations } from "@/lib/toyota";
+import type { ToyotaCustomizationItem, ToyotaPreview, ToyotaScanEcu, ToyotaWriteResult } from "@/lib/schema";
+import { errorText, groupCustomizations, scanEcuText, scanSummary } from "@/lib/toyota";
 import Accordion from "../ui/Accordion.vue";
 import Badge from "../ui/Badge.vue";
 import Button from "../ui/Button.vue";
@@ -17,6 +17,7 @@ import HexDiff from "./HexDiff.vue";
 const READONLY_REASON = "数据库读写 ID 不一致，已禁止写入";
 
 const items = ref<ToyotaCustomizationItem[] | null>(null);
+const ecus = ref<ToyotaScanEcu[]>([]);
 const scanning = ref(false);
 const previewing = ref<number | null>(null);
 
@@ -30,7 +31,9 @@ async function scan(): Promise<void> {
   if (scanning.value) return;
   scanning.value = true;
   try {
-    items.value = (await api.toyotaScanCustomizations()).items;
+    const scanned = await api.toyotaScanCustomizations();
+    items.value = scanned.items;
+    ecus.value = scanned.ecus;
   } catch (e) {
     toast(errorText(e), "error");
   } finally {
@@ -98,12 +101,19 @@ async function confirmWrite(): Promise<void> {
         读取车辆定制项
       </Button>
       <span v-if="scanning" class="text-[13px] text-sl-text-2">正在逐个 ECU 读取，可能需要 30 秒以上…</span>
-      <span v-else-if="items" class="text-[13px] text-sl-text-3">共 {{ items.length }} 项</span>
+      <span v-else-if="items" class="text-[13px] text-sl-text-3">共 {{ items.length }} 项 · {{ scanSummary(ecus) }}</span>
     </div>
 
-    <p v-if="items && !items.length" class="sl-card px-5 py-6 text-center text-[13px] text-sl-text-3">
-      没有读到任何定制项
-    </p>
+    <div v-if="items && !items.length" class="sl-card flex flex-col gap-3 px-5 py-5 text-[13px] text-sl-text-3">
+      <p class="text-center">没有读到任何定制项，各 ECU 的结果：</p>
+      <ul class="flex flex-col gap-1">
+        <li v-for="e in ecus" :key="e.ecu" class="flex flex-wrap gap-x-3">
+          <span class="text-sl-text-2">{{ e.ecu }}</span>
+          <span>{{ scanEcuText(e) }}</span>
+        </li>
+      </ul>
+      <p class="text-center">若 ECU 普遍拒绝或不应答 A8 03，可试试只通电不启动（IG-ON）再读取</p>
+    </div>
 
     <Accordion v-if="accordionEntries.length" :items="accordionEntries">
       <template #default="{ item: entry }">

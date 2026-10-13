@@ -397,6 +397,17 @@ export interface ToyotaCustomizationItem {
   raw: string;                     // 读到的压缩数据 hex
   writable: boolean;               // false：UID 10038 等数据库读写 ID 不一致的项
 }
+/** 定制项扫描里每个 ECU 的明细：列表为空时据此说明卡在哪一步 */
+export interface ToyotaScanEcu {
+  ecu: string;                     // 如 "750/40 车身控制"
+  status: "offline" | "silent" | "rejected" | "empty" | "ok";  // 3E 无响应 / A803 无响应 / 负响应 / 正响应无掩码 / 有掩码
+  total: number;                   // 数据库里属于该 ECU 的项数
+  supported: number;               // 掩码表支持的项数
+  read: number;                    // 读到当前值的项数
+  nrc?: string;                    // status=rejected 时的负响应码
+  response?: string;               // status=empty 时的原始应答 hex
+  readError?: string;              // 读值失败的第一个原因
+}
 export interface ToyotaPreview { uid: number; before: string; after: string; payload: string }
 export interface ToyotaWriteResult { uid: number; backupId: string; verified: boolean; current: number | null }
 export interface ToyotaBackup {

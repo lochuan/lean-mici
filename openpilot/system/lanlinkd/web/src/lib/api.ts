@@ -7,7 +7,7 @@
  */
 import type {
   BluetoothStatus, Capabilities, DiagnosticsReport, ParamValues, SettingsSchema,
-  SoftwareStatus, StatusSnapshot, ToyotaBackup, ToyotaCustomizationItem, ToyotaDtcClearResult, ToyotaDtcEcu,
+  SoftwareStatus, StatusSnapshot, ToyotaBackup, ToyotaCustomizationItem, ToyotaDtcClearResult, ToyotaDtcEcu, ToyotaScanEcu,
   ToyotaPidCatalog, ToyotaPidValue, ToyotaPreview, ToyotaSession, ToyotaWriteResult, VehicleState, WifiStatus,
 } from "./schema";
 
@@ -85,7 +85,7 @@ export const api = {
   toyotaEnter: () => post<ToyotaSession>("/api/toyota/session/enter"),
   toyotaExit: () => post<null>("/api/toyota/session/exit"),
   toyotaScanCustomizations: () =>
-    post<{ items: ToyotaCustomizationItem[] }>("/api/toyota/customizations/scan"),
+    post<{ items: ToyotaCustomizationItem[]; ecus: ToyotaScanEcu[] }>("/api/toyota/customizations/scan"),
   toyotaPreview: (uid: number, option: number) =>
     post<ToyotaPreview>(`/api/toyota/customizations/${uid}/preview`, { option }),
   toyotaWrite: (uid: number, option: number, before: string) =>

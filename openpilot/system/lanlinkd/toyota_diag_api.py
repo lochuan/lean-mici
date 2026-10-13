@@ -82,6 +82,13 @@ def _customization_view(item: dict) -> dict:
   }
 
 
+def _scan_ecu_view(report: dict) -> dict:
+  view = {"ecu": catalog.ecu_name(report["tx"], report["sub"]), "status": report["status"],
+          "total": report["total"], "supported": report["supported"], "read": report["read"]}
+  view.update({k: report[k] for k in ("nrc", "response", "readError") if k in report})
+  return view
+
+
 def _backup_view(backup: dict) -> dict:
   return {"id": backup["id"], "time": backup["time"], "uid": backup["uid"], "name": catalog.text(backup["name"]),
           "ecu": catalog.ecu_name(backup["tx"], backup["sub"]), "localId": backup["writeId"], "data": backup["data"]}
@@ -139,8 +146,10 @@ class ToyotaDiagApi:
 
   # ---- 定制 ----
   def customizations_scan(self):
-    return _guarded(lambda: {"items": [_customization_view(i) for i in
-                                       self.session.run(lambda link: customization.scan(link, self._customization_items()))]})
+    def scan():
+      result = self.session.run(lambda link: customization.scan(link, self._customization_items()))
+      return {"items": [_customization_view(i) for i in result["items"]], "ecus": [_scan_ecu_view(e) for e in result["ecus"]]}
+    return _guarded(scan)
 
   def customization_preview(self, uid: str, body: dict):
     def preview():

@@ -4,7 +4,7 @@ from openpilot.system.lanlinkd.toyota import customization as cz
 from openpilot.system.lanlinkd.toyota.backups import BackupStore
 from openpilot.system.lanlinkd.toyota.link import DiagLink
 
-from .toyota_fakes import FakeBodyEcu, FakePanda
+from .toyota_fakes import FakeBodyEcu, FakeEcu, FakePanda
 from .test_toyota_customization import ITEM
 
 OTHER_ECU_ITEM = {**ITEM, "uid": 2, "tx": "7C4", "sub": None, "readId": "81", "writeId": "81"}
@@ -19,11 +19,33 @@ def make(memory=None, reject_writes=None, tmp_path=None):
 class TestScan:
   def test_lists_supported_items_with_current_value(self):
     _, link, _ = make()
-    items = cz.scan(link, [ITEM, OTHER_ECU_ITEM])
+    result = cz.scan(link, [ITEM, OTHER_ECU_ITEM])
+    items = result["items"]
     # 0x7C4 不在线 → 该 ECU 的项不出现
     assert [i["uid"] for i in items] == [1]
     assert items[0]["current"] == 0
     assert items[0]["raw"] == "a020"
+
+  def test_report_explains_each_ecu(self):
+    # 列表为空时用户要能看出卡在哪一步：ECU 不在线 / A803 被拒 / 掩码不含该项 / 读值失败
+    rejecting = FakeEcu({b"\x3e": b"\x7e", b"\xa8\x03": b"\x7f\xa8\x22"})
+    quiet_after_probe = FakeEcu({b"\x3e": b"\x7e"})
+    unreadable = FakeBodyEcu({}, {0x12: bytes.fromhex("ff0030")})
+    link = DiagLink(FakePanda({(0x750, 0x40): rejecting, (0x7C4, None): quiet_after_probe, (0x7C0, None): unreadable}),
+                    elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    third = {**ITEM, "uid": 3, "tx": "7C0", "sub": None}
+    result = cz.scan(link, [ITEM, OTHER_ECU_ITEM, third, {**third, "uid": 4}])
+    assert result["items"] == []
+    assert result["ecus"] == [
+      {"tx": "750", "sub": "40", "total": 1, "supported": 0, "read": 0, "status": "rejected", "nrc": "22"},
+      {"tx": "7C4", "sub": None, "total": 1, "supported": 0, "read": 0, "status": "silent"},
+      {"tx": "7C0", "sub": None, "total": 2, "supported": 2, "read": 0, "status": "ok", "masks": 1, "readError": "nrc 11"},
+    ]
+
+  def test_report_marks_offline_ecu(self):
+    _, link, _ = make()
+    report = cz.scan(link, [OTHER_ECU_ITEM])["ecus"]
+    assert report == [{"tx": "7C4", "sub": None, "total": 1, "supported": 0, "read": 0, "status": "offline"}]
 
 
 class TestWrite:

@@ -103,33 +103,60 @@ def read_mask(link, item: dict) -> bytes:
   return mask
 
 
-def scan(link, items: list[dict]) -> list[dict]:
-  """探测 ECU → A803 掩码 → 读出支持项的当前值。不在线的 ECU 整体跳过。"""
-  masks_by_ecu: dict[tuple, dict[int, bytes] | None] = {}
+def _probe_masks(link, address: tuple[int, int | None]) -> tuple[dict[int, bytes], dict]:
+  """3E 探测 → A8 03 掩码表。返回 (掩码表, 明细)，明细里的 status 说明为什么这个 ECU 没有可定制项。"""
+  try:
+    link.request(*address, b"\x3e")
+  except NoResponseError:
+    return {}, {"status": "offline"}
+  try:
+    response = link.request(*address, b"\xa8\x03")
+  except NoResponseError:
+    return {}, {"status": "silent"}
+  masks = parse_masks(response)
+  if masks:
+    return masks, {"status": "ok", "masks": len(masks)}
+  if response[:1] == b"\x7f":
+    return {}, {"status": "rejected", "nrc": f"{response[2]:02X}" if len(response) >= 3 else ""}
+  return {}, {"status": "empty", "response": response.hex()}
+
+
+def scan(link, items: list[dict]) -> dict:
+  """探测 ECU → A803 掩码 → 读出支持项的当前值。
+
+  返回 {"items": 读到当前值的项, "ecus": 每个 ECU 的明细}。列表为空时明细能说明卡在哪一步：
+  offline（3E 无响应）/ silent（A803 无响应）/ rejected（负响应 nrc）/ empty（正响应但没有掩码）/ ok。
+  """
+  masks_by_ecu: dict[tuple, dict[int, bytes]] = {}
+  reports: dict[tuple, dict] = {}
   data_cache: dict[tuple, bytes | None] = {}
   found = []
   for item in items:
     address = _address(item)
     if address not in masks_by_ecu:
-      try:
-        link.request(*address, b"\x3e")
-        masks_by_ecu[address] = parse_masks(link.request(*address, b"\xa8\x03"))
-      except NoResponseError:
-        masks_by_ecu[address] = None
-    masks = masks_by_ecu[address]
-    if not masks or not is_supported(item, masks):
+      masks_by_ecu[address], detail = _probe_masks(link, address)
+      reports[address] = {"tx": item["tx"], "sub": item["sub"], "total": 0, "supported": 0, "read": 0, **detail}
+    report = reports[address]
+    report["total"] += 1
+    if not is_supported(item, masks_by_ecu[address]):
       continue
+    report["supported"] += 1
     key = (address, item["readId"])
     if key not in data_cache:
       try:
         data_cache[key] = read_data(link, item)
-      except (NoResponseError, EcuRejectedError):
+      except NoResponseError:
         data_cache[key] = None
+        report.setdefault("readError", "no response")
+      except EcuRejectedError as exc:
+        data_cache[key] = None
+        report.setdefault("readError", f"nrc {exc.nrc:02X}" if exc.nrc is not None else "bad response")
     data = data_cache[key]
     if data is None:
       continue
+    report["read"] += 1
     found.append({**item, "current": current_option(item, data), "raw": data.hex()})
-  return found
+  return {"items": found, "ecus": list(reports.values())}
 
 
 def preview(link, item: dict, option_index: int) -> dict:

@@ -44,10 +44,13 @@ class DiagLink:
     message.send(payload)
     deadline = time.monotonic() + self.timeout
     while True:
-      response, _ = message.recv(timeout=0)
+      response, frame_received = message.recv(timeout=0)
       now = time.monotonic()
       if response is None:
-        if now > deadline:
+        if frame_received:
+          # 多帧响应接收中（A8 03 的掩码表可达几十帧）：每收到一帧就续期，只在 ECU 停发后才算超时
+          deadline = now + self.timeout
+        elif now > deadline:
           raise NoResponseError(f"{tx:X}/{sub if sub is None else f'{sub:02X}'} {payload.hex()}: no response")
         if now - self._last_heartbeat >= HEARTBEAT_PERIOD_S:
           self._heartbeat()
