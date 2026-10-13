@@ -34,6 +34,7 @@ from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd import wifi_api
 from openpilot.system.lanlinkd import software_api
+from openpilot.system.lanlinkd import toyota_diag_api
 from openpilot.system.lanlinkd.statusd import StatusCache
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -55,6 +56,8 @@ class LanlinkApp:
     self._wifi_manager = None
     self._wifi_lock = threading.Lock()
     threading.Thread(target=self.cache.run, args=(self.exit_event,), name="lanlink_status", daemon=True).start()
+    self.toyota = toyota_diag_api.create(self.params, self.cache.snapshot)
+    threading.Thread(target=self.toyota.idle_watchdog, args=(self.exit_event,), name="lanlink_toyota_idle", daemon=True).start()
 
   # ---- helpers ----
   @staticmethod
@@ -210,6 +213,21 @@ class LanlinkApp:
       return _json_error(code, payload)
     return json_response(payload, status=code)
 
+  # ---- toyota 诊断 ----
+  # 全部是阻塞 IO（等 pandad 退出、等 ECU 应答，扫描可达几十秒），一律进线程池
+  async def _toyota(self, method: str, *args) -> HTTPResponse:
+    code, body = await asyncio.to_thread(getattr(self.toyota, method), *args)
+    return empty(status=204) if body is None else json_response(body, status=code)
+
+  async def toyota_session_get(self, request: Request) -> HTTPResponse:
+    return await self._toyota("session_get")
+
+  async def toyota_session_enter(self, request: Request) -> HTTPResponse:
+    return await self._toyota("session_enter")
+
+  async def toyota_session_exit(self, request: Request) -> HTTPResponse:
+    return await self._toyota("session_exit")
+
   # ---- status / capabilities / settings / logs ----
   async def status(self, request: Request) -> HTTPResponse:
     snap = self.cache.snapshot()
@@ -283,6 +301,9 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/wifi/<operation:str>", "wifi_operation"),
   ("GET", "/api/software", "software_get"),
   ("POST", "/api/software/<action:str>", "software_action"),
+  ("GET", "/api/toyota/session", "toyota_session_get"),
+  ("POST", "/api/toyota/session/enter", "toyota_session_enter"),
+  ("POST", "/api/toyota/session/exit", "toyota_session_exit"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/diagnostics", "diagnostics"),
   ("GET", "/api/bootstrap", "bootstrap"),

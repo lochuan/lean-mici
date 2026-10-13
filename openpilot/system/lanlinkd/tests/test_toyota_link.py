@@ -1,0 +1,68 @@
+import pytest
+
+from openpilot.system.lanlinkd.toyota import link as link_mod
+from openpilot.system.lanlinkd.toyota.link import DiagLink, NoResponseError
+
+from .toyota_fakes import FakeEcu, FakePanda
+
+ELM327 = 3  # 只用于断言透传
+
+
+def make_link(ecus, **kwargs):
+  panda = FakePanda(ecus)
+  kwargs.setdefault("timeout", 0.05)
+  return panda, DiagLink(panda, elm327_mode=ELM327, heartbeat_thread=False, **kwargs)
+
+
+class TestOpen:
+  def test_sets_elm327_without_obd_multiplexing(self):
+    panda, _ = make_link({})
+    # 参数 1 = 不把 bus 1 切到 OBD 口：我们走的是摄像头线束的 bus 0
+    assert panda.safety_modes == [(ELM327, 1)]
+
+  def test_close_releases_panda(self):
+    panda, link = make_link({})
+    link.close()
+    assert panda.closed
+
+
+class TestRequest:
+  def test_single_frame_direct_ecu(self):
+    _, link = make_link({(0x7C0, None): FakeEcu({b"\x21\xa7": b"\x61\xa7\x12\x34"})})
+    assert link.request(0x7C0, None, b"\x21\xa7") == b"\x61\xa7\x12\x34"
+
+  def test_gateway_sub_address_multi_frame_both_ways(self):
+    # 10 字节写请求要分段发；12 字节响应要分段收，且每帧首字节都是子地址 0x40
+    request = bytes.fromhex("3b11") + bytes(range(8))
+    response = bytes.fromhex("6111") + bytes(range(10))
+    ecu = FakeEcu({request: response})
+    panda, link = make_link({(0x750, 0x40): ecu})
+    assert link.request(0x750, 0x40, request) == response
+    assert ecu.requests == [request]
+    assert all(dat[0] == 0x40 for addr, dat, _ in panda.sent if addr == 0x750)
+
+  def test_waits_through_response_pending(self):
+    ecu = FakeEcu({b"\x3b\x12\x01": [b"\x7f\x3b\x78", b"\x7b\x12"]})
+    _, link = make_link({(0x750, 0x40): ecu})
+    assert link.request(0x750, 0x40, b"\x3b\x12\x01") == b"\x7b\x12"
+
+  def test_negative_response_is_returned_not_raised(self):
+    # 读码/清码要按 NRC 换下一条命令，所以负响应原样交给调用方判断
+    _, link = make_link({(0x7E0, None): FakeEcu({b"\x13": b"\x7f\x13\x11"})})
+    assert link.request(0x7E0, None, b"\x13") == b"\x7f\x13\x11"
+
+  def test_silent_ecu_raises_no_response(self):
+    _, link = make_link({})
+    with pytest.raises(NoResponseError):
+      link.request(0x7E0, None, b"\x3e")
+
+  def test_heartbeat_sent_while_waiting(self, monkeypatch):
+    # 熄火时 panda 2 s 收不到心跳就进 SILENT；长等待期间也要续心跳
+    ecu = FakeEcu({b"\x3b\x12\x01": [b"\x7f\x3b\x78"]})
+    panda = FakePanda({(0x750, 0x40): ecu})
+    link = DiagLink(panda, elm327_mode=ELM327, heartbeat_thread=False, timeout=0.05, pending_timeout=0.2)
+    clock = iter(range(1000))
+    monkeypatch.setattr(link_mod.time, "monotonic", lambda: next(clock) * 0.01)
+    with pytest.raises(NoResponseError):
+      link.request(0x750, 0x40, b"\x3b\x12\x01")
+    assert panda.heartbeats > 0

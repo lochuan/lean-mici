@@ -53,6 +53,10 @@ def lanlink_run(started: bool, params: Params, CP: car.CarParams) -> bool:
   # offroad+onroad 常驻：LAN 访问的价值恰在停车时
   return params.get_bool("LanLinkEnabled")
 
+def pandad_run(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # LANLink 丰田诊断模式期间让出 panda（lanlinkd 直连发诊断帧，见 system/lanlinkd/toyota/session.py）
+  return not params.get_bool("LanLinkDiagMode")
+
 def bigmodeld_run(started: bool, params: Params, CP: car.CarParams) -> bool:
   # 07 号：「远程大模型」关闭时不启动上行进程，行为同 lean-master；默认关（同 AdbEnabled）
   return started and params.get_bool("BigmodelToggle")
@@ -83,7 +87,7 @@ procs = [
   PythonProcess("soundd", "openpilot.selfdrive.ui.soundd", soundd_run),
   PythonProcess("bluetooth_managerd", "openpilot.sunnypilot.system.bluetooth.daemon", bluetooth_enabled, enabled=COMMA_HARDWARE),
   PythonProcess("locationd", "openpilot.selfdrive.locationd.locationd", only_onroad),
-  NativeProcess("_pandad", "openpilot/selfdrive/pandad", ["./pandad"], always_run, enabled=False),
+  NativeProcess("_pandad", "openpilot/selfdrive/pandad", ["./pandad"], pandad_run, enabled=False),
   PythonProcess("calibrationd", "openpilot.selfdrive.locationd.calibrationd", only_onroad),
   PythonProcess("torqued", "openpilot.selfdrive.locationd.torqued", only_onroad),
   PythonProcess("controlsd", "openpilot.selfdrive.controls.controlsd", iscar),
@@ -91,7 +95,7 @@ procs = [
   PythonProcess("card", "openpilot.selfdrive.car.card", only_onroad),
   PythonProcess("deleter", "openpilot.system.loggerd.deleter", always_run),
   PythonProcess("qcomgpsd", "openpilot.system.qcomgpsd.qcomgpsd", qcomgps, enabled=COMMA_HARDWARE),
-  PythonProcess("pandad", "openpilot.selfdrive.pandad.pandad", always_run),
+  PythonProcess("pandad", "openpilot.selfdrive.pandad.pandad", pandad_run),
   PythonProcess("paramsd", "openpilot.selfdrive.locationd.paramsd", only_onroad),
   PythonProcess("lagd", "openpilot.selfdrive.locationd.lagd", only_onroad),
   PythonProcess("ubloxd", "openpilot.system.ubloxd.ubloxd", ublox, enabled=COMMA_HARDWARE),

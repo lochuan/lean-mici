@@ -25,7 +25,9 @@ class FakeParams:
             # LanlinkApp.__init__ 读这三个组版本信息；设备上它们都存在
             "Version": "STRING", "GitBranch": "STRING", "GitCommit": "STRING",
             # bluetooth 降级快照从 params 推导；设备上它们都存在
-            "BluetoothEnabled": "BOOL", "BluetoothAudioAddress": "STRING"}
+            "BluetoothEnabled": "BOOL", "BluetoothAudioAddress": "STRING",
+            # 丰田诊断会话读写这两个
+            "IsOffroad": "BOOL", "LanLinkDiagMode": "BOOL"}
 
   class _Type:
     def __init__(self, name: str):
@@ -48,6 +50,9 @@ class FakeParams:
 
   def put(self, key, value, **k):
     self._v[key.decode() if isinstance(key, bytes) else key] = value
+
+  def put_bool(self, key, value, **k):
+    self.put(key, bool(value))
 
   def remove(self, key):
     self._v.pop(key.decode() if isinstance(key, bytes) else key, None)
