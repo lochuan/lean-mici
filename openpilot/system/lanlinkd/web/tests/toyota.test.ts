@@ -181,14 +181,12 @@ describe("ecusWithSettings", () => {
 });
 
 describe("scanTally", () => {
-  it("按状态汇总，进度 = 已完成 / 总数", () => {
-    expect(scanTally(["ok", "offline", "malformed", "ok"], 8)).toEqual({
-      done: 4, total: 8, online: 2, offline: 1, malformed: 1, percent: 50,
-    });
+  it("进度 = 已完成 / 总数，不论各 ECU 的状态", () => {
+    expect(scanTally(["ok", "offline", "malformed", "ok"], 8)).toEqual({ done: 4, total: 8, percent: 50 });
   });
 
   it("还没开始：全 0", () => {
-    expect(scanTally([], 14)).toEqual({ done: 0, total: 14, online: 0, offline: 0, malformed: 0, percent: 0 });
+    expect(scanTally([], 14)).toEqual({ done: 0, total: 14, percent: 0 });
   });
 
   it("总数为 0 时进度为 0，不出现 NaN", () => {

@@ -163,7 +163,7 @@ def _save_backup(backups, ecu: dict, setting: dict, data: bytes, after: bytes) -
 
 
 def _write_value(link, ecu: dict, setting: dict, value: int, before: bytes, backups) -> dict:
-  """只改 before 里该项的位 → 备份 → 写入 → 回读校验。"""
+  """只改 before 里该项的位 → 备份 → 写入 → 回读校验。返回的 after 是回读到的数据（校验失败时 ≠ 打算写入的）。"""
   address = catalog.ecu_address(ecu)
   mask = int(setting["mask"], 16)
   after = coding.insert_value(before, setting["byteIndex"], mask, value)
@@ -171,7 +171,7 @@ def _write_value(link, ecu: dict, setting: dict, value: int, before: bytes, back
   _write_payload(link, address, ecu, setting, after)
   current = _read_payload(link, address, ecu, setting)
   return {"key": setting["key"], "value": coding.extract_value(current, setting["byteIndex"], mask),
-          "verified": current == after, "backupId": backup_id, "before": before.hex(), "after": after.hex()}
+          "verified": current == after, "backupId": backup_id, "before": before.hex(), "after": current.hex()}
 
 
 def write_setting(link, ecu: dict, setting: dict, value: int, expected_before: str, backups) -> dict:
@@ -183,9 +183,10 @@ def write_setting(link, ecu: dict, setting: dict, value: int, expected_before: s
 
 
 def restore_setting(link, ecu: dict, setting: dict, backup: dict, backups) -> dict:
-  """撤销 = 把该项的值写回备份时的值（只动该项的位，同一 DID 里后改的其他项不受影响）；原备份标为已恢复。"""
+  """撤销 = 把该项的值写回备份时的值（只动该项的位，同一 DID 里后改的其他项不受影响）；回读校验通过才把原备份标为已恢复。"""
   old_value = coding.extract_value(bytes.fromhex(backup["data"]), setting["byteIndex"], int(setting["mask"], 16))
   current = _read_payload(link, catalog.ecu_address(ecu), ecu, setting)
   result = _write_value(link, ecu, setting, old_value, current, backups)
-  backups.mark_restored(backup["id"])
+  if result["verified"]:
+    backups.mark_restored(backup["id"])
   return result

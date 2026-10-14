@@ -9,8 +9,6 @@ defineProps<{
   title: string;
   confirmText: string;
   busy?: boolean;
-  /** 隐藏确认按钮（操作已完成，只剩关闭） */
-  done?: boolean;
   danger?: boolean;
 }>();
 const emit = defineEmits<{ "update:open": [boolean]; confirm: [] }>();
@@ -23,9 +21,9 @@ const emit = defineEmits<{ "update:open": [boolean]; confirm: [] }>();
     </div>
     <div class="mt-5 flex justify-end gap-2">
       <Button variant="ghost" :disabled="busy" @click="emit('update:open', false)">
-        {{ done ? "关闭" : "取消" }}
+        取消
       </Button>
-      <Button v-if="!done" :variant="danger ? 'danger' : 'accent'" :disabled="busy" @click="emit('confirm')">
+      <Button :variant="danger ? 'danger' : 'accent'" :disabled="busy" @click="emit('confirm')">
         <Loader2 v-if="busy" class="animate-spin" />
         {{ confirmText }}
       </Button>

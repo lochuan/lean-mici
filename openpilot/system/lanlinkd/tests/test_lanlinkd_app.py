@@ -27,8 +27,8 @@ class FakeParams:
             "Version": "STRING", "GitBranch": "STRING", "GitCommit": "STRING",
             # bluetooth 降级快照从 params 推导；设备上它们都存在
             "BluetoothEnabled": "BOOL", "BluetoothAudioAddress": "STRING",
-            # 丰田诊断会话读写这两个；实时数据按 CarParamsPersistent 里的 VIN 选配置
-            "IsOffroad": "BOOL", "LanLinkDiagMode": "BOOL", "CarParamsPersistent": "BYTES"}
+            # 丰田诊断会话读写这两个
+            "IsOffroad": "BOOL", "LanLinkDiagMode": "BOOL"}
 
   class _Type:
     def __init__(self, name: str):

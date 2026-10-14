@@ -136,6 +136,11 @@ class TestWriteSetting:
       cz.write_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), 0, "01", BackupStore(str(blocker / "sub")))
     assert fake.memory[0x2270] == b"\x01"
 
+  def test_unverified_write_reports_data_read_back_from_ecu(self, tmp_path):
+    fake, link = _body_ecu_link(ignore_writes=True)
+    result = cz.write_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), 0, "01", BackupStore(str(tmp_path)))
+    assert (result["verified"], result["value"], result["after"]) == (False, 1, "01")
+
   def test_toyota_can_write_sends_expanded_data(self, tmp_path):
     window = FakeToyotaCanEcu({0x11: bytes.fromhex("a020")}, {0x11: bytes.fromhex("ff0030")})
     link = DiagLink(FakePanda({(0x750, 0x90): window}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
@@ -153,6 +158,15 @@ class TestWriteSetting:
     assert fake.memory[0x2270] == b"\x01"
     assert backups.get(restored["backupId"])["data"] == "00"        # 恢复前另存的是被覆盖的值
     assert backups.get(written["backupId"])["restored"] is True
+
+  def test_unverified_restore_keeps_backup_restorable(self, tmp_path):
+    fake, link = _body_ecu_link()
+    backups = BackupStore(str(tmp_path))
+    written = cz.write_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), 0, "01", backups)
+    fake.ignore_writes = True
+    restored = cz.restore_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), backups.get(written["backupId"]), backups)
+    assert not restored["verified"]
+    assert not backups.get(written["backupId"]).get("restored")
 
   def test_undo_restores_only_its_own_bits(self, tmp_path):
     # 750/B5 DID 2009 实车 c0 00：字节 1 的 0x80 / 0x40 是两个不同的设置项

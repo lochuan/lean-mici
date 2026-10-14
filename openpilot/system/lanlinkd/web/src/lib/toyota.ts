@@ -137,23 +137,12 @@ export function onlineEcuText(ecuAnswered: Record<string, boolean>): string {
 export interface ScanTally {
   done: number;
   total: number;
-  online: number;
-  offline: number;
-  malformed: number;
   percent: number;
 }
 
-/** 逐个 ECU 扫描的进度汇总：已扫描的 ECU 按状态计数，percent 给进度条用。 */
+/** 逐个 ECU 扫描的进度：已扫描几个、共几个，percent 给进度条用。 */
 export function scanTally(statuses: ToyotaScanStatus[], total: number): ScanTally {
-  const count = (s: ToyotaScanStatus) => statuses.filter((x) => x === s).length;
-  return {
-    done: statuses.length,
-    total,
-    online: count("ok"),
-    offline: count("offline"),
-    malformed: count("malformed"),
-    percent: total ? (statuses.length / total) * 100 : 0,
-  };
+  return { done: statuses.length, total, percent: total ? (statuses.length / total) * 100 : 0 };
 }
 
 /** 写入后整段数据的预期样子（技术详情里和当前原始值做 hex 对比）：

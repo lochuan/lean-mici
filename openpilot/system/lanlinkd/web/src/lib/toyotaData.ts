@@ -55,7 +55,12 @@ export function customizationScanTotal(): number {
   return c ? ecusWithSettings(c.ecus, c.settings).length : 0;
 }
 
-/** 逐个 ECU 读定制项当前值。单个 ECU 失败只记下来继续；会话没了（409）才中止。 */
+/** 会话没了（退出或空闲超时）：没扫完的结果不能当成扫描结果显示 */
+function isSessionGone(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 409;
+}
+
+/** 逐个 ECU 读定制项当前值。单个 ECU 失败只记下来继续；会话没了（409）就中止，这次扫描作废（回到 idle）。 */
 export async function scanCustomizations(): Promise<void> {
   const catalog = toyotaData.catalog;
   const c = toyotaData.customization;
@@ -72,7 +77,10 @@ export async function scanCustomizations(): Promise<void> {
       if (r.status !== "ok") c.unreachable.push(ecu);
       for (const it of r.items) c.values[it.key] = { value: it.value, raw: it.raw };
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) break;
+      if (isSessionGone(e)) {
+        c.state = "idle";
+        return;
+      }
       c.statuses.push("offline");
       toyotaData.ecuAnswered[ecu.id] = false;
       c.unreachable.push(ecu);
@@ -81,7 +89,7 @@ export async function scanCustomizations(): Promise<void> {
   c.state = "done";
 }
 
-/** 逐个 ECU 读故障码（全部 41 个）。失败的 ECU 记为无应答继续；会话没了（409）才中止。 */
+/** 逐个 ECU 读故障码（全部 41 个）。失败的 ECU 记为无应答继续；会话没了（409）就中止，这次扫描作废（回到 idle）。 */
 export async function scanDtcs(): Promise<void> {
   const catalog = toyotaData.catalog;
   const d = toyotaData.dtc;
@@ -92,7 +100,10 @@ export async function scanDtcs(): Promise<void> {
     try {
       d.scans.push(await api.toyotaScanDtc(ecu.id));
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) break;
+      if (isSessionGone(e)) {
+        d.state = "idle";
+        return;
+      }
       d.scans.push({ ecu: ecu.id, status: "offline", protocol: ecu.protocol, dtcs: [] });
     }
     toyotaData.ecuAnswered[ecu.id] = d.scans[d.scans.length - 1].status === "ok";
