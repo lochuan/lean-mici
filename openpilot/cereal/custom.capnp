@@ -467,7 +467,7 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   bigActionT @3 :List(Float32);  # [lat, long] 秒，chestnut 公式（research/02 §4）
   desireClass @4 :UInt8;         # DH.desire 电平（log.Desire 索引），bigmodeld 生成 pulse 边沿
   bigLatencyMs @5 :Float32;      # C-3：REPLY 到达 − timestamp_eof（ms），0 = 本帧没等到
-  cameraToModelMs @6 :Float32;   # 帧出图（timestamp_eof）→ modeld 收帧（ms），ADR-0001 的 L_n，喂 L̂
+  cameraToModelMs @6 :Float32;   # 传感器读出完（timestamp_eof）→ modeld 收帧（ms），仅遥测
   # 截止后才到的 REPLY：自上一帧发布以来的个数，及其中最近一个的往返（ms）；随后发布的一帧上报一次，
   # 0 = 没有迟到。warmup 头几帧不等 REPLY，不计。
   bigLateReplyMs @7 :Float32;

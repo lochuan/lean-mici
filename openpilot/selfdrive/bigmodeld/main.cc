@@ -73,6 +73,7 @@ const size_t kEncUvOffset = kEncStride * VENUS_Y_SCANLINES(COLOR_FMT_NV12, chipm
 const size_t kEncBufSize = VENUS_BUFFER_SIZE(COLOR_FMT_NV12, chipmunk::kModelW, chipmunk::kModelH);
 constexpr int kEncPoolDepth = 6;   // 每路编码缓冲池（1 配对槽 + ≤5 在编码器在途）
 constexpr int kSchedFifoPrio = 53;
+// 下列 RTT/取帧/REPLY 数值测于 os04c10 读出常量修正前（timestamp_eof 早 ~21.5 ms）：以 eof 为零点的量相对真实 eof 各减 ~21.5 ms。
 // writer/reply 线程：core 3 有 pandad（FIFO 54，常驻 ~36%）抢占 → 编码完到 send 等 1～8 ms；
 // core 2 只有 RT 5 的 locationd 系（台架 A/B/A：RTT p90 62.4→56.2 ms）。EINVAL（离线核）容忍
 const std::vector<int> kCpuAffinity = {2};

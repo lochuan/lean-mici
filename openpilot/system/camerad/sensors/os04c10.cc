@@ -44,8 +44,9 @@ OS04C10::OS04C10() {
   frame_data_type = CSI_RAW12;
   mclk_frequency = 24000000; // Hz
 
-  // TODO: this was set from logs. actually calculate it out
-  readout_time_ns = 11000000;
+  // 寄存器反推：20 fps、VTS 2360 行 → 21.19 µs/行，读出区域 2704x1536 → 1536 行 ≈ 32.5 ms；
+  // C4 实测 SOF→IFE 完成 ≈ 33 ms 吻合。上游写 11 ms（≈2x2 合并 760 行的读出），使 timestamp_eof 早 ~21.5 ms
+  readout_time_ns = 32500000;
 
   ev_scale = 150.0;
   dc_gain_factor = 1;
