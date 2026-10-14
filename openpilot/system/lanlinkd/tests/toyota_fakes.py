@@ -5,6 +5,7 @@ send_heartbeat/close），并把 ISO-TP 帧还原成请求交给 FakeEcu，
 再把响应按 ISO-TP 分段发回——包括 0x750 网关的子地址首字节和流控帧，
 这样协议模块的测试走的是和真车一样的帧路径。
 """
+import json
 from collections.abc import Callable
 
 
@@ -132,3 +133,52 @@ class FakeBodyEcu(FakeEcu):
       self.memory[request[1]] = bytes(b for b, m in zip(request[2:], self.masks[request[1]], strict=True) if m)
       return [b"\x7f\x3b\x78", b"\x7b" + request[1:2]]
     return b"\x7f" + request[:1] + b"\x11"
+
+
+class FakeUdsEcu(FakeEcu):
+  """有内存的 UDS ECU：22 按 DID 读（XX00 位图也是一个 DID）、2E 写进内存、10 03 切扩展会话。
+
+  writes_need_extended_session：默认会话下 2E 回 7F 2E 7F，发过 10 03 才能写。
+  其余请求（3E、19 02 8D、14 FFFFFF…）查 responses 表，查不到回 7F xx 11。
+  """
+
+  def __init__(self, memory: dict[int, bytes], responses: dict[bytes, bytes | list[bytes]] | None = None,
+               reject_writes: bytes | None = None, writes_need_extended_session: bool = False):
+    super().__init__(responses, handler=self._handle)
+    self.memory = dict(memory)
+    self.reject_writes = reject_writes
+    self.writes_need_extended_session = writes_need_extended_session
+    self.extended_session = False
+
+  @classmethod
+  def from_probe(cls, path: str, tx: str, sub: str | None, **kwargs) -> "FakeUdsEcu":
+    """用实车只读探测记录（tests/fixtures/sienna_ready_probe.jsonl）回放这个 ECU。"""
+    memory: dict[int, bytes] = {}
+    responses: dict[bytes, bytes] = {}
+    with open(path) as f:
+      for line in f:
+        row = json.loads(line)
+        if row.get("tx") != tx or row.get("sub") != sub or "resp" not in row:
+          continue
+        request, response = bytes.fromhex(row["req"]), bytes.fromhex(row["resp"])
+        if request[0] == 0x22 and response[0] == 0x62:
+          memory[int.from_bytes(request[1:3], "big")] = response[3:]
+        else:
+          responses[request] = response
+    return cls(memory, responses, **kwargs)
+
+  def _handle(self, request: bytes):
+    if request == b"\x10\x03":
+      self.extended_session = True
+      return b"\x50\x03"
+    did = int.from_bytes(request[1:3], "big") if len(request) >= 3 else None
+    if request[0] == 0x22 and len(request) == 3:
+      return b"\x62" + request[1:3] + self.memory[did] if did in self.memory else b"\x7f\x22\x31"
+    if request[0] == 0x2E and did in self.memory:
+      if self.reject_writes:
+        return self.reject_writes
+      if self.writes_need_extended_session and not self.extended_session:
+        return b"\x7f\x2e\x7f"
+      self.memory[did] = request[3:]
+      return [b"\x7f\x2e\x78", b"\x6e" + request[1:3]]
+    return self.responses.get(request, b"\x7f" + request[:1] + b"\x11")

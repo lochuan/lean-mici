@@ -237,7 +237,7 @@ class LanlinkApp:
     return await self._toyota("catalog_get")
 
   async def toyota_customizations_scan(self, request: Request) -> HTTPResponse:
-    return await self._toyota("customizations_scan")
+    return await self._toyota("customizations_scan", self._body(request))
 
   async def toyota_customization_preview(self, request: Request, uid: str) -> HTTPResponse:
     return await self._toyota("customization_preview", uid, self._body(request))

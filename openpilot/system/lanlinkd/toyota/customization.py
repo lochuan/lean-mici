@@ -4,6 +4,7 @@
 - 21 id → 61 id <data>：data 只含掩码非零的字节（压缩形式），BIT:n:b 的 n 是它的下标。
 - 写：改位 → 按掩码展开（掩码 0 的位置填 0）→ 3B id <展开数据>，期望 7B id。
 """
+from openpilot.system.lanlinkd.toyota import coding
 from openpilot.system.lanlinkd.toyota.link import MalformedResponseError, NoResponseError
 
 POSITIVE_A8 = 0xE8
@@ -203,3 +204,124 @@ def restore(link, backup: dict, backups) -> dict:
   mask = bytes.fromhex(backup["mask"])
   backup_id = _backup(backups, item, read_data(link, item), mask)
   return {"backupId": backup_id, "verified": _write_and_verify(link, item, bytes.fromhex(backup["data"]), mask)}
+
+
+# ---- Sienna 4 代：按 ECU 扫描（目录见 catalog.load_sienna，位运算见 coding.py）----
+
+def ecu_address(ecu: dict) -> tuple[int, int | None]:
+  return int(ecu["tx"], 16), int(ecu["sub"], 16) if ecu["sub"] else None
+
+
+def _positive(link, address: tuple[int, int | None], request: bytes, echo_len: int) -> bytes:
+  """发请求，要求正响应（SID+0x40 且回显请求的前 echo_len 字节），返回回显之后的数据。"""
+  response = link.request(*address, request)
+  expected = bytes([request[0] + 0x40]) + request[1:echo_len]
+  if response[:echo_len] != expected:
+    raise EcuRejectedError(request, response)
+  return response[echo_len:]
+
+
+def read_uds_did(link, address: tuple[int, int | None], did: int) -> bytes:
+  return _positive(link, address, b"\x22" + did.to_bytes(2, "big"), 3)
+
+
+def read_can_expanded(link, address: tuple[int, int | None], local_id: int, mask_entry: bytes) -> bytes:
+  return coding.expand(_positive(link, address, bytes([0x21, local_id]), 2), mask_entry)
+
+
+class _UdsReader:
+  """一个 UDS ECU 的扫描：支持位图按 DID 高字节缓存，每个 DID 只读一次。"""
+
+  def __init__(self, link, address: tuple[int, int | None]):
+    self.link, self.address = link, address
+    self._bitmaps: dict[int, bytes] = {}
+    self._payloads: dict[int, bytes | Exception] = {}
+
+  def supported(self, setting: dict) -> bool:
+    did = int(setting["did"], 16)
+    high = did >> 8
+    if high not in self._bitmaps:
+      try:
+        self._bitmaps[high] = read_uds_did(self.link, self.address, high << 8)
+      except (NoResponseError, MalformedResponseError, EcuRejectedError):
+        self._bitmaps[high] = b""
+    return coding.uds_did_supported(self._bitmaps[high], did)
+
+  def payload(self, setting: dict) -> bytes:
+    did = int(setting["did"], 16)
+    if did not in self._payloads:
+      try:
+        self._payloads[did] = read_uds_did(self.link, self.address, did)
+      except (NoResponseError, MalformedResponseError, EcuRejectedError) as exc:
+        self._payloads[did] = exc
+    if isinstance(self._payloads[did], Exception):
+      raise self._payloads[did]
+    return self._payloads[did]
+
+
+class _CanReader:
+  """一个 Toyota CAN ECU 的扫描：A8 03 掩码表读一次，每个本地 ID 只读一次。"""
+
+  def __init__(self, link, address: tuple[int, int | None]):
+    self.link, self.address = link, address
+    self.masks = coding.parse_masks(link.request(*address, b"\xa8\x03"))
+    self._data: dict[int, bytes | Exception] = {}
+
+  def supported(self, setting: dict) -> bool:
+    entry = self.masks.get(int(setting["localId"], 16), b"")
+    return coding.can_setting_supported(entry, setting["byteIndex"], int(setting["mask"], 16))
+
+  def payload(self, setting: dict) -> bytes:
+    local_id = int(setting["localId"], 16)
+    if local_id not in self._data:
+      try:
+        self._data[local_id] = read_can_expanded(self.link, self.address, local_id, self.masks[local_id])
+      except (NoResponseError, MalformedResponseError, EcuRejectedError) as exc:
+        self._data[local_id] = exc
+    if isinstance(self._data[local_id], Exception):
+      raise self._data[local_id]
+    return self._data[local_id]
+
+
+def _bit_support_ok(setting: dict, payload: bytes) -> bool:
+  """requiresBitSupportCheck：前一字节同样位置的位是「该项存在」的标志。"""
+  mask = int(setting["mask"], 16)
+  index = setting["byteIndex"] - 1
+  return 0 <= index < len(payload) and payload[index] & mask == mask
+
+
+def scan_ecu(link, ecu: dict, settings: list[dict]) -> dict:
+  """读一个 ECU 上目录里各定制项的当前值。
+
+  返回 {ecu, status, items: [{key, value, raw}], total, supported, read, readError?, malformedReason?}；
+  status：offline（3E 无响应）/ malformed（应答不符合 ISO-TP）/ ok。raw 是 UDS 的整段 payload 或 CAN 的展开数据。
+  """
+  address = ecu_address(ecu)
+  report = {"ecu": ecu["id"], "status": "ok", "items": [], "total": len(settings), "supported": 0, "read": 0}
+  try:
+    link.request(*address, b"\x3e")
+    reader = _CanReader(link, address) if ecu["protocol"] == "toyota_can" else _UdsReader(link, address)
+  except NoResponseError:
+    return {**report, "status": "offline"}
+  except MalformedResponseError as exc:
+    return {**report, "status": "malformed", "malformedReason": str(exc)}
+  for setting in settings:
+    if not reader.supported(setting):
+      continue
+    try:
+      payload = reader.payload(setting)
+    except (NoResponseError, MalformedResponseError, EcuRejectedError) as exc:
+      report["supported"] += 1
+      report.setdefault("readError", _read_error_text(exc))
+      continue
+    if setting["requiresBitSupportCheck"] and not _bit_support_ok(setting, payload):
+      continue
+    report["supported"] += 1
+    try:
+      value = coding.extract_value(payload, setting["byteIndex"], int(setting["mask"], 16))
+    except ValueError:
+      report.setdefault("readError", "应答太短")
+      continue
+    report["read"] += 1
+    report["items"].append({"key": setting["key"], "value": value, "raw": payload.hex()})
+  return report

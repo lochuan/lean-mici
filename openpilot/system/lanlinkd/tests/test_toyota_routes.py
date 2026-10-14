@@ -61,7 +61,7 @@ class TestRequiresSession:
     ("post", "/api/toyota/pids/read"),
   ])
   def test_bus_operations_need_diag_mode(self, app, method, path):
-    _, r = getattr(app.test_client, method)(path, json={"option": 0, "before": "00", "ecus": ["7E0"], "ids": [1]})
+    _, r = getattr(app.test_client, method)(path, json={"ecu": "750/40", "option": 0, "before": "00", "ecus": ["7E0"], "ids": [1]})
     assert r.status in (404, 409)
     assert "error" in r.json
 

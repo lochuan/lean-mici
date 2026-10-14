@@ -1,10 +1,13 @@
+import os
+
 import pytest
 
+from openpilot.system.lanlinkd.toyota import catalog
 from openpilot.system.lanlinkd.toyota import customization as cz
 from openpilot.system.lanlinkd.toyota.backups import BackupStore
 from openpilot.system.lanlinkd.toyota.link import DiagLink
 
-from .toyota_fakes import FakeBodyEcu, FakeEcu, FakePanda
+from .toyota_fakes import FakeBodyEcu, FakeEcu, FakePanda, FakeUdsEcu
 from .test_toyota_customization import ITEM
 
 OTHER_ECU_ITEM = {**ITEM, "uid": 2, "tx": "7C4", "sub": None, "readId": "81", "writeId": "81"}
@@ -102,3 +105,71 @@ class TestWrite:
     with pytest.raises(cz.BackupError):
       cz.write(link, ITEM, 1, "a020", BackupStore(str(blocker)))
     assert ecu.memory[0x12] == bytes.fromhex("a020")
+
+
+# ---- Sienna 4 代：按 ECU 扫描（目录 + Carista 规则）----
+
+PROBE = os.path.join(os.path.dirname(__file__), "fixtures", "sienna_ready_probe.jsonl")
+# 目录里每个 UDS ECU 的定制项数 = 实车报告支持的项数（剔除脚踢感应后）
+UDS_SETTING_COUNTS = {"750/40": 44, "750/67": 17, "750/B5": 14, "750/B8": 11, "7C4": 9, "750/A7": 7, "750/A4": 7,
+                      "7C0": 3, "750/41": 2, "750/C7": 2}
+WINDOW_SETTING = {"key": "car_setting_one_touch_test", "ecu": "750/90", "did": None, "localId": "11", "byteIndex": 2,
+                  "mask": "20", "requiresBitSupportCheck": False}
+
+
+def _replay_link(ecu_id: str):
+  ecu = catalog.ecu(ecu_id)
+  fake = FakeUdsEcu.from_probe(PROBE, ecu["tx"], ecu["sub"])
+  address = (int(ecu["tx"], 16), int(ecu["sub"], 16) if ecu["sub"] else None)
+  return DiagLink(FakePanda({address: fake}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+
+
+def _settings_of(ecu_id: str) -> list[dict]:
+  return [s for s in catalog.load_sienna()["settings"] if s["ecu"] == ecu_id]
+
+
+class TestScanEcu:
+  @pytest.mark.parametrize("ecu_id", sorted(UDS_SETTING_COUNTS))
+  def test_replayed_car_reports_every_catalog_setting(self, ecu_id):
+    result = cz.scan_ecu(_replay_link(ecu_id), catalog.ecu(ecu_id), _settings_of(ecu_id))
+    assert result["status"] == "ok"
+    assert len(result["items"]) == result["supported"] == result["read"] == UDS_SETTING_COUNTS[ecu_id]
+
+  @pytest.mark.parametrize("ecu_id, key, value, raw", [
+    ("750/40", "car_setting_warn_headlights_on_door_open", 1, "01"),   # 实车 62 2270 01
+    ("750/B5", "car_setting_warn_on_key_in_car", 1, None),             # 要过前一字节的支持位检查
+    ("750/41", "car_setting_rcta", 0, None),
+  ])
+  def test_values_match_the_probe(self, ecu_id, key, value, raw):
+    items = {i["key"]: i for i in cz.scan_ecu(_replay_link(ecu_id), catalog.ecu(ecu_id), _settings_of(ecu_id))["items"]}
+    assert items[key]["value"] == value
+    if raw is not None:
+      assert items[key]["raw"] == raw
+
+  def test_bit_support_check_hides_setting_whose_support_bit_is_clear(self):
+    setting = {**catalog.setting("car_setting_warn_on_key_in_car")}
+    bitmap = bytearray(32)
+    bitmap[(0x0C - 1) >> 3] = 1 << ((-0x0C) & 7)                      # DID 200C 在位图里
+    fake = FakeUdsEcu({0x2000: bytes(bitmap), 0x200C: bytes.fromhex("0020")}, {b"\x3e": b"\x7e"})   # 前一字节 0x00：支持位没置
+    link = DiagLink(FakePanda({(0x750, 0xB5): fake}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    result = cz.scan_ecu(link, catalog.ecu("750/B5"), [setting])
+    assert result["items"] == [] and result["supported"] == 0
+
+  def test_toyota_can_setting_is_read_from_expanded_data(self):
+    window = FakeBodyEcu({0x11: bytes.fromhex("a020")}, {0x11: bytes.fromhex("ff0030")})
+    link = DiagLink(FakePanda({(0x750, 0x90): window}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    result = cz.scan_ecu(link, catalog.ecu("750/90"), [WINDOW_SETTING])
+    # 压缩 a0 20 按掩码 ff 00 30 展开成 a0 00 20，第 2 字节 & 0x20 → 1
+    assert result["items"] == [{"key": "car_setting_one_touch_test", "value": 1, "raw": "a00020"}]
+
+  def test_offline_ecu(self):
+    link = DiagLink(FakePanda({}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    result = cz.scan_ecu(link, catalog.ecu("750/40"), _settings_of("750/40"))
+    assert (result["status"], result["items"], result["total"]) == ("offline", [], 44)
+
+  def test_unreadable_did_is_reported_not_raised(self):
+    fake = FakeUdsEcu.from_probe(PROBE, "750", "40")
+    del fake.memory[0x2270]                                             # 位图说支持，读却被拒
+    link = DiagLink(FakePanda({(0x750, 0x40): fake}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    result = cz.scan_ecu(link, catalog.ecu("750/40"), _settings_of("750/40"))
+    assert result["read"] == 43 and result["readError"] == "NRC 31"

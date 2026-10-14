@@ -8,7 +8,8 @@ from openpilot.system.lanlinkd.toyota.link import DiagLink
 from openpilot.system.lanlinkd.toyota.session import SessionError
 
 from .test_toyota_customization import ITEM
-from .toyota_fakes import FakeBodyEcu, FakeEcu, FakePanda
+from .test_toyota_customization_flow import PROBE
+from .toyota_fakes import FakeBodyEcu, FakeEcu, FakePanda, FakeUdsEcu
 
 
 class FakeSession:
@@ -85,17 +86,18 @@ def make_active_api(tmp_path, ecus=None):
 
 
 class TestCustomizationEndpoints:
-  def test_scan_shapes_items_for_the_web(self, tmp_path):
-    _, api = make_active_api(tmp_path)
-    status, body = api.customizations_scan()
+  def test_scan_one_ecu(self, tmp_path):
+    body_ecu = FakeUdsEcu.from_probe(PROBE, "750", "40")
+    _, api = make_active_api(tmp_path, ecus={(0x750, 0x40): body_ecu})
+    status, body = api.customizations_scan({"ecu": "750/40"})
     assert status == 200
-    item = body["items"][0]
-    assert item["uid"] == 1 and item["name"] == "提示音" and item["current"] == 0
-    assert item["options"] == [{"index": 0, "title": "开"}, {"index": 1, "title": "关"}]
-    assert item["ecu"].startswith("750/40")
-    assert [i["writable"] for i in body["items"]] == [True, False]
-    assert body["ecus"][0]["ecu"].startswith("750/40") and body["ecus"][0]["status"] == "ok"
-    assert {k: body["ecus"][0][k] for k in ("total", "supported", "read")} == {"total": 2, "supported": 2, "read": 2}
+    assert body["ecu"] == "750/40" and body["status"] == "ok" and len(body["items"]) == 44
+    assert {"key": "car_setting_warn_headlights_on_door_open", "value": 1, "raw": "01"} in body["items"]
+
+  @pytest.mark.parametrize("request_body", [{}, {"ecu": "7FF"}, {"ecu": 7}])
+  def test_scan_rejects_unknown_ecu(self, tmp_path, request_body):
+    _, api = make_active_api(tmp_path)
+    assert api.customizations_scan(request_body)[0] == 400
 
   def test_preview_then_write_then_restore(self, tmp_path):
     ecu, api = make_active_api(tmp_path)

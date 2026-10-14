@@ -79,22 +79,6 @@ def _guarded(operation: Callable[[], dict | None], status: int = 200) -> tuple[i
   return (204, None) if body is None else (status, body)
 
 
-def _customization_view(item: dict) -> dict:
-  return {
-    "uid": item["uid"], "group": catalog.group_title(item["group"]), "name": catalog.text(item["name"]),
-    "ecu": catalog.ecu_name(item["tx"], item["sub"]),
-    "options": [{"index": i, "title": catalog.text(o["title"])} for i, o in enumerate(item["options"])],
-    "current": item["current"], "raw": item["raw"], "writable": not item["readOnly"],
-  }
-
-
-def _scan_ecu_view(report: dict) -> dict:
-  view = {"ecu": catalog.ecu_name(report["tx"], report["sub"]), "status": report["status"],
-          "total": report["total"], "supported": report["supported"], "read": report["read"]}
-  view.update({k: report[k] for k in ("nrc", "response", "readError", "malformedReason") if k in report})
-  return view
-
-
 def _backup_view(backup: dict) -> dict:
   return {"id": backup["id"], "time": backup["time"], "uid": backup["uid"], "name": catalog.text(backup["name"]),
           "ecu": catalog.ecu_name(backup["tx"], backup["sub"]), "localId": backup["writeId"], "data": backup["data"]}
@@ -102,6 +86,13 @@ def _backup_view(backup: dict) -> dict:
 
 def _pid_group(item: dict) -> str:
   return catalog.ecu_name(item["hdr"].upper(), item["sub"]) if item["cmd"] else COMPUTED_GROUP
+
+
+def _catalog_ecu(body: dict) -> dict:
+  ecu = catalog.ecu(body.get("ecu")) if isinstance(body.get("ecu"), str) else None
+  if ecu is None:
+    raise RequestError(400, "ecu 无效")
+  return ecu
 
 
 class ToyotaDiagApi:
@@ -156,10 +147,12 @@ class ToyotaDiagApi:
     return _guarded(lambda: {k: v for k, v in catalog.load_sienna().items() if k != "dtcText"})
 
   # ---- 定制 ----
-  def customizations_scan(self):
+  def customizations_scan(self, body: dict):
+    """扫一个 ECU：前端按目录 ECU 列表逐个调用，自己算进度。"""
     def scan():
-      result = self.session.run(lambda link: customization.scan(link, self._customization_items()))
-      return {"items": [_customization_view(i) for i in result["items"]], "ecus": [_scan_ecu_view(e) for e in result["ecus"]]}
+      ecu = _catalog_ecu(body)
+      settings = [s for s in catalog.load_sienna()["settings"] if s["ecu"] == ecu["id"]]
+      return self.session.run(lambda link: customization.scan_ecu(link, ecu, settings))
     return _guarded(scan)
 
   def customization_preview(self, uid: str, body: dict):
