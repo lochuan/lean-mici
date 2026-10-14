@@ -53,6 +53,8 @@ for bus in [0, 1, 2, 3, 0xFFFF]:
   jungle.can_clear(bus)
 for bus in [0, 1, 2]:
   jungle.set_can_speed_kbps(bus, 500)
+# V1 上电后方向复位为 NONE，此时 set_ignition 不驱动任何 SBU 引脚：每次都显式设方向
+jungle.set_harness_orientation(PandaJungle.HARNESS_ORIENTATION_1)
 jungle.set_ignition(True)
 jungle.set_panda_power(True)
 jungle.set_can_loopback(False)
