@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** 实时数据页：3 个主题 + 动力电池入口；主题页是大数字网格，1 s 刷新，可暂停 / 继续。
  *  里程单位并进里程卡；Ready 下发动机常不转，所以发动机相关项带「需发动机运转」标签。 */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { BatteryCharging, ChevronRight, Pause, Play } from "lucide-vue-next";
 import { api } from "@/lib/api";
 import type { ToyotaLiveValue } from "@/lib/schema";
@@ -46,8 +46,12 @@ async function refresh(): Promise<void> {
   }
 }
 
+// 主题列表和主题页是同一个组件实例（进主题页不会重新挂载），所以计时器挂载即启动，切主题时清掉旧值立即读一次
+watch(tool, () => {
+  values.value = [];
+  void refresh();
+});
 onMounted(() => {
-  if (!tool.value) return;
   void refresh();
   timer = setInterval(() => void refresh(), REFRESH_MS);
 });
