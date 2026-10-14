@@ -11,7 +11,7 @@ SPI 句柄自带锁，心跳线程与请求线程并发调用是安全的。
 import threading
 import time
 
-from opendbc.car.uds import CanClient, IsoTpMessage
+from opendbc.car.uds import CanClient, InvalidSubAddressError, IsoTpMessage
 
 HEARTBEAT_PERIOD_S = 0.5
 RESPONSE_PENDING = 0x78
@@ -20,6 +20,14 @@ NEGATIVE_RESPONSE = 0x7F
 
 class NoResponseError(Exception):
   """ECU 在超时内没有应答（不存在、未上电或不支持该地址）。"""
+
+
+class MalformedResponseError(Exception):
+  """ECU 有应答但不符合 ISO-TP（如续帧序号错乱，实车 750/AD 天窗的 A8 03 应答必现）。"""
+
+
+def _request_label(tx: int, sub: int | None, payload: bytes) -> str:
+  return f"{tx:X}/{sub if sub is None else f'{sub:02X}'} {payload.hex()}"
 
 
 class DiagLink:
@@ -39,19 +47,23 @@ class DiagLink:
 
   def request(self, tx: int, sub: int | None, payload: bytes) -> bytes:
     """发一条诊断请求，返回 ECU 的最终响应（正响应或 7F 负响应，原样返回）。"""
-    client = CanClient(self.panda.can_send, self.panda.can_recv, tx, tx + 8, self.bus, sub)
+    client = CanClient(self.panda.can_send, self._receiver_for(tx + 8, sub), tx, tx + 8, self.bus, sub)
     message = IsoTpMessage(client, timeout=self.timeout)
     message.send(payload)
     deadline = time.monotonic() + self.timeout
     while True:
-      response, frame_received = message.recv(timeout=0)
+      try:
+        response, frame_received = message.recv(timeout=0)
+      except (AssertionError, InvalidSubAddressError) as exc:  # opendbc 用 assert 校验 ISO-TP 帧
+        self._discard_until_quiet(tx + 8)
+        raise MalformedResponseError(f"{_request_label(tx, sub, payload)}: {exc}") from exc
       now = time.monotonic()
       if response is None:
         if frame_received:
           # 多帧响应接收中（A8 03 的掩码表可达几十帧）：每收到一帧就续期，只在 ECU 停发后才算超时
           deadline = now + self.timeout
         elif now > deadline:
-          raise NoResponseError(f"{tx:X}/{sub if sub is None else f'{sub:02X}'} {payload.hex()}: no response")
+          raise NoResponseError(f"{_request_label(tx, sub, payload)}: no response")
         if now - self._last_heartbeat >= HEARTBEAT_PERIOD_S:
           self._heartbeat()
         time.sleep(0.001)
@@ -60,6 +72,22 @@ class DiagLink:
         deadline = now + self.pending_timeout
         continue
       return response
+
+  def _receiver_for(self, rx_addr: int, sub: int | None):
+    """网关请求只收本子地址的帧：别的子 ECU 迟到的帧（如上一个应答异常的残留续帧）直接丢掉，不算应答异常。"""
+    if sub is None:
+      return self.panda.can_recv
+    return lambda: [f for f in self.panda.can_recv() if f[0] != rx_addr or (len(f[1]) > 1 and f[1][0] == sub)]
+
+  def _discard_until_quiet(self, rx_addr: int) -> None:
+    """应答异常时 ECU 往往还在按 STmin 发剩下的续帧：丢到它静默 timeout 为止，免得拼进下一次请求的应答。"""
+    now = time.monotonic()
+    quiet_at, give_up_at = now + self.timeout, now + self.pending_timeout
+    while now < min(quiet_at, give_up_at):
+      if any(f[0] == rx_addr for f in self.panda.can_recv()):
+        quiet_at = now + self.timeout
+      time.sleep(0.001)
+      now = time.monotonic()
 
   def close(self) -> None:
     self._closed.set()

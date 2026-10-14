@@ -176,6 +176,7 @@ describe("scanEcuText / scanSummary", () => {
     expect(scanEcuText(ecu({ status: "rejected", nrc: "22" }))).toBe("拒绝 A8 03：NRC 22（条件不满足）");
     expect(scanEcuText(ecu({ status: "rejected", nrc: "9A" }))).toBe("拒绝 A8 03：NRC 9A");
     expect(scanEcuText(ecu({ status: "empty", response: "e803" }))).toBe("A8 03 应答里没有掩码：e803");
+    expect(scanEcuText(ecu({ status: "malformed" }))).toBe("应答异常（ISO-TP 帧错乱），已跳过");
     expect(scanEcuText(ecu({ status: "ok" }))).toBe("掩码表不含数据库里的 10 项");
     expect(scanEcuText(ecu({ supported: 4, read: 3, readError: "nrc 22" }))).toBe("支持 4/10 项，读到 3 项（读值失败：nrc 22）");
   });

@@ -121,6 +121,7 @@ export function scanEcuText(e: ToyotaScanEcu): string {
     case "silent": return "在线，但不应答 A8 03";
     case "rejected": return `拒绝 A8 03：NRC ${e.nrc}${NRC_TEXT[e.nrc ?? ""] ? `（${NRC_TEXT[e.nrc ?? ""]}）` : ""}`;
     case "empty": return `A8 03 应答里没有掩码：${e.response}`;
+    case "malformed": return "应答异常（ISO-TP 帧错乱），已跳过";
   }
   if (!e.supported) return `掩码表不含数据库里的 ${e.total} 项`;
   return `支持 ${e.supported}/${e.total} 项，读到 ${e.read} 项${e.readError ? `（读值失败：${e.readError}）` : ""}`;

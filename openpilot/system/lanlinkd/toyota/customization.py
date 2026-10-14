@@ -4,7 +4,7 @@
 - 21 id → 61 id <data>：data 只含掩码非零的字节（压缩形式），BIT:n:b 的 n 是它的下标。
 - 写：改位 → 按掩码展开（掩码 0 的位置填 0）→ 3B id <展开数据>，期望 7B id。
 """
-from openpilot.system.lanlinkd.toyota.link import NoResponseError
+from openpilot.system.lanlinkd.toyota.link import MalformedResponseError, NoResponseError
 
 POSITIVE_A8 = 0xE8
 
@@ -113,6 +113,8 @@ def _probe_masks(link, address: tuple[int, int | None]) -> tuple[dict[int, bytes
     response = link.request(*address, b"\xa8\x03")
   except NoResponseError:
     return {}, {"status": "silent"}
+  except MalformedResponseError as exc:
+    return {}, {"status": "malformed", "malformedReason": str(exc)}
   masks = parse_masks(response)
   if masks:
     return masks, {"status": "ok", "masks": len(masks)}
@@ -121,11 +123,20 @@ def _probe_masks(link, address: tuple[int, int | None]) -> tuple[dict[int, bytes
   return {}, {"status": "empty", "response": response.hex()}
 
 
+def _read_error_text(exc: Exception) -> str:
+  if isinstance(exc, NoResponseError):
+    return "无响应"
+  if isinstance(exc, MalformedResponseError):
+    return "应答异常"
+  return f"NRC {exc.nrc:02X}" if getattr(exc, "nrc", None) is not None else "应答格式不符"
+
+
 def scan(link, items: list[dict]) -> dict:
   """探测 ECU → A803 掩码 → 读出支持项的当前值。
 
   返回 {"items": 读到当前值的项, "ecus": 每个 ECU 的明细}。列表为空时明细能说明卡在哪一步：
-  offline（3E 无响应）/ silent（A803 无响应）/ rejected（负响应 nrc）/ empty（正响应但没有掩码）/ ok。
+  offline（3E 无响应）/ silent（A803 无响应）/ rejected（负响应 nrc）/ empty（正响应但没有掩码）/
+  malformed（A803 应答不符合 ISO-TP，malformedReason 是原因）/ ok。
   """
   masks_by_ecu: dict[tuple, dict[int, bytes]] = {}
   reports: dict[tuple, dict] = {}
@@ -145,12 +156,9 @@ def scan(link, items: list[dict]) -> dict:
     if key not in data_cache:
       try:
         data_cache[key] = read_data(link, item)
-      except NoResponseError:
+      except (NoResponseError, MalformedResponseError, EcuRejectedError) as exc:
         data_cache[key] = None
-        report.setdefault("readError", "no response")
-      except EcuRejectedError as exc:
-        data_cache[key] = None
-        report.setdefault("readError", f"nrc {exc.nrc:02X}" if exc.nrc is not None else "bad response")
+        report.setdefault("readError", _read_error_text(exc))
     data = data_cache[key]
     if data is None:
       continue

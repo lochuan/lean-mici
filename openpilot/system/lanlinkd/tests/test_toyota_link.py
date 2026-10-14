@@ -1,7 +1,7 @@
 import pytest
 
 from openpilot.system.lanlinkd.toyota import link as link_mod
-from openpilot.system.lanlinkd.toyota.link import DiagLink, NoResponseError
+from openpilot.system.lanlinkd.toyota.link import DiagLink, MalformedResponseError, NoResponseError
 
 from .toyota_fakes import FakeEcu, FakePanda
 
@@ -62,6 +62,27 @@ class TestRequest:
     _, link = make_link({})
     with pytest.raises(NoResponseError):
       link.request(0x7E0, None, b"\x3e")
+
+  def test_misnumbered_consecutive_frames_raise_malformed_response(self):
+    # 实车 750/AD 对 A8 03 的多帧应答序号错乱，opendbc 会抛 AssertionError；要变成能按 ECU 处理的应答异常
+    ecu = FakeEcu({b"\xa8\x03": b"\xe8\x03" + bytes(range(20))}, misnumbered_frames=True)
+    _, link = make_link({(0x750, 0xAD): ecu})
+    with pytest.raises(MalformedResponseError):
+      link.request(0x750, 0xAD, b"\xa8\x03")
+
+  @pytest.mark.parametrize("next_address, next_request, next_response", [
+    ((0x750, 0x40), b"\x21\x12", b"\x61\x12\xa0"),   # 网关后的另一个 ECU：残留帧子地址不同
+    ((0x750, 0xAD), b"\x19\x02\x8d", b"\x7f\x19\x11"),  # 同一个 ECU：残留续帧不能拼进新应答
+  ])
+  def test_late_frames_of_malformed_response_do_not_break_next_request(self, next_address, next_request, next_response):
+    # 实车 ECU 在序号错乱后还会按 STmin 把剩下的续帧发完，下一次请求时它们才陆续到达
+    sunroof = FakeEcu({b"\xa8\x03": b"\xe8\x03" + bytes(range(60)), b"\x19\x02\x8d": b"\x7f\x19\x11"}, misnumbered_frames=True)
+    body = FakeEcu({b"\x21\x12": b"\x61\x12\xa0"})
+    panda = OneFramePerPollPanda({(0x750, 0xAD): sunroof, (0x750, 0x40): body})
+    link = DiagLink(panda, elm327_mode=ELM327, heartbeat_thread=False, timeout=0.05)
+    with pytest.raises(MalformedResponseError):
+      link.request(0x750, 0xAD, b"\xa8\x03")
+    assert link.request(*next_address, next_request) == next_response
 
   def test_slow_multi_frame_response_is_not_a_timeout(self, monkeypatch):
     # A8 03 的掩码表可达几十帧；ECU 逐帧慢慢发时，总耗时超过单次超时也不能当成无响应

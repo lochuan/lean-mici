@@ -124,6 +124,19 @@ class TestCustomizationEndpoints:
     status, body = api.customization_preview("1", {"option": 1})
     assert status == 504 and "无响应" in body["error"]
 
+  def test_malformed_response_is_502(self, tmp_path):
+    garbled = FakeEcu({b"\x21\x12": b"\x61\x12" + bytes(10)}, misnumbered_frames=True)
+    _, api = make_active_api(tmp_path, ecus={(0x750, 0x40): garbled})
+    status, body = api.customization_preview("1", {"option": 1})
+    assert status == 502 and "应答异常" in body["error"]
+
+  def test_unexpected_error_is_json_500(self, tmp_path):
+    class BrokenSession(FakeSession):
+      def run(self, operation):
+        raise RuntimeError("panda 断开")
+    status, body = make_api(BrokenSession()).dtc_scan()
+    assert status == 500 and "panda 断开" in body["error"]
+
 
 # ---- 故障码 ----
 

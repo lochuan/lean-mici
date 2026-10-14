@@ -6,10 +6,11 @@ body 为 None 表示 204。协议细节见 toyota/ 下各模块的文档字符�
 import subprocess
 from collections.abc import Callable
 
+from openpilot.common.swaglog import cloudlog
 from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd.toyota import catalog, customization, dtc, live_data
 from openpilot.system.lanlinkd.toyota.backups import BackupStore
-from openpilot.system.lanlinkd.toyota.link import NoResponseError
+from openpilot.system.lanlinkd.toyota.link import MalformedResponseError, NoResponseError
 from openpilot.system.lanlinkd.toyota.session import DiagSession, SessionError, car_is_parked
 
 BACKUP_DIR = "/data/lanlink/toyota_backups"
@@ -68,8 +69,13 @@ def _guarded(operation: Callable[[], dict | None], status: int = 200) -> tuple[i
     return 502, {"error": str(exc)}
   except customization.StaleDataError as exc:
     return 409, {"error": f"{exc}，请重新预览"}
+  except MalformedResponseError as exc:
+    return 502, {"error": f"ECU 应答异常：{exc}"}
   except customization.BackupError as exc:
     return 500, {"error": str(exc)}
+  except Exception as exc:  # 未预料的错误也给前端 JSON，并留日志（否则 Sanic 只回裸 500）
+    cloudlog.exception("lanlink toyota: 未处理的异常")
+    return 500, {"error": f"内部错误：{exc}"}
   return (204, None) if body is None else (status, body)
 
 
@@ -85,7 +91,7 @@ def _customization_view(item: dict) -> dict:
 def _scan_ecu_view(report: dict) -> dict:
   view = {"ecu": catalog.ecu_name(report["tx"], report["sub"]), "status": report["status"],
           "total": report["total"], "supported": report["supported"], "read": report["read"]}
-  view.update({k: report[k] for k in ("nrc", "response", "readError") if k in report})
+  view.update({k: report[k] for k in ("nrc", "response", "readError", "malformedReason") if k in report})
   return view
 
 
@@ -133,7 +139,7 @@ class ToyotaDiagApi:
 
   # ---- 会话 ----
   def session_get(self):
-    return 200, self.session.snapshot()
+    return _guarded(self.session.snapshot)
 
   def session_enter(self):
     def enter():
@@ -168,7 +174,7 @@ class ToyotaDiagApi:
 
   # ---- 备份 ----
   def backups_list(self):
-    return 200, {"backups": [_backup_view(b) for b in self.backups.list()]}
+    return _guarded(lambda: {"backups": [_backup_view(b) for b in self.backups.list()]})
 
   def backup_restore(self, backup_id: str):
     def restore():

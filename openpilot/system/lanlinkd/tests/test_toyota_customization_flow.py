@@ -39,8 +39,20 @@ class TestScan:
     assert result["ecus"] == [
       {"tx": "750", "sub": "40", "total": 1, "supported": 0, "read": 0, "status": "rejected", "nrc": "22"},
       {"tx": "7C4", "sub": None, "total": 1, "supported": 0, "read": 0, "status": "silent"},
-      {"tx": "7C0", "sub": None, "total": 2, "supported": 2, "read": 0, "status": "ok", "masks": 1, "readError": "nrc 11"},
+      {"tx": "7C0", "sub": None, "total": 2, "supported": 2, "read": 0, "status": "ok", "masks": 1, "readError": "NRC 11"},
     ]
+
+  def test_malformed_ecu_is_reported_and_scan_continues(self):
+    # 实车：750/AD 天窗的 A8 03 应答序号错乱曾让整个扫描变成 HTTP 500
+    sunroof = FakeEcu({b"\x3e": b"\x7e", b"\xa8\x03": b"\xe8\x03" + bytes(range(20))}, misnumbered_frames=True)
+    body = FakeBodyEcu({0x12: bytes.fromhex("a020")}, {0x12: bytes.fromhex("ff0030")})
+    link = DiagLink(FakePanda({(0x750, 0xAD): sunroof, (0x750, 0x40): body}),
+                    elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    result = cz.scan(link, [{**ITEM, "uid": 5, "sub": "AD"}, ITEM])
+    assert [i["uid"] for i in result["items"]] == [1]
+    report = result["ecus"][0]
+    assert (report["sub"], report["status"]) == ("AD", "malformed")
+    assert "invalid consecutive frame index" in report["malformedReason"]
 
   def test_report_marks_offline_ecu(self):
     _, link, _ = make()

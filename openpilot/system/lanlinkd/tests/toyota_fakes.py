@@ -9,12 +9,14 @@ from collections.abc import Callable
 
 
 class FakeEcu:
-  """按请求字节查表应答。responses 的值可以是 bytes，或 bytes 列表（依次发出，用于 7F xx 78）。"""
+  """按请求字节查表应答。responses 的值可以是 bytes，或 bytes 列表（依次发出，用于 7F xx 78）。
+  misnumbered_frames：多帧应答的续帧序号从 2 起跳（实车 750/AD 天窗对 A8 03 就是这样）。"""
 
   def __init__(self, responses: dict[bytes, bytes | list[bytes]] | None = None,
-               handler: Callable[[bytes], bytes | list[bytes] | None] | None = None):
+               handler: Callable[[bytes], bytes | list[bytes] | None] | None = None, misnumbered_frames: bool = False):
     self.responses = dict(responses or {})
     self.handler = handler
+    self.misnumbered_frames = misnumbered_frames
     self.requests: list[bytes] = []
 
   def respond(self, request: bytes) -> list[bytes]:
@@ -98,7 +100,8 @@ class FakePanda:
     first = bytes([0x10 | (len(payload) >> 8), len(payload) & 0xFF]) + payload[:max_len - 2]
     rest = payload[max_len - 2:]
     chunks = [rest[i:i + max_len - 1] for i in range(0, len(rest), max_len - 1)]
-    self._pending_tx[key] = [bytes([0x20 | ((i + 1) & 0x0F)]) + c for i, c in enumerate(chunks)]
+    first_index = 2 if self.ecus[key].misnumbered_frames else 1
+    self._pending_tx[key] = [bytes([0x20 | ((i + first_index) & 0x0F)]) + c for i, c in enumerate(chunks)]
     self._emit(key, first)
 
   def _emit(self, key, frame: bytes):
