@@ -1,10 +1,7 @@
-/** TechStream（丰田诊断）页的纯逻辑：hex 差异高亮、定制项分组、PID 勾选、会话状态与倒计时。
+/** TechStream（丰田诊断）页的纯逻辑：hex 差异高亮、会话状态与倒计时。
  *  接口与类型见 schema.ts（后端 toyota_diag_api.py）。 */
 import type { Tone } from "./diagnostics";
-import type { ToyotaCustomizationItem, ToyotaPidGroup, ToyotaScanEcu, ToyotaSession } from "./schema";
-
-/** 单次 pids/read 的 id 上限（后端同样限制） */
-export const PID_SELECTION_LIMIT = 40;
+import type { ToyotaDtc, ToyotaDtcScan, ToyotaEcu, ToyotaLiveItem, ToyotaLiveValue, ToyotaScanStatus, ToyotaSession, ToyotaSetting } from "./schema";
 
 // ---- hex 差异 ----
 
@@ -25,46 +22,6 @@ export function hexDiff(before: string, after: string): { before: HexByte[]; aft
   const mark = (own: string[], other: string[]): HexByte[] =>
     own.map((byte, i) => ({ byte, changed: byte !== other[i] }));
   return { before: mark(a, b), after: mark(b, a) };
-}
-
-// ---- 定制项 ----
-
-export interface CustomizationGroup {
-  group: string;
-  items: ToyotaCustomizationItem[];
-}
-
-const zh = (a: string, b: string) => a.localeCompare(b, "zh");
-
-/** 按 group 分组；组按中文序，组内按名称再按 uid。 */
-export function groupCustomizations(items: ToyotaCustomizationItem[]): CustomizationGroup[] {
-  const byGroup = new Map<string, ToyotaCustomizationItem[]>();
-  for (const it of items) {
-    const list = byGroup.get(it.group);
-    if (list) list.push(it);
-    else byGroup.set(it.group, [it]);
-  }
-  return [...byGroup.entries()]
-    .sort(([a], [b]) => zh(a, b))
-    .map(([group, list]) => ({ group, items: [...list].sort((x, y) => zh(x.name, y.name) || x.uid - y.uid) }));
-}
-
-// ---- 实时数据 PID ----
-
-/** 勾选 / 取消勾选；已满额时拒绝新增并置 overLimit 供界面提示。 */
-export function togglePid(selected: number[], id: number): { selected: number[]; overLimit: boolean } {
-  if (selected.includes(id)) return { selected: selected.filter((s) => s !== id), overLimit: false };
-  if (selected.length >= PID_SELECTION_LIMIT) return { selected, overLimit: true };
-  return { selected: [...selected, id], overLimit: false };
-}
-
-/** 按名称（不区分大小写）过滤，没有命中的 ECU 组整组丢弃。 */
-export function filterPidGroups(groups: ToyotaPidGroup[], query: string): ToyotaPidGroup[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return groups;
-  return groups
-    .map((g) => ({ ecu: g.ecu, pids: g.pids.filter((p) => p.name.toLowerCase().includes(q)) }))
-    .filter((g) => g.pids.length > 0);
 }
 
 // ---- 会话 ----
@@ -108,32 +65,162 @@ export function countdownText(seconds: number): string {
 }
 
 /** 任意抛出物 → 提示文案。ApiError 的 message 已是服务端 {"error"} 文案。 */
-// ---- 扫描明细 ----
-
-const NRC_TEXT: Record<string, string> = {
-  "11": "服务不支持", "12": "子功能不支持", "22": "条件不满足", "31": "请求超出范围", "33": "需要安全访问", "7F": "当前会话不支持",
-};
-
-/** 一个 ECU 在定制项扫描里的结果，给列表为空时解释原因 */
-export function scanEcuText(e: ToyotaScanEcu): string {
-  switch (e.status) {
-    case "offline": return "无响应（不在线或未上电）";
-    case "silent": return "在线，但不应答 A8 03";
-    case "rejected": return `拒绝 A8 03：NRC ${e.nrc}${NRC_TEXT[e.nrc ?? ""] ? `（${NRC_TEXT[e.nrc ?? ""]}）` : ""}`;
-    case "empty": return `A8 03 应答里没有掩码：${e.response}`;
-    case "malformed": return "应答异常（ISO-TP 帧错乱），已跳过";
-  }
-  if (!e.supported) return `掩码表不含数据库里的 ${e.total} 项`;
-  return `支持 ${e.supported}/${e.total} 项，读到 ${e.read} 项${e.readError ? `（读值失败：${e.readError}）` : ""}`;
-}
-
-/** 扫描完成后的一句话汇总 */
-export function scanSummary(ecus: ToyotaScanEcu[]): string {
-  const online = ecus.filter((e) => e.status !== "offline").length;
-  const providing = ecus.filter((e) => e.read > 0).length;
-  return `${ecus.length} 个 ECU 地址，${online} 个在线，${providing} 个提供了定制项`;
-}
-
 export function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** 数值显示：固定小数位，整数位带千分位（里程）。 */
+export function formatNumber(n: number, digits: number): string {
+  return n.toLocaleString("zh-CN", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+// ---- 实时数据显示 ----
+
+export const BATTERY_12V_KEY = "car_tool_battery_voltage_engine";
+export const MILEAGE_KEY = "car_tool_mileage";
+export const MILEAGE_UNIT_KEY = "car_tool_mileage_unit";
+
+/** 首页车辆卡要读的三项：12V 电压、总里程、里程单位 */
+export const HOME_LIVE_KEYS = [BATTERY_12V_KEY, MILEAGE_KEY, MILEAGE_UNIT_KEY] as const;
+
+/** 一项实时数据的显示文字：数值格式由后端按目录的 precision 给好（text），这里只拼单位。 */
+export function liveValueText(v: ToyotaLiveValue | undefined, unit = ""): string {
+  if (!v || v.error || v.value === null) return "—";
+  return unit ? `${v.text} ${unit}` : v.text;
+}
+
+/** 里程单位并进里程卡：单位是另一个实时数据项（1 = 公里、2 = 英里），读不到时按公里 */
+export function mileageText(mileage: ToyotaLiveValue | undefined, unit: ToyotaLiveValue | undefined): string {
+  if (!mileage || mileage.error || mileage.value === null) return "—";
+  return `${formatNumber(mileage.value, 0)} ${unit?.text || "公里"}`;
+}
+
+// ---- 定制项 ----
+
+/** 一个设置当前值的显示文案：选项型取选项文字，数值型直接显示数字。 */
+export function settingValueLabel(setting: ToyotaSetting, value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  if (setting.numeric) return String(value);
+  return setting.options.find((o) => o.value === value)?.label ?? `其他（原始值 ${value}）`;
+}
+
+/** 定制扫描只需要问有定制项的 ECU（其余 ECU 问了也是白等一次超时），保持目录顺序。 */
+export function ecusWithSettings(ecus: ToyotaEcu[], settings: ToyotaSetting[]): ToyotaEcu[] {
+  const used = new Set(settings.map((s) => s.ecu));
+  return ecus.filter((e) => used.has(e.id));
+}
+
+// ---- 扫描进度 ----
+
+export interface ScanTally {
+  done: number;
+  total: number;
+  online: number;
+  offline: number;
+  malformed: number;
+  percent: number;
+}
+
+/** 逐个 ECU 扫描的进度汇总：已扫描的 ECU 按状态计数，percent 给进度条用。 */
+export function scanTally(statuses: ToyotaScanStatus[], total: number): ScanTally {
+  const count = (s: ToyotaScanStatus) => statuses.filter((x) => x === s).length;
+  return {
+    done: statuses.length,
+    total,
+    online: count("ok"),
+    offline: count("offline"),
+    malformed: count("malformed"),
+    percent: total ? (statuses.length / total) * 100 : 0,
+  };
+}
+
+/** 写入后整段数据的预期样子（技术详情里和当前原始值做 hex 对比）：
+ *  把 value 左移到 mask 最低置位位置，只替换 byteIndex 字节里被 mask 覆盖的位。 */
+export function previewRaw(raw: string, byteIndex: number, mask: string, value: number): string {
+  const bytes = raw.replace(/\s+/g, "").toUpperCase().match(/.{1,2}/g) ?? [];
+  if (byteIndex >= bytes.length) return bytes.join("");
+  const m = parseInt(mask, 16);
+  const shift = Math.log2(m & -m);
+  const next = (parseInt(bytes[byteIndex], 16) & ~m) | ((value << shift) & m);
+  bytes[byteIndex] = next.toString(16).toUpperCase().padStart(2, "0");
+  return bytes.join("");
+}
+
+// ---- 故障码 ----
+
+export interface DtcTag {
+  label: string;
+  tone: Tone;
+}
+
+/** UDS 状态字节 → 标签：bit0 当前故障，bit2 待定，bit3 已确认，bit7 请求点亮故障灯；
+ *  已确认且非当前 = 历史。Toyota CAN 的码没有状态（null），视为已确认。 */
+export function dtcStatusTags(status: number | null): DtcTag[] {
+  if (status === null) return [{ label: "已确认", tone: "muted" }];
+  const current = (status & 0x01) !== 0;
+  const pending = (status & 0x04) !== 0;
+  const confirmed = (status & 0x08) !== 0;
+  const mil = (status & 0x80) !== 0;
+  const tags: DtcTag[] = [];
+  if (current) tags.push({ label: "当前故障", tone: "danger" });
+  if (confirmed && current) tags.push({ label: "已确认", tone: "danger" });
+  if (pending) tags.push({ label: "待定", tone: "warn" });
+  if (confirmed && !current) tags.push({ label: "历史", tone: "muted" });
+  if (mil) tags.push({ label: "请求点亮故障灯", tone: "warn" });
+  return tags;
+}
+
+/** 同一 ECU 里「FTB 87（报文丢失）且非当前」的码折成一组：多半是拆装线束或断电留下的历史记录。 */
+export function groupDtcs(dtcs: ToyotaDtc[]): { shown: ToyotaDtc[]; history: ToyotaDtc[] } {
+  const isHistoryLoss = (d: ToyotaDtc) => d.code.endsWith("-87") && d.status !== null && (d.status & 0x01) === 0;
+  return { shown: dtcs.filter((d) => !isHistoryLoss(d)), history: dtcs.filter(isHistoryLoss) };
+}
+
+export function dtcDescription(d: ToyotaDtc): string {
+  return d.text || "暂无中文说明";
+}
+
+export function dtcSummary(scans: ToyotaDtcScan[]): { ecuCount: number; faultyEcuCount: number; codeCount: number } {
+  return {
+    ecuCount: scans.length,
+    faultyEcuCount: scans.filter((s) => s.dtcs.length > 0).length,
+    codeCount: scans.reduce((n, s) => n + s.dtcs.length, 0),
+  };
+}
+
+/** 故障数多的 ECU 排前面；同数保持目录顺序（sort 稳定）。没扫到的按 0 条算。 */
+export function sortEcusByDtcCount<T extends { id: string }>(ecus: T[], scans: ToyotaDtcScan[]): T[] {
+  const count = (id: string) => scans.find((s) => s.ecu === id)?.dtcs.length ?? 0;
+  return [...ecus].sort((a, b) => count(b.id) - count(a.id));
+}
+
+/** 首页「故障码」入口的说明；scans 为 null 表示还没扫描过 */
+export function dtcSummaryText(scans: ToyotaDtcScan[] | null): string {
+  if (!scans) return "尚未扫描";
+  const { faultyEcuCount, codeCount } = dtcSummary(scans);
+  return codeCount ? `上次扫描：${faultyEcuCount} 个 ECU 共 ${codeCount} 条故障码` : "上次扫描：未发现故障码";
+}
+
+export interface LiveCard {
+  key: string;
+  name: string;
+  value: string;
+  unit: string;
+  needsEngineRunning: boolean;
+}
+
+/** 一个主题页的数据卡：按 items 顺序，里程单位项并进里程卡不单独成卡，读不到的项显示 —。 */
+export function liveCards(items: ToyotaLiveItem[], values: ToyotaLiveValue[]): LiveCard[] {
+  const byKey = new Map(values.map((v) => [v.key, v]));
+  return items
+    .filter((it) => it.key !== MILEAGE_UNIT_KEY)
+    .map((it) => {
+      const v = byKey.get(it.key);
+      const base = { key: it.key, name: it.name, needsEngineRunning: it.needsEngineRunning };
+      if (!v || v.error || v.value === null) return { ...base, value: "—", unit: "" };
+      if (it.key === MILEAGE_KEY) {
+        return { ...base, value: formatNumber(v.value, 0), unit: byKey.get(MILEAGE_UNIT_KEY)?.text || "公里" };
+      }
+      return { ...base, value: v.text, unit: it.unit };
+    });
 }

@@ -1,148 +1,85 @@
 <script setup lang="ts">
-/** TechStream（丰田诊断）页：顶部会话条 + 四个标签页。
+/** TechStream（丰田诊断）页：会话条 + 页面栈。
  *
- * 会话状态每 2 s 轮询 /api/toyota/session（浏览器页面不可见时暂停）。
- * 只有 active 时标签页可用；进入诊断模式会暂停 openpilot，所以先弹确认框。
+ * 目录（/api/toyota/catalog）不需要诊断模式，挂载时就拉；拉到之后才渲染页面。
+ * 会话结束（主动退出或空闲超时）时回首页并清掉扫描结果：车上的值可能已被别处改动。
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Loader2, LogOut, Power } from "lucide-vue-next";
-import { api } from "@/lib/api";
-import { toast } from "@/lib/store";
-import type { ToyotaSession } from "@/lib/schema";
-import { countdownText, errorText, idleRemainingS, sessionView } from "@/lib/toyota";
-import Badge from "../ui/Badge.vue";
+import { computed, onMounted, onUnmounted, watch } from "vue";
+import { ChevronLeft, Loader2 } from "lucide-vue-next";
+import { clearToasts } from "@/lib/store";
+import { canGoBack, currentPage, goBack, resetToHome } from "@/lib/toyotaNav";
+import { loadCatalog, resetScanData, toyotaData } from "@/lib/toyotaData";
+import { startSessionWatch, touch, view } from "@/lib/toyotaSession";
 import Button from "../ui/Button.vue";
-import Tabs from "../ui/Tabs.vue";
-import BackupsTab from "./BackupsTab.vue";
-import ConfirmDialog from "./ConfirmDialog.vue";
-import CustomizationTab from "./CustomizationTab.vue";
-import DtcTab from "./DtcTab.vue";
-import LiveDataTab from "./LiveDataTab.vue";
+import BackupsPage from "./BackupsPage.vue";
+import BatteryPage from "./BatteryPage.vue";
+import CustomizationPage from "./CustomizationPage.vue";
+import DtcEcuPage from "./DtcEcuPage.vue";
+import DtcPage from "./DtcPage.vue";
+import HomePage from "./HomePage.vue";
+import LivePage from "./LivePage.vue";
+import SessionBar from "./SessionBar.vue";
 
-const TABS = [
-  { id: "customization", label: "定制" },
-  { id: "dtc", label: "故障码" },
-  { id: "live", label: "实时数据" },
-  { id: "backups", label: "备份" },
-];
+const PAGE_TITLES: Record<string, string> = {
+  home: "丰田诊断", custom: "定制", dtc: "故障码", live: "实时数据", battery: "动力电池", backups: "备份记录",
+};
 
-const session = ref<ToyotaSession | null>(null);
-const tab = ref("customization");
-const busy = ref(false);
-const confirmOpen = ref(false);
-const elapsedS = ref(0);
-let fetchedAtMs = Date.now();
+const title = computed(() => {
+  const { page, arg } = currentPage.value;
+  const catalog = toyotaData.catalog;
+  if (page === "customCat") return catalog?.categories.find((c) => c.id === arg)?.name ?? "定制";
+  if (page === "dtcEcu") return catalog?.ecus.find((e) => e.id === arg)?.name ?? "故障码";
+  if (page === "liveTool") return catalog?.liveTools.find((t) => t.id === arg)?.name ?? "实时数据";
+  return PAGE_TITLES[page] ?? "丰田诊断";
+});
 
-const view = computed(() => sessionView(session.value));
-const remainingS = computed(() => idleRemainingS(session.value, elapsedS.value));
-
-let pollTimer: ReturnType<typeof setInterval> | undefined;
-let clockTimer: ReturnType<typeof setInterval> | undefined;
-let polling = false;
-
-/** 每次拿到设备数据就重置本地递减的起点，下次轮询自然校正 */
-function setSession(next: ToyotaSession): void {
-  session.value = next;
-  fetchedAtMs = Date.now();
-  elapsedS.value = 0;
-}
-
-async function poll(): Promise<void> {
-  if (polling || document.visibilityState !== "visible") return;
-  polling = true;
-  try {
-    setSession(await api.toyotaSession());
-  } catch (e) {
-    // 失败保留上一帧；只在从没拿到过数据时提示
-    if (!session.value) toast(errorText(e), "error");
-  } finally {
-    polling = false;
-  }
-}
-
-async function enter(): Promise<void> {
-  if (busy.value) return;
-  busy.value = true;
-  // 进入过程可能持续十几秒，期间轮询能显示 entering
-  session.value = { ...(session.value ?? { idleTimeoutS: 0 }), state: "entering" };
-  try {
-    setSession(await api.toyotaEnter());
-    confirmOpen.value = false;
-  } catch (e) {
-    confirmOpen.value = false;
-    toast(errorText(e), "error");
-    await poll();
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function exit(): Promise<void> {
-  if (busy.value) return;
-  busy.value = true;
-  try {
-    await api.toyotaExit();
-    toast("已退出诊断模式，openpilot 将恢复", "ok");
-  } catch (e) {
-    toast(errorText(e), "error");
-  } finally {
-    busy.value = false;
-    await poll();
-  }
-}
-
+let stopWatch: (() => void) | undefined;
 onMounted(() => {
-  void poll();
-  pollTimer = setInterval(() => void poll(), 2000);
-  clockTimer = setInterval(() => { elapsedS.value = (Date.now() - fetchedAtMs) / 1000; }, 1000);
+  stopWatch = startSessionWatch();
+  // 弹层 / toast 渲染在 body 下，只能在 document 上捕获点击
+  document.addEventListener("click", touch, true);
+  void loadCatalog();
 });
 onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer);
-  if (clockTimer) clearInterval(clockTimer);
+  stopWatch?.();
+  document.removeEventListener("click", touch, true);
+  clearToasts();
+});
+
+// 备份记录不需要诊断模式，所以停在备份页时会话结束不踢回首页
+watch(() => view.value.tabsEnabled, (on, wasOn) => {
+  if (wasOn && !on) {
+    resetScanData();
+    if (currentPage.value.page !== "backups") resetToHome();
+  }
 });
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
-    <section class="sl-card flex flex-wrap items-center gap-3 px-5 py-4">
-      <div class="flex min-w-0 flex-1 flex-col gap-1">
-        <div class="flex items-center gap-2">
-          <span class="text-[13px] text-sl-text-3">诊断模式</span>
-          <Badge :kind="view.tone">{{ view.label }}</Badge>
-          <Loader2 v-if="session?.state === 'entering'" class="size-4 animate-spin text-sl-text-3" />
-        </div>
-        <p v-if="view.detail" class="text-[13px] text-sl-danger">{{ view.detail }}</p>
-        <p v-if="remainingS !== null" class="sl-tabular text-[12px] text-sl-text-3">
-          空闲自动退出倒计时 {{ countdownText(remainingS) }}（任意操作会重新计时）
-        </p>
-      </div>
-      <Button variant="accent" :disabled="!view.canEnter || busy" @click="confirmOpen = true">
-        <Power />进入诊断模式
-      </Button>
-      <Button :disabled="!view.canExit || busy" @click="exit"><LogOut />退出</Button>
-    </section>
+  <div class="mx-auto flex w-full max-w-[480px] flex-col gap-3">
+    <SessionBar />
 
-    <p v-if="!view.tabsEnabled" class="text-[13px] text-sl-text-2">请先进入诊断模式后再使用下面的功能。</p>
-
-    <!-- 未进入诊断模式时整体置灰且不可点 -->
-    <div :class="view.tabsEnabled ? '' : 'pointer-events-none select-none opacity-40'" :inert="!view.tabsEnabled">
-      <Tabs v-model="tab" :items="TABS">
-        <template #customization><CustomizationTab /></template>
-        <template #dtc><DtcTab /></template>
-        <template #live="{ active }"><LiveDataTab :active="active && view.tabsEnabled" /></template>
-        <template #backups="{ active }"><BackupsTab :active="active && view.tabsEnabled" /></template>
-      </Tabs>
+    <div v-if="!toyotaData.catalog" class="sl-card flex flex-col items-center gap-3 px-5 py-8 text-center text-[13px] text-sl-text-2">
+      <template v-if="toyotaData.catalogError">
+        <p class="text-sl-danger">{{ toyotaData.catalogError }}</p>
+        <Button @click="loadCatalog">重试</Button>
+      </template>
+      <Loader2 v-else class="size-5 animate-spin text-sl-text-3" />
     </div>
 
-    <ConfirmDialog
-      v-model:open="confirmOpen"
-      title="进入诊断模式"
-      confirm-text="进入"
-      :busy="busy"
-      @confirm="enter"
-    >
-      <p>进入后 openpilot 会暂停（pandad 停止，设备按熄火处理），退出或空闲超时后自动恢复。</p>
-      <p class="text-sl-warn">请确认车辆已熄火，或挂在 P 挡且完全静止。</p>
-    </ConfirmDialog>
+    <template v-else>
+      <header v-if="canGoBack" class="flex items-center gap-1">
+        <Button variant="ghost" size="sm" aria-label="返回" @click="goBack"><ChevronLeft />返回</Button>
+        <h2 class="text-[17px] font-semibold text-sl-text-1">{{ title }}</h2>
+      </header>
+
+      <HomePage v-if="currentPage.page === 'home'" />
+      <CustomizationPage v-else-if="currentPage.page === 'custom' || currentPage.page === 'customCat'" />
+      <DtcPage v-else-if="currentPage.page === 'dtc'" />
+      <DtcEcuPage v-else-if="currentPage.page === 'dtcEcu'" />
+      <LivePage v-else-if="currentPage.page === 'live' || currentPage.page === 'liveTool'" />
+      <BatteryPage v-else-if="currentPage.page === 'battery'" />
+      <BackupsPage v-else-if="currentPage.page === 'backups'" />
+    </template>
   </div>
 </template>

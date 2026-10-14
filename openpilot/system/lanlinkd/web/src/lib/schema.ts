@@ -387,42 +387,83 @@ export interface ToyotaSession {
   lastActivity?: number;           // 设备 unix 秒
   idleRemainingS?: number;         // 设备算好的空闲自动退出剩余秒数，active 后才有
 }
-export interface ToyotaCustomizationItem {
-  uid: number;
-  group: string;
+/** 目录（GET /api/toyota/catalog）：只适配 Sienna 4 代，后端从 sienna_catalog.json 发出 */
+export interface ToyotaEcu {
+  id: string;                      // "750/40"（网关子地址）或 "7B0"
+  tx: string;
+  sub: string | null;
   name: string;
-  ecu: string;                     // 如 "750/40 车身控制"
-  options: { index: number; title: string }[];
-  current: number | null;          // null = 读到但未匹配任何选项
-  raw: string;                     // 读到的压缩数据 hex
-  writable: boolean;               // false：UID 10038 等数据库读写 ID 不一致的项
+  protocol: "uds" | "toyota_can";
 }
-/** 定制项扫描里每个 ECU 的明细：列表为空时据此说明卡在哪一步 */
-export interface ToyotaScanEcu {
-  ecu: string;                     // 如 "750/40 车身控制"
-  status: "offline" | "silent" | "rejected" | "empty" | "malformed" | "ok";  // 3E 无响应 / A803 无响应 / 负响应 / 正响应无掩码 / ISO-TP 帧错乱 / 有掩码
-  total: number;                   // 数据库里属于该 ECU 的项数
-  supported: number;               // 掩码表支持的项数
-  read: number;                    // 读到当前值的项数
-  nrc?: string;                    // status=rejected 时的负响应码
-  response?: string;               // status=empty 时的原始应答 hex
-  readError?: string;              // 读值失败的第一个原因
-  malformedReason?: string;        // status=malformed 时的原因（ISO-TP 报错原文）
+export interface ToyotaCategory { id: string; name: string; icon: string }  // icon = lucide 图标名（kebab-case）
+export interface ToyotaOption { value: number; label: string }
+export interface ToyotaSetting {
+  key: string;
+  category: string;
+  name: string;
+  ecu: string;                     // ToyotaEcu.id
+  did: string | null;              // UDS 用 did，Toyota CAN 用 localId（十六进制字符串）
+  localId: string | null;
+  byteIndex: number;
+  mask: string;
+  requiresBitSupportCheck: boolean;
+  options: ToyotaOption[];         // 数值型为空
+  numeric: { min: number; max: number } | null;
+  popular: boolean;
 }
-export interface ToyotaPreview { uid: number; before: string; after: string; payload: string }
-export interface ToyotaWriteResult { uid: number; backupId: string; verified: boolean; current: number | null }
+export interface ToyotaLiveItem {
+  key: string;
+  name: string;
+  unit: string;
+  options: ToyotaOption[] | null;
+  needsEngineRunning: boolean;
+}
+export interface ToyotaLiveTool { id: string; name: string; icon: string; keys: string[] }
+export interface ToyotaBatteryBlock { voltageKey: string; resistanceKey: string; modules: number }
+export interface ToyotaCatalog {
+  ecus: ToyotaEcu[];
+  categories: ToyotaCategory[];
+  settings: ToyotaSetting[];
+  liveTools: ToyotaLiveTool[];
+  live: ToyotaLiveItem[];
+  battery: { ecu: string; blocks: ToyotaBatteryBlock[] };
+}
+
+/** 逐 ECU 扫描的结果状态：无应答 / ISO-TP 应答异常 / 正常 */
+export type ToyotaScanStatus = "offline" | "malformed" | "ok";
+export interface ToyotaCustomizationScan {
+  ecu: string;
+  status: ToyotaScanStatus;
+  items: { key: string; value: number; raw: string }[];  // raw = 整段 payload（CAN 型为展开后的数据）hex
+  supported?: number;              // 明细：支持数 / 读到数
+  read?: number;
+  readError?: string;
+}
+export interface ToyotaWriteResult {
+  key: string; value: number; verified: boolean; backupId: string; before: string; after: string;
+}
 export interface ToyotaBackup {
-  id: string; time: number; uid: number; name: string; ecu: string; localId: string; data: string;
+  id: string;
+  time: number;                    // 设备 unix 秒
+  key: string;
+  name: string;
+  ecu: string;
+  before: { value: number; label: string };
+  after?: { value: number; label: string };
+  restored?: boolean;
 }
-export interface ToyotaDtcEcu {
-  ecu: string; name: string; dtcs: { code: string; status: string; description: string }[];
+export interface ToyotaDtc {
+  code: string;                    // "U0131-87"
+  status: number | null;           // UDS 状态字节；Toyota CAN 的码没有状态
+  text: string;                    // 后端按目录拼好的中文说明，查不到为空
+  guess: boolean;
+}
+export interface ToyotaDtcScan {
+  ecu: string;
+  status: ToyotaScanStatus;
+  protocol: string;
+  dtcs: ToyotaDtc[];
+  readError?: string;              // ECU 拒绝读码（如 "NRC 11"）时，dtcs 为空
 }
 export interface ToyotaDtcClearResult { ecu: string; ok: boolean; error?: string }
-export interface ToyotaPid { id: number; name: string; unit: string }
-export interface ToyotaPidGroup { ecu: string; pids: ToyotaPid[] }
-export interface ToyotaPidCatalog {
-  profile: { id: string; name: string };
-  profiles: { id: string; name: string }[];
-  groups: ToyotaPidGroup[];
-}
-export interface ToyotaPidValue { id: number; value: number | null; text: string; error?: string }
+export interface ToyotaLiveValue { key: string; value: number | null; text: string; error?: string }

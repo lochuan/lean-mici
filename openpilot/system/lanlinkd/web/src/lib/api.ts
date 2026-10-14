@@ -7,8 +7,8 @@
  */
 import type {
   BluetoothStatus, Capabilities, DiagnosticsReport, ParamValues, SettingsSchema,
-  SoftwareStatus, StatusSnapshot, ToyotaBackup, ToyotaCustomizationItem, ToyotaDtcClearResult, ToyotaDtcEcu, ToyotaScanEcu,
-  ToyotaPidCatalog, ToyotaPidValue, ToyotaPreview, ToyotaSession, ToyotaWriteResult, VehicleState, WifiStatus,
+  SoftwareStatus, StatusSnapshot, ToyotaBackup, ToyotaCatalog, ToyotaCustomizationScan, ToyotaDtcClearResult,
+  ToyotaDtcScan, ToyotaLiveValue, ToyotaSession, ToyotaWriteResult, VehicleState, WifiStatus,
 } from "./schema";
 
 export class ApiError extends Error {
@@ -80,26 +80,22 @@ export const api = {
   softwareOp: (action: string) =>
     post<null>(`/api/software/${encodeURIComponent(action)}`),
 
-  // ---- toyota 诊断（非诊断模式下除 session 外一律 409 {"error": "请先进入诊断模式"}）----
+  // ---- toyota 诊断（非诊断模式下除 session、catalog、backups 外一律 409 {"error": "请先进入诊断模式"}）----
   toyotaSession: () => request<ToyotaSession>("/api/toyota/session"),
   toyotaEnter: () => post<ToyotaSession>("/api/toyota/session/enter"),
   toyotaExit: () => post<null>("/api/toyota/session/exit"),
-  toyotaScanCustomizations: () =>
-    post<{ items: ToyotaCustomizationItem[]; ecus: ToyotaScanEcu[] }>("/api/toyota/customizations/scan"),
-  toyotaPreview: (uid: number, option: number) =>
-    post<ToyotaPreview>(`/api/toyota/customizations/${uid}/preview`, { option }),
-  toyotaWrite: (uid: number, option: number, before: string) =>
-    post<ToyotaWriteResult>(`/api/toyota/customizations/${uid}/write`, { option, before }),
+  toyotaCatalog: () => request<ToyotaCatalog>("/api/toyota/catalog"),
+  // 扫描由前端按目录 ECU 列表逐个调用
+  toyotaScanCustomizations: (ecu: string) => post<ToyotaCustomizationScan>("/api/toyota/customizations/scan", { ecu }),
+  toyotaWrite: (key: string, value: number, before: string) =>
+    post<ToyotaWriteResult>(`/api/toyota/customizations/${encodeURIComponent(key)}/write`, { value, before }),
   toyotaBackups: () => request<{ backups: ToyotaBackup[] }>("/api/toyota/backups"),
   toyotaRestore: (id: string) =>
-    post<{ verified: boolean; backupId: string }>(`/api/toyota/backups/${encodeURIComponent(id)}/restore`),
-  toyotaScanDtc: () => post<{ ecus: ToyotaDtcEcu[] }>("/api/toyota/dtc/scan"),
+    post<ToyotaWriteResult>(`/api/toyota/backups/${encodeURIComponent(id)}/restore`),
+  toyotaScanDtc: (ecu: string) => post<ToyotaDtcScan>("/api/toyota/dtc/scan", { ecu }),
   toyotaClearDtc: (ecus: string[]) =>
     post<{ results: ToyotaDtcClearResult[] }>("/api/toyota/dtc/clear", { ecus }),
-  toyotaPids: () => request<ToyotaPidCatalog>("/api/toyota/pids"),
-  toyotaSelectPidProfile: (id: string) =>
-    request<null>("/api/toyota/pids/profile", { method: "PUT", body: JSON.stringify({ id }) }),
-  toyotaReadPids: (ids: number[]) => post<{ values: ToyotaPidValue[] }>("/api/toyota/pids/read", { ids }),
+  toyotaReadLive: (keys: string[]) => post<{ values: ToyotaLiveValue[] }>("/api/toyota/live/read", { keys }),
 
   // ---- logs ----
   logs: () => request<unknown>("/api/logs"),

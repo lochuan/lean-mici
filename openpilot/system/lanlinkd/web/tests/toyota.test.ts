@@ -1,16 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  PID_SELECTION_LIMIT, countdownText, errorText, filterPidGroups, groupCustomizations, hexDiff,
-  idleRemainingS, scanEcuText, scanSummary, sessionView, togglePid,
+  countdownText, ecusWithSettings, errorText, formatNumber, hexDiff, idleRemainingS, liveValueText, mileageText,
+  dtcDescription, liveCards, dtcStatusTags, dtcSummary, dtcSummaryText, groupDtcs, previewRaw, scanTally, sortEcusByDtcCount, sessionView, settingValueLabel,
 } from "../src/lib/toyota";
-import type { ToyotaCustomizationItem, ToyotaPidGroup, ToyotaScanEcu, ToyotaSession } from "../src/lib/schema";
+import type { ToyotaLiveItem, ToyotaDtc, ToyotaDtcScan, ToyotaEcu, ToyotaLiveValue, ToyotaSession, ToyotaSetting } from "../src/lib/schema";
 import { ApiError } from "../src/lib/api";
-
-function item(over: Partial<ToyotaCustomizationItem>): ToyotaCustomizationItem {
-  return {
-    uid: 1, group: "车身", name: "x", ecu: "750/40 车身控制", options: [], current: null, raw: "", writable: true, ...over,
-  };
-}
 
 function session(over: Partial<ToyotaSession> = {}): ToyotaSession {
   return { state: "idle", idleTimeoutS: 900, ...over };
@@ -39,67 +33,6 @@ describe("hexDiff", () => {
 
   it("空串得到空数组", () => {
     expect(hexDiff("", "")).toEqual({ before: [], after: [] });
-  });
-});
-
-describe("groupCustomizations", () => {
-  it("按 group 分组，组内按名称再按 uid 排序", () => {
-    const groups = groupCustomizations([
-      item({ uid: 3, group: "灯光", name: "b" }),
-      item({ uid: 2, group: "车身", name: "b" }),
-      item({ uid: 1, group: "车身", name: "b" }),
-      item({ uid: 4, group: "车身", name: "a" }),
-    ]);
-    expect(groups.map((g) => g.group)).toEqual(["灯光", "车身"].sort((a, b) => a.localeCompare(b, "zh")));
-    const body = groups.find((g) => g.group === "车身")!;
-    expect(body.items.map((i) => i.uid)).toEqual([4, 1, 2]);
-  });
-
-  it("空列表得到空数组", () => {
-    expect(groupCustomizations([])).toEqual([]);
-  });
-});
-
-describe("togglePid", () => {
-  it("未选中则加入，已选中则移除", () => {
-    expect(togglePid([1], 2)).toEqual({ selected: [1, 2], overLimit: false });
-    expect(togglePid([1, 2], 1)).toEqual({ selected: [2], overLimit: false });
-  });
-
-  it("达到上限后不再加入并提示", () => {
-    const full = Array.from({ length: PID_SELECTION_LIMIT }, (_, i) => i);
-    const r = togglePid(full, 999);
-    expect(r.selected).toEqual(full);
-    expect(r.overLimit).toBe(true);
-  });
-
-  it("满额时仍可取消勾选", () => {
-    const full = Array.from({ length: PID_SELECTION_LIMIT }, (_, i) => i);
-    expect(togglePid(full, 0).selected).toHaveLength(PID_SELECTION_LIMIT - 1);
-  });
-
-  it("上限是 40", () => {
-    expect(PID_SELECTION_LIMIT).toBe(40);
-  });
-});
-
-describe("filterPidGroups", () => {
-  const groups: ToyotaPidGroup[] = [
-    { ecu: "7E0 发动机", pids: [{ id: 1, name: "Coolant Temp", unit: "°C" }, { id: 2, name: "RPM", unit: "rpm" }] },
-    { ecu: "7B0 ABS", pids: [{ id: 3, name: "车速", unit: "km/h" }] },
-  ];
-
-  it("空查询原样返回", () => {
-    expect(filterPidGroups(groups, "  ")).toEqual(groups);
-  });
-
-  it("不区分大小写匹配名称，丢弃没有命中的 ECU 组", () => {
-    const r = filterPidGroups(groups, "coolant");
-    expect(r).toEqual([{ ecu: "7E0 发动机", pids: [{ id: 1, name: "Coolant Temp", unit: "°C" }] }]);
-  });
-
-  it("中文名称可匹配", () => {
-    expect(filterPidGroups(groups, "车速").map((g) => g.ecu)).toEqual(["7B0 ABS"]);
   });
 });
 
@@ -166,23 +99,229 @@ describe("errorText", () => {
   });
 });
 
-describe("scanEcuText / scanSummary", () => {
-  const ecu = (over: Partial<ToyotaScanEcu>): ToyotaScanEcu =>
-    ({ ecu: "750/40 车身控制", status: "ok", total: 10, supported: 0, read: 0, ...over });
-
-  it("每种状态都说明卡在哪一步", () => {
-    expect(scanEcuText(ecu({ status: "offline" }))).toBe("无响应（不在线或未上电）");
-    expect(scanEcuText(ecu({ status: "silent" }))).toBe("在线，但不应答 A8 03");
-    expect(scanEcuText(ecu({ status: "rejected", nrc: "22" }))).toBe("拒绝 A8 03：NRC 22（条件不满足）");
-    expect(scanEcuText(ecu({ status: "rejected", nrc: "9A" }))).toBe("拒绝 A8 03：NRC 9A");
-    expect(scanEcuText(ecu({ status: "empty", response: "e803" }))).toBe("A8 03 应答里没有掩码：e803");
-    expect(scanEcuText(ecu({ status: "malformed" }))).toBe("应答异常（ISO-TP 帧错乱），已跳过");
-    expect(scanEcuText(ecu({ status: "ok" }))).toBe("掩码表不含数据库里的 10 项");
-    expect(scanEcuText(ecu({ supported: 4, read: 3, readError: "nrc 22" }))).toBe("支持 4/10 项，读到 3 项（读值失败：nrc 22）");
+describe("formatNumber", () => {
+  it("按指定小数位四舍五入，补零", () => {
+    expect(formatNumber(14.248, 2)).toBe("14.25");
+    expect(formatNumber(14.2, 2)).toBe("14.20");
+    expect(formatNumber(0, 1)).toBe("0.0");
   });
 
-  it("汇总在线与提供定制项的 ECU 数", () => {
-    const ecus = [ecu({ status: "offline" }), ecu({ status: "rejected", nrc: "22" }), ecu({ supported: 2, read: 2 })];
-    expect(scanSummary(ecus)).toBe("3 个 ECU 地址，2 个在线，1 个提供了定制项");
+  it("整数位带千分位", () => {
+    expect(formatNumber(13875, 0)).toBe("13,875");
+  });
+});
+
+describe("liveValueText", () => {
+  it("用后端给的 text 加单位", () => {
+    expect(liveValueText({ key: "k", value: 14.248, text: "14.25" }, "V")).toBe("14.25 V");
+    expect(liveValueText({ key: "k", value: 0, text: "0" })).toBe("0");
+  });
+
+  it("没读到或该项出错显示 —", () => {
+    expect(liveValueText(undefined, "V")).toBe("—");
+    expect(liveValueText({ key: "k", value: null, text: "", error: "无响应" }, "V")).toBe("—");
+  });
+});
+
+describe("mileageText", () => {
+  const mileage: ToyotaLiveValue = { key: "m", value: 13875, text: "13875" };
+
+  it("里程千分位 + 单位项的文字", () => {
+    expect(mileageText(mileage, { key: "u", value: 2, text: "英里" })).toBe("13,875 英里");
+  });
+
+  it("单位项没读到时按公里显示", () => {
+    expect(mileageText(mileage, undefined)).toBe("13,875 公里");
+  });
+
+  it("里程没读到显示 —", () => {
+    expect(mileageText(undefined, { key: "u", value: 1, text: "公里" })).toBe("—");
+    expect(mileageText({ key: "m", value: null, text: "", error: "x" }, undefined)).toBe("—");
+  });
+});
+
+function setting(over: Partial<ToyotaSetting>): ToyotaSetting {
+  return {
+    key: "k", category: "C", name: "n", ecu: "750/40", did: "2270", localId: null, byteIndex: 0, mask: "FF",
+    requiresBitSupportCheck: false, options: [], numeric: null, popular: false, ...over,
+  };
+}
+
+describe("settingValueLabel", () => {
+  const onOff = setting({ options: [{ value: 1, label: "开启" }, { value: 0, label: "关闭" }] });
+
+  it("选项型显示选项文案", () => {
+    expect(settingValueLabel(onOff, 1)).toBe("开启");
+    expect(settingValueLabel(onOff, 0)).toBe("关闭");
+  });
+
+  it("读到的值不在选项里：显示原始值，不猜", () => {
+    expect(settingValueLabel(onOff, 3)).toBe("其他（原始值 3）");
+  });
+
+  it("数值型直接显示数字", () => {
+    expect(settingValueLabel(setting({ numeric: { min: 1, max: 11 } }), 6)).toBe("6");
+  });
+
+  it("没读到显示 —", () => {
+    expect(settingValueLabel(onOff, null)).toBe("—");
+    expect(settingValueLabel(onOff, undefined)).toBe("—");
+  });
+});
+
+describe("ecusWithSettings", () => {
+  const ecu = (id: string): ToyotaEcu => ({ id, tx: id.slice(0, 3), sub: null, name: id, protocol: "uds" });
+
+  it("只留下有定制项的 ECU，保持目录顺序", () => {
+    const ecus = [ecu("7B0"), ecu("750/40"), ecu("7C4"), ecu("750/90")];
+    const settings = [setting({ ecu: "750/90" }), setting({ ecu: "750/40" }), setting({ ecu: "750/40" })];
+    expect(ecusWithSettings(ecus, settings).map((e) => e.id)).toEqual(["750/40", "750/90"]);
+  });
+});
+
+describe("scanTally", () => {
+  it("按状态汇总，进度 = 已完成 / 总数", () => {
+    expect(scanTally(["ok", "offline", "malformed", "ok"], 8)).toEqual({
+      done: 4, total: 8, online: 2, offline: 1, malformed: 1, percent: 50,
+    });
+  });
+
+  it("还没开始：全 0", () => {
+    expect(scanTally([], 14)).toEqual({ done: 0, total: 14, online: 0, offline: 0, malformed: 0, percent: 0 });
+  });
+
+  it("总数为 0 时进度为 0，不出现 NaN", () => {
+    expect(scanTally([], 0).percent).toBe(0);
+  });
+});
+
+describe("previewRaw", () => {
+  it("只改掩码覆盖的位，其余位和字节原样保留", () => {
+    // 0x5F = 0101 1111，掩码 0x30 = 0011 0000，写入 2 → 位 5..4 = 10 → 0110 1111 = 0x6F
+    expect(previewRaw("0A5F", 1, "30", 2)).toBe("0A6F");
+  });
+
+  it("整字节掩码直接替换该字节", () => {
+    expect(previewRaw("0A5F", 0, "FF", 6)).toBe("065F");
+  });
+
+  it("输出统一大写、不带空格", () => {
+    expect(previewRaw("0a 5f", 1, "0F", 0)).toBe("0A50");
+  });
+
+  it("字节下标越界时原样返回", () => {
+    expect(previewRaw("0A", 3, "FF", 1)).toBe("0A");
+  });
+});
+
+describe("dtcStatusTags", () => {
+  const labels = (status: number | null) => dtcStatusTags(status).map((t) => t.label);
+
+  it("已确认且非当前 = 历史（0x28：bit3 + bit5）", () => {
+    expect(labels(0x28)).toEqual(["历史"]);
+  });
+
+  it("当前 + 已确认（0x09：bit0 + bit3）", () => {
+    expect(labels(0x09)).toEqual(["当前故障", "已确认"]);
+  });
+
+  it("待定（0x04：bit2）", () => {
+    expect(labels(0x04)).toEqual(["待定"]);
+  });
+
+  it("全部置位（0x8D：bit0/2/3/7）", () => {
+    expect(labels(0x8d)).toEqual(["当前故障", "已确认", "待定", "请求点亮故障灯"]);
+  });
+
+  it("没有任何相关位：无标签", () => {
+    expect(labels(0)).toEqual([]);
+  });
+
+  it("CAN 型 ECU 的码没有状态：显示已确认", () => {
+    expect(labels(null)).toEqual(["已确认"]);
+  });
+
+  it("当前故障和待定用警示色，历史用中性色", () => {
+    expect(dtcStatusTags(0x01)[0].tone).toBe("danger");
+    expect(dtcStatusTags(0x04)[0].tone).toBe("warn");
+    expect(dtcStatusTags(0x28)[0].tone).toBe("muted");
+  });
+});
+
+describe("groupDtcs", () => {
+  const dtc = (code: string, status: number | null): ToyotaDtc => ({ code, status, text: "", guess: false });
+
+  it("FTB 87 且非当前的码归入历史通信丢失，其余留在原列表", () => {
+    const g = groupDtcs([dtc("U0131-87", 0x28), dtc("U0163-87", 0x08), dtc("B1234-13", 0x28), dtc("U0100-87", 0x09)]);
+    expect(g.history.map((d) => d.code)).toEqual(["U0131-87", "U0163-87"]);
+    expect(g.shown.map((d) => d.code)).toEqual(["B1234-13", "U0100-87"]);
+  });
+
+  it("没有 FTB 的码（CAN 型）不分组", () => {
+    const g = groupDtcs([dtc("B2799", null)]);
+    expect(g.history).toEqual([]);
+    expect(g.shown).toHaveLength(1);
+  });
+});
+
+describe("dtcDescription", () => {
+  it("有说明用说明，没有显示暂无中文说明", () => {
+    expect(dtcDescription({ code: "U0131-87", status: 0x28, text: "与动力转向控制模块通信丢失（报文丢失）", guess: false }))
+      .toBe("与动力转向控制模块通信丢失（报文丢失）");
+    expect(dtcDescription({ code: "P0A80-00", status: 0x08, text: "", guess: false })).toBe("暂无中文说明");
+  });
+});
+
+describe("dtcSummary / sortEcusByDtcCount / dtcSummaryText", () => {
+  const scan = (ecu: string, codes: string[]): ToyotaDtcScan => ({
+    ecu, status: "ok", protocol: "uds", dtcs: codes.map((code) => ({ code, status: 0x28, text: "", guess: false })),
+  });
+  const scans = [scan("7B0", []), scan("7C4", ["U0131-87", "U0163-87"]), scan("750/40", ["B1000-00"])];
+
+  it("统计扫描 ECU 数、有故障 ECU 数、故障码总数", () => {
+    expect(dtcSummary(scans)).toEqual({ ecuCount: 3, faultyEcuCount: 2, codeCount: 3 });
+  });
+
+  it("按故障数降序，同数保持目录顺序", () => {
+    const ecus = ["7B0", "7C4", "750/40", "7C0"].map((id) => ({ id }));
+    expect(sortEcusByDtcCount(ecus, scans).map((e) => e.id)).toEqual(["7C4", "750/40", "7B0", "7C0"]);
+  });
+
+  it("首页摘要三种情况", () => {
+    expect(dtcSummaryText(null)).toBe("尚未扫描");
+    expect(dtcSummaryText([scan("7B0", [])])).toBe("上次扫描：未发现故障码");
+    expect(dtcSummaryText(scans)).toBe("上次扫描：2 个 ECU 共 3 条故障码");
+  });
+});
+
+describe("liveCards", () => {
+  const item = (key: string, name: string, over: Partial<ToyotaLiveItem> = {}): ToyotaLiveItem =>
+    ({ key, name, unit: "", options: null, needsEngineRunning: false, ...over });
+  const val = (key: string, value: number | null, text: string, error?: string): ToyotaLiveValue => ({ key, value, text, error });
+
+  it("数值项：大字 text + 小字单位，需发动机运转的带标记", () => {
+    const cards = liveCards(
+      [item("rpm", "发动机转速", { unit: "rpm", needsEngineRunning: true }), item("v", "12V", { unit: "V" })],
+      [val("v", 14.248, "14.25"), val("rpm", 0, "0")],
+    );
+    expect(cards).toEqual([
+      { key: "rpm", name: "发动机转速", value: "0", unit: "rpm", needsEngineRunning: true },
+      { key: "v", name: "12V", value: "14.25", unit: "V", needsEngineRunning: false },
+    ]);
+  });
+
+  it("里程单位并进里程卡，不单独成卡", () => {
+    const cards = liveCards(
+      [item("car_tool_mileage", "总里程（仪表读数）"), item("car_tool_mileage_unit", "总里程单位（1 = 公里）")],
+      [val("car_tool_mileage", 13875, "13875"), val("car_tool_mileage_unit", 1, "公里")],
+    );
+    expect(cards).toEqual([
+      { key: "car_tool_mileage", name: "总里程（仪表读数）", value: "13,875", unit: "公里", needsEngineRunning: false },
+    ]);
+  });
+
+  it("该项读取出错或没返回：显示 —，不带单位", () => {
+    const cards = liveCards([item("a", "A", { unit: "V" }), item("b", "B", { unit: "°C" })], [val("a", null, "", "无响应")]);
+    expect(cards.map((c) => [c.value, c.unit])).toEqual([["—", ""], ["—", ""]]);
   });
 });

@@ -38,6 +38,13 @@
 
   --radius-sl: 0.75rem;
 
+  /* 未进入诊断模式时点功能项：会话条左右抖一下 */
+  --animate-sl-shake: sl-shake 0.4s ease-in-out;
+  @keyframes sl-shake {
+    20%, 60% { transform: translateX(-6px); }
+    40%, 80% { transform: translateX(6px); }
+  }
+
   /* shadcn 语义别名：映射到 sl 色板，让 shadcn-vue 形态的组件可直接用
    * background/muted/primary/destructive 等标准名（视觉与 sl-* 完全一致） */
   --color-background: var(--color-sl-bg);

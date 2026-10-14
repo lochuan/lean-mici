@@ -1,0 +1,127 @@
+/** TechStream 各页面共享的数据：目录与各次扫描的结果。
+ *
+ * 放在模块里是因为页面栈会销毁离开的页面：从分类子页退回定制页不能重新扫描。
+ * 退出诊断模式（或空闲超时）后 resetScanData() 清掉全部扫描结果，因为车上的值可能已被别处改动。
+ */
+import { reactive } from "vue";
+import { api, ApiError } from "./api";
+import type { BatteryAnalysis } from "./battery";
+import type { ToyotaCatalog, ToyotaDtcScan, ToyotaEcu, ToyotaScanStatus } from "./schema";
+import { ecusWithSettings, errorText } from "./toyota";
+
+export const toyotaData = reactive({
+  catalog: null as ToyotaCatalog | null,
+  catalogError: "",
+  /** 最近一次扫描里有应答的 ECU 数；还没扫描过为 null */
+  onlineEcuCount: null as number | null,
+  customization: {
+    state: "idle" as "idle" | "scanning" | "done",
+    /** 已扫描完的 ECU 的状态，长度 = 已完成数 */
+    statuses: [] as ToyotaScanStatus[],
+    /** 无应答 / 应答异常的 ECU，扫描完给用户解释为什么少了项 */
+    unreachable: [] as ToyotaEcu[],
+    /** 设置项 key → 当前值与扫描时的原始数据（写入时作为 before 校验 ECU 数据没被别处改过） */
+    values: {} as Record<string, { value: number; raw: string }>,
+  },
+  dtc: {
+    state: "idle" as "idle" | "scanning" | "done",
+    /** 按目录顺序，已扫描完的 ECU 的故障码 */
+    scans: [] as ToyotaDtcScan[],
+  },
+  battery: {
+    /** 最近一次读取的判定；还没读过或读不全为 null */
+    analysis: null as BatteryAnalysis | null,
+  },
+});
+
+let catalogLoading = false;
+
+export async function loadCatalog(): Promise<void> {
+  if (catalogLoading || toyotaData.catalog) return;
+  catalogLoading = true;
+  toyotaData.catalogError = "";
+  try {
+    toyotaData.catalog = await api.toyotaCatalog();
+  } catch (e) {
+    toyotaData.catalogError = errorText(e);
+  } finally {
+    catalogLoading = false;
+  }
+}
+
+/** 要扫描的 ECU 总数（只扫有定制项的） */
+export function customizationScanTotal(): number {
+  const c = toyotaData.catalog;
+  return c ? ecusWithSettings(c.ecus, c.settings).length : 0;
+}
+
+/** 逐个 ECU 读定制项当前值。单个 ECU 失败只记下来继续；会话没了（409）才中止。 */
+export async function scanCustomizations(): Promise<void> {
+  const catalog = toyotaData.catalog;
+  const c = toyotaData.customization;
+  if (!catalog || c.state === "scanning") return;
+  c.state = "scanning";
+  c.statuses = [];
+  c.unreachable = [];
+  c.values = {};
+  for (const ecu of ecusWithSettings(catalog.ecus, catalog.settings)) {
+    try {
+      const r = await api.toyotaScanCustomizations(ecu.id);
+      c.statuses.push(r.status);
+      if (r.status !== "ok") c.unreachable.push(ecu);
+      for (const it of r.items) c.values[it.key] = { value: it.value, raw: it.raw };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) break;
+      c.statuses.push("offline");
+      c.unreachable.push(ecu);
+    }
+  }
+  c.state = "done";
+  toyotaData.onlineEcuCount = c.statuses.filter((s) => s === "ok").length;
+}
+
+/** 逐个 ECU 读故障码（全部 41 个）。失败的 ECU 记为无应答继续；会话没了（409）才中止。 */
+export async function scanDtcs(): Promise<void> {
+  const catalog = toyotaData.catalog;
+  const d = toyotaData.dtc;
+  if (!catalog || d.state === "scanning") return;
+  d.state = "scanning";
+  d.scans = [];
+  for (const ecu of catalog.ecus) {
+    try {
+      d.scans.push(await api.toyotaScanDtc(ecu.id));
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) break;
+      d.scans.push({ ecu: ecu.id, status: "offline", protocol: ecu.protocol, dtcs: [] });
+    }
+  }
+  d.state = "done";
+  toyotaData.onlineEcuCount = d.scans.filter((s) => s.status === "ok").length;
+}
+
+/** 清除成功的 ECU 先在本地清空列表；是否真的清掉、故障是否还在，要重新扫描才知道 */
+export async function clearDtcs(ecuIds: string[]): Promise<{ ecu: string; ok: boolean; error?: string }[]> {
+  const { results } = await api.toyotaClearDtc(ecuIds);
+  for (const r of results) {
+    const scan = toyotaData.dtc.scans.find((s) => s.ecu === r.ecu);
+    if (r.ok && scan) scan.dtcs = [];
+  }
+  return results;
+}
+
+/** 扫描结果作废：写入以外的途径（恢复备份）改了车上的值，下次进定制页重新扫描 */
+export function invalidateCustomizationScan(): void {
+  toyotaData.customization.state = "idle";
+}
+
+export function resetScanData(): void {
+  toyotaData.onlineEcuCount = null;
+  const c = toyotaData.customization;
+  c.state = "idle";
+  c.statuses = [];
+  c.unreachable = [];
+  c.values = {};
+  toyotaData.dtc.state = "idle";
+  toyotaData.dtc.scans = [];
+  toyotaData.battery.analysis = null;
+}
