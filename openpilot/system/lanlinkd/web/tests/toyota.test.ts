@@ -249,7 +249,7 @@ describe("dtcStatusTags", () => {
 });
 
 describe("groupDtcs", () => {
-  const dtc = (code: string, status: number | null): ToyotaDtc => ({ code, status, text: "", guess: false });
+  const dtc = (code: string, status: number | null): ToyotaDtc => ({ code, status, text: "" });
 
   it("FTB 87 且非当前的码归入历史通信丢失，其余留在原列表", () => {
     const g = groupDtcs([dtc("U0131-87", 0x28), dtc("U0163-87", 0x08), dtc("B1234-13", 0x28), dtc("U0100-87", 0x09)]);
@@ -266,15 +266,15 @@ describe("groupDtcs", () => {
 
 describe("dtcDescription", () => {
   it("有说明用说明，没有显示暂无中文说明", () => {
-    expect(dtcDescription({ code: "U0131-87", status: 0x28, text: "与动力转向控制模块通信丢失（报文丢失）", guess: false }))
+    expect(dtcDescription({ code: "U0131-87", status: 0x28, text: "与动力转向控制模块通信丢失（报文丢失）" }))
       .toBe("与动力转向控制模块通信丢失（报文丢失）");
-    expect(dtcDescription({ code: "P0A80-00", status: 0x08, text: "", guess: false })).toBe("暂无中文说明");
+    expect(dtcDescription({ code: "P0A80-00", status: 0x08, text: "" })).toBe("暂无中文说明");
   });
 });
 
 describe("dtcSummary / sortEcusByDtcCount / dtcSummaryText", () => {
   const scan = (ecu: string, codes: string[]): ToyotaDtcScan => ({
-    ecu, status: "ok", protocol: "uds", dtcs: codes.map((code) => ({ code, status: 0x28, text: "", guess: false })),
+    ecu, status: "ok", protocol: "uds", dtcs: codes.map((code) => ({ code, status: 0x28, text: "" })),
   });
   const scans = [scan("7B0", []), scan("7C4", ["U0131-87", "U0163-87"]), scan("750/40", ["B1000-00"])];
 

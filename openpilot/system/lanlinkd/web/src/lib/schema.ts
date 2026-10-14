@@ -456,7 +456,6 @@ export interface ToyotaDtc {
   code: string;                    // "U0131-87"
   status: number | null;           // UDS 状态字节；Toyota CAN 的码没有状态
   text: string;                    // 后端按目录拼好的中文说明，查不到为空
-  guess: boolean;
 }
 export interface ToyotaDtcScan {
   ecu: string;

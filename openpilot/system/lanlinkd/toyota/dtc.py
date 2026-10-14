@@ -21,13 +21,13 @@ def decode_code(raw: bytes) -> str:
   return f"{code}-{raw[2]:02X}" if len(raw) == 3 else code
 
 
-def describe(code: str, dtc_text: dict) -> tuple[str, bool]:
-  """「基码说明（FTB 说明）」和是否推测；基码查不到返回空串（前端显示「暂无中文说明」）。"""
-  entry = dtc_text["codes"].get(code[:5])
-  if entry is None:
-    return "", False
+def describe(code: str, dtc_text: dict) -> str:
+  """「基码说明（FTB 说明）」；基码查不到返回空串（前端显示「暂无中文说明」）。"""
+  text = dtc_text["codes"].get(code[:5])
+  if text is None:
+    return ""
   ftb = dtc_text["ftb"].get(code[6:]) if len(code) > 5 else None
-  return entry["text"] + (f"（{ftb}）" if ftb else ""), entry["guess"]
+  return text + (f"（{ftb}）" if ftb else "")
 
 
 def _parse_uds(payload: bytes) -> list[tuple[str, int | None]]:
@@ -78,8 +78,7 @@ def scan_ecu(link, ecu: dict, dtc_text: dict) -> dict:
   if codes is None:
     return {**report, "readError": error}
   for code, status in codes:
-    text, guess = describe(code, dtc_text)
-    report["dtcs"].append({"code": code, "status": status, "text": text, "guess": guess})
+    report["dtcs"].append({"code": code, "status": status, "text": describe(code, dtc_text)})
   return report
 
 

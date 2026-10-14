@@ -58,11 +58,13 @@ class TestSiennaCatalog:
     assert blocks[0]["voltageKey"] == "car_ev_or_hybrid_battery_n1_block_1_voltage"
     assert catalog.live_item(blocks[11]["resistanceKey"])["did"] == "1813"
 
-  def test_dtc_text_splits_base_code_and_failure_type(self):
+  def test_dtc_text_covers_carista_tables(self):
     dtc_text = catalog.load_sienna()["dtcText"]
-    assert dtc_text["codes"]["U0131"] == {"text": "与动力转向控制模块通信丢失", "guess": False}
-    assert dtc_text["codes"]["B2359"]["guess"] is True
-    assert dtc_text["ftb"] == {"87": "报文丢失", "13": "线路开路"}
+    # 丰田表 1073 + 通用 OBD-II 表 4277，去重后 5345 个基码；FTB 01～FF 共 255 个
+    assert (len(dtc_text["codes"]), len(dtc_text["ftb"])) == (5345, 255)
+    assert dtc_text["codes"]["U0131"] == "与动力转向控制模块通信丢失"
+    assert dtc_text["codes"]["B2359"] == "右侧智能 LDM"
+    assert (dtc_text["ftb"]["87"], dtc_text["ftb"]["13"]) == ("报文丢失", "线路开路")
 
   def test_engine_dependent_live_items_are_marked(self):
     marked = {i["key"] for i in catalog.load_sienna()["live"] if i["needsEngineRunning"]}

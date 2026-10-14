@@ -11,7 +11,6 @@
   tools/lanlink/build_toyota_sienna_catalog.py <sienna_snapshot.json> <sienna_zh.json> <输出 json>
 """
 import json
-import re
 import sys
 
 # 两侧滑门脚踢感应灵敏度：实车读到 3，超出选项 0～2，不收
@@ -50,9 +49,6 @@ LIVE_OPTION_LABELS = {"km": "公里", "miles": "英里"}
 # 动力电池 12 块：块 1、2、11、12 是半块（2 模组），其余整块（4 模组）
 BATTERY_BLOCKS = 12
 HALF_BATTERY_BLOCKS = {1, 2, 11, 12}
-
-# 翻译里的故障码说明是「基码说明（FTB 说明）」，拆开存
-_DTC_TEXT = re.compile(r"^(?P<text>.*)（(?P<ftb>[^（）]+)）$")
 
 
 def _hex_id(value: str, width: int) -> str:
@@ -112,19 +108,6 @@ def build_live(snapshot: dict, zh: dict) -> list[dict]:
   return live
 
 
-def build_dtc_text(zh: dict) -> dict:
-  codes: dict[str, dict] = {}
-  ftb: dict[str, str] = {}
-  for code, description in zh["dtc"].items():
-    base, failure_type = code.split("-")
-    match = _DTC_TEXT.match(description)
-    assert match, f"{code} 的说明不是「基码说明（FTB 说明）」：{description}"
-    entry = {"text": match["text"], "guess": code in zh["notes"]}
-    assert codes.setdefault(base, entry) == entry, f"{base} 有两种说明"
-    assert ftb.setdefault(failure_type, match["ftb"]) == match["ftb"], f"FTB {failure_type} 有两种说明"
-  return {"codes": codes, "ftb": ftb}
-
-
 def build(snapshot: dict, zh: dict) -> dict:
   settings = build_settings(snapshot, zh)
   live = build_live(snapshot, zh)
@@ -141,7 +124,7 @@ def build(snapshot: dict, zh: dict) -> dict:
     "battery": {"ecu": "7D2", "blocks": [{"voltageKey": battery_key.format(n=n, kind="voltage"),
                                           "resistanceKey": battery_key.format(n=n, kind="internal_resistance"),
                                           "modules": 2 if n in HALF_BATTERY_BLOCKS else 4} for n in range(1, BATTERY_BLOCKS + 1)]},
-    "dtcText": build_dtc_text(zh),
+    "dtcText": zh["dtc"],   # {codes: {基码: 说明}, ftb: {FTB: 说明}}，Carista 码表的中文翻译
   }
 
 

@@ -176,7 +176,7 @@ class TestDtcEndpoints:
     status, body = api.dtc_scan({"ecu": "750/40"})
     assert status == 200
     assert (body["ecu"], body["status"], body["protocol"]) == ("750/40", "ok", "uds")
-    assert body["dtcs"][1] == {"code": "U0163-87", "status": 0x28, "text": "与导航控制模块通信丢失（报文丢失）", "guess": False}
+    assert body["dtcs"][1] == {"code": "U0163-87", "status": 0x28, "text": "与导航控制模块通信丢失（报文丢失）"}
 
   @pytest.mark.parametrize("request_body", [{}, {"ecu": "7FF"}, {"ecu": 7}])
   def test_scan_rejects_unknown_ecu(self, tmp_path, request_body):

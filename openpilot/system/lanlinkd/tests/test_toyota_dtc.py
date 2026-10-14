@@ -51,10 +51,9 @@ class TestDecode:
     assert dtc.decode_code(bytes.fromhex(raw)) == code
 
   def test_text_joins_base_code_and_failure_type(self):
-    assert dtc.describe("U0131-87", DTC_TEXT) == ("与动力转向控制模块通信丢失（报文丢失）", False)
-    assert dtc.describe("B2359-87", DTC_TEXT)[1] is True
-    assert dtc.describe("U0131-FF", DTC_TEXT) == ("与动力转向控制模块通信丢失", False)   # FTB 没有说明
-    assert dtc.describe("P0001-87", DTC_TEXT) == ("", False)                          # 基码没有说明
+    assert dtc.describe("U0131-87", DTC_TEXT) == "与动力转向控制模块通信丢失（报文丢失）"
+    assert dtc.describe("U0131-00", DTC_TEXT) == "与动力转向控制模块通信丢失"   # FTB 00 没有说明
+    assert dtc.describe("B1A01-87", DTC_TEXT) == ""                          # 基码没有说明
 
 
 class TestScanUds:
@@ -72,8 +71,7 @@ class TestScanUds:
     ecu, link = _replay("750/40")
     result = dtc.scan_ecu(link, ecu, DTC_TEXT)
     assert (result["ecu"], result["protocol"]) == ("750/40", "uds")
-    assert result["dtcs"][0] == {"code": "B2359-87", "status": 0x29,
-                                 "text": "车身电气故障（厂商自定义，具体含义未查到）（报文丢失）", "guess": True}
+    assert result["dtcs"][0] == {"code": "B2359-87", "status": 0x29, "text": "右侧智能 LDM（报文丢失）"}
     assert [d["code"] for d in result["dtcs"]] == ["B2359-87", "U0163-87", "U023A-87"]
 
   def test_all_zero_code_is_skipped(self):
@@ -99,12 +97,13 @@ class TestScanUds:
 
 class TestScanToyotaCan:
   def test_tries_pids_in_order_and_codes_have_no_status(self):
-    window = FakeEcu({bytes.fromhex("1381"): bytes.fromhex("7f1312"), bytes.fromhex("1380"): bytes.fromhex("5302 9a01 c123")})
+    window = FakeEcu({bytes.fromhex("1381"): bytes.fromhex("7f1312"), bytes.fromhex("1380"): bytes.fromhex("5302 9a01 c131")})
     result = dtc.scan_ecu(_link({(0x750, 0x90): window}), catalog.ecu("750/90"), DTC_TEXT)
     assert window.requests == [bytes.fromhex("1381"), bytes.fromhex("1380")]
     assert (result["status"], result["protocol"]) == ("ok", "toyota_can")
-    assert result["dtcs"] == [{"code": "B1A01", "status": None, "text": "", "guess": False},
-                              {"code": "U0123", "status": None, "text": "", "guess": False}]
+    # B1A01 两张码表都没有 → 空说明；Toyota CAN 的码没有 FTB
+    assert result["dtcs"] == [{"code": "B1A01", "status": None, "text": ""},
+                              {"code": "U0131", "status": None, "text": "与动力转向控制模块通信丢失"}]
 
   def test_silent_pid_does_not_stop_the_next_one(self):
     window = FakeEcu({bytes.fromhex("1380"): bytes.fromhex("5301 9a01")})   # 13 81 无响应
