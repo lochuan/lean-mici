@@ -244,7 +244,7 @@ def main(demo=False):
   # messaging
   pub_socks = ["modelV2", "drivingModelData", "cameraOdometry", "modelDataV2SP"]
   pm = PubMaster(pub_socks)
-  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "carControl", "lateralDelay"])
+  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "carControl", "lateralDelay", "controlsState"])
   # 04 号 C-3：bigModelReply 独立订阅——latch 读线程收帧即盖到达时刻，主循环不碰 sm 的 updated 语义
   sm_big = SubMaster(["bigModelReply"])
   latch = BigReplyLatch(sm_big, warmup_replies=BIG_WARMUP_FRAMES)
@@ -383,6 +383,8 @@ def main(demo=False):
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
 
+      if not sm['carControl'].latActive:
+        prev_action.desiredCurvature = sm['controlsState'].curvature
       frame = select_frame(
         model_output, latch=latch, enabled=bigmodel_enabled, run_count=run_count,
         timestamp_eof=meta_main.timestamp_eof, deadline_after_eof_ms=BIG_REPLY_DEADLINE_MS,

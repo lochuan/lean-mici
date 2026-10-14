@@ -139,7 +139,7 @@ def model_replay(lr, frs):
   # modeld is using frame pairs
   camera_states = {"narrowRoadCameraState", "wideRoadCameraState"}
   modeld_logs = trim_logs(lr, START_FRAME, END_FRAME, camera_states,
-                          {"narrowRoadEncodeIdx", "wideRoadEncodeIdx", "carParams", "carState", "carControl", "can"})
+                          {"narrowRoadEncodeIdx", "wideRoadEncodeIdx", "carParams", "carState", "carControl", "controlsState", "can"})
 
   if not SEND_EXTRA_INPUTS:
     modeld_logs = [msg for msg in modeld_logs if msg.which() != 'extrinsicsCalibration']
