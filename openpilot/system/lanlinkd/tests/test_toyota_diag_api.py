@@ -199,55 +199,20 @@ class TestDtcEndpoints:
 
 # ---- 实时数据 ----
 
-def _pid(id_, **fields):
-  base = {"id": id_, "name": {"en": f"pid{id_}"}, "hdr": "7E0", "sub": None, "cmd": "2104", "type": 1, "sbi": 0, "dl": 1,
-          "bit": 0, "mul": 1.0, "div": 1.0, "ofs": 0.0, "signed": False, "formula": "", "unit": "km/h"}
-  return {**base, **fields}
-
-
-PID_PROFILES = [
-  {"id": "new", "name": "2016+", "pids": [_pid(1), _pid(2, hdr="750", sub="40", cmd="221001"), _pid(3, type=3)]},
-  {"id": "old", "name": "2009-2015", "pids": [_pid(5)]},
-]
-
-
-def make_pid_api(tmp_path, vin=""):
-  engine = FakeEcu({bytes.fromhex("2104"): bytes.fromhex("6104 2a")})
-  link = DiagLink(FakePanda({(0x7E0, None): engine}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
-  return toyota_diag_api.ToyotaDiagApi(ActiveSession(link), str(tmp_path), pid_profiles=lambda: PID_PROFILES,
-                                       vin=lambda: vin, default_profile_id=lambda v: "old" if v else "new")
-
-
-class TestPidEndpoints:
-  def test_catalog_groups_readable_pids_by_ecu(self, tmp_path):
-    status, body = make_pid_api(tmp_path).pids_get()
-    assert status == 200
-    assert body["profile"] == {"id": "new", "name": "2016+"}
-    assert body["profiles"] == [{"id": "new", "name": "2016+"}, {"id": "old", "name": "2009-2015"}]
-    assert [g["ecu"].split()[0] for g in body["groups"]] == ["7E0", "750/40"]
-    assert body["groups"][0]["pids"] == [{"id": 1, "name": "pid1", "unit": "km/h"}]   # 动作 PID 3 不出现
-
-  def test_default_profile_follows_vin(self, tmp_path):
-    assert make_pid_api(tmp_path, vin="JT...").pids_get()[1]["profile"]["id"] == "old"
-
-  def test_select_profile(self, tmp_path):
-    api = make_pid_api(tmp_path)
-    assert api.pids_select_profile({"id": "old"}) == (204, None)
-    assert api.pids_get()[1]["profile"]["id"] == "old"
-    assert api.pids_select_profile({"id": "nope"})[0] == 400
-
+class TestLiveEndpoints:
   def test_read_values(self, tmp_path):
-    status, body = make_pid_api(tmp_path).pids_read({"ids": [1]})
+    engine = FakeUdsEcu.from_probe(PROBE, "700", None)
+    _, api = make_active_api(tmp_path, ecus={(0x700, None): engine})
+    status, body = api.live_read({"keys": ["car_tool_mileage", "car_tool_mileage_unit"]})
     assert status == 200
-    assert body == {"values": [{"id": 1, "value": 42, "text": "42"}]}
+    assert body == {"values": [{"key": "car_tool_mileage", "value": 13875, "text": "13875"},
+                               {"key": "car_tool_mileage_unit", "value": 1, "text": "公里"}]}
 
-  @pytest.mark.parametrize("body", [{}, {"ids": []}, {"ids": [True]}, {"ids": ["1"]}, {"ids": list(range(41))}])
-  def test_read_rejects_bad_ids(self, tmp_path, body):
-    assert make_pid_api(tmp_path).pids_read(body)[0] == 400
-
-  def test_action_pid_cannot_be_read(self, tmp_path):
-    _, body = make_pid_api(tmp_path).pids_read({"ids": [3]})
-    assert body["values"][0]["value"] is None
+  @pytest.mark.parametrize("request_body", [{}, {"keys": []}, {"keys": "car_tool_mileage"}, {"keys": [1]},
+                                            {"keys": ["nope"]}, {"keys": ["car_tool_mileage"] * 41}])
+  def test_rejects_bad_keys(self, tmp_path, request_body):
+    _, api = make_active_api(tmp_path)
+    assert api.live_read(request_body)[0] == 400
 
 
 class TestOpenPandaLink:

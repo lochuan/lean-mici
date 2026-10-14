@@ -57,10 +57,10 @@ class TestRequiresSession:
     ("post", "/api/toyota/backups/0123456789ab/restore"),
     ("post", "/api/toyota/dtc/scan"),
     ("post", "/api/toyota/dtc/clear"),
-    ("post", "/api/toyota/pids/read"),
+    ("post", "/api/toyota/live/read"),
   ])
   def test_bus_operations_need_diag_mode(self, app, method, path):
-    _, r = getattr(app.test_client, method)(path, json={"ecu": "750/40", "value": 0, "before": "00", "ecus": ["750/40"], "ids": [1]})
+    _, r = getattr(app.test_client, method)(path, json={"ecu": "750/40", "value": 0, "before": "00", "ecus": ["750/40"], "keys": ["car_tool_mileage"]})
     assert r.status in (404, 409)
     assert "error" in r.json
 
@@ -77,13 +77,3 @@ class TestCatalogRoute:
     assert r.status == 200
     assert len(r.json["settings"]) == 130
 
-
-class TestPidCatalogRoutes:
-  def test_catalog_and_profile_switch_work_without_session(self, app):
-    _, r = app.test_client.get("/api/toyota/pids")
-    assert r.status == 200
-    other = next(p["id"] for p in r.json["profiles"] if p["id"] != r.json["profile"]["id"])
-    _, r = app.test_client.put("/api/toyota/pids/profile", json={"id": other})
-    assert r.status == 204
-    _, r = app.test_client.get("/api/toyota/pids")
-    assert r.json["profile"]["id"] == other

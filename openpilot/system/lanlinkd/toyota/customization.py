@@ -4,7 +4,7 @@
 - Toyota CAN ECU（车窗类）：A8 03 掩码表 → 21 id 读压缩数据并按掩码展开；写 3B id <展开数据>，期望 7B id。
 - 写入一律先备份、写后回读校验；ECU 协议写死在目录里（catalog.load_sienna）。
 """
-from openpilot.system.lanlinkd.toyota import coding
+from openpilot.system.lanlinkd.toyota import catalog, coding
 from openpilot.system.lanlinkd.toyota.link import MalformedResponseError, NoResponseError
 
 
@@ -28,10 +28,6 @@ def _read_error_text(exc: Exception) -> str:
   if isinstance(exc, MalformedResponseError):
     return "应答异常"
   return f"NRC {exc.nrc:02X}" if getattr(exc, "nrc", None) is not None else "应答格式不符"
-
-
-def ecu_address(ecu: dict) -> tuple[int, int | None]:
-  return int(ecu["tx"], 16), int(ecu["sub"], 16) if ecu["sub"] else None
 
 
 def _positive(link, address: tuple[int, int | None], request: bytes, echo_len: int) -> bytes:
@@ -118,7 +114,7 @@ def scan_ecu(link, ecu: dict, settings: list[dict]) -> dict:
   返回 {ecu, status, items: [{key, value, raw}], total, supported, read, readError?, malformedReason?}；
   status：offline（3E 无响应）/ malformed（应答不符合 ISO-TP）/ ok。raw 是 UDS 的整段 payload 或 CAN 的展开数据。
   """
-  address = ecu_address(ecu)
+  address = catalog.ecu_address(ecu)
   report = {"ecu": ecu["id"], "status": "ok", "items": [], "total": len(settings), "supported": 0, "read": 0}
   try:
     link.request(*address, b"\x3e")
@@ -196,7 +192,7 @@ def _write_verified(link, address, ecu: dict, setting: dict, before: bytes, afte
 
 def write_setting(link, ecu: dict, setting: dict, value: int, expected_before: str, backups) -> dict:
   """expected_before：扫描时的 raw；ECU 里的数据变了就不写（StaleDataError）。"""
-  address = ecu_address(ecu)
+  address = catalog.ecu_address(ecu)
   before = _read_payload(link, address, ecu, setting)
   if before.hex() != expected_before.lower():
     raise StaleDataError(f"ECU 当前数据 {before.hex()} 与扫描时 {expected_before} 不一致")
@@ -206,7 +202,7 @@ def write_setting(link, ecu: dict, setting: dict, value: int, expected_before: s
 
 def restore_setting(link, ecu: dict, setting: dict, backup: dict, backups) -> dict:
   """恢复也是写入：先把当前数据另存一份备份，再写回备份数据并回读校验；原备份标为已恢复。"""
-  address = ecu_address(ecu)
+  address = catalog.ecu_address(ecu)
   current = _read_payload(link, address, ecu, setting)
   result = _write_verified(link, address, ecu, setting, current, bytes.fromhex(backup["data"]), backups)
   backups.mark_restored(backup["id"])

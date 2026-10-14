@@ -7,7 +7,6 @@ import subprocess
 from collections.abc import Callable
 
 from openpilot.common.swaglog import cloudlog
-from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd.toyota import catalog, coding, customization, dtc, live_data
 from openpilot.system.lanlinkd.toyota.backups import BackupStore
 from openpilot.system.lanlinkd.toyota.link import MalformedResponseError, NoResponseError
@@ -15,8 +14,7 @@ from openpilot.system.lanlinkd.toyota.session import DiagSession, SessionError, 
 
 BACKUP_DIR = "/data/lanlink/toyota_backups"
 IDLE_CHECK_PERIOD_S = 10
-PID_READ_LIMIT = 40
-COMPUTED_GROUP = "计算值"
+LIVE_READ_LIMIT = 40
 
 
 def _process_alive(cmd: list[str]) -> bool:
@@ -48,7 +46,7 @@ def create(params, status_snapshot: Callable[[], dict]) -> "ToyotaDiagApi":
   session = DiagSession(params, open_link=open_panda_link, pandad_running=pandad_running,
                         is_parked=lambda: car_is_parked(status_snapshot()))
   session.reset_on_startup()
-  return ToyotaDiagApi(session, BACKUP_DIR, vin=lambda: vehicle_api.car_vin(params))
+  return ToyotaDiagApi(session, BACKUP_DIR)
 
 
 class RequestError(Exception):
@@ -108,10 +106,6 @@ def _value_allowed(setting: dict, value) -> bool:
   return any(o["value"] == value for o in setting["options"])
 
 
-def _pid_group(item: dict) -> str:
-  return catalog.ecu_name(item["hdr"].upper(), item["sub"]) if item["cmd"] else COMPUTED_GROUP
-
-
 def _catalog_ecu(body: dict) -> dict:
   ecu = catalog.ecu(body.get("ecu")) if isinstance(body.get("ecu"), str) else None
   if ecu is None:
@@ -120,16 +114,9 @@ def _catalog_ecu(body: dict) -> dict:
 
 
 class ToyotaDiagApi:
-  def __init__(self, session: DiagSession, backup_dir: str,
-               pid_profiles: Callable[[], list[dict]] = catalog.pid_profiles,
-               vin: Callable[[], str] = lambda: "",
-               default_profile_id: Callable[[str], str] = live_data.default_profile_id):
+  def __init__(self, session: DiagSession, backup_dir: str):
     self.session = session
     self.backups = BackupStore(backup_dir)
-    self._pid_profiles = pid_profiles
-    self._vin = vin
-    self._default_profile_id = default_profile_id
-    self._pid_profile_id: str | None = None  # 用户手动选的配置；None = 按 VIN 年份
 
   def idle_watchdog(self, exit_event) -> None:
     """后台线程：空闲超时自动退出诊断模式；lanlinkd 退出时也退出，把 pandad 还回去。"""
@@ -210,34 +197,12 @@ class ToyotaDiagApi:
     return _guarded(clear)
 
   # ---- 实时数据 ----
-  def _pid_profile(self) -> dict:
-    profiles = self._pid_profiles()
-    profile_id = self._pid_profile_id or self._default_profile_id(self._vin())
-    return next((p for p in profiles if p["id"] == profile_id), profiles[0])
-
-  def pids_get(self):
-    profile = self._pid_profile()
-    groups: dict[str, list[dict]] = {}
-    for item in live_data.readable_pids(profile["pids"]):
-      groups.setdefault(_pid_group(item), []).append({"id": item["id"], "name": catalog.text(item["name"]), "unit": item["unit"]})
-    return 200, {"profile": {"id": profile["id"], "name": profile["name"]},
-                 "profiles": [{"id": p["id"], "name": p["name"]} for p in self._pid_profiles()],
-                 "groups": [{"ecu": ecu, "pids": pids} for ecu, pids in groups.items()]}
-
-  def pids_select_profile(self, body: dict):
-    def select():
-      profile_id = body.get("id")
-      if not any(p["id"] == profile_id for p in self._pid_profiles()):
-        raise RequestError(400, "未知配置")
-      self._pid_profile_id = profile_id
-    return _guarded(select)
-
-  def pids_read(self, body: dict):
+  def live_read(self, body: dict):
     def read():
-      ids = body.get("ids")
-      if (not isinstance(ids, list) or not 0 < len(ids) <= PID_READ_LIMIT
-          or not all(isinstance(i, int) and not isinstance(i, bool) for i in ids)):
-        raise RequestError(400, f"ids 须为 1～{PID_READ_LIMIT} 个整数")
-      pids = {p["id"]: p for p in live_data.readable_pids(self._pid_profile()["pids"])}
-      return {"values": self.session.run(lambda link: live_data.read(link, pids, ids))}
+      keys = body.get("keys")
+      if (not isinstance(keys, list) or not 0 < len(keys) <= LIVE_READ_LIMIT
+          or not all(isinstance(k, str) and catalog.live_item(k) for k in keys)):
+        raise RequestError(400, f"keys 须为 1～{LIVE_READ_LIMIT} 个目录里的实时数据项")
+      items = [catalog.live_item(k) for k in keys]
+      return {"values": self.session.run(lambda link: live_data.read(link, items))}
     return _guarded(read)

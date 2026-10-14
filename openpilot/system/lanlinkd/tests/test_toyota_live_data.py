@@ -1,123 +1,84 @@
 import pytest
 
-from openpilot.system.lanlinkd.toyota import live_data as ld
+from openpilot.system.lanlinkd.toyota import catalog, live_data
 from openpilot.system.lanlinkd.toyota.link import DiagLink
 
-from .toyota_fakes import FakeEcu, FakePanda
+from .test_toyota_customization_flow import PROBE
+from .toyota_fakes import FakeEcu, FakePanda, FakeUdsEcu
+
+# 快照 carista/sienna_snapshot.json 的 probe_values.ready（与夹具同一次 Ready 探测）
+READY_VALUES = {
+  "car_tool_front_right_wheel_speed": 0.0, "car_tool_front_left_wheel_speed": 0.0, "car_tool_rear_right_wheel_speed": 0.0,
+  "car_tool_rear_left_wheel_speed": 0.0, "car_tool_compressor_speed": 0.0, "car_tool_inside_temp": 22.85,
+  "car_tool_battery_voltage_engine": 14.248, "car_tool_engine_speed": 0.0, "car_calculated_load": 0.0,
+  "car_tool_coolant_temp": 24.0,
+  **{f"car_ev_or_hybrid_battery_n1_block_{n}_voltage": v for n, v in enumerate(
+    [15.249, 15.199, 30.3394, 30.2698, 30.2588, 30.21, 30.2393, 30.2295, 30.2698, 30.3198, 15.199, 15.2197], start=1)},
+  **{f"car_ev_or_hybrid_battery_n1_block_{n}_internal_resistance": r for n, r in enumerate(
+    [23.0, 22.0, 22.0, 22.0, 22.0, 22.0, 22.0, 22.0, 22.0, 22.0, 23.0, 23.0], start=1)},
+  "car_tool_mileage": 13875, "car_tool_mileage_unit": 1,
+}
 
 
-def pid(id_, **fields):
-  base = {"id": id_, "name": {"en": f"pid{id_}"}, "hdr": "7E0", "sub": None, "cmd": "2104", "type": 1, "sbi": 0, "dl": 1,
-          "bit": 0, "mul": 1.0, "div": 1.0, "ofs": 0.0, "signed": False, "formula": "", "unit": ""}
-  return {**base, **fields}
+def _replay_car() -> DiagLink:
+  ecus = {}
+  for item in catalog.load_sienna()["live"]:
+    ecu = catalog.ecu(item["ecu"])
+    address = (int(ecu["tx"], 16), int(ecu["sub"], 16) if ecu["sub"] else None)
+    ecus.setdefault(address, FakeUdsEcu.from_probe(PROBE, ecu["tx"], ecu["sub"]))
+  return DiagLink(FakePanda(ecus), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
 
 
-class TestDefaultProfile:
-  @pytest.mark.parametrize("vin,profile", [
-    ("JTMB1RFV5ND123456", ld.PROFILE_2016_ON),     # N = 2022
-    ("JTDKN3DU0G0123456", ld.PROFILE_2016_ON),     # G = 2016
-    ("JTDKN3DU0F0123456", ld.PROFILE_2009_2015),   # F = 2015
-    ("JTDKN3DU090123456", ld.PROFILE_2009_2015),   # 9 = 2009
-    ("JTDKN3DU070123456", ld.PROFILE_UP_TO_2008),  # 7 = 2007
-    ("", ld.PROFILE_2016_ON),
-    ("bogus", ld.PROFILE_2016_ON),
-  ])
-  def test_by_model_year(self, vin, profile):
-    assert ld.default_profile_id(vin) == profile
+def _items(*keys: str) -> list[dict]:
+  return [catalog.live_item(k) for k in keys]
 
 
-class TestReadablePids:
-  def test_keeps_only_11bit_can_reads(self):
-    pids = [pid(1), pid(2, type=3, cmd="3029060101"), pid(3, hdr="DA62E0", cmd="2290"), pid(4, hdr="812AF0"),
-            pid(5, hdr="", cmd="01B4"), pid(6, hdr="750", sub="2A", cmd="221001"), pid(9, type=0, formula="")]
-    assert [p["id"] for p in ld.readable_pids(pids)] == [1, 6]
+class TestReplayedCar:
+  def test_every_item_matches_the_snapshot(self):
+    items = catalog.load_sienna()["live"]
+    assert len(items) == len(READY_VALUES) == 36
+    values = {v["key"]: v for v in live_data.read(_replay_car(), items)}
+    assert {k: v["value"] for k, v in values.items()} == pytest.approx(READY_VALUES, abs=1e-3)
+    assert all("error" not in v for v in values.values())
 
-  def test_computed_pid_needs_all_references_readable(self):
-    pids = [pid(1), pid(3, hdr="DA62E0"), pid(7, hdr="", cmd="", type=0, formula="PID(1)*2"),
-            pid(8, hdr="", cmd="", type=0, formula="PID(1)-PID(3)")]
-    assert [p["id"] for p in ld.readable_pids(pids)] == [1, 7]
+  def test_text_follows_precision_and_options(self):
+    values = {v["key"]: v["text"] for v in live_data.read(_replay_car(), _items(
+      "car_tool_inside_temp", "car_tool_battery_voltage_engine", "car_tool_mileage", "car_tool_mileage_unit"))}
+    assert values == {"car_tool_inside_temp": "22.85", "car_tool_battery_voltage_engine": "14.2",
+                      "car_tool_mileage": "13875", "car_tool_mileage_unit": "公里"}
 
-
-class TestResponseData:
-  def test_strips_sid_and_echo(self):
-    assert ld.response_data("2104", bytes.fromhex("6104 aabb")) == bytes.fromhex("aabb")
-    assert ld.response_data("220103", bytes.fromhex("620103 0102")) == bytes.fromhex("0102")
-    assert ld.response_data("01B4", bytes.fromhex("41b4 80")) == bytes.fromhex("80")
-
-  def test_negative_or_mismatched_is_none(self):
-    assert ld.response_data("2104", bytes.fromhex("7f2112")) is None
-    assert ld.response_data("220103", bytes.fromhex("620104 01")) is None
+  def test_items_sharing_a_did_cost_one_request(self):
+    link = _replay_car()
+    battery = [i for i in catalog.load_sienna()["live"] if i["ecu"] == "7D2"]
+    live_data.read(link, battery)
+    requests = [r for ecu in link.panda.ecus.values() for r in ecu.requests]
+    assert sorted(requests) == [bytes.fromhex("221809"), bytes.fromhex("221813")]
 
 
 class TestDecode:
-  def test_byte_set_big_endian_scaled(self):
-    assert ld.decode(pid(1, sbi=1, dl=2, mul=2.0, div=10.0, ofs=-40.0), bytes.fromhex("ff0102"), {}) == pytest.approx(
-      0x0102 * 2 / 10 - 40)
+  def test_signed_uses_mask_width(self):
+    fake = FakeUdsEcu({0x1001: bytes.fromhex("ff38")}, {})   # -200 × 0.01
+    link = DiagLink(FakePanda({(0x7C4, None): fake}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    assert live_data.read(link, _items("car_tool_inside_temp")) == [{"key": "car_tool_inside_temp", "value": -2.0, "text": "-2.00"}]
 
-  def test_byte_set_signed_and_div_zero_means_one(self):
-    assert ld.decode(pid(1, dl=2, signed=True, div=0.0), bytes.fromhex("fffe"), {}) == -2
-
-  def test_byte_set_dl_zero_reads_to_end_up_to_four_bytes(self):
-    assert ld.decode(pid(1, sbi=1, dl=0), bytes.fromhex("00 01 02 03 04 05"), {}) == 0x01020304
-
-  def test_bit_value_ignores_scaling(self):
-    item = pid(1, type=2, sbi=1, bit=7, mul=5.0, ofs=3.0)
-    assert ld.decode(item, bytes.fromhex("00 80"), {}) == 1
-    assert ld.decode(item, bytes.fromhex("00 7f"), {}) == 0
-
-  def test_formula_letters_index_data_from_zero(self):
-    assert ld.decode(pid(1, type=0, sbi=1, formula="(A*256+B)/1000", mul=9.0), bytes.fromhex("1234"), {}) == pytest.approx(
-      0x1234 / 1000)
-
-  def test_formula_two_letter_bytes(self):
-    data = bytes(range(30))
-    assert ld.decode(pid(1, type=0, formula="AA*256+AB"), data, {}) == 26 * 256 + 27
-
-  def test_short_response_raises(self):
-    with pytest.raises(ld.DecodeError):
-      ld.decode(pid(1, sbi=2, dl=2), bytes.fromhex("0102"), {})
-    with pytest.raises(ld.DecodeError):
-      ld.decode(pid(1, type=0, formula="C"), bytes.fromhex("0102"), {})
+  def test_unknown_option_value_falls_back_to_number(self):
+    fake = FakeUdsEcu({0x0103: bytes.fromhex("07003633")}, {})
+    link = DiagLink(FakePanda({(0x700, None): fake}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    assert live_data.read(link, _items("car_tool_mileage_unit"))[0]["text"] == "7"
 
 
-class TestFormatValue:
-  @pytest.mark.parametrize("value,text", [(1.0, "1"), (12.3456, "12.35"), (-0.5, "-0.5"), (123456.0, "123456")])
-  def test_trims_trailing_zeros(self, value, text):
-    assert ld.format_value(value) == text
+class TestErrors:
+  def test_each_failed_item_carries_its_own_error(self):
+    engine = FakeEcu({bytes.fromhex("221f42"): bytes.fromhex("7f2231"), bytes.fromhex("221f05"): bytes.fromhex("621f05")})
+    link = DiagLink(FakePanda({(0x700, None): engine}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    values = live_data.read(link, _items("car_tool_battery_voltage_engine", "car_tool_coolant_temp", "car_tool_inside_temp"))
+    assert values == [
+      {"key": "car_tool_battery_voltage_engine", "value": None, "text": "", "error": "NRC 31"},
+      {"key": "car_tool_coolant_temp", "value": None, "text": "", "error": "应答太短"},
+      {"key": "car_tool_inside_temp", "value": None, "text": "", "error": "无响应"},
+    ]
 
-
-# ---- 与 ECU 交互 ----
-
-def make_link(ecus):
-  panda = FakePanda({address: FakeEcu(responses) for address, responses in ecus.items()})
-  return panda, DiagLink(panda, elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
-
-
-class TestRead:
-  PIDS = {p["id"]: p for p in [
-    pid(1, sbi=0), pid(2, sbi=1, mul=2.0),
-    pid(3, hdr="750", sub="2A", cmd="221001", type=2, sbi=0, bit=0),
-    pid(4, hdr="7C0", cmd="2101"),
-    pid(5, hdr="", cmd="", type=0, formula="PID(1)+PID(2)"),
-  ]}
-
-  def test_groups_same_request_and_reports_errors_per_pid(self):
-    panda, link = make_link({(0x7E0, None): {bytes.fromhex("2104"): bytes.fromhex("6104 0a 14")},
-                             (0x750, 0x2A): {bytes.fromhex("221001"): bytes.fromhex("621001 01")}})
-    values = {v["id"]: v for v in ld.read(link, self.PIDS, [2, 1, 3, 4, 99])}
-    assert list(values) == [2, 1, 3, 4, 99]
-    assert values[1] == {"id": 1, "value": 10, "text": "10"}
-    assert values[2]["value"] == 40
-    assert values[3]["value"] == 1
-    assert values[4]["value"] is None and "无响应" in values[4]["error"]
-    assert values[99]["value"] is None and values[99]["error"]
-    assert panda.ecus[(0x7E0, None)].requests == [bytes.fromhex("2104")]   # 同一请求只发一次
-
-  def test_computed_pid_reads_its_references(self):
-    _, link = make_link({(0x7E0, None): {bytes.fromhex("2104"): bytes.fromhex("6104 0a 14")}})
-    assert ld.read(link, self.PIDS, [5]) == [{"id": 5, "value": 50, "text": "50"}]
-
-  def test_negative_response_is_an_error(self):
-    _, link = make_link({(0x7E0, None): {bytes.fromhex("2104"): bytes.fromhex("7f2131")}})
-    value = ld.read(link, self.PIDS, [1])[0]
-    assert value["value"] is None and "7f2131" in value["error"]
+  def test_malformed_response(self):
+    garbled = FakeEcu({bytes.fromhex("221809"): b"\x62\x18\x09" + bytes(24)}, misnumbered_frames=True)
+    link = DiagLink(FakePanda({(0x7D2, None): garbled}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    assert live_data.read(link, _items("car_ev_or_hybrid_battery_n1_block_1_voltage"))[0]["error"] == "应答异常"

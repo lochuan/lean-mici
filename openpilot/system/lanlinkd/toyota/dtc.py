@@ -6,16 +6,13 @@
 - 码串：首字节高 2 位 → PCBU，其余照抄十六进制；UDS 码再加 -FTB（如 U0131-87）。
 - 无响应 / 应答异常 / 负响应都按 ECU 记下返回，不抛出。
 """
+from openpilot.system.lanlinkd.toyota import catalog
 from openpilot.system.lanlinkd.toyota.link import MalformedResponseError, NoResponseError
 
 UDS_READ = bytes.fromhex("19028D")
 CAN_READ_PIDS = (0x81, 0x80, 0xB0)
 CLEAR = {"uds": bytes.fromhex("14FFFFFF"), "toyota_can": b"\x14"}
 NO_CODE = b"\x00\x00\x00"
-
-
-def ecu_address(ecu: dict) -> tuple[int, int | None]:
-  return int(ecu["tx"], 16), int(ecu["sub"], 16) if ecu["sub"] else None
 
 
 def decode_code(raw: bytes) -> str:
@@ -49,7 +46,7 @@ def _nrc_text(response: bytes) -> str:
 
 def _read(link, ecu: dict) -> tuple[list[tuple[str, int | None]] | None, str]:
   """返回 (码列表, 错误)；码列表为 None 表示 ECU 拒绝了所有读码请求。"""
-  address = ecu_address(ecu)
+  address = catalog.ecu_address(ecu)
   if ecu["protocol"] == "uds":
     attempts = [(UDS_READ, 2, _parse_uds)]
   else:
@@ -83,7 +80,7 @@ def scan_ecu(link, ecu: dict, dtc_text: dict) -> dict:
 def clear(link, ecu: dict) -> dict:
   request = CLEAR[ecu["protocol"]]
   try:
-    response = link.request(*ecu_address(ecu), request)
+    response = link.request(*catalog.ecu_address(ecu), request)
   except NoResponseError:
     return {"ecu": ecu["id"], "ok": False, "error": "无响应"}
   except MalformedResponseError:

@@ -254,14 +254,8 @@ class LanlinkApp:
   async def toyota_dtc_clear(self, request: Request) -> HTTPResponse:
     return await self._toyota("dtc_clear", self._body(request))
 
-  async def toyota_pids(self, request: Request) -> HTTPResponse:
-    return await self._toyota("pids_get")
-
-  async def toyota_pids_profile(self, request: Request) -> HTTPResponse:
-    return await self._toyota("pids_select_profile", self._body(request))
-
-  async def toyota_pids_read(self, request: Request) -> HTTPResponse:
-    return await self._toyota("pids_read", self._body(request))
+  async def toyota_live_read(self, request: Request) -> HTTPResponse:
+    return await self._toyota("live_read", self._body(request))
 
   # ---- status / capabilities / settings / logs ----
   async def status(self, request: Request) -> HTTPResponse:
@@ -346,9 +340,7 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/toyota/backups/<backup_id:str>/restore", "toyota_backup_restore"),
   ("POST", "/api/toyota/dtc/scan", "toyota_dtc_scan"),
   ("POST", "/api/toyota/dtc/clear", "toyota_dtc_clear"),
-  ("GET", "/api/toyota/pids", "toyota_pids"),
-  ("PUT", "/api/toyota/pids/profile", "toyota_pids_profile"),
-  ("POST", "/api/toyota/pids/read", "toyota_pids_read"),
+  ("POST", "/api/toyota/live/read", "toyota_live_read"),
   ("GET", "/api/status", "status"),
   ("GET", "/api/diagnostics", "diagnostics"),
   ("GET", "/api/bootstrap", "bootstrap"),
