@@ -1,4 +1,8 @@
-"""懒加载 data/*.json（由 Car Scanner APK 的定制项/ECU 表/故障码描述/PID 配置转换而来）。"""
+"""懒加载 data/*.json。
+
+sienna_catalog.json：Sienna 4 代目录（Carista 数据源，tools/lanlink/build_toyota_sienna_catalog.py 生成）。
+其余文件由 Car Scanner APK 转换而来，迁移完成后删除。
+"""
 import json
 import os
 from functools import cache
@@ -51,3 +55,26 @@ def group_title(group: str) -> str:
 
 def pid_profiles() -> list[dict]:
   return load("pid_profiles")
+
+
+# ---- Sienna 4 代目录 ----
+
+def load_sienna() -> dict:
+  return load("sienna_catalog")
+
+
+@cache
+def _by_key(section: str, key_field: str) -> dict[str, dict]:
+  return {entry[key_field]: entry for entry in load_sienna()[section]}
+
+
+def ecu(ecu_id: str) -> dict | None:
+  return _by_key("ecus", "id").get(ecu_id)
+
+
+def setting(key: str) -> dict | None:
+  return _by_key("settings", "key").get(key)
+
+
+def live_item(key: str) -> dict | None:
+  return _by_key("live", "key").get(key)

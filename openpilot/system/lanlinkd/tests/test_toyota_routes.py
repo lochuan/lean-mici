@@ -72,6 +72,13 @@ class TestRequiresSession:
     assert r.json == {"backups": []}
 
 
+class TestCatalogRoute:
+  def test_catalog_works_without_session(self, app):
+    _, r = app.test_client.get("/api/toyota/catalog")
+    assert r.status == 200
+    assert len(r.json["settings"]) == 130
+
+
 class TestPidCatalogRoutes:
   def test_catalog_and_profile_switch_work_without_session(self, app):
     _, r = app.test_client.get("/api/toyota/pids")

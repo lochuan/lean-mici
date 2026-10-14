@@ -1,0 +1,4278 @@
+{
+ "ecus": [
+  {
+   "id": "7B0",
+   "tx": "7B0",
+   "sub": null,
+   "name": "ABS 防抱死制动",
+   "protocol": "uds"
+  },
+  {
+   "id": "7C4",
+   "tx": "7C4",
+   "sub": null,
+   "name": "空调系统",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/2A",
+   "tx": "750",
+   "sub": "2A",
+   "name": "胎压监测",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/40",
+   "tx": "750",
+   "sub": "40",
+   "name": "车身舒适系统",
+   "protocol": "uds"
+  },
+  {
+   "id": "7C0",
+   "tx": "7C0",
+   "sub": null,
+   "name": "组合仪表",
+   "protocol": "uds"
+  },
+  {
+   "id": "730",
+   "tx": "730",
+   "sub": null,
+   "name": "电动助力转向",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/67",
+   "tx": "750",
+   "sub": "67",
+   "name": "驻车辅助雷达",
+   "protocol": "uds"
+  },
+  {
+   "id": "700",
+   "tx": "700",
+   "sub": null,
+   "name": "发动机",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/C7",
+   "tx": "750",
+   "sub": "C7",
+   "name": "车载通信（Telematics）",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/B5",
+   "tx": "750",
+   "sub": "B5",
+   "name": "智能钥匙与进入",
+   "protocol": "uds"
+  },
+  {
+   "id": "7D0",
+   "tx": "7D0",
+   "sub": null,
+   "name": "导航/多媒体主机",
+   "protocol": "uds"
+  },
+  {
+   "id": "780",
+   "tx": "780",
+   "sub": null,
+   "name": "安全气囊",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/7A",
+   "tx": "750",
+   "sub": "7A",
+   "name": "车道保持辅助",
+   "protocol": "uds"
+  },
+  {
+   "id": "791",
+   "tx": "791",
+   "sub": null,
+   "name": "预碰撞系统（PCS）",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/E9",
+   "tx": "750",
+   "sub": "E9",
+   "name": "电源控制",
+   "protocol": "uds"
+  },
+  {
+   "id": "7D2",
+   "tx": "7D2",
+   "sub": null,
+   "name": "电驱动控制（混动 ECU）",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/6D",
+   "tx": "750",
+   "sub": "6D",
+   "name": "前视摄像头",
+   "protocol": "uds"
+  },
+  {
+   "id": "724",
+   "tx": "724",
+   "sub": null,
+   "name": "前电动机/发电机（MG）",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/B8",
+   "tx": "750",
+   "sub": "B8",
+   "name": "电动尾门",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/7C",
+   "tx": "750",
+   "sub": "7C",
+   "name": "智能远光（AHB）",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/41",
+   "tx": "750",
+   "sub": "41",
+   "name": "盲区监测（BSM）",
+   "protocol": "uds"
+  },
+  {
+   "id": "790",
+   "tx": "790",
+   "sub": null,
+   "name": "全速自适应巡航",
+   "protocol": "uds"
+  },
+  {
+   "id": "784",
+   "tx": "784",
+   "sub": null,
+   "name": "车载通信（Telematics）",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/AD",
+   "tx": "750",
+   "sub": "AD",
+   "name": "天窗",
+   "protocol": "toyota_can"
+  },
+  {
+   "id": "7A1",
+   "tx": "7A1",
+   "sub": null,
+   "name": "电动助力转向",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/7B",
+   "tx": "750",
+   "sub": "7B",
+   "name": "全景影像",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/90",
+   "tx": "750",
+   "sub": "90",
+   "name": "驾驶席车窗电机",
+   "protocol": "toyota_can"
+  },
+  {
+   "id": "750/D3",
+   "tx": "750",
+   "sub": "D3",
+   "name": "特殊车型辅助模块",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/91",
+   "tx": "750",
+   "sub": "91",
+   "name": "副驾驶席车窗电机",
+   "protocol": "toyota_can"
+  },
+  {
+   "id": "750/42",
+   "tx": "750",
+   "sub": "42",
+   "name": "盲区监测（从机）",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/92",
+   "tx": "750",
+   "sub": "92",
+   "name": "右后车窗电机",
+   "protocol": "toyota_can"
+  },
+  {
+   "id": "750/93",
+   "tx": "750",
+   "sub": "93",
+   "name": "左后车窗电机",
+   "protocol": "toyota_can"
+  },
+  {
+   "id": "750/A4",
+   "tx": "750",
+   "sub": "A4",
+   "name": "右后滑门",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/A7",
+   "tx": "750",
+   "sub": "A7",
+   "name": "左后滑门",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/EC",
+   "tx": "750",
+   "sub": "EC",
+   "name": "主车窗开关",
+   "protocol": "toyota_can"
+  },
+  {
+   "id": "7B3",
+   "tx": "7B3",
+   "sub": null,
+   "name": "转向角传感器",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/0F",
+   "tx": "750",
+   "sub": "0F",
+   "name": "前毫米波雷达",
+   "protocol": "uds"
+  },
+  {
+   "id": "705",
+   "tx": "705",
+   "sub": null,
+   "name": "后电动机（MGR）",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/4A",
+   "tx": "750",
+   "sub": "4A",
+   "name": "电源集成模块 1",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/4D",
+   "tx": "750",
+   "sub": "4D",
+   "name": "配电盒",
+   "protocol": "uds"
+  },
+  {
+   "id": "750/29",
+   "tx": "750",
+   "sub": "29",
+   "name": "制动助力器",
+   "protocol": "uds"
+  }
+ ],
+ "categories": [
+  {
+   "id": "DINGS_AND_WARNINGS",
+   "name": "提示音与警告",
+   "icon": "bell"
+  },
+  {
+   "id": "DRIVER_ASSIST",
+   "name": "驾驶辅助",
+   "icon": "shield-check"
+  },
+  {
+   "id": "HEATER_AC",
+   "name": "空调",
+   "icon": "snowflake"
+  },
+  {
+   "id": "INSTR_DISPLAY_AND_NAV",
+   "name": "仪表、显示与导航",
+   "icon": "gauge"
+  },
+  {
+   "id": "LIGHTS_AUTOMATIC",
+   "name": "自动灯光",
+   "icon": "sun-moon"
+  },
+  {
+   "id": "LIGHTS_EXTERIOR_LIGHTS",
+   "name": "车外灯光",
+   "icon": "lightbulb"
+  },
+  {
+   "id": "LIGHTS_INTERIOR_LIGHTS",
+   "name": "车内灯光",
+   "icon": "lamp-ceiling"
+  },
+  {
+   "id": "LOCKING_AUTOMATIC",
+   "name": "自动锁车",
+   "icon": "lock"
+  },
+  {
+   "id": "LOCKING_BEEP_AND_BLINK",
+   "name": "锁车提示（灯光与鸣笛）",
+   "icon": "megaphone"
+  },
+  {
+   "id": "LOCKING_DOORS_AND_ALARM",
+   "name": "车门解锁与防盗",
+   "icon": "siren"
+  },
+  {
+   "id": "LOCKING_SMART_KEY",
+   "name": "智能钥匙",
+   "icon": "key-round"
+  },
+  {
+   "id": "MIRRORS",
+   "name": "后视镜",
+   "icon": "flip-horizontal-2"
+  },
+  {
+   "id": "PARKING_SENSORS",
+   "name": "驻车辅助雷达",
+   "icon": "radar"
+  },
+  {
+   "id": "SEATS_AND_STEERING_WHEEL",
+   "name": "座椅与方向盘",
+   "icon": "armchair"
+  },
+  {
+   "id": "SLIDING_DOORS",
+   "name": "电动滑门",
+   "icon": "door-open"
+  },
+  {
+   "id": "TRUNK",
+   "name": "电动尾门",
+   "icon": "package-open"
+  },
+  {
+   "id": "WINDOWS_AND_SUNROOF",
+   "name": "车窗与天窗",
+   "icon": "panel-top"
+  },
+  {
+   "id": "WIPERS_AND_WASHER",
+   "name": "雨刮与清洗",
+   "icon": "cloud-rain"
+  }
+ ],
+ "settings": [
+  {
+   "key": "car_setting_warn_headlights_on_door_open",
+   "category": "DINGS_AND_WARNINGS",
+   "name": "开门时大灯未关提醒",
+   "ecu": "750/40",
+   "did": "2270",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_warn_on_key_in_car",
+   "category": "DINGS_AND_WARNINGS",
+   "name": "钥匙遗留车内提示音",
+   "ecu": "750/B5",
+   "did": "200C",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "20",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_remote_low_battery_warning",
+   "category": "DINGS_AND_WARNINGS",
+   "name": "遥控器电量低提醒",
+   "ecu": "750/B5",
+   "did": "200C",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "80",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rcta",
+   "category": "DRIVER_ASSIST",
+   "name": "后方横向来车预警（RCTA）",
+   "ecu": "750/41",
+   "did": "2042",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "01",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "启用"
+    },
+    {
+     "value": 1,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "ecu_name_blind_spot_monitor",
+   "category": "DRIVER_ASSIST",
+   "name": "盲区监测（BSM）",
+   "ecu": "750/41",
+   "did": "2041",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "01",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "启用"
+    },
+    {
+     "value": 1,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_eco_mode_control",
+   "category": "HEATER_AC",
+   "name": "ECO 模式下空调可自动开关压缩机",
+   "ecu": "7C4",
+   "did": "2005",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_fan_speed_reaches_target",
+   "category": "HEATER_AC",
+   "name": "风量达到目标值的速度",
+   "ecu": "7C4",
+   "did": "2007",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "正常"
+    },
+    {
+     "value": 1,
+     "label": "快"
+    },
+    {
+     "value": 2,
+     "label": "慢"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_auto_turn_on_ac_when_auto_button_pressed",
+   "category": "HEATER_AC",
+   "name": "按 AUTO 键时自动开启 A/C",
+   "ecu": "7C4",
+   "did": "200B",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_auto_turn_on_foot_def_when_auto_button_pressed",
+   "category": "HEATER_AC",
+   "name": "按 AUTO 键时自动开启脚部/除霜出风",
+   "ecu": "7C4",
+   "did": "2004",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_auto_increase_airflow_when_foot_def_on",
+   "category": "HEATER_AC",
+   "name": "除霜开启时自动加大风量",
+   "ecu": "7C4",
+   "did": "2003",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_auto_turn_when_recirculate_mode_when_ac_on",
+   "category": "HEATER_AC",
+   "name": "开启 A/C 时自动切换内循环",
+   "ecu": "7C4",
+   "did": "2001",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_temperature_dial_calibration",
+   "category": "HEATER_AC",
+   "name": "温度旋钮校准",
+   "ecu": "7C4",
+   "did": "2011",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 5,
+     "label": "-2 °C"
+    },
+    {
+     "value": 6,
+     "label": "-1 °C"
+    },
+    {
+     "value": 0,
+     "label": "标准"
+    },
+    {
+     "value": 1,
+     "label": "+1 °C"
+    },
+    {
+     "value": 2,
+     "label": "+2 °C"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_ambient_temperature_calibration",
+   "category": "HEATER_AC",
+   "name": "车外温度显示校准",
+   "ecu": "7C4",
+   "did": "2010",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 4,
+     "label": "-3 °C"
+    },
+    {
+     "value": 5,
+     "label": "-2 °C"
+    },
+    {
+     "value": 6,
+     "label": "-1 °C"
+    },
+    {
+     "value": 0,
+     "label": "标准"
+    },
+    {
+     "value": 1,
+     "label": "+1 °C"
+    },
+    {
+     "value": 2,
+     "label": "+2 °C"
+    },
+    {
+     "value": 3,
+     "label": "+3 °C"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_gauge_lights_dimming_sensitivity",
+   "category": "INSTR_DISPLAY_AND_NAV",
+   "name": "仪表灯调暗灵敏度",
+   "ecu": "750/40",
+   "did": "227E",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "最暗"
+    },
+    {
+     "value": 2,
+     "label": "较暗"
+    },
+    {
+     "value": 0,
+     "label": "标准"
+    },
+    {
+     "value": 3,
+     "label": "较亮"
+    },
+    {
+     "value": 4,
+     "label": "最亮"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_gauge_lights_undimming_sensitivity",
+   "category": "INSTR_DISPLAY_AND_NAV",
+   "name": "仪表灯恢复亮度灵敏度",
+   "ecu": "750/40",
+   "did": "227F",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "最暗"
+    },
+    {
+     "value": 2,
+     "label": "较暗"
+    },
+    {
+     "value": 0,
+     "label": "标准"
+    },
+    {
+     "value": 3,
+     "label": "较亮"
+    },
+    {
+     "value": 4,
+     "label": "最亮"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_driver_aids_when",
+   "category": "INSTR_DISPLAY_AND_NAV",
+   "name": "驾驶辅助图标显示时机",
+   "ecu": "750/40",
+   "did": "2350",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "从不"
+    },
+    {
+     "value": 1,
+     "label": "挂 P 挡时"
+    },
+    {
+     "value": 3,
+     "label": "始终"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_engine_start_indicator",
+   "category": "INSTR_DISPLAY_AND_NAV",
+   "name": "启动指示灯",
+   "ecu": "750/B5",
+   "did": "200C",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "08",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_odo_display_after_ign_off",
+   "category": "INSTR_DISPLAY_AND_NAV",
+   "name": "熄火后继续显示里程的时间",
+   "ecu": "7C0",
+   "did": "2002",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "30 秒"
+    },
+    {
+     "value": 1,
+     "label": "1 分钟"
+    },
+    {
+     "value": 2,
+     "label": "10 分钟"
+    },
+    {
+     "value": 3,
+     "label": "不显示"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_microphone_sensitivity",
+   "category": "INSTR_DISPLAY_AND_NAV",
+   "name": "麦克风灵敏度",
+   "ecu": "750/C7",
+   "did": "2005",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [],
+   "numeric": {
+    "min": 1,
+    "max": 11
+   },
+   "popular": false
+  },
+  {
+   "key": "car_setting_speaker_volume",
+   "category": "INSTR_DISPLAY_AND_NAV",
+   "name": "通话扬声器音量",
+   "ecu": "750/C7",
+   "did": "2006",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [],
+   "numeric": {
+    "min": 1,
+    "max": 14
+   },
+   "popular": false
+  },
+  {
+   "key": "car_setting_afs_when_vehicle_started",
+   "category": "LIGHTS_AUTOMATIC",
+   "name": "启动车辆时自动开启 AFS 随动转向大灯",
+   "ecu": "750/40",
+   "did": "2271",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_auto_lights_sensitivity",
+   "category": "LIGHTS_AUTOMATIC",
+   "name": "自动大灯感应灵敏度",
+   "ecu": "750/40",
+   "did": "2340",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "最暗"
+    },
+    {
+     "value": 2,
+     "label": "较暗"
+    },
+    {
+     "value": 0,
+     "label": "标准"
+    },
+    {
+     "value": 3,
+     "label": "较亮"
+    },
+    {
+     "value": 4,
+     "label": "最亮"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_comfort_turn_signal_count",
+   "category": "LIGHTS_EXTERIOR_LIGHTS",
+   "name": "变道转向灯闪烁次数",
+   "ecu": "7C0",
+   "did": "2042",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "关闭"
+    },
+    {
+     "value": 1,
+     "label": "3 次"
+    },
+    {
+     "value": 2,
+     "label": "4 次"
+    },
+    {
+     "value": 3,
+     "label": "5 次"
+    },
+    {
+     "value": 4,
+     "label": "6 次"
+    },
+    {
+     "value": 5,
+     "label": "7 次"
+    }
+   ],
+   "numeric": null,
+   "popular": true
+  },
+  {
+   "key": "car_setting_turn_signal_click_volume",
+   "category": "LIGHTS_EXTERIOR_LIGHTS",
+   "name": "转向灯提示音音量",
+   "ecu": "7C0",
+   "did": "2043",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "小"
+    },
+    {
+     "value": 0,
+     "label": "中"
+    },
+    {
+     "value": 2,
+     "label": "大"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_exterior_light_control",
+   "category": "LIGHTS_EXTERIOR_LIGHTS",
+   "name": "车外灯光控制",
+   "ecu": "750/40",
+   "did": "2313",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_exterior_light_on_when_approached",
+   "category": "LIGHTS_EXTERIOR_LIGHTS",
+   "name": "携钥匙靠近时点亮车外灯（迎宾灯）",
+   "ecu": "750/40",
+   "did": "2220",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": true
+  },
+  {
+   "key": "car_setting_exterior_light_on_when_unlocked",
+   "category": "LIGHTS_EXTERIOR_LIGHTS",
+   "name": "解锁时点亮车外灯",
+   "ecu": "750/40",
+   "did": "2221",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_coming_home_duration",
+   "category": "LIGHTS_EXTERIOR_LIGHTS",
+   "name": "回家照明时长",
+   "ecu": "750/40",
+   "did": "2312",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "短"
+    },
+    {
+     "value": 0,
+     "label": "标准"
+    },
+    {
+     "value": 2,
+     "label": "长"
+    }
+   ],
+   "numeric": null,
+   "popular": true
+  },
+  {
+   "key": "car_setting_marker_lights_with_unlock",
+   "category": "LIGHTS_EXTERIOR_LIGHTS",
+   "name": "遥控解锁时点亮示宽灯",
+   "ecu": "750/40",
+   "did": "2275",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_interior_lights_with_acc_off",
+   "category": "LIGHTS_INTERIOR_LIGHTS",
+   "name": "熄火时点亮室内灯",
+   "ecu": "750/40",
+   "did": "221C",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_interior_lights_with_unlock",
+   "category": "LIGHTS_INTERIOR_LIGHTS",
+   "name": "解锁车门时点亮室内灯",
+   "ecu": "750/40",
+   "did": "221B",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_interior_lights_with_smart",
+   "category": "LIGHTS_INTERIOR_LIGHTS",
+   "name": "智能钥匙靠近时点亮室内灯",
+   "ecu": "750/40",
+   "did": "221A",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_interior_lights_duration",
+   "category": "LIGHTS_INTERIOR_LIGHTS",
+   "name": "室内灯点亮时长",
+   "ecu": "750/40",
+   "did": "2310",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "短"
+    },
+    {
+     "value": 0,
+     "label": "标准"
+    },
+    {
+     "value": 2,
+     "label": "长"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_interior_footlight",
+   "category": "LIGHTS_INTERIOR_LIGHTS",
+   "name": "脚部照明灯（开门亮，行驶中暗）",
+   "ecu": "750/40",
+   "did": "222B",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_interior_lights_1",
+   "category": "LIGHTS_INTERIOR_LIGHTS",
+   "name": "室内灯 1",
+   "ecu": "750/40",
+   "did": "222C",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_interior_lights_2",
+   "category": "LIGHTS_INTERIOR_LIGHTS",
+   "name": "室内灯 2",
+   "ecu": "750/40",
+   "did": "222D",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_interior_lights_dim_when_driving",
+   "category": "LIGHTS_INTERIOR_LIGHTS",
+   "name": "行驶中微亮车门拉手及中控台照明（泛光灯）",
+   "ecu": "750/40",
+   "did": "2229",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_start_switch_light",
+   "category": "LIGHTS_INTERIOR_LIGHTS",
+   "name": "启动按钮照明",
+   "ecu": "750/B5",
+   "did": "2016",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "04",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_wireless_door_lock",
+   "category": "LOCKING_AUTOMATIC",
+   "name": "遥控锁/解锁车门",
+   "ecu": "750/40",
+   "did": "225A",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_auto_lock_when_moving",
+   "category": "LOCKING_AUTOMATIC",
+   "name": "行驶中自动落锁",
+   "ecu": "750/40",
+   "did": "2301",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_door_lock_with_shift",
+   "category": "LOCKING_AUTOMATIC",
+   "name": "挂入行车挡时自动落锁",
+   "ecu": "750/40",
+   "did": "2302",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_door_unlock_with_shift",
+   "category": "LOCKING_AUTOMATIC",
+   "name": "挂入 P 挡时自动解锁",
+   "ecu": "750/40",
+   "did": "2303",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_all_unlock_with_open",
+   "category": "LOCKING_AUTOMATIC",
+   "name": "打开驾驶席车门时解锁全部车门",
+   "ecu": "750/40",
+   "did": "2304",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_auto_relock_time",
+   "category": "LOCKING_AUTOMATIC",
+   "name": "解锁后未开门，自动重新上锁的时间",
+   "ecu": "750/40",
+   "did": "2332",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "30 秒"
+    },
+    {
+     "value": 1,
+     "label": "60 秒"
+    },
+    {
+     "value": 2,
+     "label": "120 秒"
+    }
+   ],
+   "numeric": null,
+   "popular": true
+  },
+  {
+   "key": "car_setting_blink_hazards_on_lock",
+   "category": "LOCKING_BEEP_AND_BLINK",
+   "name": "遥控锁车时双闪提示",
+   "ecu": "750/40",
+   "did": "2333",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_settings_unlock_all_doors_with_two_clicks_entry_operation",
+   "category": "LOCKING_DOORS_AND_ALARM",
+   "name": "智能进入：一次解锁驾驶席车门，两次解锁全部车门",
+   "ecu": "750/40",
+   "did": "2331",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_settings_unlock_all_doors_with_two_clicks_remote",
+   "category": "LOCKING_DOORS_AND_ALARM",
+   "name": "遥控器：按一次解锁驾驶席车门，按两次解锁全部车门",
+   "ecu": "750/40",
+   "did": "2330",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_settings_unlock_all_doors_with_two_key_spins_key",
+   "category": "LOCKING_DOORS_AND_ALARM",
+   "name": "机械钥匙：转一次解锁驾驶席车门，转两次解锁全部车门",
+   "ecu": "750/40",
+   "did": "2210",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_power_saving_time_key_out_of_range",
+   "category": "LOCKING_DOORS_AND_ALARM",
+   "name": "钥匙离开感应范围后进入省电模式的时间",
+   "ecu": "750/B5",
+   "did": "2016",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "02",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "标准时长"
+    },
+    {
+     "value": 1,
+     "label": "较短时长"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_touch_activation_over_threshold",
+   "category": "LOCKING_DOORS_AND_ALARM",
+   "name": "触摸感应连续锁/解锁的最多次数",
+   "ecu": "750/B5",
+   "did": "2016",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "10",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "不限次数"
+    },
+    {
+     "value": 1,
+     "label": "2 次"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_open_window_warning",
+   "category": "LOCKING_DOORS_AND_ALARM",
+   "name": "锁车时车窗未关提示音",
+   "ecu": "750/40",
+   "did": "224F",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_open_sunroof_warning",
+   "category": "LOCKING_DOORS_AND_ALARM",
+   "name": "锁车时天窗未关提示音",
+   "ecu": "750/40",
+   "did": "2250",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_warn_ignition_on_when_door_locked_by_entry_function",
+   "category": "LOCKING_DOORS_AND_ALARM",
+   "name": "电源未关时按门把手按钮锁车的警告",
+   "ecu": "750/B5",
+   "did": "200C",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "10",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_auto_arm_on_doors_closed",
+   "category": "LOCKING_DOORS_AND_ALARM",
+   "name": "关门且智能钥匙离开后自动设防",
+   "ecu": "750/B5",
+   "did": "2009",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "80",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_auto_arm_on_doors_closing",
+   "category": "LOCKING_DOORS_AND_ALARM",
+   "name": "电动尾门关闭且智能钥匙离开后自动设防",
+   "ecu": "750/B5",
+   "did": "2009",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "40",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_disarm_alarm_via_door_lock",
+   "category": "LOCKING_DOORS_AND_ALARM",
+   "name": "用机械钥匙开锁时解除防盗报警",
+   "ecu": "750/40",
+   "did": "2293",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_smart_key_system",
+   "category": "LOCKING_SMART_KEY",
+   "name": "智能钥匙系统",
+   "ecu": "750/B5",
+   "did": "2016",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "80",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "启用"
+    },
+    {
+     "value": 1,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_smart_key_system_entry_only",
+   "category": "LOCKING_SMART_KEY",
+   "name": "智能钥匙进入功能",
+   "ecu": "750/B5",
+   "did": "202D",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "启用"
+    },
+    {
+     "value": 4,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_door_touch_time_adjust",
+   "category": "LOCKING_SMART_KEY",
+   "name": "触摸开锁所需的最短触摸时间",
+   "ecu": "750/B5",
+   "did": "2007",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "关闭（不限）"
+    },
+    {
+     "value": 1,
+     "label": "短"
+    },
+    {
+     "value": 2,
+     "label": "中"
+    },
+    {
+     "value": 3,
+     "label": "长"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_smart_lock_delay",
+   "category": "LOCKING_SMART_KEY",
+   "name": "智能钥匙锁车后禁止重新开门的时间",
+   "ecu": "750/B5",
+   "did": "2003",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "0.5 秒"
+    },
+    {
+     "value": 1,
+     "label": "1.5 秒"
+    },
+    {
+     "value": 2,
+     "label": "2.5 秒"
+    },
+    {
+     "value": 3,
+     "label": "5 秒"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_smart_ignition_location",
+   "category": "LOCKING_SMART_KEY",
+   "name": "可启动车辆的智能钥匙位置",
+   "ecu": "750/B5",
+   "did": "2002",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "仅前后排座椅附近"
+    },
+    {
+     "value": 1,
+     "label": "车内任意位置"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_auto_fold_mirrors",
+   "category": "MIRRORS",
+   "name": "后视镜自动折叠（需电动折叠后视镜）",
+   "ecu": "750/40",
+   "did": "22B5",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "随电源开启"
+    },
+    {
+     "value": 2,
+     "label": "随车门锁止"
+    },
+    {
+     "value": 3,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": true
+  },
+  {
+   "key": "car_setting_park_support_speech_guidance",
+   "category": "PARKING_SENSORS",
+   "name": "驻车辅助语音提示",
+   "ecu": "750/67",
+   "did": "2107",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "80",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_parking_sensor_beep_volume",
+   "category": "PARKING_SENSORS",
+   "name": "驻车辅助雷达蜂鸣音量",
+   "ecu": "750/67",
+   "did": "2102",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "03",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "小"
+    },
+    {
+     "value": 2,
+     "label": "中"
+    },
+    {
+     "value": 3,
+     "label": "大"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_park_sensor_active_in_neutral",
+   "category": "PARKING_SENSORS",
+   "name": "空挡（N）时启用驻车辅助雷达",
+   "ecu": "750/67",
+   "did": "2104",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "80",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_pksa_auto_mute_function",
+   "category": "PARKING_SENSORS",
+   "name": "车辆驻稳后静音驻车辅助报警（PKSA）",
+   "ecu": "750/67",
+   "did": "2104",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "10",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "是"
+    },
+    {
+     "value": 1,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_pksa_auto_mute_judgement_function",
+   "category": "PARKING_SENSORS",
+   "name": "无障碍物时静音驻车辅助报警（PKSA）",
+   "ecu": "750/67",
+   "did": "2104",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "20",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "启用"
+    },
+    {
+     "value": 1,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_pksa_last_state",
+   "category": "PARKING_SENSORS",
+   "name": "记忆驻车辅助报警（PKSA）上次开关状态",
+   "ecu": "750/67",
+   "did": "2104",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "40",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_pksb_last_state",
+   "category": "PARKING_SENSORS",
+   "name": "记忆驻车辅助制动（PKSB）上次开关状态",
+   "ecu": "750/67",
+   "did": "2203",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "20",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "是"
+    },
+    {
+     "value": 1,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_park_sensor_front_center_range",
+   "category": "PARKING_SENSORS",
+   "name": "前中雷达探测距离",
+   "ecu": "750/67",
+   "did": "2101",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "80",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "短"
+    },
+    {
+     "value": 1,
+     "label": "长"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_front_corner_sensor_onset_range",
+   "category": "PARKING_SENSORS",
+   "name": "前角雷达探测距离",
+   "ecu": "750/67",
+   "did": "2101",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "40",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "短"
+    },
+    {
+     "value": 1,
+     "label": "长"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_park_sensor_rear_center_range",
+   "category": "PARKING_SENSORS",
+   "name": "后中雷达探测距离",
+   "ecu": "750/67",
+   "did": "2101",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "20",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "短"
+    },
+    {
+     "value": 1,
+     "label": "长"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_corner_sensor_onset_range",
+   "category": "PARKING_SENSORS",
+   "name": "后角雷达探测距离",
+   "ecu": "750/67",
+   "did": "2101",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "10",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "短"
+    },
+    {
+     "value": 1,
+     "label": "长"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_pksa_display_obstacles_when_moving_away",
+   "category": "PARKING_SENSORS",
+   "name": "驶离障碍物时仍显示障碍物（PKSA）",
+   "ecu": "750/67",
+   "did": "2105",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "80",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_pksb_stationary_objects",
+   "category": "PARKING_SENSORS",
+   "name": "驻车辅助制动（PKSB）：静止物体探测",
+   "ecu": "750/67",
+   "did": "2203",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "80",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "启用"
+    },
+    {
+     "value": 1,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_pksb_vehicles_from_rear",
+   "category": "PARKING_SENSORS",
+   "name": "驻车辅助制动（PKSB）：后方来车探测",
+   "ecu": "750/67",
+   "did": "2221",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "80",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "启用"
+    },
+    {
+     "value": 1,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_pksb_vehicles_from_rear_timing",
+   "category": "PARKING_SENSORS",
+   "name": "驻车辅助制动（PKSB）：后方来车探测时机",
+   "ecu": "750/67",
+   "did": "2221",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "40",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "较晚"
+    },
+    {
+     "value": 1,
+     "label": "标准"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_pksb_vehicles_from_rear_sensitivity",
+   "category": "PARKING_SENSORS",
+   "name": "驻车辅助制动（PKSB）：后方来车探测灵敏度",
+   "ecu": "750/67",
+   "did": "2221",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "20",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "标准"
+    },
+    {
+     "value": 1,
+     "label": "低"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_pksb_stationary_objects_stop_distance",
+   "category": "PARKING_SENSORS",
+   "name": "驻车辅助制动（PKSB）：静止物体制停距离",
+   "ecu": "750/67",
+   "did": "2203",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "40",
+   "requiresBitSupportCheck": true,
+   "options": [
+    {
+     "value": 0,
+     "label": "短"
+    },
+    {
+     "value": 1,
+     "label": "长"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_seat_airflow_mode",
+   "category": "SEATS_AND_STEERING_WHEEL",
+   "name": "座椅通风风量",
+   "ecu": "7C4",
+   "did": "2015",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "标准"
+    },
+    {
+     "value": 1,
+     "label": "静音（高）"
+    },
+    {
+     "value": 2,
+     "label": "静音（低）"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_left_sliding_door_via_remote",
+   "category": "SLIDING_DOORS",
+   "name": "遥控开关左侧电动滑门",
+   "ecu": "750/A7",
+   "did": "2204",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_left_sliding_door_via_remote_type",
+   "category": "SLIDING_DOORS",
+   "name": "遥控开关左侧滑门的按键方式",
+   "ecu": "750/A7",
+   "did": "2204",
+   "localId": null,
+   "byteIndex": 2,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "单击"
+    },
+    {
+     "value": 1,
+     "label": "双击"
+    },
+    {
+     "value": 2,
+     "label": "长按"
+    }
+   ],
+   "numeric": null,
+   "popular": true
+  },
+  {
+   "key": "car_setting_left_sliding_door_via_remote_one_motion",
+   "category": "SLIDING_DOORS",
+   "name": "遥控开关左侧滑门的“一键操作”",
+   "ecu": "750/A7",
+   "did": "2204",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_right_sliding_door_via_remote",
+   "category": "SLIDING_DOORS",
+   "name": "遥控开关右侧电动滑门",
+   "ecu": "750/A4",
+   "did": "2204",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_right_sliding_door_via_remote_type",
+   "category": "SLIDING_DOORS",
+   "name": "遥控开关右侧滑门的按键方式",
+   "ecu": "750/A4",
+   "did": "2204",
+   "localId": null,
+   "byteIndex": 2,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "单击"
+    },
+    {
+     "value": 1,
+     "label": "双击"
+    },
+    {
+     "value": 2,
+     "label": "长按"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_right_sliding_door_via_remote_one_motion",
+   "category": "SLIDING_DOORS",
+   "name": "遥控开关右侧滑门的“一键操作”",
+   "ecu": "750/A4",
+   "did": "2204",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_open_close_rear_left_door_via_switch_enable",
+   "category": "SLIDING_DOORS",
+   "name": "左后滑门开关“一键触控”功能",
+   "ecu": "750/A7",
+   "did": "2202",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_open_close_rear_left_door_via_switch",
+   "category": "SLIDING_DOORS",
+   "name": "左后滑门开关的按键方式",
+   "ecu": "750/A7",
+   "did": "2202",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "短按"
+    },
+    {
+     "value": 1,
+     "label": "长按"
+    },
+    {
+     "value": 2,
+     "label": "超长按"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_open_close_rear_right_door_via_switch_enable",
+   "category": "SLIDING_DOORS",
+   "name": "右后滑门开关“一键触控”功能",
+   "ecu": "750/A4",
+   "did": "2202",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_open_close_rear_right_door_via_switch",
+   "category": "SLIDING_DOORS",
+   "name": "右后滑门开关的按键方式",
+   "ecu": "750/A4",
+   "did": "2202",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "短按"
+    },
+    {
+     "value": 1,
+     "label": "长按"
+    },
+    {
+     "value": 2,
+     "label": "超长按"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_left_power_sliding_door_button_delay",
+   "category": "SLIDING_DOORS",
+   "name": "左侧滑门按键响应延迟",
+   "ecu": "750/A7",
+   "did": "2201",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "01",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "无延迟"
+    },
+    {
+     "value": 1,
+     "label": "短延迟"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_right_power_sliding_door_button_delay",
+   "category": "SLIDING_DOORS",
+   "name": "右侧滑门按键响应延迟",
+   "ecu": "750/A4",
+   "did": "2201",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "无延迟"
+    },
+    {
+     "value": 1,
+     "label": "短延迟"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_left_sliding_door_buzzer",
+   "category": "SLIDING_DOORS",
+   "name": "左侧滑门开关时蜂鸣提示",
+   "ecu": "750/A7",
+   "did": "2203",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_right_sliding_door_buzzer",
+   "category": "SLIDING_DOORS",
+   "name": "右侧滑门开关时蜂鸣提示",
+   "ecu": "750/A4",
+   "did": "2203",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_hatch_open_assist",
+   "category": "TRUNK",
+   "name": "尾门开启助力",
+   "ecu": "750/B8",
+   "did": "2205",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_hatch_close_assist",
+   "category": "TRUNK",
+   "name": "尾门关闭助力",
+   "ecu": "750/B8",
+   "did": "2204",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_hatch_open_angle",
+   "category": "TRUNK",
+   "name": "尾门最大开启高度",
+   "ecu": "750/B8",
+   "did": "2209",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "1 档"
+    },
+    {
+     "value": 1,
+     "label": "2 档"
+    },
+    {
+     "value": 2,
+     "label": "3 档"
+    },
+    {
+     "value": 3,
+     "label": "4 档"
+    },
+    {
+     "value": 4,
+     "label": "5 档"
+    }
+   ],
+   "numeric": null,
+   "popular": true
+  },
+  {
+   "key": "car_setting_unlock_via_1_motion",
+   "category": "TRUNK",
+   "name": "“一键操作”解锁范围",
+   "ecu": "750/B8",
+   "did": "2208",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "仅尾门"
+    },
+    {
+     "value": 1,
+     "label": "全部车门"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_1_motion_mode_acc",
+   "category": "TRUNK",
+   "name": "电源 ON 时通过“一键操作”开启尾门",
+   "ecu": "750/40",
+   "did": "2201",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_hatch_close_via_switch",
+   "category": "TRUNK",
+   "name": "用尾门开关关闭尾门",
+   "ecu": "750/B8",
+   "did": "2201",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_hatch_front_seat_switch_press",
+   "category": "TRUNK",
+   "name": "前排尾门开关的按键方式",
+   "ecu": "750/B8",
+   "did": "2202",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "短按"
+    },
+    {
+     "value": 1,
+     "label": "长按"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_hatch_close_switch_press_type",
+   "category": "TRUNK",
+   "name": "尾门关闭按钮的操作方式",
+   "ecu": "750/B8",
+   "did": "2207",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "短按"
+    },
+    {
+     "value": 1,
+     "label": "长按"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_hatch_via_remote",
+   "category": "TRUNK",
+   "name": "遥控开关尾门",
+   "ecu": "750/B8",
+   "did": "2208",
+   "localId": null,
+   "byteIndex": 1,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_hatch_remote_one_motion",
+   "category": "TRUNK",
+   "name": "遥控开关尾门的“一键操作”",
+   "ecu": "750/B8",
+   "did": "2208",
+   "localId": null,
+   "byteIndex": 2,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_hatch_remote_press_type",
+   "category": "TRUNK",
+   "name": "遥控开关尾门的按键方式",
+   "ecu": "750/B8",
+   "did": "2208",
+   "localId": null,
+   "byteIndex": 3,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "短按一次"
+    },
+    {
+     "value": 1,
+     "label": "短按两次"
+    },
+    {
+     "value": 2,
+     "label": "长按"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_hatch_buzzer",
+   "category": "TRUNK",
+   "name": "电动尾门动作时蜂鸣提示",
+   "ecu": "750/B8",
+   "did": "2203",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_comfort_open_remote",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "长按遥控器解锁键开启车窗和天窗",
+   "ecu": "750/40",
+   "did": "224D",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": true
+  },
+  {
+   "key": "car_setting_comfort_close_remote",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "长按遥控器锁车键关闭车窗和天窗",
+   "ecu": "750/40",
+   "did": "224C",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_comfort_open_key",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "机械钥匙在门锁处转动并保持，开启车窗和天窗",
+   "ecu": "750/40",
+   "did": "224B",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_comfort_close_key",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "机械钥匙在门锁处转动并保持，关闭车窗和天窗",
+   "ecu": "750/40",
+   "did": "224A",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "开启"
+    },
+    {
+     "value": 0,
+     "label": "关闭"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_one_touch_driver_window_opening",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "驾驶席车窗一键下降",
+   "ecu": "750/90",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "02",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_one_touch_driver_window_closing",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "驾驶席车窗一键上升",
+   "ecu": "750/90",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "08",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_one_touch_passenger_window_opening",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "副驾驶席车窗一键下降",
+   "ecu": "750/91",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "02",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_one_touch_passenger_window_closing",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "副驾驶席车窗一键上升",
+   "ecu": "750/91",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "08",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_window_auto_down_rear_left",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "左后车窗一键下降",
+   "ecu": "750/93",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "02",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_window_auto_up_rear_left",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "左后车窗一键上升",
+   "ecu": "750/93",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "08",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_window_auto_down_rear_right",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "右后车窗一键下降",
+   "ecu": "750/92",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "02",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_window_auto_up_rear_right",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "右后车窗一键上升",
+   "ecu": "750/92",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "08",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_window_auto_down_passenger_driver_sw",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "主驾开关一键下降副驾驶席车窗",
+   "ecu": "750/91",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "01",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_window_auto_up_passenger_driver_sw",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "主驾开关一键上升副驾驶席车窗",
+   "ecu": "750/91",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "04",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_window_auto_down_rear_left_driver_sw",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "主驾开关一键下降左后车窗",
+   "ecu": "750/93",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "01",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_window_auto_up_rear_left_driver_sw",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "主驾开关一键上升左后车窗",
+   "ecu": "750/93",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "04",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_window_auto_down_rear_right_driver_sw",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "主驾开关一键下降右后车窗",
+   "ecu": "750/92",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "01",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_window_auto_up_rear_right_driver_sw",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "主驾开关一键上升右后车窗",
+   "ecu": "750/92",
+   "did": null,
+   "localId": "11",
+   "byteIndex": 0,
+   "mask": "04",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "是"
+    },
+    {
+     "value": 0,
+     "label": "否"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_power_windows_voice_control",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "语音控制车窗",
+   "ecu": "750/40",
+   "did": "2240",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_roof_voice_control",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "语音控制天窗",
+   "ecu": "750/40",
+   "did": "2241",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_wiper_voice_control",
+   "category": "WINDOWS_AND_SUNROOF",
+   "name": "语音控制雨刮",
+   "ecu": "750/40",
+   "did": "2243",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_comfort_rear_wiping",
+   "category": "WIPERS_AND_WASHER",
+   "name": "雨刮开启并挂入倒挡时，后雨刮自动动作",
+   "ecu": "750/40",
+   "did": "22BC",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 3,
+     "label": "倒车时后雨刮由间歇改为持续刮"
+    },
+    {
+     "value": 2,
+     "label": "刮一次"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_wiper_after_washer",
+   "category": "WIPERS_AND_WASHER",
+   "name": "使用洗涤器后后雨刮自动刮一次",
+   "ecu": "750/40",
+   "did": "22BB",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 1,
+     "label": "启用"
+    },
+    {
+     "value": 0,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  },
+  {
+   "key": "car_setting_rear_wiper_when_trunk_lid_open",
+   "category": "WIPERS_AND_WASHER",
+   "name": "尾门打开时允许后雨刮工作",
+   "ecu": "750/40",
+   "did": "22BA",
+   "localId": null,
+   "byteIndex": 0,
+   "mask": "FF",
+   "requiresBitSupportCheck": false,
+   "options": [
+    {
+     "value": 0,
+     "label": "启用"
+    },
+    {
+     "value": 1,
+     "label": "禁用"
+    }
+   ],
+   "numeric": null,
+   "popular": false
+  }
+ ],
+ "live": [
+  {
+   "key": "car_tool_front_right_wheel_speed",
+   "name": "右前轮速",
+   "ecu": "7B0",
+   "did": "1002",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "mult": 0.1,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "km/h",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_tool_front_left_wheel_speed",
+   "name": "左前轮速",
+   "ecu": "7B0",
+   "did": "1002",
+   "byteIndex": 2,
+   "mask": "FFFF",
+   "mult": 0.1,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "km/h",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_tool_rear_right_wheel_speed",
+   "name": "右后轮速",
+   "ecu": "7B0",
+   "did": "1002",
+   "byteIndex": 4,
+   "mask": "FFFF",
+   "mult": 0.1,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "km/h",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_tool_rear_left_wheel_speed",
+   "name": "左后轮速",
+   "ecu": "7B0",
+   "did": "1002",
+   "byteIndex": 6,
+   "mask": "FFFF",
+   "mult": 0.1,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "km/h",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_tool_compressor_speed",
+   "name": "空调压缩机转速",
+   "ecu": "7C4",
+   "did": "1081",
+   "byteIndex": 2,
+   "mask": "FFFF",
+   "mult": 1,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "rpm",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_tool_inside_temp",
+   "name": "车内温度",
+   "ecu": "7C4",
+   "did": "1001",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "mult": 0.01,
+   "offset": 0,
+   "signed": true,
+   "precision": 2,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_tool_battery_voltage_engine",
+   "name": "12V 蓄电池电压（发动机 ECU 侧）",
+   "ecu": "700",
+   "did": "1F42",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "mult": 0.001,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_tool_engine_speed",
+   "name": "发动机转速",
+   "ecu": "700",
+   "did": "1F0C",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "mult": 0.25,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "rpm",
+   "options": null,
+   "needsEngineRunning": true
+  },
+  {
+   "key": "car_calculated_load",
+   "name": "发动机计算负荷",
+   "ecu": "700",
+   "did": "1F04",
+   "byteIndex": 0,
+   "mask": "FF",
+   "mult": 0.39215686274509803,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "%",
+   "options": null,
+   "needsEngineRunning": true
+  },
+  {
+   "key": "car_tool_coolant_temp",
+   "name": "冷却液温度",
+   "ecu": "700",
+   "did": "1F05",
+   "byteIndex": 0,
+   "mask": "FF",
+   "mult": 1,
+   "offset": -40.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": true
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_1_voltage",
+   "name": "动力电池第 1 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_2_voltage",
+   "name": "动力电池第 2 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 2,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_3_voltage",
+   "name": "动力电池第 3 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 4,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_4_voltage",
+   "name": "动力电池第 4 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 6,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_5_voltage",
+   "name": "动力电池第 5 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 8,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_6_voltage",
+   "name": "动力电池第 6 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 10,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_7_voltage",
+   "name": "动力电池第 7 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 12,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_8_voltage",
+   "name": "动力电池第 8 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 14,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_9_voltage",
+   "name": "动力电池第 9 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 16,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_10_voltage",
+   "name": "动力电池第 10 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 18,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_11_voltage",
+   "name": "动力电池第 11 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 20,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_12_voltage",
+   "name": "动力电池第 12 块电压",
+   "ecu": "7D2",
+   "did": "1809",
+   "byteIndex": 22,
+   "mask": "FFFF",
+   "mult": 0.001220703125,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_1_internal_resistance",
+   "name": "动力电池第 1 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 0,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_2_internal_resistance",
+   "name": "动力电池第 2 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 1,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_3_internal_resistance",
+   "name": "动力电池第 3 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 2,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_4_internal_resistance",
+   "name": "动力电池第 4 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 3,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_5_internal_resistance",
+   "name": "动力电池第 5 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 4,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_6_internal_resistance",
+   "name": "动力电池第 6 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 5,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_7_internal_resistance",
+   "name": "动力电池第 7 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 6,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_8_internal_resistance",
+   "name": "动力电池第 8 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 7,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_9_internal_resistance",
+   "name": "动力电池第 9 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 8,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_10_internal_resistance",
+   "name": "动力电池第 10 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 9,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_11_internal_resistance",
+   "name": "动力电池第 11 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 10,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_ev_or_hybrid_battery_n1_block_12_internal_resistance",
+   "name": "动力电池第 12 块内阻",
+   "ecu": "7D2",
+   "did": "1813",
+   "byteIndex": 11,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 1,
+   "unit": "mΩ",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_tool_mileage",
+   "name": "总里程（仪表读数）",
+   "ecu": "700",
+   "did": "0103",
+   "byteIndex": 1,
+   "mask": "FFFFFF",
+   "mult": 1,
+   "offset": 0,
+   "signed": false,
+   "precision": 0,
+   "unit": "",
+   "options": null,
+   "needsEngineRunning": false
+  },
+  {
+   "key": "car_tool_mileage_unit",
+   "name": "总里程单位（1 = 公里）",
+   "ecu": "700",
+   "did": "0103",
+   "byteIndex": 0,
+   "mask": "FF",
+   "mult": 1.0,
+   "offset": 0.0,
+   "signed": false,
+   "precision": 0,
+   "unit": "",
+   "options": [
+    {
+     "value": 1,
+     "label": "公里"
+    },
+    {
+     "value": 2,
+     "label": "英里"
+    }
+   ],
+   "needsEngineRunning": false
+  }
+ ],
+ "liveTools": [
+  {
+   "id": "wheels",
+   "name": "车轮速度",
+   "icon": "circle-gauge",
+   "keys": [
+    "car_tool_front_left_wheel_speed",
+    "car_tool_front_right_wheel_speed",
+    "car_tool_rear_left_wheel_speed",
+    "car_tool_rear_right_wheel_speed"
+   ]
+  },
+  {
+   "id": "engine",
+   "name": "发动机与 12V",
+   "icon": "battery-charging",
+   "keys": [
+    "car_tool_battery_voltage_engine",
+    "car_tool_engine_speed",
+    "car_calculated_load",
+    "car_tool_coolant_temp",
+    "car_tool_mileage",
+    "car_tool_mileage_unit"
+   ]
+  },
+  {
+   "id": "hvac",
+   "name": "空调",
+   "icon": "thermometer",
+   "keys": [
+    "car_tool_compressor_speed",
+    "car_tool_inside_temp"
+   ]
+  }
+ ],
+ "battery": {
+  "ecu": "7D2",
+  "blocks": [
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_1_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_1_internal_resistance",
+    "modules": 2
+   },
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_2_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_2_internal_resistance",
+    "modules": 2
+   },
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_3_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_3_internal_resistance",
+    "modules": 4
+   },
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_4_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_4_internal_resistance",
+    "modules": 4
+   },
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_5_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_5_internal_resistance",
+    "modules": 4
+   },
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_6_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_6_internal_resistance",
+    "modules": 4
+   },
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_7_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_7_internal_resistance",
+    "modules": 4
+   },
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_8_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_8_internal_resistance",
+    "modules": 4
+   },
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_9_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_9_internal_resistance",
+    "modules": 4
+   },
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_10_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_10_internal_resistance",
+    "modules": 4
+   },
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_11_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_11_internal_resistance",
+    "modules": 2
+   },
+   {
+    "voltageKey": "car_ev_or_hybrid_battery_n1_block_12_voltage",
+    "resistanceKey": "car_ev_or_hybrid_battery_n1_block_12_internal_resistance",
+    "modules": 2
+   }
+  ]
+ },
+ "dtcText": {
+  "codes": {
+   "U0131": {
+    "text": "与动力转向控制模块通信丢失",
+    "guess": false
+   },
+   "U0163": {
+    "text": "与导航控制模块通信丢失",
+    "guess": false
+   },
+   "B2359": {
+    "text": "车身电气故障（厂商自定义，具体含义未查到）",
+    "guess": true
+   },
+   "U023A": {
+    "text": "与车辆方向摄像头控制模块通信丢失",
+    "guess": true
+   },
+   "U0233": {
+    "text": "与右侧物体探测（盲区）控制模块通信丢失",
+    "guess": true
+   },
+   "U1110": {
+    "text": "网络通信故障（厂商自定义，常见为车速信号丢失）",
+    "guess": true
+   },
+   "B1321": {
+    "text": "车门未关检测电路故障（厂商自定义，可能为对电池短路）",
+    "guess": true
+   },
+   "U0100": {
+    "text": "与发动机控制模块（ECM）通信丢失",
+    "guess": false
+   },
+   "U0129": {
+    "text": "与制动系统控制模块通信丢失",
+    "guess": false
+   },
+   "U0126": {
+    "text": "与转向角传感器模块通信丢失",
+    "guess": false
+   },
+   "U0293": {
+    "text": "与混合动力/电动车动力系统控制模块通信丢失",
+    "guess": false
+   },
+   "B27A1": {
+    "text": "车身电气故障（厂商自定义，具体含义未查到）",
+    "guess": true
+   },
+   "B27A2": {
+    "text": "车身电气故障（厂商自定义，具体含义未查到）",
+    "guess": true
+   },
+   "U0155": {
+    "text": "与仪表板组合仪表通信丢失",
+    "guess": false
+   },
+   "U0235": {
+    "text": "与巡航前方测距传感器（前雷达）通信丢失",
+    "guess": false
+   },
+   "U0101": {
+    "text": "与变速器控制模块通信丢失",
+    "guess": false
+   },
+   "U0140": {
+    "text": "与车身控制模块通信丢失",
+    "guess": false
+   },
+   "U114F": {
+    "text": "网络通信故障（厂商自定义，具体含义未查到）",
+    "guess": true
+   },
+   "U0104": {
+    "text": "与巡航控制模块通信丢失",
+    "guess": false
+   }
+  },
+  "ftb": {
+   "87": "报文丢失",
+   "13": "线路开路"
+  }
+ }
+}

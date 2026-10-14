@@ -233,6 +233,9 @@ class LanlinkApp:
   async def toyota_session_exit(self, request: Request) -> HTTPResponse:
     return await self._toyota("session_exit")
 
+  async def toyota_catalog(self, request: Request) -> HTTPResponse:
+    return await self._toyota("catalog_get")
+
   async def toyota_customizations_scan(self, request: Request) -> HTTPResponse:
     return await self._toyota("customizations_scan")
 
@@ -337,6 +340,7 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("GET", "/api/software", "software_get"),
   ("POST", "/api/software/<action:str>", "software_action"),
   ("GET", "/api/toyota/session", "toyota_session_get"),
+  ("GET", "/api/toyota/catalog", "toyota_catalog"),
   ("POST", "/api/toyota/session/enter", "toyota_session_enter"),
   ("POST", "/api/toyota/session/exit", "toyota_session_exit"),
   ("POST", "/api/toyota/customizations/scan", "toyota_customizations_scan"),

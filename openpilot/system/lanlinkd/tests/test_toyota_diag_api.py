@@ -48,6 +48,15 @@ class TestSessionEndpoints:
     assert session.exited
 
 
+class TestCatalogEndpoint:
+  def test_catalog_works_without_session_and_hides_dtc_text(self):
+    status, body = make_api(FakeSession()).catalog_get()
+    assert status == 200
+    assert len(body["ecus"]) == 41 and len(body["settings"]) == 130 and len(body["categories"]) == 18
+    assert {"live", "liveTools", "battery"} <= body.keys()
+    assert "dtcText" not in body   # 故障码说明由后端拼好随扫描结果下发
+
+
 class TestPandadRunning:
   def test_native_or_python_pandad_counts(self):
     assert toyota_diag_api.pandad_running(run=lambda cmd: cmd[0] == "pidof")

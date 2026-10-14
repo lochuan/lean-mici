@@ -150,6 +150,11 @@ class ToyotaDiagApi:
   def session_exit(self):
     return _guarded(self.session.exit)
 
+  # ---- 目录 ----
+  def catalog_get(self):
+    """不需要诊断模式。故障码说明不下发：扫描结果里由后端拼好。"""
+    return _guarded(lambda: {k: v for k, v in catalog.load_sienna().items() if k != "dtcText"})
+
   # ---- 定制 ----
   def customizations_scan(self):
     def scan():
