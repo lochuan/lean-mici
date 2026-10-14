@@ -22,8 +22,8 @@ from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.camera_offset_helper import CameraOffsetHelper
-from openpilot.selfdrive.modeld.big_model import (SourceBlender, BigReplyLatch, LatencyEstimator,
-                                                  nanos_since_boot, select_frame)
+from openpilot.selfdrive.modeld.big_model import (SourceBlender, BigReplyLatch, FrameDelayEstimator,
+                                                  ms_since_eof, nanos_since_boot, select_frame)
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, nv12_copy_size, MODELD_INPUTS
 from openpilot.selfdrive.modeld.fill_model_msg import (fill_model_msg, fill_driving_model_data, fill_pose_msg,
                                                        PublishState, get_curvature_from_output)
@@ -39,8 +39,10 @@ SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
 LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
-# 04 号 C-3：大模型 REPLY 截止 = timestamp_eof + L̂ + 48ms（ADR-0001），L̂ 滑动中位 [15,35] 初值 22
-BIG_REPLY_GRACE_MS = 48.
+# 04 号 C-3：大模型 REPLY 截止 = timestamp_eof + 60 ms。
+# 上游 chestnut 同步阻塞、隐含预算一帧 50 ms（frame_delay = DT_MDL），超了掉帧→modeldLagging；
+# 我们逐帧有小模型兜底，放宽 10 ms。C4 台架 REPLY ≈ eof + 28 ms（p50）/ 32 ms（p99）。
+BIG_REPLY_DEADLINE_MS = 60.
 BIG_WARMUP_FRAMES = 5  # modeld 重启 / 手机新建序列后头 5 帧（0.25 s）按小模型帧
 MIN_LAT_CONTROL_SPEED = 0.3
 
@@ -246,7 +248,7 @@ def main(demo=False):
   # 04 号 C-3：bigModelReply 独立订阅——latch 读线程收帧即盖到达时刻，主循环不碰 sm 的 updated 语义
   sm_big = SubMaster(["bigModelReply"])
   latch = BigReplyLatch(sm_big, warmup_replies=BIG_WARMUP_FRAMES)
-  latency = LatencyEstimator()  # L̂：喂 modeld 收帧时刻 − timestamp_eof（ADR-0001），不喂 REPLY 往返
+  frame_delay_estimator = FrameDelayEstimator()  # 大模型链路的 frame_delay：timestamp_eof → 发布 的实测滑动中位
   blender = SourceBlender()
 
   publish_state = PublishState()
@@ -295,8 +297,7 @@ def main(demo=False):
     if buf_main is None:
       cloudlog.debug("vipc_client_main no frame")
       continue
-    camera_to_model_ms = (nanos_since_boot() - meta_main.timestamp_eof) / 1e6  # L_n（ADR-0001），进遥测 cameraToModelMs
-    latency.update(camera_to_model_ms)
+    camera_to_model_ms = ms_since_eof(meta_main.timestamp_eof)  # 收帧延迟，仅进遥测 cameraToModelMs
 
     if use_extra_client:
       # Keep receiving extra frames until frame id matches main camera
@@ -359,7 +360,8 @@ def main(demo=False):
 
     bufs = {name: buf_extra if 'big' in name else buf_main for name in model.vision_input_names}
     transforms = {name: model_transform_extra if 'big' in name else model_transform_main for name in model.vision_input_names}
-    frame_delay = DT_MDL # compensate for time passed since the frame was captured: current_time - timestamp_eof is 50ms on average
+    # 大模型开着：按 eof→发布的实测滑动中位（等 REPLY 使发布更晚）；关着：同上游常量 DT_MDL（"50ms on average"）
+    frame_delay = frame_delay_estimator.value / 1e3 if bigmodel_enabled else DT_MDL
     action_delay = DT_MDL / 2 # middle of the interval between model output (current state) and next frame (expected state)
     lat_action_t = lat_delay + frame_delay + action_delay
     long_action_t = long_delay + frame_delay + action_delay
@@ -383,7 +385,7 @@ def main(demo=False):
 
       frame = select_frame(
         model_output, latch=latch, enabled=bigmodel_enabled, run_count=run_count,
-        timestamp_eof=meta_main.timestamp_eof, latency_ms=latency.value, grace_ms=BIG_REPLY_GRACE_MS,
+        timestamp_eof=meta_main.timestamp_eof, deadline_after_eof_ms=BIG_REPLY_DEADLINE_MS,
         warmup_frames=BIG_WARMUP_FRAMES, current_time_ns=nanos_since_boot, blender=blender,
         action_for=lambda output, lat_t, long_t, prev_action=prev_action, v_ego=v_ego:
           model.get_action_from_model(output, prev_action, lat_t, long_t, v_ego),
@@ -433,6 +435,8 @@ def main(demo=False):
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)
       pm.send('modelDataV2SP', mdv2sp_send)
+      if frame.deadline_ms > 0:  # 只喂等过 REPLY 的帧：warmup/断链/关闭时发布早，不代表大模型链路
+        frame_delay_estimator.update(ms_since_eof(meta_main.timestamp_eof))
     last_vipc_frame_id = meta_main.frame_id
 
 if __name__ == "__main__":

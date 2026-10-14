@@ -1,4 +1,4 @@
-# big_model 纯逻辑单测（04 号 C+D）：outputs[0:2066) 解析、L̂ 估计、交叉淡入、bigModelReply schema。
+# big_model 纯逻辑单测（04 号 C+D）：outputs[0:2066) 解析、frame_delay 估计、交叉淡入、bigModelReply schema。
 # 跑法：pytest openpilot/selfdrive/modeld/tests/test_big_model.py
 import threading
 import time
@@ -6,13 +6,13 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from openpilot.selfdrive.modeld.big_model import (BIG_OUTPUT_SLICES, parse_big_outputs, LatencyEstimator,
+from openpilot.selfdrive.modeld.big_model import (BIG_OUTPUT_SLICES, parse_big_outputs, FrameDelayEstimator,
                                                   SourceBlender, BigReplyLatch, nanos_since_boot, select_frame)
 
 
 def test_nanos_since_boot_matches_timestamp_eof_clock():
-  # timestamp_eof = 内核 SOF_BOOT_TS（get_monotonic_boottime64 = CLOCK_BOOTTIME），
-  # 与它相减/比较的"现在"必须同一时钟，否则挂起累计量会混进 L_n 和截止
+  # timestamp_eof = 内核 SOF 时间戳（get_monotonic_boottime64 = CLOCK_BOOTTIME）+ 传感器读出时间，
+  # 与它相减/比较的"现在"必须同一时钟，否则挂起累计量会混进收帧延迟和截止
   clock = getattr(time, 'CLOCK_BOOTTIME', time.CLOCK_MONOTONIC)  # macOS 无 BOOTTIME（同 common/timing.h）
   a = time.clock_gettime_ns(clock)
   now = nanos_since_boot()
@@ -38,8 +38,8 @@ def test_model_data_v2sp_meta_schema():
   sp = messaging.new_message('modelDataV2SP').modelDataV2SP
   sp.bigActionT = [0.125, 0.45]
   sp.desireClass = 3
-  sp.bigLatencyMs = 33.5  # C-3：REPLY 到达 − timestamp_eof（0 = 本帧没等到）；≠ L̂ 的 L_n
-  sp.cameraToModelMs = 22.5  # L_n = 收帧时刻 − timestamp_eof（ms），喂 L̂
+  sp.bigLatencyMs = 33.5  # C-3：REPLY 到达 − timestamp_eof（0 = 本帧没等到）；≠ cameraToModelMs
+  sp.cameraToModelMs = 22.5  # 收帧时刻 − timestamp_eof（ms），仅遥测
   np.testing.assert_allclose(list(sp.bigActionT), [0.125, 0.45], rtol=1e-6)  # f32 往返
   assert sp.desireClass == 3
   assert sp.bigLatencyMs == 33.5
@@ -77,13 +77,14 @@ def test_parse_big_outputs():
   np.testing.assert_allclose(outs['meta'], 0.5)                # sigmoid(0)
 
 
-def test_latency_estimator():
-  est = LatencyEstimator()
-  assert est.value == 22.                 # 初值
-  assert est.update(50.) == 35.           # 中位 50 → 限幅上
-  est2 = LatencyEstimator()
-  assert est2.update(1.) == 15.           # 中位 1 → 限幅下
-  est3 = LatencyEstimator()
+def test_frame_delay_estimator():
+  # eof→发布的滑动中位（ms）：初值一帧 50 ms（上游 frame_delay = DT_MDL 的常量假设），限幅 [10, 100]
+  est = FrameDelayEstimator()
+  assert est.value == 50.                 # 初值
+  assert est.update(150.) == 100.         # 中位 150 → 限幅上
+  est2 = FrameDelayEstimator()
+  assert est2.update(1.) == 10.           # 中位 1 → 限幅下
+  est3 = FrameDelayEstimator()
   for v in (20., 21., 22.):
     got = est3.update(v)
   assert got == 21.                       # 滑动中位
@@ -169,13 +170,13 @@ def test_big_reply_latch_reader_thread_consumes_real_capnp_reply():
 def test_big_reply_latch():
   # C-3：读线程收帧即盖真实到达时刻（不被 model.run() 遮挡）、按 tEof 匹配、
   # 已到且按时零等待取、超时/迟到兜底、迟到 Condition 唤醒、链路存活门。
-  # REPLY 往返只进 bigLatencyMs 遥测，不进 L̂（L̂ = modeld 收帧延迟，ADR-0001）
+  # REPLY 往返只进 bigLatencyMs 遥测，不参与截止计算（截止 = timestamp_eof + 固定宽限）
   latch = BigReplyLatch(_FakeSM())
   raw = np.arange(2066, dtype=np.float32)
   t_eof = nanos_since_boot() - 30_000_000
 
   assert not latch.link_alive()                       # 从未见过 REPLY → 门关（只捡不等）
-  assert not hasattr(latch, 'latency')                # latch 不持有 L̂
+  assert not hasattr(latch, 'latency')                # latch 不持有延迟估计
 
   latch._on_reply(t_eof, raw, t_eof + 25_000_000)     # 到达 = eof+25 ms
   assert latch.link_alive()
@@ -282,7 +283,7 @@ def test_select_frame_obeys_warmup_enable_and_link_gates():
   def select(enabled, run_count):
     return select_frame(
       small, latch=latch, enabled=enabled, run_count=run_count, timestamp_eof=1_000_000_000,
-      latency_ms=22., grace_ms=48., warmup_frames=4, current_time_ns=lambda: 9_000_000_000, blender=blender,
+      deadline_after_eof_ms=70., warmup_frames=4, current_time_ns=lambda: 9_000_000_000, blender=blender,
       action_for=action_for, action_t=(0.1, 0.2),
       parse_outputs=lambda raw: {"plan": np.array([raw[0]], dtype=np.float32)})
 
@@ -318,8 +319,8 @@ def test_select_frame_obeys_warmup_enable_and_link_gates():
 def test_select_frame_rejects_zero_reply():
   latch = _FakeReplySelector(alive=True, result=(np.zeros(2066, dtype=np.float32), 12., 'big'))
   small = {"plan": np.array([1.], dtype=np.float32)}
-  frame = select_frame(small, latch=latch, enabled=True, run_count=5, timestamp_eof=1, latency_ms=22.,
-                       grace_ms=48., warmup_frames=4, current_time_ns=lambda: 10, blender=SourceBlender(),
+  frame = select_frame(small, latch=latch, enabled=True, run_count=5, timestamp_eof=1, deadline_after_eof_ms=70.,
+                       warmup_frames=4, current_time_ns=lambda: 10, blender=SourceBlender(),
                        action_for=lambda *_: SimpleNamespace(desiredCurvature=0., desiredAcceleration=0.,
                                                             shouldStop=False),
                        action_t=(0., 0.),
@@ -331,7 +332,7 @@ def test_select_frame_rejects_zero_reply():
 
 def test_modeld_c3_wiring_source():
   """modeld 主循环需 QCOM GPU 无法宿主构造，锁票面不变量
-  （预热帧、全零兜底、modelV2.big、L_n 遥测）。接线一起改的话本测试会提醒更新。"""
+  （预热帧、全零兜底、modelV2.big、cameraToModelMs 遥测）。接线一起改的话本测试会提醒更新。"""
   import inspect
   from openpilot.selfdrive.modeld import modeld
   src = inspect.getsource(modeld.main)
@@ -341,13 +342,17 @@ def test_modeld_c3_wiring_source():
   assert "bigLatencyMs" in src, "REPLY 往返每帧进遥测（04 号票）"
   assert "bigLateReplyCount, mdv2sp_send.modelDataV2SP.bigLateReplyMs = latch.take_late_replies()" in src, \
     "迟到 REPLY 个数与往返也进遥测"
-  # ADR-0001：L̂ 只喂 modeld 收帧时刻 − timestamp_eof（cameraToModelMs），截止用它；
-  # REPLY 往返不得进 L̂，每帧 L_n 进遥测
-  assert "camera_to_model_ms = (nanos_since_boot() - meta_main.timestamp_eof) / 1e6" in src
+  # 截止 = timestamp_eof + 固定 60 ms（上游 chestnut 隐含预算一帧 50 ms，有小模型兜底故放宽 10 ms）
+  assert modeld.BIG_REPLY_DEADLINE_MS == 60.
+  assert "deadline_after_eof_ms=BIG_REPLY_DEADLINE_MS" in src
+  assert "camera_to_model_ms = ms_since_eof(meta_main.timestamp_eof)" in src
+  # frame_delay：大模型开着按 eof→发布实测滑动中位，关着同上游常量；只用等过 REPLY 的帧喂样本
+  assert "frame_delay = frame_delay_estimator.value / 1e3 if bigmodel_enabled else DT_MDL" in src
+  assert "if frame.deadline_ms > 0:" in src
+  assert "frame_delay_estimator.update(ms_since_eof(meta_main.timestamp_eof))" in src
   # 与 timestamp_eof 比较的"现在"全走 BOOTTIME（modeld 主循环 + latch）
   assert "monotonic_ns" not in src
   assert "monotonic_ns" not in inspect.getsource(BigReplyLatch)
-  assert "latency.update(camera_to_model_ms)" in src
   assert "cameraToModelMs = camera_to_model_ms" in src
   assert "bigSource = frame.source" in src and "bigDeadlineMs = frame.deadline_ms" in src
   assert "BigReplyLatch(sm_big, warmup_replies=BIG_WARMUP_FRAMES)" in src, "手机新建序列后同样回落小模型"

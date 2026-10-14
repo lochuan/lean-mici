@@ -19,13 +19,18 @@ BIGMODELD_STAGE_FIELDS = ('captureMs', 'warpMs', 'pairWaitMs', 'encodeMs', 'send
 REPLY_FLAG_SEQ_RESET = 1 << 0
 REPLY_FLAG_ZERO_PAIR = 1 << 1
 
-# timestamp_eof 是内核 SOF_BOOT_TS（CLOCK_BOOTTIME）；与它比较的"现在"必须同钟，
+# timestamp_eof = 内核 SOF 时间戳（CLOCK_BOOTTIME）+ 传感器读出时间（camerad 推算）；与它比较的"现在"必须同钟，
 # time.monotonic 不含挂起时长，设备挂起过就整体偏移。macOS 无 BOOTTIME（同 common/timing.h）
 _CLOCK_BOOTTIME = getattr(time, 'CLOCK_BOOTTIME', time.CLOCK_MONOTONIC)
 
 
 def nanos_since_boot() -> int:
   return time.clock_gettime_ns(_CLOCK_BOOTTIME)
+
+
+def ms_since_eof(timestamp_eof: int) -> float:
+  """现在 − timestamp_eof（ms），与 timestamp_eof 同 BOOTTIME 时钟。"""
+  return (nanos_since_boot() - timestamp_eof) / 1e6
 
 BIG_OUTPUT_SLICES: dict[str, slice] = {
   'lane_lines': slice(0, 528),
@@ -51,19 +56,19 @@ def parse_big_outputs(raw: np.ndarray) -> dict[str, np.ndarray]:
   return Parser().parse_outputs(outs)
 
 
-class LatencyEstimator:
-  """L̂：最近约 100 帧 L_n 的滑动中位，限幅 [15, 35] ms，初值 22（ADR-0001）。
+class FrameDelayEstimator:
+  """frame_delay：最近约 100 帧「timestamp_eof → modelV2 发布」的滑动中位（ms），限幅 [10, 100]，初值 50。
 
-  L_n = modeld 收帧时刻 − timestamp_eof（相机帧出图 → 收帧，遥测字段 cameraToModelMs）；
-  每帧 L_n 由调用方进遥测。与 bigLatencyMs（REPLY 往返）是两个量，别混。
+  上游 action_t = lat_delay + frame_delay + action_delay 里 frame_delay 是常量 DT_MDL（"50 ms on average"）；
+  我们逐帧等 REPLY、兜底帧发布更晚，改按实测自适应。与 cameraToModelMs（收帧延迟）、bigLatencyMs（REPLY 往返）是不同量。
   """
-  def __init__(self, window: int = 100, lo: float = 15., hi: float = 35., init: float = 22.):
+  def __init__(self, window: int = 100, lo: float = 10., hi: float = 100., init: float = 50.):
     self._samples: deque[float] = deque(maxlen=window)
     self._lo, self._hi = lo, hi
     self.value = init
 
-  def update(self, camera_to_model_ms: float) -> float:
-    self._samples.append(camera_to_model_ms)
+  def update(self, eof_to_publish_ms: float) -> float:
+    self._samples.append(eof_to_publish_ms)
     self.value = float(min(max(median(self._samples), self._lo), self._hi))
     return self.value
 
@@ -110,7 +115,7 @@ class BigReplyLatch:
   """bigModelReply 后台接收闩（04 号 C-3）。
 
   读线程独立于 model.run()：收帧即盖真实到达时刻并缓存最新一帧（按 tEof 匹配），
-  到达 − tEof = REPLY 往返，只进 bigLatencyMs 遥测、不进 L̂（L̂ 在 modeld 收帧点喂）；主线程
+  到达 − tEof = REPLY 往返，只进 bigLatencyMs 遥测、不参与截止计算（截止 = tEof + 固定宽限）；主线程
   wait_for 要么零等待拿到已到的 REPLY，要么等 Condition 到 deadline。链路 alive_s
   内没回音就只捡不等，保 20 Hz 不塌（不 modeldLagging）；一有回音自恢复。
   ponytail: 只缓存最新一帧（msgq 语义，不重试不补发），迟到旧帧不参与匹配。
@@ -212,7 +217,7 @@ class FrameSelection(NamedTuple):
 
 
 def select_frame(small_output: dict[str, np.ndarray], *, latch, enabled: bool, run_count: int,
-                 timestamp_eof: int, latency_ms: float, grace_ms: float, warmup_frames: int,
+                 timestamp_eof: int, deadline_after_eof_ms: float, warmup_frames: int,
                  current_time_ns: Callable[[], int],
                  blender: SourceBlender, action_for: Callable, action_t: tuple[float, float],
                  parse_outputs: Callable[[np.ndarray], dict[str, np.ndarray]] = parse_big_outputs) -> FrameSelection:
@@ -225,7 +230,7 @@ def select_frame(small_output: dict[str, np.ndarray], *, latch, enabled: bool, r
   eof_to_reply_ms = deadline_ms = 0.
   source = 'off' if not enabled else 'warmup'
   if enabled and run_count > warmup_frames:
-    deadline_ms = latency_ms + grace_ms
+    deadline_ms = deadline_after_eof_ms  # 截止 = timestamp_eof + 固定宽限（modeld.BIG_REPLY_DEADLINE_MS）
     deadline_ns = timestamp_eof + int(deadline_ms * 1e6)
     alive = latch.link_alive()
     if not alive:
