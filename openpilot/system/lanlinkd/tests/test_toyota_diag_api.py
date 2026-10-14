@@ -163,37 +163,38 @@ class TestCustomizationEndpoints:
 
 # ---- 故障码 ----
 
-DTC_TARGETS = [{"ecu": "7E0", "tx": 0x7E0, "sub": None, "name": "发动机"},
-               {"ecu": "750/40", "tx": 0x750, "sub": 0x40, "name": "车身"}]
-
-
 def make_dtc_api(tmp_path):
-  engine = FakeEcu({b"\x3e": b"\x7e", b"\x13": bytes.fromhex("5301 0133"), b"\x04": b"\x44"})
-  link = DiagLink(FakePanda({(0x7E0, None): engine}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
-  return engine, toyota_diag_api.ToyotaDiagApi(ActiveSession(link), str(tmp_path), dtc_targets=lambda: DTC_TARGETS)
+  body_ecu = FakeUdsEcu.from_probe(PROBE, "750", "40")
+  body_ecu.responses[bytes.fromhex("14ffffff")] = b"\x54"
+  _, api = make_active_api(tmp_path, ecus={(0x750, 0x40): body_ecu})
+  return body_ecu, api
 
 
 class TestDtcEndpoints:
-  def test_scan_lists_responding_ecus(self, tmp_path):
+  def test_scan_one_ecu_with_text(self, tmp_path):
     _, api = make_dtc_api(tmp_path)
-    status, body = api.dtc_scan()
+    status, body = api.dtc_scan({"ecu": "750/40"})
     assert status == 200
-    assert [(e["ecu"], e["name"]) for e in body["ecus"]] == [("7E0", "发动机")]
-    assert body["ecus"][0]["dtcs"][0]["code"] == "P0133"
+    assert (body["ecu"], body["status"], body["protocol"]) == ("750/40", "ok", "uds")
+    assert body["dtcs"][1] == {"code": "U0163-87", "status": 0x28, "text": "与导航控制模块通信丢失（报文丢失）", "guess": False}
+
+  @pytest.mark.parametrize("request_body", [{}, {"ecu": "7FF"}, {"ecu": 7}])
+  def test_scan_rejects_unknown_ecu(self, tmp_path, request_body):
+    _, api = make_dtc_api(tmp_path)
+    assert api.dtc_scan(request_body)[0] == 400
 
   def test_clear_reports_each_ecu(self, tmp_path):
-    engine, api = make_dtc_api(tmp_path)
-    status, body = api.dtc_clear({"ecus": ["7E0", "750/40"]})
+    body_ecu, api = make_dtc_api(tmp_path)
+    status, body = api.dtc_clear({"ecus": ["750/40", "7C4"]})
     assert status == 200
-    assert body["results"][0] == {"ecu": "7E0", "ok": True}
-    assert body["results"][1]["ecu"] == "750/40" and body["results"][1]["ok"] is False
-    assert b"\x04" in engine.requests
+    assert body["results"] == [{"ecu": "750/40", "ok": True}, {"ecu": "7C4", "ok": False, "error": "无响应"}]
+    assert bytes.fromhex("14ffffff") in body_ecu.requests
 
-  @pytest.mark.parametrize("body", [{}, {"ecus": []}, {"ecus": "7E0"}, {"ecus": [1]}, {"ecus": ["7FF"]}])
-  def test_clear_rejects_bad_ecu_list(self, tmp_path, body):
-    engine, api = make_dtc_api(tmp_path)
-    assert api.dtc_clear(body)[0] == 400
-    assert b"\x04" not in engine.requests
+  @pytest.mark.parametrize("request_body", [{}, {"ecus": []}, {"ecus": "750/40"}, {"ecus": [1]}, {"ecus": ["7FF"]}])
+  def test_clear_rejects_bad_ecu_list(self, tmp_path, request_body):
+    body_ecu, api = make_dtc_api(tmp_path)
+    assert api.dtc_clear(request_body)[0] == 400
+    assert bytes.fromhex("14ffffff") not in body_ecu.requests
 
 
 # ---- 实时数据 ----

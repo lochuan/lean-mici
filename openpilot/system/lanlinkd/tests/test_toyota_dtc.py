@@ -1,125 +1,136 @@
+import json
+
 import pytest
 
 from openpilot.system.lanlinkd.toyota import catalog, dtc
 from openpilot.system.lanlinkd.toyota.link import DiagLink
 
-from .toyota_fakes import FakeEcu, FakePanda
+from .test_toyota_customization_flow import PROBE
+from .toyota_fakes import FakeEcu, FakePanda, FakeUdsEcu
+
+DTC_TEXT = catalog.load_sienna()["dtcText"]
 
 
-class TestDecodeCode:
-  @pytest.mark.parametrize("raw,code", [
-    ("0133", "P0133"),
+def _link(ecus: dict) -> DiagLink:
+  return DiagLink(FakePanda(ecus), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+
+
+def _address(ecu: dict) -> tuple[int, int | None]:
+  return int(ecu["tx"], 16), int(ecu["sub"], 16) if ecu["sub"] else None
+
+
+def _replay(ecu_id: str) -> tuple[dict, DiagLink]:
+  ecu = catalog.ecu(ecu_id)
+  return ecu, _link({_address(ecu): FakeUdsEcu.from_probe(PROBE, ecu["tx"], ecu["sub"])})
+
+
+def _prototype_decode_dtcs(resp: str) -> list[tuple[str, int]]:
+  """原型 carista/prototype/build_data.py 的 decode_dtcs（独立参照实现）。"""
+  if not resp.startswith("5902"):
+    return []
+  b = bytes.fromhex(resp[6:])
+  return [(f"{'PCBU'[b[i] >> 6]}{(b[i] >> 4) & 3}{b[i] & 15:X}{b[i+1]:02X}-{b[i+2]:02X}", b[i + 3])
+          for i in range(0, len(b) - 3, 4)]
+
+
+def _probe_dtc_responses() -> dict[str, str]:
+  with open(PROBE) as f:
+    rows = [json.loads(line) for line in f]
+  return {f"{r['tx']}/{r['sub']}" if r["sub"] else r["tx"]: r["resp"] for r in rows if r.get("phase") == "dtc"}
+
+
+class TestDecode:
+  @pytest.mark.parametrize("raw, code", [
+    ("c13187", "U0131-87"),
+    ("a35987", "B2359-87"),
+    ("0a9b12", "P0A9B-12"),
+    ("9a01", "B1A01"),       # Toyota CAN：2 字节，没有 FTB
     ("4123", "C0123"),
-    ("9a01", "B1A01"),
-    ("c001", "U0001"),
-    ("0a9b12", "P0A9B12"),   # UDS：再加 2 位故障类型
   ])
-  def test_letter_and_digits(self, raw, code):
+  def test_code_string(self, raw, code):
     assert dtc.decode_code(bytes.fromhex(raw)) == code
 
+  def test_text_joins_base_code_and_failure_type(self):
+    assert dtc.describe("U0131-87", DTC_TEXT) == ("与动力转向控制模块通信丢失（报文丢失）", False)
+    assert dtc.describe("B2359-87", DTC_TEXT)[1] is True
+    assert dtc.describe("U0131-FF", DTC_TEXT) == ("与动力转向控制模块通信丢失", False)   # FTB 没有说明
+    assert dtc.describe("P0001-87", DTC_TEXT) == ("", False)                          # 基码没有说明
 
-class TestParseResponse:
-  def test_kwp_13_is_count_then_two_byte_codes(self):
-    assert dtc.parse_response(bytes.fromhex("13"), bytes.fromhex("5302 0133 c123")) == [
-      ("P0133", "确认"), ("U0123", "确认")]
 
-  def test_13_with_suffix_uses_the_same_layout(self):
-    assert dtc.parse_response(bytes.fromhex("13ff00"), bytes.fromhex("5301 0133")) == [("P0133", "确认")]
+class TestScanUds:
+  def test_replayed_car_matches_prototype_for_every_ecu(self):
+    responses = _probe_dtc_responses()
+    assert len(responses) == len(catalog.load_sienna()["ecus"]) == 41
+    for ecu_id, resp in responses.items():
+      ecu, link = _replay(ecu_id)
+      result = dtc.scan_ecu(link, ecu, DTC_TEXT)
+      if ecu["protocol"] == "uds":
+        assert result["status"] == "ok", ecu_id
+        assert [(d["code"], d["status"]) for d in result["dtcs"]] == _prototype_decode_dtcs(resp), ecu_id
 
-  def test_zero_count_means_no_dtcs(self):
-    assert dtc.parse_response(bytes.fromhex("13"), bytes.fromhex("5300")) == []
+  def test_body_ecu_codes_with_text(self):
+    ecu, link = _replay("750/40")
+    result = dtc.scan_ecu(link, ecu, DTC_TEXT)
+    assert (result["ecu"], result["protocol"]) == ("750/40", "uds")
+    assert result["dtcs"][0] == {"code": "B2359-87", "status": 0x29,
+                                 "text": "车身电气故障（厂商自定义，具体含义未查到）（报文丢失）", "guess": True}
+    assert [d["code"] for d in result["dtcs"]] == ["B2359-87", "U0163-87", "U023A-87"]
+
+  def test_all_zero_code_is_skipped(self):
+    ecu = catalog.ecu("7B0")
+    fake = FakeEcu({bytes.fromhex("19028d"): bytes.fromhex("5902ff 00000000 c1318728")})
+    result = dtc.scan_ecu(_link({(0x7B0, None): fake}), ecu, DTC_TEXT)
+    assert [d["code"] for d in result["dtcs"]] == ["U0131-87"]
+
+  def test_offline_ecu(self):
+    result = dtc.scan_ecu(_link({}), catalog.ecu("750/40"), DTC_TEXT)
+    assert (result["status"], result["dtcs"]) == ("offline", [])
+
+  def test_rejected_read_is_reported_not_raised(self):
+    fake = FakeEcu({bytes.fromhex("19028d"): bytes.fromhex("7f1922")})
+    result = dtc.scan_ecu(_link({(0x7B0, None): fake}), catalog.ecu("7B0"), DTC_TEXT)
+    assert (result["status"], result["dtcs"], result["readError"]) == ("ok", [], "NRC 22")
+
+  def test_malformed_response(self):
+    fake = FakeEcu({bytes.fromhex("19028d"): bytes.fromhex("5902ff") + bytes(range(24))}, misnumbered_frames=True)
+    result = dtc.scan_ecu(_link({(0x7B0, None): fake}), catalog.ecu("7B0"), DTC_TEXT)
+    assert result["status"] == "malformed" and "invalid consecutive frame index" in result["malformedReason"]
+
+
+class TestScanToyotaCan:
+  def test_tries_pids_in_order_and_codes_have_no_status(self):
+    window = FakeEcu({bytes.fromhex("1381"): bytes.fromhex("7f1312"), bytes.fromhex("1380"): bytes.fromhex("5302 9a01 c123")})
+    result = dtc.scan_ecu(_link({(0x750, 0x90): window}), catalog.ecu("750/90"), DTC_TEXT)
+    assert window.requests == [bytes.fromhex("1381"), bytes.fromhex("1380")]
+    assert (result["status"], result["protocol"]) == ("ok", "toyota_can")
+    assert result["dtcs"] == [{"code": "B1A01", "status": None, "text": "", "guess": False},
+                              {"code": "U0123", "status": None, "text": "", "guess": False}]
 
   def test_count_limits_trailing_padding(self):
-    assert dtc.parse_response(bytes.fromhex("13"), bytes.fromhex("5301 0133 0455")) == [("P0133", "确认")]
+    window = FakeEcu({bytes.fromhex("1381"): bytes.fromhex("5301 9a01 0455")})
+    result = dtc.scan_ecu(_link({(0x750, 0x90): window}), catalog.ecu("750/90"), DTC_TEXT)
+    assert [d["code"] for d in result["dtcs"]] == ["B1A01"]
 
-  def test_kwp_18_is_count_then_code_and_status(self):
-    assert dtc.parse_response(bytes.fromhex("1800ff00"), bytes.fromhex("5802 0133e0 c12340")) == [
-      ("P0133", "0xE0"), ("U0123", "0x40")]
-
-  def test_uds_19_skips_availability_mask(self):
-    assert dtc.parse_response(bytes.fromhex("1902ac"), bytes.fromhex("5902ff 0a9b1209 c0010188")) == [
-      ("P0A9B12", "测试失败、确认"), ("U000101", "确认、故障指示灯亮")]
-
-  def test_placeholder_codes_are_skipped(self):
-    assert dtc.parse_response(bytes.fromhex("13"), bytes.fromhex("5303 0000 aaaa 0133")) == [("P0133", "确认")]
-    assert dtc.parse_response(bytes.fromhex("1902ac"), bytes.fromhex("5902ff 00000008 aaaaaa08")) == []
-
-  def test_negative_response_is_none(self):
-    assert dtc.parse_response(bytes.fromhex("13"), bytes.fromhex("7f1311")) is None
-
-
-class TestDescribe:
-  def test_toyota_table_wins_over_obd2(self):
-    descriptions = {"toyota": {"P0133": "丰田"}, "obd2": {"P0133": "通用", "P0171": "稀"}}
-    assert dtc.describe("P0133", descriptions) == "丰田"
-    assert dtc.describe("P0171", descriptions) == "稀"
-
-  def test_uds_code_falls_back_to_five_chars(self):
-    assert dtc.describe("P017112", {"toyota": {}, "obd2": {"P0171": "稀"}}) == "稀"
-
-  def test_unknown_is_empty(self):
-    assert dtc.describe("P9999", {"toyota": {}, "obd2": {}}) == ""
-
-
-class TestTargets:
-  def test_direct_and_gateway_targets_are_unique(self):
-    targets = catalog.dtc_targets()
-    keys = [t["ecu"] for t in targets]
-    assert len(keys) == len(set(keys))
-    assert "7E0" in keys and "750/40" in keys
-    # 0x750 只用子地址访问：不带子地址的帧会被网关当成子地址解析
-    assert "750" not in keys
-    engine = next(t for t in targets if t["ecu"] == "7E0")
-    assert engine["tx"] == 0x7E0 and engine["sub"] is None and engine["name"]
-
-
-# ---- 与 ECU 交互：帧级假 ECU ----
-
-ENGINE = (0x7E0, None)
-BODY = (0x750, 0x40)
-TARGETS = [{"ecu": "7E0", "tx": 0x7E0, "sub": None, "name": "发动机"}, {"ecu": "750/40", "tx": 0x750, "sub": 0x40, "name": "车身"},
-           {"ecu": "7C0", "tx": 0x7C0, "sub": None, "name": "仪表"}]
-DESCRIPTIONS = {"toyota": {"B1A01": "车身"}, "obd2": {"P0133": "氧传感器响应慢"}}
-
-
-def make_link(ecus):
-  panda = FakePanda({address: FakeEcu(responses) for address, responses in ecus.items()})
-  link = DiagLink(panda, elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
-  return panda, link
-
-
-class TestScan:
-  def test_reads_present_ecus_with_first_positive_command(self):
-    panda, link = make_link({
-      ENGINE: {b"\x3e": b"\x7e", bytes.fromhex("1800ff00"): bytes.fromhex("7f1811"),
-               bytes.fromhex("1802ff00"): bytes.fromhex("5801 0133e0"),
-               bytes.fromhex("18ff00"): bytes.fromhex("5801 0171e0")},
-      BODY: {b"\x3e": bytes.fromhex("7f3e12"), b"\x13": bytes.fromhex("5300")},
-    })
-    result = dtc.scan(link, TARGETS, DESCRIPTIONS)
-    assert result == [
-      {"ecu": "7E0", "name": "发动机", "dtcs": [{"code": "P0133", "status": "0xE0", "description": "氧传感器响应慢"}]},
-      {"ecu": "750/40", "name": "车身", "dtcs": []},
-    ]
-    engine_requests = panda.ecus[ENGINE].requests
-    assert bytes.fromhex("18ff00") not in engine_requests   # 取到第一条正响应就停
-
-  def test_present_ecu_that_answers_no_read_command_is_listed_empty(self):
-    _, link = make_link({ENGINE: {b"\x3e": b"\x7e"}})
-    assert dtc.scan(link, TARGETS[:1], DESCRIPTIONS) == [{"ecu": "7E0", "name": "发动机", "dtcs": []}]
+  def test_all_pids_rejected(self):
+    window = FakeEcu({bytes([0x13, pid]): bytes.fromhex("7f1312") for pid in (0x81, 0x80, 0xB0)})
+    result = dtc.scan_ecu(_link({(0x750, 0x90): window}), catalog.ecu("750/90"), DTC_TEXT)
+    assert len(window.requests) == 3
+    assert (result["status"], result["dtcs"], result["readError"]) == ("ok", [], "NRC 12")
 
 
 class TestClear:
-  def test_stops_at_first_positive(self):
-    panda, link = make_link({BODY: {b"\x04": bytes.fromhex("7f0411"), b"\x14": b"\x54"}})
-    assert dtc.clear(link, TARGETS[1]) == {"ecu": "750/40", "ok": True}
-    assert panda.ecus[BODY].requests == [b"\x04", b"\x14"]
+  @pytest.mark.parametrize("ecu_id, address, request_hex", [
+    ("750/40", (0x750, 0x40), "14ffffff"),
+    ("750/90", (0x750, 0x90), "14"),
+  ])
+  def test_clear_by_protocol(self, ecu_id, address, request_hex):
+    fake = FakeEcu({bytes.fromhex(request_hex): [b"\x7f\x14\x78", b"\x54"]})
+    assert dtc.clear(_link({address: fake}), catalog.ecu(ecu_id)) == {"ecu": ecu_id, "ok": True}
+    assert fake.requests == [bytes.fromhex(request_hex)]
 
-  def test_pending_then_positive_is_ok(self):
-    _, link = make_link({ENGINE: {b"\x04": [bytes.fromhex("7f0478"), b"\x44"]}})
-    assert dtc.clear(link, TARGETS[0]) == {"ecu": "7E0", "ok": True}
+  def test_rejected(self):
+    fake = FakeEcu({bytes.fromhex("14ffffff"): bytes.fromhex("7f1422")})
+    assert dtc.clear(_link({(0x750, 0x40): fake}), catalog.ecu("750/40")) == {"ecu": "750/40", "ok": False, "error": "NRC 22"}
 
-  def test_all_rejected_reports_last_error(self):
-    _, link = make_link({ENGINE: {}})
-    result = dtc.clear(link, TARGETS[0])
-    assert result["ecu"] == "7E0" and result["ok"] is False and result["error"]
+  def test_offline(self):
+    assert dtc.clear(_link({}), catalog.ecu("750/40")) == {"ecu": "750/40", "ok": False, "error": "无响应"}

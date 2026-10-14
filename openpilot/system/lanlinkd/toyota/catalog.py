@@ -32,19 +32,6 @@ def ecu_name(tx: str, sub: str | None) -> str:
   return f"{address_key(tx, sub)} {name}".strip()
 
 
-def dtc_targets() -> list[dict]:
-  """故障码扫描的地址表：直连 ECU + 0x750 网关子地址，按地址去重（Car Scanner 表里有重复子地址）。
-  不扫直连 0x750：网关会把不带子地址的帧首字节当成子地址。"""
-  ecus = load("ecus")
-  targets: dict[str, dict] = {}
-  for e in ecus["direct"] + ecus["gateway"]:
-    key = address_key(e["tx"], e.get("sub"))
-    if key != "750":
-      targets.setdefault(key, {"ecu": key, "tx": int(e["tx"], 16), "sub": int(e["sub"], 16) if e.get("sub") else None,
-                               "name": text(e["name"])})
-  return list(targets.values())
-
-
 def pid_profiles() -> list[dict]:
   return load("pid_profiles")
 

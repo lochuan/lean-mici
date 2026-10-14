@@ -121,13 +121,11 @@ def _catalog_ecu(body: dict) -> dict:
 
 class ToyotaDiagApi:
   def __init__(self, session: DiagSession, backup_dir: str,
-               dtc_targets: Callable[[], list[dict]] = catalog.dtc_targets,
                pid_profiles: Callable[[], list[dict]] = catalog.pid_profiles,
                vin: Callable[[], str] = lambda: "",
                default_profile_id: Callable[[str], str] = live_data.default_profile_id):
     self.session = session
     self.backups = BackupStore(backup_dir)
-    self._dtc_targets = dtc_targets
     self._pid_profiles = pid_profiles
     self._vin = vin
     self._default_profile_id = default_profile_id
@@ -196,17 +194,19 @@ class ToyotaDiagApi:
     return _guarded(restore)
 
   # ---- 故障码 ----
-  def dtc_scan(self):
-    return _guarded(lambda: {"ecus": self.session.run(
-      lambda link: dtc.scan(link, self._dtc_targets(), catalog.load("dtc_descriptions")))})
+  def dtc_scan(self, body: dict):
+    """扫一个 ECU：前端按目录 ECU 列表逐个调用。说明由目录 dtcText 拼好随结果下发。"""
+    def scan():
+      ecu = _catalog_ecu(body)
+      return self.session.run(lambda link: dtc.scan_ecu(link, ecu, catalog.load_sienna()["dtcText"]))
+    return _guarded(scan)
 
   def dtc_clear(self, body: dict):
     def clear():
-      targets = {t["ecu"]: t for t in self._dtc_targets()}
       ecus = body.get("ecus")
-      if not isinstance(ecus, list) or not ecus or not all(isinstance(e, str) and e in targets for e in ecus):
+      if not isinstance(ecus, list) or not ecus or not all(isinstance(e, str) and catalog.ecu(e) for e in ecus):
         raise RequestError(400, "ecus 无效")
-      return {"results": self.session.run(lambda link: [dtc.clear(link, targets[e]) for e in ecus])}
+      return {"results": self.session.run(lambda link: [dtc.clear(link, catalog.ecu(e)) for e in ecus])}
     return _guarded(clear)
 
   # ---- 实时数据 ----

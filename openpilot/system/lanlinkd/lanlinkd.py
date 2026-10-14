@@ -249,7 +249,7 @@ class LanlinkApp:
     return await self._toyota("backup_restore", backup_id)
 
   async def toyota_dtc_scan(self, request: Request) -> HTTPResponse:
-    return await self._toyota("dtc_scan")
+    return await self._toyota("dtc_scan", self._body(request))
 
   async def toyota_dtc_clear(self, request: Request) -> HTTPResponse:
     return await self._toyota("dtc_clear", self._body(request))
