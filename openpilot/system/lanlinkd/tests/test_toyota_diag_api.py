@@ -7,9 +7,8 @@ from openpilot.system.lanlinkd import toyota_diag_api
 from openpilot.system.lanlinkd.toyota.link import DiagLink
 from openpilot.system.lanlinkd.toyota.session import SessionError
 
-from .test_toyota_customization import ITEM
 from .test_toyota_customization_flow import PROBE
-from .toyota_fakes import FakeBodyEcu, FakeEcu, FakePanda, FakeUdsEcu
+from .toyota_fakes import FakeEcu, FakePanda, FakeUdsEcu
 
 
 class FakeSession:
@@ -77,75 +76,88 @@ class ActiveSession(FakeSession):
     return operation(self.link)
 
 
+HEADLIGHTS = "car_setting_warn_headlights_on_door_open"   # 750/40 DID 2270，实车值 01（开启）
+
+
 def make_active_api(tmp_path, ecus=None):
-  ecu = FakeBodyEcu({0x12: bytes.fromhex("a020")}, {0x12: bytes.fromhex("ff0030")})
-  panda = FakePanda(ecus if ecus is not None else {(0x750, 0x40): ecu})
+  body_ecu = FakeUdsEcu.from_probe(PROBE, "750", "40")
+  panda = FakePanda(ecus if ecus is not None else {(0x750, 0x40): body_ecu})
   link = DiagLink(panda, elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
-  items = [ITEM, {**ITEM, "uid": 9, "readOnly": True}]
-  return ecu, toyota_diag_api.ToyotaDiagApi(ActiveSession(link), str(tmp_path), customization_items=lambda: items)
+  return body_ecu, toyota_diag_api.ToyotaDiagApi(ActiveSession(link), str(tmp_path))
 
 
 class TestCustomizationEndpoints:
   def test_scan_one_ecu(self, tmp_path):
-    body_ecu = FakeUdsEcu.from_probe(PROBE, "750", "40")
-    _, api = make_active_api(tmp_path, ecus={(0x750, 0x40): body_ecu})
+    _, api = make_active_api(tmp_path)
     status, body = api.customizations_scan({"ecu": "750/40"})
     assert status == 200
     assert body["ecu"] == "750/40" and body["status"] == "ok" and len(body["items"]) == 44
-    assert {"key": "car_setting_warn_headlights_on_door_open", "value": 1, "raw": "01"} in body["items"]
+    assert {"key": HEADLIGHTS, "value": 1, "raw": "01"} in body["items"]
 
   @pytest.mark.parametrize("request_body", [{}, {"ecu": "7FF"}, {"ecu": 7}])
   def test_scan_rejects_unknown_ecu(self, tmp_path, request_body):
     _, api = make_active_api(tmp_path)
     assert api.customizations_scan(request_body)[0] == 400
 
-  def test_preview_then_write_then_restore(self, tmp_path):
-    ecu, api = make_active_api(tmp_path)
-    status, preview = api.customization_preview("1", {"option": 1})
-    assert status == 200 and preview["before"] == "a020" and preview["after"] == "a000"
-    status, result = api.customization_write("1", {"option": 1, "before": preview["before"]})
-    assert status == 200 and result["verified"] and result["current"] == 1
+  def test_write_list_and_restore(self, tmp_path):
+    body_ecu, api = make_active_api(tmp_path)
+    status, result = api.customization_write(HEADLIGHTS, {"value": 0, "before": "01"})
+    assert status == 200 and result["verified"] and result["value"] == 0
+    assert body_ecu.memory[0x2270] == b"\x00"
     status, listing = api.backups_list()
-    assert [b["id"] for b in listing["backups"]] == [result["backupId"]]
-    assert listing["backups"][0]["localId"] == "12"
+    assert status == 200
+    assert listing["backups"] == [{"id": result["backupId"], "time": listing["backups"][0]["time"], "key": HEADLIGHTS,
+                                   "name": "开门时大灯未关提醒", "ecu": "车身舒适系统",
+                                   "before": {"value": 1, "label": "开启"}, "after": {"value": 0, "label": "关闭"},
+                                   "restored": False}]
     status, restored = api.backup_restore(result["backupId"])
-    assert status == 200 and restored["verified"]
-    assert len(api.backups_list()[1]["backups"]) == 2   # 恢复前另存了一份
-    assert ecu.memory[0x12] == bytes.fromhex("a020")
+    assert status == 200 and restored["verified"] and restored["value"] == 1
+    assert body_ecu.memory[0x2270] == b"\x01"
+    listing = api.backups_list()[1]["backups"]
+    assert len(listing) == 2 and next(b for b in listing if b["id"] == result["backupId"])["restored"] is True
+
+  def test_old_format_backups_are_not_listed(self, tmp_path):
+    (tmp_path / "0123456789ab.json").write_text('{"id": "0123456789ab", "time": 1, "uid": 10001, "data": "a020"}')
+    _, api = make_active_api(tmp_path)
+    assert api.backups_list() == (200, {"backups": []})
+    assert api.backup_restore("0123456789ab")[0] == 404
 
   def test_stale_before_is_409(self, tmp_path):
     _, api = make_active_api(tmp_path)
-    status, body = api.customization_write("1", {"option": 1, "before": "0000"})
-    assert status == 409 and "error" in body
+    status, body = api.customization_write(HEADLIGHTS, {"value": 0, "before": "00"})
+    assert status == 409 and "重新扫描" in body["error"]
 
-  def test_read_only_item_is_409(self, tmp_path):
+  @pytest.mark.parametrize("key, request_body, expected", [
+    ("nope", {"value": 0, "before": "01"}, 404),
+    (HEADLIGHTS, {"value": 5, "before": "01"}, 400),                      # 不是选项之一
+    (HEADLIGHTS, {"value": True, "before": "01"}, 400),
+    (HEADLIGHTS, {"value": 0}, 400),                                      # 缺 before
+    ("car_setting_speaker_volume", {"value": 15, "before": "00"}, 400),   # 数值型超出 1～14
+  ])
+  def test_bad_write_input(self, tmp_path, key, request_body, expected):
     _, api = make_active_api(tmp_path)
-    assert api.customization_preview("9", {"option": 0})[0] == 409
+    assert api.customization_write(key, request_body)[0] == expected
 
-  def test_bad_input(self, tmp_path):
+  def test_bad_backup_id_is_404(self, tmp_path):
     _, api = make_active_api(tmp_path)
-    assert api.customization_preview("abc", {"option": 0})[0] == 404
-    assert api.customization_preview("777", {"option": 0})[0] == 404
-    assert api.customization_preview("1", {"option": 5})[0] == 400
-    assert api.customization_preview("1", {})[0] == 400
     assert api.backup_restore("../../etc")[0] == 404
 
   def test_silent_ecu_is_504(self, tmp_path):
     _, api = make_active_api(tmp_path, ecus={})
-    status, body = api.customization_preview("1", {"option": 1})
+    status, body = api.customization_write(HEADLIGHTS, {"value": 0, "before": "01"})
     assert status == 504 and "无响应" in body["error"]
 
   def test_malformed_response_is_502(self, tmp_path):
-    garbled = FakeEcu({b"\x21\x12": b"\x61\x12" + bytes(10)}, misnumbered_frames=True)
+    garbled = FakeEcu({b"\x22\x22\x70": b"\x62\x22\x70" + bytes(10)}, misnumbered_frames=True)
     _, api = make_active_api(tmp_path, ecus={(0x750, 0x40): garbled})
-    status, body = api.customization_preview("1", {"option": 1})
+    status, body = api.customization_write(HEADLIGHTS, {"value": 0, "before": "01"})
     assert status == 502 and "应答异常" in body["error"]
 
   def test_unexpected_error_is_json_500(self, tmp_path):
     class BrokenSession(FakeSession):
       def run(self, operation):
         raise RuntimeError("panda 断开")
-    status, body = make_api(BrokenSession()).dtc_scan()
+    status, body = make_api(BrokenSession()).customizations_scan({"ecu": "750/40"})
     assert status == 500 and "panda 断开" in body["error"]
 
 

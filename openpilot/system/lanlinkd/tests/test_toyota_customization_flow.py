@@ -8,104 +8,6 @@ from openpilot.system.lanlinkd.toyota.backups import BackupStore
 from openpilot.system.lanlinkd.toyota.link import DiagLink
 
 from .toyota_fakes import FakeBodyEcu, FakeEcu, FakePanda, FakeUdsEcu
-from .test_toyota_customization import ITEM
-
-OTHER_ECU_ITEM = {**ITEM, "uid": 2, "tx": "7C4", "sub": None, "readId": "81", "writeId": "81"}
-
-
-def make(memory=None, reject_writes=None, tmp_path=None):
-  ecu = FakeBodyEcu(memory or {0x12: bytes.fromhex("a020")}, {0x12: bytes.fromhex("ff0030")}, reject_writes)
-  link = DiagLink(FakePanda({(0x750, 0x40): ecu}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
-  return ecu, link, BackupStore(str(tmp_path)) if tmp_path else None
-
-
-class TestScan:
-  def test_lists_supported_items_with_current_value(self):
-    _, link, _ = make()
-    result = cz.scan(link, [ITEM, OTHER_ECU_ITEM])
-    items = result["items"]
-    # 0x7C4 不在线 → 该 ECU 的项不出现
-    assert [i["uid"] for i in items] == [1]
-    assert items[0]["current"] == 0
-    assert items[0]["raw"] == "a020"
-
-  def test_report_explains_each_ecu(self):
-    # 列表为空时用户要能看出卡在哪一步：ECU 不在线 / A803 被拒 / 掩码不含该项 / 读值失败
-    rejecting = FakeEcu({b"\x3e": b"\x7e", b"\xa8\x03": b"\x7f\xa8\x22"})
-    quiet_after_probe = FakeEcu({b"\x3e": b"\x7e"})
-    unreadable = FakeBodyEcu({}, {0x12: bytes.fromhex("ff0030")})
-    link = DiagLink(FakePanda({(0x750, 0x40): rejecting, (0x7C4, None): quiet_after_probe, (0x7C0, None): unreadable}),
-                    elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
-    third = {**ITEM, "uid": 3, "tx": "7C0", "sub": None}
-    result = cz.scan(link, [ITEM, OTHER_ECU_ITEM, third, {**third, "uid": 4}])
-    assert result["items"] == []
-    assert result["ecus"] == [
-      {"tx": "750", "sub": "40", "total": 1, "supported": 0, "read": 0, "status": "rejected", "nrc": "22"},
-      {"tx": "7C4", "sub": None, "total": 1, "supported": 0, "read": 0, "status": "silent"},
-      {"tx": "7C0", "sub": None, "total": 2, "supported": 2, "read": 0, "status": "ok", "masks": 1, "readError": "NRC 11"},
-    ]
-
-  def test_malformed_ecu_is_reported_and_scan_continues(self):
-    # 实车：750/AD 天窗的 A8 03 应答序号错乱曾让整个扫描变成 HTTP 500
-    sunroof = FakeEcu({b"\x3e": b"\x7e", b"\xa8\x03": b"\xe8\x03" + bytes(range(20))}, misnumbered_frames=True)
-    body = FakeBodyEcu({0x12: bytes.fromhex("a020")}, {0x12: bytes.fromhex("ff0030")})
-    link = DiagLink(FakePanda({(0x750, 0xAD): sunroof, (0x750, 0x40): body}),
-                    elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
-    result = cz.scan(link, [{**ITEM, "uid": 5, "sub": "AD"}, ITEM])
-    assert [i["uid"] for i in result["items"]] == [1]
-    report = result["ecus"][0]
-    assert (report["sub"], report["status"]) == ("AD", "malformed")
-    assert "invalid consecutive frame index" in report["malformedReason"]
-
-  def test_report_marks_offline_ecu(self):
-    _, link, _ = make()
-    report = cz.scan(link, [OTHER_ECU_ITEM])["ecus"]
-    assert report == [{"tx": "7C4", "sub": None, "total": 1, "supported": 0, "read": 0, "status": "offline"}]
-
-
-class TestWrite:
-  def test_preview_shows_compressed_before_and_after(self):
-    _, link, _ = make()
-    assert cz.preview(link, ITEM, 1) == {"before": "a020", "after": "a000", "payload": "3b12a00000"}
-
-  def test_write_backs_up_writes_and_verifies(self, tmp_path):
-    ecu, link, store = make(tmp_path=tmp_path)
-    result = cz.write(link, ITEM, 1, "a020", store)
-    assert ecu.memory[0x12] == bytes.fromhex("a000")
-    assert result["verified"] and result["current"] == 1
-    backup = store.get(result["backupId"])
-    assert backup["data"] == "a020" and backup["uid"] == 1 and backup["mask"] == "ff0030"
-
-  def test_write_refuses_when_ecu_changed_since_preview(self, tmp_path):
-    ecu, link, store = make(tmp_path=tmp_path)
-    with pytest.raises(cz.StaleDataError):
-      cz.write(link, ITEM, 1, "ffff", store)
-    assert ecu.memory[0x12] == bytes.fromhex("a020")
-    assert store.list() == []
-
-  def test_rejected_write_raises_with_nrc(self, tmp_path):
-    _, link, store = make(reject_writes=b"\x7f\x3b\x22", tmp_path=tmp_path)
-    with pytest.raises(cz.EcuRejectedError) as err:
-      cz.write(link, ITEM, 1, "a020", store)
-    assert err.value.nrc == 0x22
-
-  def test_restore_backs_up_current_then_writes_backup_back(self, tmp_path):
-    ecu, link, store = make(tmp_path=tmp_path)
-    backup_id = cz.write(link, ITEM, 1, "a020", store)["backupId"]
-    result = cz.restore(link, store.get(backup_id), store)
-    assert result["verified"]
-    assert ecu.memory[0x12] == bytes.fromhex("a020")
-    # 恢复也是一次写入：恢复前的数据（a000）同样留了备份，可以再恢复回去
-    assert store.get(result["backupId"])["data"] == "a000"
-
-  def test_failed_backup_blocks_write(self, tmp_path):
-    ecu, link, _ = make()
-    blocker = tmp_path / "not_a_dir"
-    blocker.write_text("")
-    with pytest.raises(cz.BackupError):
-      cz.write(link, ITEM, 1, "a020", BackupStore(str(blocker)))
-    assert ecu.memory[0x12] == bytes.fromhex("a020")
-
 
 # ---- Sienna 4 代：按 ECU 扫描（目录 + Carista 规则）----
 
@@ -162,6 +64,13 @@ class TestScanEcu:
     # 压缩 a0 20 按掩码 ff 00 30 展开成 a0 00 20，第 2 字节 & 0x20 → 1
     assert result["items"] == [{"key": "car_setting_one_touch_test", "value": 1, "raw": "a00020"}]
 
+  def test_malformed_ecu_is_reported_not_raised(self):
+    # 实车：750/AD 天窗的 A8 03 应答序号错乱曾让整个扫描变成 HTTP 500
+    sunroof = FakeEcu({b"\x3e": b"\x7e", b"\xa8\x03": b"\xe8\x03" + bytes(range(20))}, misnumbered_frames=True)
+    link = DiagLink(FakePanda({(0x750, 0xAD): sunroof}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    result = cz.scan_ecu(link, catalog.ecu("750/AD"), [])
+    assert result["status"] == "malformed" and "invalid consecutive frame index" in result["malformedReason"]
+
   def test_offline_ecu(self):
     link = DiagLink(FakePanda({}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
     result = cz.scan_ecu(link, catalog.ecu("750/40"), _settings_of("750/40"))
@@ -173,3 +82,68 @@ class TestScanEcu:
     link = DiagLink(FakePanda({(0x750, 0x40): fake}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
     result = cz.scan_ecu(link, catalog.ecu("750/40"), _settings_of("750/40"))
     assert result["read"] == 43 and result["readError"] == "NRC 31"
+
+
+HEADLIGHTS = "car_setting_warn_headlights_on_door_open"   # 750/40 DID 2270 字节 0 掩码 FF，实车值 01
+
+
+def _body_ecu_link(**fake_kwargs):
+  fake = FakeUdsEcu.from_probe(PROBE, "750", "40", **fake_kwargs)
+  link = DiagLink(FakePanda({(0x750, 0x40): fake}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+  return fake, link
+
+
+class TestWriteSetting:
+  def test_uds_write_backs_up_writes_and_verifies(self, tmp_path):
+    fake, link = _body_ecu_link()
+    backups = BackupStore(str(tmp_path))
+    result = cz.write_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), 0, "01", backups)
+    assert {k: result[k] for k in ("key", "value", "verified", "before", "after")} == \
+      {"key": HEADLIGHTS, "value": 0, "verified": True, "before": "01", "after": "00"}
+    assert fake.memory[0x2270] == b"\x00"
+    saved = backups.get(result["backupId"])
+    assert (saved["key"], saved["ecu"], saved["data"], saved["after"]) == (HEADLIGHTS, "750/40", "01", "00")
+
+  def test_refuses_when_ecu_changed_since_scan(self, tmp_path):
+    fake, link = _body_ecu_link()
+    with pytest.raises(cz.StaleDataError):
+      cz.write_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), 0, "00", BackupStore(str(tmp_path)))
+    assert fake.memory[0x2270] == b"\x01" and not os.listdir(tmp_path)
+
+  def test_switches_to_extended_session_when_default_session_refuses(self, tmp_path):
+    fake, link = _body_ecu_link(writes_need_extended_session=True)
+    result = cz.write_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), 0, "01", BackupStore(str(tmp_path)))
+    assert result["verified"] and fake.extended_session
+    assert fake.requests.count(b"\x10\x03") == 1
+
+  def test_rejected_write_raises_with_nrc(self, tmp_path):
+    _, link = _body_ecu_link(reject_writes=b"\x7f\x2e\x22")
+    with pytest.raises(cz.EcuRejectedError) as exc:
+      cz.write_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), 0, "01", BackupStore(str(tmp_path)))
+    assert exc.value.nrc == 0x22
+
+  def test_failed_backup_blocks_write(self, tmp_path):
+    fake, link = _body_ecu_link()
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    with pytest.raises(cz.BackupError):
+      cz.write_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), 0, "01", BackupStore(str(blocker / "sub")))
+    assert fake.memory[0x2270] == b"\x01"
+
+  def test_toyota_can_write_sends_expanded_data(self, tmp_path):
+    window = FakeBodyEcu({0x11: bytes.fromhex("a020")}, {0x11: bytes.fromhex("ff0030")})
+    link = DiagLink(FakePanda({(0x750, 0x90): window}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    result = cz.write_setting(link, catalog.ecu("750/90"), WINDOW_SETTING, 0, "a00020", BackupStore(str(tmp_path)))
+    assert (result["verified"], result["value"], result["after"]) == (True, 0, "a00000")
+    assert window.memory[0x11] == bytes.fromhex("a000")
+    assert bytes.fromhex("3b11a00000") in window.requests
+
+  def test_restore_backs_up_current_value_then_writes_backup_back(self, tmp_path):
+    fake, link = _body_ecu_link()
+    backups = BackupStore(str(tmp_path))
+    written = cz.write_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), 0, "01", backups)
+    restored = cz.restore_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), backups.get(written["backupId"]), backups)
+    assert restored["verified"] and restored["value"] == 1
+    assert fake.memory[0x2270] == b"\x01"
+    assert backups.get(restored["backupId"])["data"] == "00"        # 恢复前另存的是被覆盖的值
+    assert backups.get(written["backupId"])["restored"] is True

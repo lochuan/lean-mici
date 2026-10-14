@@ -239,11 +239,8 @@ class LanlinkApp:
   async def toyota_customizations_scan(self, request: Request) -> HTTPResponse:
     return await self._toyota("customizations_scan", self._body(request))
 
-  async def toyota_customization_preview(self, request: Request, uid: str) -> HTTPResponse:
-    return await self._toyota("customization_preview", uid, self._body(request))
-
-  async def toyota_customization_write(self, request: Request, uid: str) -> HTTPResponse:
-    return await self._toyota("customization_write", uid, self._body(request))
+  async def toyota_customization_write(self, request: Request, key: str) -> HTTPResponse:
+    return await self._toyota("customization_write", key, self._body(request))
 
   async def toyota_backups(self, request: Request) -> HTTPResponse:
     return await self._toyota("backups_list")
@@ -344,8 +341,7 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/toyota/session/enter", "toyota_session_enter"),
   ("POST", "/api/toyota/session/exit", "toyota_session_exit"),
   ("POST", "/api/toyota/customizations/scan", "toyota_customizations_scan"),
-  ("POST", "/api/toyota/customizations/<uid:str>/preview", "toyota_customization_preview"),
-  ("POST", "/api/toyota/customizations/<uid:str>/write", "toyota_customization_write"),
+  ("POST", "/api/toyota/customizations/<key:str>/write", "toyota_customization_write"),
   ("GET", "/api/toyota/backups", "toyota_backups"),
   ("POST", "/api/toyota/backups/<backup_id:str>/restore", "toyota_backup_restore"),
   ("POST", "/api/toyota/dtc/scan", "toyota_dtc_scan"),

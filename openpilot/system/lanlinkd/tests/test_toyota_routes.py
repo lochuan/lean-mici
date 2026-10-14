@@ -53,15 +53,14 @@ class TestSessionRoutes:
 class TestRequiresSession:
   @pytest.mark.parametrize("method,path", [
     ("post", "/api/toyota/customizations/scan"),
-    ("post", "/api/toyota/customizations/10000/preview"),
-    ("post", "/api/toyota/customizations/10000/write"),
+    ("post", "/api/toyota/customizations/car_setting_warn_headlights_on_door_open/write"),
     ("post", "/api/toyota/backups/0123456789ab/restore"),
     ("post", "/api/toyota/dtc/scan"),
     ("post", "/api/toyota/dtc/clear"),
     ("post", "/api/toyota/pids/read"),
   ])
   def test_bus_operations_need_diag_mode(self, app, method, path):
-    _, r = getattr(app.test_client, method)(path, json={"ecu": "750/40", "option": 0, "before": "00", "ecus": ["7E0"], "ids": [1]})
+    _, r = getattr(app.test_client, method)(path, json={"ecu": "750/40", "value": 0, "before": "00", "ecus": ["7E0"], "ids": [1]})
     assert r.status in (404, 409)
     assert "error" in r.json
 

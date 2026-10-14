@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.lanlinkd import vehicle_api
-from openpilot.system.lanlinkd.toyota import catalog, customization, dtc, live_data
+from openpilot.system.lanlinkd.toyota import catalog, coding, customization, dtc, live_data
 from openpilot.system.lanlinkd.toyota.backups import BackupStore
 from openpilot.system.lanlinkd.toyota.link import MalformedResponseError, NoResponseError
 from openpilot.system.lanlinkd.toyota.session import DiagSession, SessionError, car_is_parked
@@ -68,7 +68,7 @@ def _guarded(operation: Callable[[], dict | None], status: int = 200) -> tuple[i
   except customization.EcuRejectedError as exc:
     return 502, {"error": str(exc)}
   except customization.StaleDataError as exc:
-    return 409, {"error": f"{exc}，请重新预览"}
+    return 409, {"error": f"{exc}，请重新扫描"}
   except MalformedResponseError as exc:
     return 502, {"error": f"ECU 应答异常：{exc}"}
   except customization.BackupError as exc:
@@ -79,9 +79,33 @@ def _guarded(operation: Callable[[], dict | None], status: int = 200) -> tuple[i
   return (204, None) if body is None else (status, body)
 
 
+def _value_view(setting: dict, data_hex: str) -> dict:
+  """备份里的整段数据 → {value, label}：选项型反查目录标签，数值型标签就是数字。"""
+  value = coding.extract_value(bytes.fromhex(data_hex), setting["byteIndex"], int(setting["mask"], 16))
+  label = next((o["label"] for o in setting["options"] if o["value"] == value), str(value))
+  return {"value": value, "label": label}
+
+
 def _backup_view(backup: dict) -> dict:
-  return {"id": backup["id"], "time": backup["time"], "uid": backup["uid"], "name": catalog.text(backup["name"]),
-          "ecu": catalog.ecu_name(backup["tx"], backup["sub"]), "localId": backup["writeId"], "data": backup["data"]}
+  setting = catalog.setting(backup["key"])
+  ecu = catalog.ecu(backup["ecu"])
+  return {"id": backup["id"], "time": backup["time"], "key": backup["key"], "name": setting["name"],
+          "ecu": ecu["name"] if ecu else backup["ecu"],
+          "before": _value_view(setting, backup["data"]), "after": _value_view(setting, backup["after"]),
+          "restored": backup.get("restored", False)}
+
+
+def _is_listable(backup: dict) -> bool:
+  """旧格式（Car Scanner，含 uid）和目录里已没有的项都不列、不恢复。"""
+  return "key" in backup and catalog.setting(backup["key"]) is not None
+
+
+def _value_allowed(setting: dict, value) -> bool:
+  if not isinstance(value, int) or isinstance(value, bool):
+    return False
+  if setting["numeric"]:
+    return setting["numeric"]["min"] <= value <= setting["numeric"]["max"]
+  return any(o["value"] == value for o in setting["options"])
 
 
 def _pid_group(item: dict) -> str:
@@ -97,30 +121,17 @@ def _catalog_ecu(body: dict) -> dict:
 
 class ToyotaDiagApi:
   def __init__(self, session: DiagSession, backup_dir: str,
-               customization_items: Callable[[], list[dict]] = catalog.customization_items,
                dtc_targets: Callable[[], list[dict]] = catalog.dtc_targets,
                pid_profiles: Callable[[], list[dict]] = catalog.pid_profiles,
                vin: Callable[[], str] = lambda: "",
                default_profile_id: Callable[[str], str] = live_data.default_profile_id):
     self.session = session
     self.backups = BackupStore(backup_dir)
-    self._customization_items = customization_items
     self._dtc_targets = dtc_targets
     self._pid_profiles = pid_profiles
     self._vin = vin
     self._default_profile_id = default_profile_id
     self._pid_profile_id: str | None = None  # 用户手动选的配置；None = 按 VIN 年份
-
-  def _item_and_option(self, uid: str, body: dict) -> tuple[dict, int]:
-    item = next((i for i in self._customization_items() if str(i["uid"]) == uid), None)
-    if item is None:
-      raise RequestError(404, "未知定制项")
-    if item["readOnly"]:
-      raise RequestError(409, "该项读写 ID 不一致，已禁止写入")
-    option = body.get("option")
-    if not isinstance(option, int) or isinstance(option, bool) or not 0 <= option < len(item["options"]):
-      raise RequestError(400, "option 无效")
-    return item, option
 
   def idle_watchdog(self, exit_event) -> None:
     """后台线程：空闲超时自动退出诊断模式；lanlinkd 退出时也退出，把 pandad 还回去。"""
@@ -155,31 +166,33 @@ class ToyotaDiagApi:
       return self.session.run(lambda link: customization.scan_ecu(link, ecu, settings))
     return _guarded(scan)
 
-  def customization_preview(self, uid: str, body: dict):
-    def preview():
-      item, option = self._item_and_option(uid, body)
-      return {"uid": item["uid"], **self.session.run(lambda link: customization.preview(link, item, option))}
-    return _guarded(preview)
-
-  def customization_write(self, uid: str, body: dict):
+  def customization_write(self, key: str, body: dict):
     def write():
-      item, option = self._item_and_option(uid, body)
+      setting = catalog.setting(key)
+      if setting is None:
+        raise RequestError(404, "未知定制项")
+      value = body.get("value")
+      if not _value_allowed(setting, value):
+        raise RequestError(400, "value 无效")
       before = body.get("before")
       if not isinstance(before, str):
-        raise RequestError(400, "缺少 before（预览时的原始数据）")
-      return {"uid": item["uid"], **self.session.run(lambda link: customization.write(link, item, option, before, self.backups))}
+        raise RequestError(400, "缺少 before（扫描时的原始数据）")
+      ecu = catalog.ecu(setting["ecu"])
+      return self.session.run(lambda link: customization.write_setting(link, ecu, setting, value, before, self.backups))
     return _guarded(write)
 
   # ---- 备份 ----
   def backups_list(self):
-    return _guarded(lambda: {"backups": [_backup_view(b) for b in self.backups.list()]})
+    return _guarded(lambda: {"backups": [_backup_view(b) for b in self.backups.list() if _is_listable(b)]})
 
   def backup_restore(self, backup_id: str):
     def restore():
       backup = self.backups.get(backup_id)
-      if backup is None:
+      if backup is None or not _is_listable(backup):
         raise RequestError(404, "备份不存在")
-      return self.session.run(lambda link: customization.restore(link, backup, self.backups))
+      setting = catalog.setting(backup["key"])
+      ecu = catalog.ecu(backup["ecu"])
+      return self.session.run(lambda link: customization.restore_setting(link, ecu, setting, backup, self.backups))
     return _guarded(restore)
 
   # ---- 故障码 ----

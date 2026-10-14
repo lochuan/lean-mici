@@ -45,14 +45,6 @@ def dtc_targets() -> list[dict]:
   return list(targets.values())
 
 
-def customization_items() -> list[dict]:
-  return load("customizations")["items"]
-
-
-def group_title(group: str) -> str:
-  return text(load("customizations")["groups"].get(group, {"en": group}))
-
-
 def pid_profiles() -> list[dict]:
   return load("pid_profiles")
 
