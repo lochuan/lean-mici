@@ -11,7 +11,7 @@ IMPORT_HARDWARE_WITHOUT_SERIAL_SCRIPT = """
 import sys
 sys.path.insert(0, sys.argv[1])
 sys.modules["serial"] = None  # a foreign AGNOS venv may lack pyserial (upstream #38925)
-import openpilot.system.hardware as hardware
+import openpilot.common.hardware as hardware  # updater 实际导入的路径（上游旧包是 openpilot.system.hardware）
 assert hardware.__file__.startswith(sys.argv[1]), hardware.__file__
 """
 
