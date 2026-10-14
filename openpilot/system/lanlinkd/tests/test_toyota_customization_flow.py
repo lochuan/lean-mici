@@ -5,7 +5,7 @@ import pytest
 from openpilot.system.lanlinkd.toyota import catalog
 from openpilot.system.lanlinkd.toyota import customization as cz
 from openpilot.system.lanlinkd.toyota.backups import BackupStore
-from openpilot.system.lanlinkd.toyota.link import DiagLink
+from openpilot.system.lanlinkd.toyota.link import DiagLink, EcuRejectedError
 
 from .toyota_fakes import FakeBodyEcu, FakeEcu, FakePanda, FakeUdsEcu
 
@@ -83,6 +83,12 @@ class TestScanEcu:
     result = cz.scan_ecu(link, catalog.ecu("750/40"), _settings_of("750/40"))
     assert result["read"] == 43 and result["readError"] == "NRC 31"
 
+  def test_unreadable_support_bitmap_is_reported(self):
+    fake = FakeUdsEcu({0x2270: b"\x01"}, {b"\x3e": b"\x7e"})            # 22 2200 被拒：不知道哪些项支持
+    link = DiagLink(FakePanda({(0x750, 0x40): fake}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    result = cz.scan_ecu(link, catalog.ecu("750/40"), _settings_of("750/40"))
+    assert (result["status"], result["items"], result["readError"]) == ("ok", [], "NRC 31")
+
 
 HEADLIGHTS = "car_setting_warn_headlights_on_door_open"   # 750/40 DID 2270 字节 0 掩码 FF，实车值 01
 
@@ -118,7 +124,7 @@ class TestWriteSetting:
 
   def test_rejected_write_raises_with_nrc(self, tmp_path):
     _, link = _body_ecu_link(reject_writes=b"\x7f\x2e\x22")
-    with pytest.raises(cz.EcuRejectedError) as exc:
+    with pytest.raises(EcuRejectedError) as exc:
       cz.write_setting(link, catalog.ecu("750/40"), catalog.setting(HEADLIGHTS), 0, "01", BackupStore(str(tmp_path)))
     assert exc.value.nrc == 0x22
 
@@ -147,3 +153,17 @@ class TestWriteSetting:
     assert fake.memory[0x2270] == b"\x01"
     assert backups.get(restored["backupId"])["data"] == "00"        # 恢复前另存的是被覆盖的值
     assert backups.get(written["backupId"])["restored"] is True
+
+  def test_undo_restores_only_its_own_bits(self, tmp_path):
+    # 750/B5 DID 2009 实车 c0 00：字节 1 的 0x80 / 0x40 是两个不同的设置项
+    fake = FakeUdsEcu.from_probe(PROBE, "750", "B5")
+    link = DiagLink(FakePanda({(0x750, 0xB5): fake}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
+    backups = BackupStore(str(tmp_path))
+    ecu = catalog.ecu("750/B5")
+    closed = catalog.setting("car_setting_auto_arm_on_doors_closed")
+    closing = catalog.setting("car_setting_auto_arm_on_doors_closing")
+    first = cz.write_setting(link, ecu, closed, 1, "c000", backups)
+    cz.write_setting(link, ecu, closing, 1, "c080", backups)
+    restored = cz.restore_setting(link, ecu, closed, backups.get(first["backupId"]), backups)
+    assert fake.memory[0x2009] == bytes.fromhex("c040")             # 后写的 closing 不被一起改回
+    assert restored["verified"] and restored["value"] == 0

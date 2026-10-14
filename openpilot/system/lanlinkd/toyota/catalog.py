@@ -29,6 +29,11 @@ def live_item(key: str) -> dict | None:
   return _by_key("live", "key").get(key)
 
 
+def option_label(options: list[dict] | None, value) -> str | None:
+  """选项型取值的标签；不在选项里（或不是选项型）返回 None。"""
+  return next((o["label"] for o in options or [] if o["value"] == value), None)
+
+
 def ecu_address(ecu: dict) -> tuple[int, int | None]:
   """(请求 ID, 0x750 网关子地址或 None)。"""
   return int(ecu["tx"], 16), int(ecu["sub"], 16) if ecu["sub"] else None

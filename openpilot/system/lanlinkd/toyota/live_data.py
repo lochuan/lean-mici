@@ -6,7 +6,7 @@
 - 失败（无响应、应答异常、负响应、应答太短）只记在该项的 error 上，不影响其他项。
 """
 from openpilot.system.lanlinkd.toyota import catalog
-from openpilot.system.lanlinkd.toyota.link import MalformedResponseError, NoResponseError
+from openpilot.system.lanlinkd.toyota.link import READ_ERRORS, expect_positive, read_error_text
 
 
 class _ReadError(Exception):
@@ -27,23 +27,14 @@ def decode(item: dict, payload: bytes) -> float:
 
 
 def format_value(item: dict, value: float) -> str:
-  label = next((o["label"] for o in item["options"] or [] if o["value"] == value), None)
-  return label if label is not None else f"{value:.{item['precision']}f}"
+  return catalog.option_label(item["options"], value) or f"{value:.{item['precision']}f}"
 
 
 def _read_did(link, ecu_id: str, did: str) -> bytes:
-  request = b"\x22" + bytes.fromhex(did)
   try:
-    response = link.request(*catalog.ecu_address(catalog.ecu(ecu_id)), request)
-  except NoResponseError:
-    raise _ReadError("无响应") from None
-  except MalformedResponseError:
-    raise _ReadError("应答异常") from None
-  if response[:3] == b"\x62" + request[1:3]:
-    return response[3:]
-  if len(response) >= 3 and response[0] == 0x7F:
-    raise _ReadError(f"NRC {response[2]:02X}")
-  raise _ReadError("应答格式不符")
+    return expect_positive(link, catalog.ecu_address(catalog.ecu(ecu_id)), b"\x22" + bytes.fromhex(did), 3)
+  except READ_ERRORS as exc:
+    raise _ReadError(read_error_text(exc)) from None
 
 
 def read(link, items: list[dict]) -> list[dict]:

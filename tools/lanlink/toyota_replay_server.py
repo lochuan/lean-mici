@@ -57,7 +57,7 @@ class ReplayUdsEcu(FakeUdsEcu):
     return super()._handle(request)
 
 
-def _probe_a803(tx: str, sub: str | None) -> bytes:
+def _probed_can_mask_table(tx: str, sub: str | None) -> bytes:
   with open(PROBE) as f:
     for line in f:
       row = json.loads(line)
@@ -70,7 +70,7 @@ def build_car() -> FakePanda:
   ecus = {}
   for ecu in catalog.load_sienna()["ecus"]:
     if ecu["protocol"] == "toyota_can":
-      masks = coding.parse_masks(_probe_a803(ecu["tx"], ecu["sub"]))
+      masks = coding.parse_masks(_probed_can_mask_table(ecu["tx"], ecu["sub"]))
       fake = FakeBodyEcu({i: bytes(sum(1 for b in m if b)) for i, m in masks.items()}, masks)
     else:
       fake = ReplayUdsEcu.from_probe(PROBE, ecu["tx"], ecu["sub"])

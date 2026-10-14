@@ -55,7 +55,7 @@ def parse_masks(response: bytes) -> dict[int, bytes]:
   return masks
 
 
-def expand(compressed: bytes, mask: bytes) -> bytes:
+def expand_by_mask(compressed: bytes, mask: bytes) -> bytes:
   values = iter(compressed)
   return bytes(next(values, 0) if m else 0 for m in mask)
 

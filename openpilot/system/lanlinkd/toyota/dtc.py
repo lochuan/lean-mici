@@ -7,7 +7,8 @@
 - 无响应 / 应答异常 / 负响应都按 ECU 记下返回，不抛出。
 """
 from openpilot.system.lanlinkd.toyota import catalog
-from openpilot.system.lanlinkd.toyota.link import MalformedResponseError, NoResponseError
+from openpilot.system.lanlinkd.toyota.link import (READ_ERRORS, EcuRejectedError, MalformedResponseError, NoResponseError,
+                                                   expect_positive, read_error_text)
 
 UDS_READ = bytes.fromhex("19028D")
 CAN_READ_PIDS = (0x81, 0x80, 0xB0)
@@ -40,31 +41,36 @@ def _parse_can(payload: bytes) -> list[tuple[str, int | None]]:
   return [(decode_code(records[i * 2:i * 2 + 2]), None) for i in range(min(count, len(records) // 2))]
 
 
-def _nrc_text(response: bytes) -> str:
-  return f"NRC {response[2]:02X}" if len(response) >= 3 and response[0] == 0x7F else f"应答格式不符：{response.hex()}"
-
-
-def _read(link, ecu: dict) -> tuple[list[tuple[str, int | None]] | None, str]:
-  """返回 (码列表, 错误)；码列表为 None 表示 ECU 拒绝了所有读码请求。"""
+def _read_codes(link, ecu: dict) -> tuple[list[tuple[str, int | None]] | None, str]:
+  """返回 (码列表, 错误)；码列表为 None 表示 ECU 拒绝了所有读码请求。
+  所有请求都无响应才抛 NoResponseError（某个 pid 不应答不影响试下一个）。"""
   address = catalog.ecu_address(ecu)
   if ecu["protocol"] == "uds":
     attempts = [(UDS_READ, 2, _parse_uds)]
   else:
     attempts = [(bytes([0x13, pid]), 1, _parse_can) for pid in CAN_READ_PIDS]
-  error = ""
+  rejection = None
   for request, echo_len, parse in attempts:
-    response = link.request(*address, request)
-    if response[:echo_len] == bytes([request[0] + 0x40]) + request[1:echo_len] and len(response) > echo_len:
-      return parse(response[echo_len:]), ""
-    error = _nrc_text(response)
-  return None, error
+    try:
+      payload = expect_positive(link, address, request, echo_len)
+    except NoResponseError:
+      continue
+    except EcuRejectedError as exc:
+      rejection = rejection or exc
+      continue
+    if payload:
+      return parse(payload), ""
+    rejection = rejection or EcuRejectedError(request, b"")
+  if rejection is None:
+    raise NoResponseError(f"{ecu['id']} 读故障码无响应")
+  return None, read_error_text(rejection)
 
 
 def scan_ecu(link, ecu: dict, dtc_text: dict) -> dict:
   """读一个 ECU 的故障码：{ecu, status: offline / malformed / ok, protocol, dtcs, readError?, malformedReason?}。"""
   report = {"ecu": ecu["id"], "status": "ok", "protocol": ecu["protocol"], "dtcs": []}
   try:
-    codes, error = _read(link, ecu)
+    codes, error = _read_codes(link, ecu)
   except NoResponseError:
     return {**report, "status": "offline"}
   except MalformedResponseError as exc:
@@ -78,13 +84,8 @@ def scan_ecu(link, ecu: dict, dtc_text: dict) -> dict:
 
 
 def clear(link, ecu: dict) -> dict:
-  request = CLEAR[ecu["protocol"]]
   try:
-    response = link.request(*catalog.ecu_address(ecu), request)
-  except NoResponseError:
-    return {"ecu": ecu["id"], "ok": False, "error": "无响应"}
-  except MalformedResponseError:
-    return {"ecu": ecu["id"], "ok": False, "error": "应答异常"}
-  if response[:1] == b"\x54":
-    return {"ecu": ecu["id"], "ok": True}
-  return {"ecu": ecu["id"], "ok": False, "error": _nrc_text(response)}
+    expect_positive(link, catalog.ecu_address(ecu), CLEAR[ecu["protocol"]], 1)
+  except READ_ERRORS as exc:
+    return {"ecu": ecu["id"], "ok": False, "error": read_error_text(exc)}
+  return {"ecu": ecu["id"], "ok": True}

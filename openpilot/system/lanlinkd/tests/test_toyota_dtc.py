@@ -106,6 +106,16 @@ class TestScanToyotaCan:
     assert result["dtcs"] == [{"code": "B1A01", "status": None, "text": "", "guess": False},
                               {"code": "U0123", "status": None, "text": "", "guess": False}]
 
+  def test_silent_pid_does_not_stop_the_next_one(self):
+    window = FakeEcu({bytes.fromhex("1380"): bytes.fromhex("5301 9a01")})   # 13 81 无响应
+    result = dtc.scan_ecu(_link({(0x750, 0x90): window}), catalog.ecu("750/90"), DTC_TEXT)
+    assert (result["status"], [d["code"] for d in result["dtcs"]]) == ("ok", ["B1A01"])
+
+  def test_offline_only_when_every_pid_is_silent(self):
+    window = FakeEcu()
+    result = dtc.scan_ecu(_link({(0x750, 0x90): window}), catalog.ecu("750/90"), DTC_TEXT)
+    assert result["status"] == "offline" and len(window.requests) == 3
+
   def test_count_limits_trailing_padding(self):
     window = FakeEcu({bytes.fromhex("1381"): bytes.fromhex("5301 9a01 0455")})
     result = dtc.scan_ecu(_link({(0x750, 0x90): window}), catalog.ecu("750/90"), DTC_TEXT)

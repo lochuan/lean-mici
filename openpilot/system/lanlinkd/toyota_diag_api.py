@@ -9,7 +9,7 @@ from collections.abc import Callable
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.lanlinkd.toyota import catalog, coding, customization, dtc, live_data
 from openpilot.system.lanlinkd.toyota.backups import BackupStore
-from openpilot.system.lanlinkd.toyota.link import MalformedResponseError, NoResponseError
+from openpilot.system.lanlinkd.toyota.link import EcuRejectedError, MalformedResponseError, NoResponseError
 from openpilot.system.lanlinkd.toyota.session import DiagSession, SessionError, car_is_parked
 
 BACKUP_DIR = "/data/lanlink/toyota_backups"
@@ -63,7 +63,7 @@ def _guarded(operation: Callable[[], dict | None], status: int = 200) -> tuple[i
     return exc.status, {"error": exc.message}
   except NoResponseError as exc:
     return 504, {"error": f"ECU 无响应：{exc}"}
-  except customization.EcuRejectedError as exc:
+  except EcuRejectedError as exc:
     return 502, {"error": str(exc)}
   except customization.StaleDataError as exc:
     return 409, {"error": f"{exc}，请重新扫描"}
@@ -80,8 +80,7 @@ def _guarded(operation: Callable[[], dict | None], status: int = 200) -> tuple[i
 def _value_view(setting: dict, data_hex: str) -> dict:
   """备份里的整段数据 → {value, label}：选项型反查目录标签，数值型标签就是数字。"""
   value = coding.extract_value(bytes.fromhex(data_hex), setting["byteIndex"], int(setting["mask"], 16))
-  label = next((o["label"] for o in setting["options"] if o["value"] == value), str(value))
-  return {"value": value, "label": label}
+  return {"value": value, "label": catalog.option_label(setting["options"], value) or str(value)}
 
 
 def _backup_view(backup: dict) -> dict:

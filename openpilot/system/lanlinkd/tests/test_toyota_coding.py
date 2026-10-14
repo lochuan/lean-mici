@@ -40,7 +40,7 @@ class TestToyotaCanMasks:
     # A8 03 应答：E8 03 + [id, len, mask…]；21 读到的是只含掩码非零字节的压缩数据
     masks = coding.parse_masks(bytes.fromhex("e803 11 03 ff0030 12 01 02"))
     assert masks == {0x11: bytes.fromhex("ff0030"), 0x12: b"\x02"}
-    assert coding.expand(bytes.fromhex("a020"), masks[0x11]) == bytes.fromhex("a00020")
+    assert coding.expand_by_mask(bytes.fromhex("a020"), masks[0x11]) == bytes.fromhex("a00020")
 
   @pytest.mark.parametrize("byte_index, mask, supported", [(2, 0x20, True), (2, 0x40, False), (1, 0x01, False), (3, 0x01, False)])
   def test_setting_supported_when_mask_covers_its_bits(self, byte_index, mask, supported):

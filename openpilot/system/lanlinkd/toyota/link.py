@@ -26,6 +26,35 @@ class MalformedResponseError(Exception):
   """ECU 有应答但不符合 ISO-TP（如续帧序号错乱，实车 750/AD 天窗的 A8 03 应答必现）。"""
 
 
+class EcuRejectedError(Exception):
+  """ECU 回了负响应，或正响应的回显不对。"""
+
+  def __init__(self, request: bytes, response: bytes):
+    self.nrc = response[2] if len(response) >= 3 and response[0] == NEGATIVE_RESPONSE else None
+    super().__init__(f"ECU 拒绝 {request[:2].hex()}：{response.hex()}")
+
+
+# 按 ECU / 按数据项记下就继续的读取失败（扫描不能因为一个 ECU 整体失败）
+READ_ERRORS = (NoResponseError, MalformedResponseError, EcuRejectedError)
+
+
+def read_error_text(exc: Exception) -> str:
+  """READ_ERRORS 给用户看的简短原因。"""
+  if isinstance(exc, NoResponseError):
+    return "无响应"
+  if isinstance(exc, MalformedResponseError):
+    return "应答异常"
+  return f"NRC {exc.nrc:02X}" if getattr(exc, "nrc", None) is not None else "应答格式不符"
+
+
+def expect_positive(link, address: tuple[int, int | None], request: bytes, echo_len: int) -> bytes:
+  """发请求，要求正响应（SID+0x40 且回显请求的前 echo_len 字节），返回回显之后的数据。"""
+  response = link.request(*address, request)
+  if response[:echo_len] != bytes([request[0] + 0x40]) + request[1:echo_len]:
+    raise EcuRejectedError(request, response)
+  return response[echo_len:]
+
+
 def _request_label(tx: int, sub: int | None, payload: bytes) -> str:
   return f"{tx:X}/{sub if sub is None else f'{sub:02X}'} {payload.hex()}"
 
