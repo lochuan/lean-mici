@@ -111,8 +111,8 @@ class FakePanda:
     self._rx.append((tx + 8, data.ljust(8, b"\x00"), self.bus))
 
 
-class FakeBodyEcu(FakeEcu):
-  """有内存的 Toyota 定制 ECU：A803 报掩码，21 读压缩数据，3B 按掩码写回。"""
+class FakeToyotaCanEcu(FakeEcu):
+  """有内存的 Toyota CAN 定制 ECU（车窗类）：A803 报掩码，21 读压缩数据，3B 按掩码写回。"""
 
   def __init__(self, memory: dict[int, bytes], masks: dict[int, bytes], reject_writes: bytes | None = None):
     super().__init__(handler=self._handle)

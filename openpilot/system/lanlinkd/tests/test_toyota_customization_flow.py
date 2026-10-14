@@ -7,7 +7,7 @@ from openpilot.system.lanlinkd.toyota import customization as cz
 from openpilot.system.lanlinkd.toyota.backups import BackupStore
 from openpilot.system.lanlinkd.toyota.link import DiagLink, EcuRejectedError
 
-from .toyota_fakes import FakeBodyEcu, FakeEcu, FakePanda, FakeUdsEcu
+from .toyota_fakes import FakeToyotaCanEcu, FakeEcu, FakePanda, FakeUdsEcu
 
 # ---- Sienna 4 代：按 ECU 扫描（目录 + Carista 规则）----
 
@@ -58,7 +58,7 @@ class TestScanEcu:
     assert result["items"] == [] and result["supported"] == 0
 
   def test_toyota_can_setting_is_read_from_expanded_data(self):
-    window = FakeBodyEcu({0x11: bytes.fromhex("a020")}, {0x11: bytes.fromhex("ff0030")})
+    window = FakeToyotaCanEcu({0x11: bytes.fromhex("a020")}, {0x11: bytes.fromhex("ff0030")})
     link = DiagLink(FakePanda({(0x750, 0x90): window}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
     result = cz.scan_ecu(link, catalog.ecu("750/90"), [WINDOW_SETTING])
     # 压缩 a0 20 按掩码 ff 00 30 展开成 a0 00 20，第 2 字节 & 0x20 → 1
@@ -137,7 +137,7 @@ class TestWriteSetting:
     assert fake.memory[0x2270] == b"\x01"
 
   def test_toyota_can_write_sends_expanded_data(self, tmp_path):
-    window = FakeBodyEcu({0x11: bytes.fromhex("a020")}, {0x11: bytes.fromhex("ff0030")})
+    window = FakeToyotaCanEcu({0x11: bytes.fromhex("a020")}, {0x11: bytes.fromhex("ff0030")})
     link = DiagLink(FakePanda({(0x750, 0x90): window}), elm327_mode=3, heartbeat_thread=False, timeout=0.02, pending_timeout=0.1)
     result = cz.write_setting(link, catalog.ecu("750/90"), WINDOW_SETTING, 0, "a00020", BackupStore(str(tmp_path)))
     assert (result["verified"], result["value"], result["after"]) == (True, 0, "a00000")

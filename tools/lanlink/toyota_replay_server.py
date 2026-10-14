@@ -19,7 +19,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from openpilot.system.lanlinkd.tests.toyota_fakes import FakeBodyEcu, FakePanda, FakeUdsEcu
+from openpilot.system.lanlinkd.tests.toyota_fakes import FakeToyotaCanEcu, FakePanda, FakeUdsEcu
 from openpilot.system.lanlinkd.toyota import catalog, coding
 from openpilot.system.lanlinkd.toyota.link import DiagLink
 from openpilot.system.lanlinkd.toyota.session import SessionError
@@ -71,7 +71,7 @@ def build_car() -> FakePanda:
   for ecu in catalog.load_sienna()["ecus"]:
     if ecu["protocol"] == "toyota_can":
       masks = coding.parse_masks(_probed_can_mask_table(ecu["tx"], ecu["sub"]))
-      fake = FakeBodyEcu({i: bytes(sum(1 for b in m if b)) for i, m in masks.items()}, masks)
+      fake = FakeToyotaCanEcu({i: bytes(sum(1 for b in m if b)) for i, m in masks.items()}, masks)
     else:
       fake = ReplayUdsEcu.from_probe(PROBE, ecu["tx"], ecu["sub"])
     ecus[catalog.ecu_address(ecu)] = fake

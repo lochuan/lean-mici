@@ -93,7 +93,7 @@ def _backup_view(backup: dict) -> dict:
 
 
 def _is_listable(backup: dict) -> bool:
-  """旧格式（Car Scanner，含 uid）和目录里已没有的项都不列、不恢复。"""
+  """缺 key 的旧格式文件和目录里已没有的项都不列、不恢复。"""
   return "key" in backup and catalog.setting(backup["key"]) is not None
 
 
