@@ -6,14 +6,14 @@
 import { reactive } from "vue";
 import { api, ApiError } from "./api";
 import type { BatteryAnalysis } from "./battery";
-import type { ToyotaCatalog, ToyotaDtcScan, ToyotaEcu, ToyotaScanStatus } from "./schema";
-import { ecusWithSettings, errorText } from "./toyota";
+import type { ToyotaCatalog, ToyotaDtcScan, ToyotaEcu, ToyotaScanStatus, ToyotaSetting } from "./schema";
+import { ecusWithSettings, errorText, settingValuesAfterRawChange } from "./toyota";
 
 export const toyotaData = reactive({
   catalog: null as ToyotaCatalog | null,
   catalogError: "",
-  /** 最近一次扫描里有应答的 ECU 数；还没扫描过为 null */
-  onlineEcuCount: null as number | null,
+  /** ECU id → 最近一次探测有没有应答（定制扫描和故障码扫描都更新）；没探测过的 ECU 不在表里 */
+  ecuAnswered: {} as Record<string, boolean>,
   customization: {
     state: "idle" as "idle" | "scanning" | "done",
     /** 已扫描完的 ECU 的状态，长度 = 已完成数 */
@@ -68,16 +68,17 @@ export async function scanCustomizations(): Promise<void> {
     try {
       const r = await api.toyotaScanCustomizations(ecu.id);
       c.statuses.push(r.status);
+      toyotaData.ecuAnswered[ecu.id] = r.status === "ok";
       if (r.status !== "ok") c.unreachable.push(ecu);
       for (const it of r.items) c.values[it.key] = { value: it.value, raw: it.raw };
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) break;
       c.statuses.push("offline");
+      toyotaData.ecuAnswered[ecu.id] = false;
       c.unreachable.push(ecu);
     }
   }
   c.state = "done";
-  toyotaData.onlineEcuCount = c.statuses.filter((s) => s === "ok").length;
 }
 
 /** 逐个 ECU 读故障码（全部 41 个）。失败的 ECU 记为无应答继续；会话没了（409）才中止。 */
@@ -94,9 +95,9 @@ export async function scanDtcs(): Promise<void> {
       if (e instanceof ApiError && e.status === 409) break;
       d.scans.push({ ecu: ecu.id, status: "offline", protocol: ecu.protocol, dtcs: [] });
     }
+    toyotaData.ecuAnswered[ecu.id] = d.scans[d.scans.length - 1].status === "ok";
   }
   d.state = "done";
-  toyotaData.onlineEcuCount = d.scans.filter((s) => s.status === "ok").length;
 }
 
 /** 清除成功的 ECU 先在本地清空列表；是否真的清掉、故障是否还在，要重新扫描才知道 */
@@ -109,13 +110,20 @@ export async function clearDtcs(ecuIds: string[]): Promise<{ ecu: string; ok: bo
   return results;
 }
 
+/** 写入 / 撤销后 ECU 里整段数据变成 afterRaw：同一 ECU、同一 DID / localId 的兄弟设置项一并更新，
+ *  否则它们的 raw 过期，下次写入会被后端当作数据已变（409）。 */
+export function applyWriteResult(setting: ToyotaSetting, afterRaw: string): void {
+  const c = toyotaData.customization;
+  Object.assign(c.values, settingValuesAfterRawChange(toyotaData.catalog?.settings ?? [], setting, afterRaw, c.values));
+}
+
 /** 扫描结果作废：写入以外的途径（恢复备份）改了车上的值，下次进定制页重新扫描 */
 export function invalidateCustomizationScan(): void {
   toyotaData.customization.state = "idle";
 }
 
 export function resetScanData(): void {
-  toyotaData.onlineEcuCount = null;
+  toyotaData.ecuAnswered = {};
   const c = toyotaData.customization;
   c.state = "idle";
   c.statuses = [];

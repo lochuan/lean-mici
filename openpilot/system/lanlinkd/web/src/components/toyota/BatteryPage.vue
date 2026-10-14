@@ -5,7 +5,7 @@
 import { computed, onMounted, ref } from "vue";
 import { CircleAlert, CircleCheck, Loader2, RefreshCw, TriangleAlert } from "lucide-vue-next";
 import { api } from "@/lib/api";
-import { analyzeBattery, batteryBlocksFromValues, type BatteryLevel } from "@/lib/battery";
+import { analyzeBattery, batteryBlocksFromValues, BATTERY_LEVEL_LABEL, DANGER_DIFF_V, WARN_DIFF_V, type BatteryLevel } from "@/lib/battery";
 import { toast } from "@/lib/store";
 import { errorText, formatNumber } from "@/lib/toyota";
 import { toyotaData } from "@/lib/toyotaData";
@@ -37,18 +37,18 @@ async function read(): Promise<void> {
 
 onMounted(() => { if (!analysis.value) void read(); });
 
-const LEVEL: Record<BatteryLevel, { text: string; icon: typeof CircleCheck; color: string; border: string }> = {
-  ok: { text: "健康", icon: CircleCheck, color: "text-sl-accent", border: "border-l-sl-accent" },
-  warn: { text: "注意", icon: TriangleAlert, color: "text-sl-warn", border: "border-l-sl-warn" },
-  danger: { text: "异常", icon: CircleAlert, color: "text-sl-danger", border: "border-l-sl-danger" },
+const LEVEL: Record<BatteryLevel, { icon: typeof CircleCheck; color: string; border: string }> = {
+  ok: { icon: CircleCheck, color: "text-sl-accent", border: "border-l-sl-accent" },
+  warn: { icon: TriangleAlert, color: "text-sl-warn", border: "border-l-sl-warn" },
+  danger: { icon: CircleAlert, color: "text-sl-danger", border: "border-l-sl-danger" },
 };
 
-const meanV2 = computed(() => (analysis.value ? analysis.value.blocks.reduce((s, b) => s + b.v2, 0) / analysis.value.blocks.length : 0));
+const meanV2 = computed(() => (analysis.value ? analysis.value.blocks.reduce((s, b) => s + b.voltagePerTwoModules, 0) / analysis.value.blocks.length : 0));
 const voltageChart = computed(() => {
   const a = analysis.value!;
-  const edgeTone = a.diff > 0.6 ? "danger" : a.diff > 0.3 ? "warn" : "accent";
+  const edgeTone = a.diff > DANGER_DIFF_V ? "danger" : a.diff > WARN_DIFF_V ? "warn" : "accent";
   return {
-    values: a.blocks.map((b) => b.v2),
+    values: a.blocks.map((b) => b.voltagePerTwoModules),
     tones: a.blocks.map((b) => (a.lowBlocks.includes(b) ? "danger" : b === a.min || b === a.max ? edgeTone : "accent")),
     marks: a.blocks.map((b) => (b === a.max ? "最高" : b === a.min ? "最低" : "")),
     lo: Math.floor((meanV2.value - 0.7) * 10) / 10,
@@ -59,9 +59,9 @@ const resistanceChart = computed(() => {
   const a = analysis.value!;
   return {
     values: a.blocks.map((b) => b.resistance),
-    tones: a.blocks.map((b) => (a.highR.includes(b) ? "warn" : "info")),
+    tones: a.blocks.map((b) => (a.highResistanceBlocks.includes(b) ? "warn" : "info")),
     marks: a.blocks.map(() => ""),
-    hi: Math.max(30, Math.ceil(a.rMax.resistance / 5) * 5),
+    hi: Math.max(30, Math.ceil(a.resistanceMaxBlock.resistance / 5) * 5),
   };
 });
 const wholeBlocks = computed(() => analysis.value?.blocks.filter((b) => b.modules === 4).length ?? 0);
@@ -82,8 +82,8 @@ const moduleCount = computed(() => analysis.value?.blocks.reduce((s, b) => s + b
     <section :class="cn('sl-card flex items-start gap-3.5 border-l-4 p-4', LEVEL[analysis.level].border)">
       <component :is="LEVEL[analysis.level].icon" :class="cn('mt-0.5 size-8 shrink-0', LEVEL[analysis.level].color)" />
       <div>
-        <b :class="cn('text-[20px]', LEVEL[analysis.level].color)">{{ LEVEL[analysis.level].text }}</b>
-        <p class="mt-0.5 text-[13px] text-sl-text-2">{{ analysis.why }}</p>
+        <b :class="cn('text-[20px]', LEVEL[analysis.level].color)">{{ BATTERY_LEVEL_LABEL[analysis.level].text }}</b>
+        <p class="mt-0.5 text-[13px] text-sl-text-2">{{ analysis.levelReason }}</p>
       </div>
     </section>
     <p class="mx-1 text-[12px] text-sl-text-3">建议 Ready 下读取；刚开完车读数更能反映弱块</p>
@@ -105,15 +105,15 @@ const moduleCount = computed(() => analysis.value?.blocks.reduce((s, b) => s + b
       </div>
       <div class="sl-card px-3 py-2.5">
         <div class="text-[12px] text-sl-text-2">内阻 平均 / 最大</div>
-        <b class="sl-tabular text-[16px] text-sl-text-1">{{ formatNumber(analysis.rAvg, 1) }} / {{ analysis.rMax.resistance }} mΩ</b>
+        <b class="sl-tabular text-[16px] text-sl-text-1">{{ formatNumber(analysis.resistanceAvg, 1) }} / {{ analysis.resistanceMaxBlock.resistance }} mΩ</b>
       </div>
       <div class="sl-card px-3 py-2.5">
         <div class="text-[12px] text-sl-text-2">最高块</div>
-        <b class="sl-tabular text-[16px] text-sl-text-1">#{{ analysis.max.n }} · {{ formatNumber(analysis.max.v2, 2) }} V</b>
+        <b class="sl-tabular text-[16px] text-sl-text-1">#{{ analysis.max.blockNumber }} · {{ formatNumber(analysis.max.voltagePerTwoModules, 2) }} V</b>
       </div>
       <div class="sl-card px-3 py-2.5">
         <div class="text-[12px] text-sl-text-2">最低块</div>
-        <b class="sl-tabular text-[16px] text-sl-text-1">#{{ analysis.min.n }} · {{ formatNumber(analysis.min.v2, 2) }} V</b>
+        <b class="sl-tabular text-[16px] text-sl-text-1">#{{ analysis.min.blockNumber }} · {{ formatNumber(analysis.min.voltagePerTwoModules, 2) }} V</b>
       </div>
     </div>
 
@@ -135,9 +135,9 @@ const moduleCount = computed(() => analysis.value?.blocks.reduce((s, b) => s + b
       <summary class="cursor-pointer font-semibold text-sl-text-1">判定依据</summary>
       <ul class="mt-2 list-disc space-y-1 pl-[18px] text-[14px] text-sl-text-2">
         <li>先把每块电压折算到「每 2 模组」：半块（2 模组）不变，整块（4 模组）÷2。</li>
-        <li><b class="text-sl-accent">健康</b>：最大 − 最小 ≤ 0.3 V。</li>
-        <li><b class="text-sl-warn">注意</b>：0.3 – 0.6 V。</li>
-        <li><b class="text-sl-danger">异常</b>：&gt; 0.6 V，或任一块比其他块平均低 1 V 以上。</li>
+        <li><b class="text-sl-accent">健康</b>：最大 − 最小 ≤ {{ WARN_DIFF_V }} V。</li>
+        <li><b class="text-sl-warn">注意</b>：{{ WARN_DIFF_V }} – {{ DANGER_DIFF_V }} V。</li>
+        <li><b class="text-sl-danger">异常</b>：&gt; {{ DANGER_DIFF_V }} V，或任一块比其他块平均低 1 V 以上。</li>
         <li>内阻：整块、半块分别求平均，任一块超出同类平均 20% → 注意。</li>
       </ul>
       <p class="mt-2 text-[14px] text-sl-text-2">

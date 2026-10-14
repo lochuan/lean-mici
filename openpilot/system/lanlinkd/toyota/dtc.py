@@ -7,7 +7,7 @@
 - 无响应 / 应答异常 / 负响应都按 ECU 记下返回，不抛出。
 """
 from openpilot.system.lanlinkd.toyota import catalog
-from openpilot.system.lanlinkd.toyota.link import (READ_ERRORS, EcuRejectedError, MalformedResponseError, NoResponseError,
+from openpilot.system.lanlinkd.toyota.link import (ECU_COMMUNICATION_ERRORS, EcuRejectedError, MalformedResponseError, NoResponseError,
                                                    expect_positive, read_error_text)
 
 UDS_READ = bytes.fromhex("19028D")
@@ -85,6 +85,6 @@ def scan_ecu(link, ecu: dict, dtc_text: dict) -> dict:
 def clear(link, ecu: dict) -> dict:
   try:
     expect_positive(link, catalog.ecu_address(ecu), CLEAR[ecu["protocol"]], 1)
-  except READ_ERRORS as exc:
+  except ECU_COMMUNICATION_ERRORS as exc:
     return {"ecu": ecu["id"], "ok": False, "error": read_error_text(exc)}
   return {"ecu": ecu["id"], "ok": True}

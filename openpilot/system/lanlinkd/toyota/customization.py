@@ -7,7 +7,7 @@
 from collections.abc import Callable
 
 from openpilot.system.lanlinkd.toyota import catalog, coding
-from openpilot.system.lanlinkd.toyota.link import (READ_ERRORS, EcuRejectedError, MalformedResponseError, NoResponseError,
+from openpilot.system.lanlinkd.toyota.link import (ECU_COMMUNICATION_ERRORS, EcuRejectedError, MalformedResponseError, NoResponseError,
                                                    expect_positive, read_error_text)
 
 Address = tuple[int, int | None]
@@ -37,7 +37,7 @@ def _read_once(cache: dict, key, read: Callable[[], bytes]) -> bytes:
   if key not in cache:
     try:
       cache[key] = read()
-    except READ_ERRORS as exc:
+    except ECU_COMMUNICATION_ERRORS as exc:
       cache[key] = exc
   if isinstance(cache[key], Exception):
     raise cache[key]
@@ -107,12 +107,12 @@ def scan_ecu(link, ecu: dict, settings: list[dict]) -> dict:
     try:
       if not reader.supported(setting):
         continue
-    except READ_ERRORS as exc:
+    except ECU_COMMUNICATION_ERRORS as exc:
       report.setdefault("readError", read_error_text(exc))
       continue
     try:
       payload = reader.payload(setting)
-    except READ_ERRORS as exc:
+    except ECU_COMMUNICATION_ERRORS as exc:
       report["supported"] += 1
       report.setdefault("readError", read_error_text(exc))
       continue

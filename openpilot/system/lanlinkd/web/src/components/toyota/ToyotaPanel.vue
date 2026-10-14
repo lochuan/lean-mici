@@ -9,7 +9,7 @@ import { ChevronLeft, Loader2 } from "lucide-vue-next";
 import { clearToasts } from "@/lib/store";
 import { canGoBack, currentPage, goBack, resetToHome } from "@/lib/toyotaNav";
 import { loadCatalog, resetScanData, toyotaData } from "@/lib/toyotaData";
-import { startSessionWatch, touch, view } from "@/lib/toyotaSession";
+import { startSessionWatch, touch, currentSessionView } from "@/lib/toyotaSession";
 import Button from "../ui/Button.vue";
 import BackupsPage from "./BackupsPage.vue";
 import BatteryPage from "./BatteryPage.vue";
@@ -47,7 +47,7 @@ onUnmounted(() => {
 });
 
 // 备份记录不需要诊断模式，所以停在备份页时会话结束不踢回首页
-watch(() => view.value.tabsEnabled, (on, wasOn) => {
+watch(() => currentSessionView.value.canUseDiagnostics, (on, wasOn) => {
   if (wasOn && !on) {
     resetScanData();
     if (currentPage.value.page !== "backups") resetToHome();

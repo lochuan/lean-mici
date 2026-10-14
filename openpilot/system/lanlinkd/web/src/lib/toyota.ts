@@ -32,7 +32,7 @@ export interface SessionView {
   detail: string;
   canEnter: boolean;
   canExit: boolean;
-  tabsEnabled: boolean;
+  canUseDiagnostics: boolean;
 }
 
 /** 会话状态 → 徽章 / 按钮可用性。session 为 null 表示还没拿到数据：什么都不让点。
@@ -40,15 +40,15 @@ export interface SessionView {
 export function sessionView(session: ToyotaSession | null): SessionView {
   switch (session?.state) {
     case "entering":
-      return { label: "进入中", tone: "warn", detail: "", canEnter: false, canExit: false, tabsEnabled: false };
+      return { label: "进入中", tone: "warn", detail: "", canEnter: false, canExit: false, canUseDiagnostics: false };
     case "active":
-      return { label: "诊断中", tone: "accent", detail: "", canEnter: false, canExit: true, tabsEnabled: true };
+      return { label: "诊断中", tone: "accent", detail: "", canEnter: false, canExit: true, canUseDiagnostics: true };
     case "idle":
       return session.error
-        ? { label: "未进入", tone: "danger", detail: session.error, canEnter: true, canExit: true, tabsEnabled: false }
-        : { label: "未进入", tone: "muted", detail: "", canEnter: true, canExit: false, tabsEnabled: false };
+        ? { label: "未进入", tone: "danger", detail: session.error, canEnter: true, canExit: true, canUseDiagnostics: false }
+        : { label: "未进入", tone: "muted", detail: "", canEnter: true, canExit: false, canUseDiagnostics: false };
     default:
-      return { label: "未进入", tone: "muted", detail: "", canEnter: false, canExit: false, tabsEnabled: false };
+      return { label: "未进入", tone: "muted", detail: "", canEnter: false, canExit: false, canUseDiagnostics: false };
   }
 }
 
@@ -90,12 +90,28 @@ export function liveValueText(v: ToyotaLiveValue | undefined, unit = ""): string
 }
 
 /** 里程单位并进里程卡：单位是另一个实时数据项（1 = 公里、2 = 英里），读不到时按公里 */
+function mileageParts(mileage: ToyotaLiveValue | undefined, unit: ToyotaLiveValue | undefined): { value: string; unit: string } | null {
+  if (!mileage || mileage.error || mileage.value === null) return null;
+  return { value: formatNumber(mileage.value, 0), unit: unit?.text || "公里" };
+}
+
 export function mileageText(mileage: ToyotaLiveValue | undefined, unit: ToyotaLiveValue | undefined): string {
-  if (!mileage || mileage.error || mileage.value === null) return "—";
-  return `${formatNumber(mileage.value, 0)} ${unit?.text || "公里"}`;
+  const parts = mileageParts(mileage, unit);
+  return parts ? `${parts.value} ${parts.unit}` : "—";
 }
 
 // ---- 定制项 ----
+
+export function ecuProtocolText(protocol: ToyotaEcu["protocol"]): string {
+  return protocol === "toyota_can" ? "Toyota CAN（旧式）" : "UDS";
+}
+
+/** 撤销 / 恢复备份成功后的 toast：回读校验没通过要提醒，不报「已恢复」。 */
+export function restoreToast(settingName: string, restoredLabel: string, verified: boolean): { message: string; tone: "ok" | "warn" } {
+  return verified
+    ? { message: `已恢复「${settingName}」→ ${restoredLabel}`, tone: "ok" }
+    : { message: "已恢复，但回读校验未通过", tone: "warn" };
+}
 
 /** 一个设置当前值的显示文案：选项型取选项文字，数值型直接显示数字。 */
 export function settingValueLabel(setting: ToyotaSetting, value: number | null | undefined): string {
@@ -111,6 +127,12 @@ export function ecusWithSettings(ecus: ToyotaEcu[], settings: ToyotaSetting[]): 
 }
 
 // ---- 扫描进度 ----
+
+/** 首页「在线 ECU」：应答数 / 已探测数（定制扫描和故障码扫描探测的 ECU 集合不同，按 ECU 记应答才口径一致）。 */
+export function onlineEcuText(ecuAnswered: Record<string, boolean>): string {
+  const probed = Object.values(ecuAnswered);
+  return probed.length ? `${probed.filter(Boolean).length} / ${probed.length}` : "—";
+}
 
 export interface ScanTally {
   done: number;
@@ -144,6 +166,34 @@ export function previewRaw(raw: string, byteIndex: number, mask: string, value: 
   const next = (parseInt(bytes[byteIndex], 16) & ~m) | ((value << shift) & m);
   bytes[byteIndex] = next.toString(16).toUpperCase().padStart(2, "0");
   return bytes.join("");
+}
+
+/** 从整段 raw 取一个设置项的值：与后端 toyota/coding.py 的 extract_value 同语义——
+ *  byteIndex 字节里被 mask 覆盖的位移到最低位。数据没有这个字节返回 null。 */
+export function settingValueFromRaw(raw: string, byteIndex: number, mask: string): number | null {
+  const bytes = toBytes(raw);
+  if (byteIndex >= bytes.length) return null;
+  const maskBits = parseInt(mask, 16);
+  const shift = Math.log2(maskBits & -maskBits);
+  return (parseInt(bytes[byteIndex], 16) & maskBits) >> shift;
+}
+
+/** 同一 ECU、同一 DID（UDS）/ localId（Toyota CAN）的设置项共用一段 raw。
+ *  changed 写入或恢复后整段数据变成 newRaw：返回所有已扫描的同段设置项的新 {value, raw}。
+ *  新 raw 里取不到值的项不返回（保持原样）。 */
+export function settingValuesAfterRawChange(
+  settings: ToyotaSetting[],
+  changed: ToyotaSetting,
+  newRaw: string,
+  scannedValues: Record<string, { value: number; raw: string }>,
+): Record<string, { value: number; raw: string }> {
+  const sharesData = (s: ToyotaSetting) => s.ecu === changed.ecu && (s.did ?? s.localId) === (changed.did ?? changed.localId);
+  const updated: Record<string, { value: number; raw: string }> = {};
+  for (const s of settings.filter(sharesData)) {
+    const value = settingValueFromRaw(newRaw, s.byteIndex, s.mask);
+    if (s.key in scannedValues && value !== null) updated[s.key] = { value, raw: newRaw };
+  }
+  return updated;
 }
 
 // ---- 故障码 ----
@@ -180,11 +230,23 @@ export function dtcDescription(d: ToyotaDtc): string {
   return d.text || "暂无中文说明";
 }
 
-export function dtcSummary(scans: ToyotaDtcScan[]): { ecuCount: number; faultyEcuCount: number; codeCount: number } {
+export type DtcScanState = ToyotaScanStatus | "faulty" | "clear" | "rejected" | "unscanned";
+
+/** 一个 ECU 故障码扫描结果的显示状态。后端对「ECU 拒绝读码」仍回 status "ok"，只带 readError、dtcs 为空，
+ *  不能显示成「无故障」。undefined = 这个 ECU 没扫到。 */
+export function dtcScanState(scan: ToyotaDtcScan | undefined): DtcScanState {
+  if (!scan) return "unscanned";
+  if (scan.status !== "ok") return scan.status;
+  if (scan.readError) return "rejected";
+  return scan.dtcs.length ? "faulty" : "clear";
+}
+
+export function dtcSummary(scans: ToyotaDtcScan[]): { ecuCount: number; faultyEcuCount: number; codeCount: number; rejectedEcuCount: number } {
   return {
     ecuCount: scans.length,
     faultyEcuCount: scans.filter((s) => s.dtcs.length > 0).length,
     codeCount: scans.reduce((n, s) => n + s.dtcs.length, 0),
+    rejectedEcuCount: scans.filter((s) => dtcScanState(s) === "rejected").length,
   };
 }
 
@@ -197,8 +259,9 @@ export function sortEcusByDtcCount<T extends { id: string }>(ecus: T[], scans: T
 /** 首页「故障码」入口的说明；scans 为 null 表示还没扫描过 */
 export function dtcSummaryText(scans: ToyotaDtcScan[] | null): string {
   if (!scans) return "尚未扫描";
-  const { faultyEcuCount, codeCount } = dtcSummary(scans);
-  return codeCount ? `上次扫描：${faultyEcuCount} 个 ECU 共 ${codeCount} 条故障码` : "上次扫描：未发现故障码";
+  const { faultyEcuCount, codeCount, rejectedEcuCount } = dtcSummary(scans);
+  const rejectedNote = rejectedEcuCount ? `（${rejectedEcuCount} 个 ECU 拒绝读码）` : "";
+  return (codeCount ? `上次扫描：${faultyEcuCount} 个 ECU 共 ${codeCount} 条故障码` : "上次扫描：未发现故障码") + rejectedNote;
 }
 
 export interface LiveCard {
@@ -218,9 +281,7 @@ export function liveCards(items: ToyotaLiveItem[], values: ToyotaLiveValue[]): L
       const v = byKey.get(it.key);
       const base = { key: it.key, name: it.name, needsEngineRunning: it.needsEngineRunning };
       if (!v || v.error || v.value === null) return { ...base, value: "—", unit: "" };
-      if (it.key === MILEAGE_KEY) {
-        return { ...base, value: formatNumber(v.value, 0), unit: byKey.get(MILEAGE_UNIT_KEY)?.text || "公里" };
-      }
+      if (it.key === MILEAGE_KEY) return { ...base, ...mileageParts(v, byKey.get(MILEAGE_UNIT_KEY))! };
       return { ...base, value: v.text, unit: it.unit };
     });
 }

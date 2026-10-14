@@ -6,11 +6,12 @@
 import { computed, onMounted, ref, watch, type Component } from "vue";
 import { Activity, Archive, BatteryCharging, CarFront, ChevronRight, Stethoscope, Wrench } from "lucide-vue-next";
 import { api } from "@/lib/api";
+import { BATTERY_LEVEL_LABEL } from "@/lib/battery";
 import type { ToyotaLiveValue } from "@/lib/schema";
 import { goTo, type ToyotaPageName } from "@/lib/toyotaNav";
-import { HOME_LIVE_KEYS, dtcSummaryText, liveValueText, mileageText } from "@/lib/toyota";
+import { BATTERY_12V_KEY, HOME_LIVE_KEYS, MILEAGE_KEY, MILEAGE_UNIT_KEY, dtcSummaryText, liveValueText, mileageText, onlineEcuText } from "@/lib/toyota";
 import { toyotaData } from "@/lib/toyotaData";
-import { requireActive, view } from "@/lib/toyotaSession";
+import { requireActive, currentSessionView } from "@/lib/toyotaSession";
 import { cn } from "@/lib/utils";
 import Badge from "../ui/Badge.vue";
 
@@ -26,18 +27,13 @@ async function readVehicle(): Promise<void> {
   }
 }
 
-onMounted(() => { if (view.value.tabsEnabled) void readVehicle(); });
-watch(() => view.value.tabsEnabled, (on) => { if (on) void readVehicle(); else vehicle.value = new Map(); });
+onMounted(() => { if (currentSessionView.value.canUseDiagnostics) void readVehicle(); });
+watch(() => currentSessionView.value.canUseDiagnostics, (on) => { if (on) void readVehicle(); else vehicle.value = new Map(); });
 
-const voltageText = computed(() => liveValueText(vehicle.value.get(HOME_LIVE_KEYS[0]), "V"));
-const mileageDisplay = computed(() => mileageText(vehicle.value.get(HOME_LIVE_KEYS[1]), vehicle.value.get(HOME_LIVE_KEYS[2])));
+const voltageText = computed(() => liveValueText(vehicle.value.get(BATTERY_12V_KEY), "V"));
+const mileageDisplay = computed(() => mileageText(vehicle.value.get(MILEAGE_KEY), vehicle.value.get(MILEAGE_UNIT_KEY)));
 
 const batteryLevel = computed(() => toyotaData.battery.analysis?.level);
-const BATTERY_CHIP = {
-  ok: { text: "健康", kind: "accent" },
-  warn: { text: "注意", kind: "warn" },
-  danger: { text: "异常", kind: "danger" },
-} as const;
 
 interface Entry { page: ToyotaPageName; icon: Component; title: string; desc: string; needsSession: boolean }
 const entries = computed<Entry[]>(() => [
@@ -76,18 +72,18 @@ function open(e: Entry): void {
         <div class="rounded-lg bg-sl-surface-2 px-2.5 py-2">
           <div class="text-[12px] text-sl-text-2">在线 ECU</div>
           <div class="sl-tabular text-[16px] font-semibold text-sl-text-1">
-            {{ toyotaData.onlineEcuCount === null ? "—" : `${toyotaData.onlineEcuCount} 个` }}
+            {{ onlineEcuText(toyotaData.ecuAnswered) }}
           </div>
         </div>
       </div>
-      <p class="text-[12px] text-sl-text-3">12V 电压：IG-ON 看蓄电池，Ready 看充电。在线 ECU 数在扫描后更新。</p>
+      <p class="text-[12px] text-sl-text-3">12V 电压：IG-ON 看蓄电池，Ready 看充电。在线 ECU：应答数 / 已探测数，扫描后更新。</p>
     </section>
 
     <button
       v-for="e in entries"
       :key="e.page"
       type="button"
-      :class="cn('sl-card flex w-full items-center gap-3.5 p-3.5 text-left transition-colors hover:bg-sl-surface-2', e.needsSession && !view.tabsEnabled && 'opacity-40')"
+      :class="cn('sl-card flex w-full items-center gap-3.5 p-3.5 text-left transition-colors hover:bg-sl-surface-2', e.needsSession && !currentSessionView.canUseDiagnostics && 'opacity-40')"
       @click="open(e)"
     >
       <span class="grid size-11 shrink-0 place-items-center rounded-xl bg-sl-accent-muted text-sl-accent">
@@ -98,14 +94,14 @@ function open(e: Entry): void {
         <span class="text-[13px] text-sl-text-2">
           {{ e.desc }}
           <template v-if="e.page === 'battery' && batteryLevel">
-            · 结论 <Badge :kind="BATTERY_CHIP[batteryLevel].kind">{{ BATTERY_CHIP[batteryLevel].text }}</Badge>
+            · 结论 <Badge :kind="BATTERY_LEVEL_LABEL[batteryLevel].tone">{{ BATTERY_LEVEL_LABEL[batteryLevel].text }}</Badge>
           </template>
         </span>
       </span>
       <ChevronRight class="size-5 shrink-0 text-sl-text-3" />
     </button>
 
-    <p v-if="!view.tabsEnabled" class="text-center text-[13px] text-sl-text-2">
+    <p v-if="!currentSessionView.canUseDiagnostics" class="text-center text-[13px] text-sl-text-2">
       先点上方「进入」开启诊断模式，才能使用前四项功能
     </p>
   </div>

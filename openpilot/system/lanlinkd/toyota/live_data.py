@@ -6,7 +6,7 @@
 - 失败（无响应、应答异常、负响应、应答太短）只记在该项的 error 上，不影响其他项。
 """
 from openpilot.system.lanlinkd.toyota import catalog
-from openpilot.system.lanlinkd.toyota.link import READ_ERRORS, expect_positive, read_error_text
+from openpilot.system.lanlinkd.toyota.link import ECU_COMMUNICATION_ERRORS, expect_positive, read_error_text
 
 
 class _ReadError(Exception):
@@ -33,7 +33,7 @@ def format_value(item: dict, value: float) -> str:
 def _read_did(link, ecu_id: str, did: str) -> bytes:
   try:
     return expect_positive(link, catalog.ecu_address(catalog.ecu(ecu_id)), b"\x22" + bytes.fromhex(did), 3)
-  except READ_ERRORS as exc:
+  except ECU_COMMUNICATION_ERRORS as exc:
     raise _ReadError(read_error_text(exc)) from None
 
 

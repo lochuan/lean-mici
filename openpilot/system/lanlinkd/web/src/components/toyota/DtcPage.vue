@@ -2,7 +2,7 @@
 /** 故障码页：逐 ECU 扫描（进度）→ 三个统计卡、「只看有故障」、ECU 列表（按故障数降序）、重新扫描、清除全部。 */
 import { computed, onMounted, ref } from "vue";
 import { ChevronRight, RefreshCw } from "lucide-vue-next";
-import { dtcSummary, scanTally, sortEcusByDtcCount } from "@/lib/toyota";
+import { dtcScanState, dtcSummary, scanTally, sortEcusByDtcCount } from "@/lib/toyota";
 import { goTo } from "@/lib/toyotaNav";
 import { scanDtcs, toyotaData } from "@/lib/toyotaData";
 import { cn } from "@/lib/utils";
@@ -74,6 +74,7 @@ const faultyEcuIds = computed(() => dtc.value.scans.filter((s) => s.dtcs.length)
         <span v-if="r.scan?.dtcs.length" class="grid h-6 min-w-6 place-items-center rounded-full bg-sl-danger px-1.5 text-[13px] font-bold text-black">{{ r.scan.dtcs.length }}</span>
         <Badge v-else-if="r.scan?.status === 'offline'">无应答</Badge>
         <Badge v-else-if="r.scan?.status === 'malformed'" kind="warn">应答异常</Badge>
+        <Badge v-else-if="dtcScanState(r.scan) === 'rejected'" kind="warn">读码被拒</Badge>
         <Badge v-else kind="accent">无故障</Badge>
         <ChevronRight class="size-4 shrink-0 text-sl-text-3" />
       </button>

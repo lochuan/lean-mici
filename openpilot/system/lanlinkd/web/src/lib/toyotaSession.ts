@@ -22,7 +22,7 @@ export const shakeTick = ref(0);
 
 export const sessionNow = computed(() => state.session);
 export const sessionBusy = computed(() => state.busy);
-export const view = computed(() => sessionView(state.session));
+export const currentSessionView = computed(() => sessionView(state.session));
 export const remainingS = computed(() => idleRemainingS(state.session, state.elapsedS));
 
 let fetchedAtMs = Date.now();

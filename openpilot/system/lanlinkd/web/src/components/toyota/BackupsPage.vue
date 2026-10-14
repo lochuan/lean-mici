@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-vue-next";
 import { api } from "@/lib/api";
 import type { ToyotaBackup } from "@/lib/schema";
 import { toast } from "@/lib/store";
-import { errorText } from "@/lib/toyota";
+import { errorText, restoreToast } from "@/lib/toyota";
 import { invalidateCustomizationScan } from "@/lib/toyotaData";
 import { requireActive } from "@/lib/toyotaSession";
 import Badge from "../ui/Badge.vue";
@@ -31,7 +31,8 @@ async function restore(b: ToyotaBackup): Promise<void> {
   try {
     const r = await api.toyotaRestore(b.id);
     invalidateCustomizationScan();
-    toast(r.verified ? `已恢复「${b.name}」→ ${b.before.label}` : "已恢复，但回读校验未通过", r.verified ? "ok" : "warn");
+    const restored = restoreToast(b.name, b.before.label, r.verified);
+    toast(restored.message, restored.tone);
     await load(); // 恢复前另存了一份当前值，列表会多一条
   } catch (e) {
     toast(errorText(e), "error");

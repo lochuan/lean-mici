@@ -10,8 +10,8 @@ import { Check, Circle, Loader2 } from "lucide-vue-next";
 import { api } from "@/lib/api";
 import type { ToyotaSetting } from "@/lib/schema";
 import { toast } from "@/lib/store";
-import { errorText, previewRaw, settingValueLabel } from "@/lib/toyota";
-import { invalidateCustomizationScan, toyotaData } from "@/lib/toyotaData";
+import { ecuProtocolText, errorText, previewRaw, restoreToast, settingValueLabel } from "@/lib/toyota";
+import { applyWriteResult, invalidateCustomizationScan, toyotaData } from "@/lib/toyotaData";
 import { requireActive } from "@/lib/toyotaSession";
 import { cn } from "@/lib/utils";
 import Button from "../ui/Button.vue";
@@ -46,7 +46,7 @@ function pick(value: number): void {
   else stage.value = "confirm";
 }
 
-const protocolText = computed(() => (ecu.value?.protocol === "toyota_can" ? "Toyota CAN（旧式）" : "UDS"));
+const protocolText = computed(() => (ecu.value ? ecuProtocolText(ecu.value.protocol) : ""));
 const addressText = computed(() => `0x${ecu.value?.tx}${ecu.value?.sub ? ` · 子地址 0x${ecu.value.sub}` : ""}`);
 const afterRaw = computed(() => {
   const s = props.setting;
@@ -62,10 +62,10 @@ async function apply(): Promise<void> {
   stepTimer = setInterval(() => { activeStep.value = Math.min(activeStep.value + 1, STEPS.length - 1); }, 700);
   try {
     const r = await api.toyotaWrite(s.key, picked.value, before.raw);
-    toyotaData.customization.values[s.key] = { value: r.value, raw: r.after };
+    applyWriteResult(s, r.after);
     toast(r.verified ? "已保存" : "已写入，但回读校验未通过", r.verified ? "ok" : "warn", {
       label: "撤销",
-      run: () => void undo(s, r.backupId, before),
+      run: () => void undo(s, r.backupId),
     });
   } catch (e) {
     toast(errorText(e), "error");
@@ -75,12 +75,13 @@ async function apply(): Promise<void> {
   }
 }
 
-async function undo(s: ToyotaSetting, backupId: string, before: { value: number; raw: string }): Promise<void> {
+async function undo(s: ToyotaSetting, backupId: string): Promise<void> {
   if (!requireActive()) return;
   try {
     const r = await api.toyotaRestore(backupId);
-    toyotaData.customization.values[s.key] = before;
-    toast(r.verified ? `已恢复「${s.name}」→ ${settingValueLabel(s, before.value)}` : "已恢复，但回读校验未通过", r.verified ? "ok" : "warn");
+    applyWriteResult(s, r.after);
+    const restored = restoreToast(s.name, settingValueLabel(s, r.value), r.verified);
+    toast(restored.message, restored.tone);
   } catch (e) {
     // 撤销失败时车上的值不确定，让定制页下次重新扫描
     invalidateCustomizationScan();

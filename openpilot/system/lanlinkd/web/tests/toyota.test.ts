@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   countdownText, ecusWithSettings, errorText, formatNumber, hexDiff, idleRemainingS, liveValueText, mileageText,
-  dtcDescription, liveCards, dtcStatusTags, dtcSummary, dtcSummaryText, groupDtcs, previewRaw, scanTally, sortEcusByDtcCount, sessionView, settingValueLabel,
+  dtcDescription, liveCards, dtcScanState, dtcStatusTags, dtcSummary, dtcSummaryText, ecuProtocolText, groupDtcs, onlineEcuText, previewRaw,
+  restoreToast, scanTally, settingValueFromRaw, settingValuesAfterRawChange, sortEcusByDtcCount, sessionView, settingValueLabel,
 } from "../src/lib/toyota";
 import type { ToyotaLiveItem, ToyotaDtc, ToyotaDtcScan, ToyotaEcu, ToyotaLiveValue, ToyotaSession, ToyotaSetting } from "../src/lib/schema";
 import { ApiError } from "../src/lib/api";
@@ -39,24 +40,24 @@ describe("hexDiff", () => {
 describe("sessionView", () => {
   it("idle：只能进入，标签页禁用", () => {
     const v = sessionView(session());
-    expect(v).toMatchObject({ label: "未进入", canEnter: true, canExit: false, tabsEnabled: false });
+    expect(v).toMatchObject({ label: "未进入", canEnter: true, canExit: false, canUseDiagnostics: false });
   });
 
   it("entering：都不可点", () => {
     expect(sessionView(session({ state: "entering" }))).toMatchObject({
-      label: "进入中", canEnter: false, canExit: false, tabsEnabled: false,
+      label: "进入中", canEnter: false, canExit: false, canUseDiagnostics: false,
     });
   });
 
   it("active：可退出，标签页可用", () => {
     expect(sessionView(session({ state: "active" }))).toMatchObject({
-      label: "诊断中", canEnter: false, canExit: true, tabsEnabled: true,
+      label: "诊断中", canEnter: false, canExit: true, canUseDiagnostics: true,
     });
   });
 
   it("idle 带 error：显示上次失败原因，允许重试进入和退出清理", () => {
     const v = sessionView(session({ state: "idle", error: "pandad 未停" }));
-    expect(v).toMatchObject({ label: "未进入", tone: "danger", canEnter: true, canExit: true, tabsEnabled: false, detail: "pandad 未停" });
+    expect(v).toMatchObject({ label: "未进入", tone: "danger", canEnter: true, canExit: true, canUseDiagnostics: false, detail: "pandad 未停" });
   });
 
   it("active 不显示 error", () => {
@@ -64,7 +65,7 @@ describe("sessionView", () => {
   });
 
   it("没有会话数据时按未进入处理但不能操作", () => {
-    expect(sessionView(null)).toMatchObject({ canEnter: false, canExit: false, tabsEnabled: false });
+    expect(sessionView(null)).toMatchObject({ canEnter: false, canExit: false, canUseDiagnostics: false });
   });
 });
 
@@ -279,7 +280,7 @@ describe("dtcSummary / sortEcusByDtcCount / dtcSummaryText", () => {
   const scans = [scan("7B0", []), scan("7C4", ["U0131-87", "U0163-87"]), scan("750/40", ["B1000-00"])];
 
   it("统计扫描 ECU 数、有故障 ECU 数、故障码总数", () => {
-    expect(dtcSummary(scans)).toEqual({ ecuCount: 3, faultyEcuCount: 2, codeCount: 3 });
+    expect(dtcSummary(scans)).toEqual({ ecuCount: 3, faultyEcuCount: 2, codeCount: 3, rejectedEcuCount: 0 });
   });
 
   it("按故障数降序，同数保持目录顺序", () => {
@@ -291,6 +292,13 @@ describe("dtcSummary / sortEcusByDtcCount / dtcSummaryText", () => {
     expect(dtcSummaryText(null)).toBe("尚未扫描");
     expect(dtcSummaryText([scan("7B0", [])])).toBe("上次扫描：未发现故障码");
     expect(dtcSummaryText(scans)).toBe("上次扫描：2 个 ECU 共 3 条故障码");
+  });
+
+  it("拒绝读码的 ECU 不算无故障：单独计数并写进摘要", () => {
+    const rejected: ToyotaDtcScan = { ecu: "7C0", status: "ok", protocol: "uds", dtcs: [], readError: "NRC 11" };
+    expect(dtcSummary([...scans, rejected])).toMatchObject({ faultyEcuCount: 2, rejectedEcuCount: 1 });
+    expect(dtcSummaryText([scan("7B0", []), rejected])).toBe("上次扫描：未发现故障码（1 个 ECU 拒绝读码）");
+    expect(dtcSummaryText([...scans, rejected])).toBe("上次扫描：2 个 ECU 共 3 条故障码（1 个 ECU 拒绝读码）");
   });
 });
 
@@ -323,5 +331,119 @@ describe("liveCards", () => {
   it("该项读取出错或没返回：显示 —，不带单位", () => {
     const cards = liveCards([item("a", "A", { unit: "V" }), item("b", "B", { unit: "°C" })], [val("a", null, "", "无响应")]);
     expect(cards.map((c) => [c.value, c.unit])).toEqual([["—", ""], ["—", ""]]);
+  });
+});
+
+// 向量来自后端 tests/test_toyota_coding.py::TestValueBits，两端取值语义必须一致
+describe("settingValueFromRaw", () => {
+  it("取 byteIndex 字节里掩码覆盖的位并移到最低位", () => {
+    expect(settingValueFromRaw("00b4", 1, "30")).toBe(3);
+  });
+
+  it("整字节掩码直接取该字节", () => {
+    expect(settingValueFromRaw("0A5F", 1, "FF")).toBe(0x5f);
+  });
+
+  it("raw 带空格、大小写混用也行", () => {
+    expect(settingValueFromRaw("00 B4", 1, "30")).toBe(3);
+  });
+
+  it("多字节掩码：只有 byteIndex 字节里的位参与，移位按最低置位位置", () => {
+    expect(settingValueFromRaw("00b4", 1, "0F30")).toBe(3);
+  });
+
+  it("数据太短：没有这个字节就取不到（null）", () => {
+    expect(settingValueFromRaw("01", 1, "FF")).toBeNull();
+  });
+});
+
+describe("settingValuesAfterRawChange", () => {
+  // 750/B5 DID 2009 被两项共用：byte 0 的高低半字节
+  const high = setting({ key: "high", ecu: "750/B5", did: "2009", byteIndex: 0, mask: "F0" });
+  const low = setting({ key: "low", ecu: "750/B5", did: "2009", byteIndex: 0, mask: "0F" });
+  const otherDid = setting({ key: "otherDid", ecu: "750/B5", did: "200A", byteIndex: 0, mask: "FF" });
+  const otherEcu = setting({ key: "otherEcu", ecu: "750/40", did: "2009", byteIndex: 0, mask: "FF" });
+  const all = [high, low, otherDid, otherEcu];
+  const scanned = {
+    high: { value: 1, raw: "12" }, low: { value: 2, raw: "12" },
+    otherDid: { value: 9, raw: "09" }, otherEcu: { value: 8, raw: "08" },
+  };
+
+  it("同 ECU 同 DID 的所有已扫描项拿到新 raw 和据此重算的值，别的 DID / ECU 不动", () => {
+    expect(settingValuesAfterRawChange(all, high, "52", scanned)).toEqual({
+      high: { value: 5, raw: "52" }, low: { value: 2, raw: "52" },
+    });
+  });
+
+  it("没扫描过的兄弟项不凭空出现", () => {
+    expect(settingValuesAfterRawChange(all, high, "52", { high: scanned.high })).toEqual({ high: { value: 5, raw: "52" } });
+  });
+
+  it("Toyota CAN 按 localId 分组", () => {
+    const a = setting({ key: "a", ecu: "7C0", did: null, localId: "21", byteIndex: 0, mask: "FF" });
+    const b = setting({ key: "b", ecu: "7C0", did: null, localId: "21", byteIndex: 1, mask: "0F" });
+    const c = setting({ key: "c", ecu: "7C0", did: null, localId: "22", byteIndex: 0, mask: "FF" });
+    const known = { a: { value: 0, raw: "0000" }, b: { value: 0, raw: "0000" }, c: { value: 7, raw: "07" } };
+    expect(settingValuesAfterRawChange([a, b, c], a, "0A03", known)).toEqual({
+      a: { value: 10, raw: "0A03" }, b: { value: 3, raw: "0A03" },
+    });
+  });
+
+  it("新 raw 太短取不到的兄弟项保持原样（不写入）", () => {
+    const tail = setting({ key: "tail", ecu: "750/B5", did: "2009", byteIndex: 3, mask: "FF" });
+    const known = { ...scanned, tail: { value: 4, raw: "12000004" } };
+    expect(settingValuesAfterRawChange([high, tail], high, "52", known)).toEqual({ high: { value: 5, raw: "52" } });
+  });
+});
+
+describe("dtcScanState", () => {
+  const scan = (over: Partial<ToyotaDtcScan>): ToyotaDtcScan => ({ ecu: "7B0", status: "ok", protocol: "uds", dtcs: [], ...over });
+
+  it("有故障码 → faulty", () => {
+    expect(dtcScanState(scan({ dtcs: [{ code: "U0131-87", status: 0x28, text: "" }] }))).toBe("faulty");
+  });
+
+  it("应答正常且没有码 → clear", () => {
+    expect(dtcScanState(scan({}))).toBe("clear");
+  });
+
+  it("应答正常但 ECU 拒绝读码（readError）→ rejected，不能当成无故障", () => {
+    expect(dtcScanState(scan({ readError: "NRC 11" }))).toBe("rejected");
+  });
+
+  it("无应答 / 应答异常沿用扫描状态", () => {
+    expect(dtcScanState(scan({ status: "offline", readError: "x" }))).toBe("offline");
+    expect(dtcScanState(scan({ status: "malformed" }))).toBe("malformed");
+  });
+
+  it("没扫到（undefined）→ unscanned", () => {
+    expect(dtcScanState(undefined)).toBe("unscanned");
+  });
+});
+
+describe("onlineEcuText", () => {
+  it("没探测过：—", () => {
+    expect(onlineEcuText({})).toBe("—");
+  });
+
+  it("在线数 / 已探测数", () => {
+    expect(onlineEcuText({ "7B0": true, "7C4": false, "750/40": true })).toBe("2 / 3");
+  });
+});
+
+describe("ecuProtocolText", () => {
+  it("两种协议各一句话", () => {
+    expect(ecuProtocolText("uds")).toBe("UDS");
+    expect(ecuProtocolText("toyota_can")).toBe("Toyota CAN（旧式）");
+  });
+});
+
+describe("restoreToast", () => {
+  it("回读校验通过：ok，带项目名与恢复后的值", () => {
+    expect(restoreToast("开门提醒", "关闭", true)).toEqual({ message: "已恢复「开门提醒」→ 关闭", tone: "ok" });
+  });
+
+  it("回读校验未通过：warn", () => {
+    expect(restoreToast("开门提醒", "关闭", false)).toEqual({ message: "已恢复，但回读校验未通过", tone: "warn" });
   });
 });

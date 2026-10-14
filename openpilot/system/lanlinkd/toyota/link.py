@@ -34,12 +34,12 @@ class EcuRejectedError(Exception):
     super().__init__(f"ECU 拒绝 {request[:2].hex()}：{response.hex()}")
 
 
-# 按 ECU / 按数据项记下就继续的读取失败（扫描不能因为一个 ECU 整体失败）
-READ_ERRORS = (NoResponseError, MalformedResponseError, EcuRejectedError)
+# 与 ECU 通信失败的三种形态：按 ECU / 按数据项记下就继续（扫描、清码都不能因为一个 ECU 整体失败）
+ECU_COMMUNICATION_ERRORS = (NoResponseError, MalformedResponseError, EcuRejectedError)
 
 
 def read_error_text(exc: Exception) -> str:
-  """READ_ERRORS 给用户看的简短原因。"""
+  """ECU_COMMUNICATION_ERRORS 里的错误给用户看的简短原因。"""
   if isinstance(exc, NoResponseError):
     return "无响应"
   if isinstance(exc, MalformedResponseError):
