@@ -86,14 +86,14 @@ const timing = computed(() => model.value?.timing ?? null);
 
 // C4 本机分段（缩进行 = 上一行的组成部分，不参与求和）
 const STAGE_ROWS = [
-  { key: "capture", label: "取帧（出图→收到）" },
+  { key: "capture", label: "取帧（读出完→收到）" },
   { key: "warp", label: "warp" },
   { key: "pairWait", label: "配对等待" },
   { key: "encode", label: "硬编" },
   { key: "send", label: "发送（含排队）" },
   { key: "replyWait", label: "等 REPLY" },
   { key: "network", label: "其中网络（−手机）", sub: true },
-  { key: "total", label: "合计（出图→收到 REPLY）", strong: true },
+  { key: "total", label: "合计（读出完→收到 REPLY）", strong: true },
 ] as const;
 
 const SOURCE_ROWS = [
