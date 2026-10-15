@@ -4151,21 +4151,6 @@
    "needsEngineRunning": false
   },
   {
-   "key": "car_tpms_id5_pressure",
-   "name": "轮胎 ID5 胎压",
-   "ecu": "750/2A",
-   "did": "1005",
-   "byteIndex": 8,
-   "mask": "FFFF",
-   "mult": 1.72,
-   "offset": -49.88,
-   "signed": false,
-   "precision": 2,
-   "unit": "kPa",
-   "options": null,
-   "needsEngineRunning": false
-  },
-  {
    "key": "car_tpms_id1_temperature",
    "name": "轮胎 ID1 胎温",
    "ecu": "750/2A",
@@ -4216,21 +4201,6 @@
    "ecu": "750/2A",
    "did": "1004",
    "byteIndex": 3,
-   "mask": "FF",
-   "mult": 1.0,
-   "offset": -40.0,
-   "signed": false,
-   "precision": 0,
-   "unit": "°C",
-   "options": null,
-   "needsEngineRunning": false
-  },
-  {
-   "key": "car_tpms_id5_temperature",
-   "name": "轮胎 ID5 胎温",
-   "ecu": "750/2A",
-   "did": "1004",
-   "byteIndex": 4,
    "mask": "FF",
    "mult": 1.0,
    "offset": -40.0,
@@ -4320,30 +4290,6 @@
    "byteIndex": 1,
    "mask": "10",
    "mult": 0.0625,
-   "offset": 0.0,
-   "signed": false,
-   "precision": 0,
-   "unit": "",
-   "options": [
-    {
-     "value": 0,
-     "label": "正常"
-    },
-    {
-     "value": 1,
-     "label": "低压"
-    }
-   ],
-   "needsEngineRunning": false
-  },
-  {
-   "key": "car_tpms_id5_low_pressure_status",
-   "name": "轮胎 ID5 低压状态",
-   "ecu": "750/2A",
-   "did": "1036",
-   "byteIndex": 1,
-   "mask": "08",
-   "mult": 0.125,
    "offset": 0.0,
    "signed": false,
    "precision": 0,
@@ -5007,17 +4953,14 @@
     "car_tpms_id2_pressure",
     "car_tpms_id3_pressure",
     "car_tpms_id4_pressure",
-    "car_tpms_id5_pressure",
     "car_tpms_id1_temperature",
     "car_tpms_id2_temperature",
     "car_tpms_id3_temperature",
     "car_tpms_id4_temperature",
-    "car_tpms_id5_temperature",
     "car_tpms_id1_low_pressure_status",
     "car_tpms_id2_low_pressure_status",
     "car_tpms_id3_low_pressure_status",
     "car_tpms_id4_low_pressure_status",
-    "car_tpms_id5_low_pressure_status",
     "car_tpms_wheel_speed_sensor_fault"
    ]
   },

@@ -11,10 +11,10 @@ class TestSiennaCatalog:
   def test_counts_match_the_car(self):
     sienna = catalog.load_sienna()
     # 实车报告支持 132 项定制，剔除两项脚踢感应灵敏度；41 个 ECU 应答；
-    # 36 项 Carista 实时数据（24 项是动力电池）+ 47 项 Techstream 新增
+    # 36 项 Carista 实时数据（24 项是动力电池）+ 44 项 Techstream 新增（胎压 ID5 实车无数据，已去掉）
     assert len(sienna["settings"]) == 130
     assert len(sienna["ecus"]) == 41
-    assert len(sienna["live"]) == 83
+    assert len(sienna["live"]) == 80
     assert len(sienna["categories"]) == 18
     assert [t["id"] for t in sienna["liveTools"]] == ["wheels", "engine", "hvac", "tpms", "hv_battery", "chassis"]
     assert not [s for s in sienna["settings"] if "kick_sensor" in s["key"]]
