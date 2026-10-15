@@ -1,3 +1,6 @@
+import json
+import os
+
 import pytest
 
 from openpilot.system.lanlinkd.toyota import catalog, live_data
@@ -20,6 +23,11 @@ READY_VALUES = {
 }
 
 
+# 数据文件必须存在（不 skip）：否则排除集合为空，守护会悄悄失效
+with open(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "tools", "lanlink", "sienna_techstream_items.json")) as _f:
+  _TECHSTREAM_KEYS = {i["key"] for i in json.load(_f)["live"]}
+
+
 def _replay_car() -> DiagLink:
   ecus = {}
   for item in catalog.load_sienna()["live"]:
@@ -35,8 +43,9 @@ def _items(*keys: str) -> list[dict]:
 
 class TestReplayedCar:
   def test_every_item_matches_the_snapshot(self):
-    items = catalog.load_sienna()["live"]
-    assert len(items) == len(READY_VALUES) == 36
+    # 夹具只覆盖 Carista 的 36 项；Techstream 新增项未上车验证，没有回放数据，显式排除
+    items = [i for i in catalog.load_sienna()["live"] if i["key"] not in _TECHSTREAM_KEYS]
+    assert {i["key"] for i in items} == set(READY_VALUES)
     values = {v["key"]: v for v in live_data.read(_replay_car(), items)}
     assert {k: v["value"] for k, v in values.items()} == pytest.approx(READY_VALUES, abs=1e-3)
     assert all("error" not in v for v in values.values())
@@ -49,7 +58,7 @@ class TestReplayedCar:
 
   def test_items_sharing_a_did_cost_one_request(self):
     link = _replay_car()
-    battery = [i for i in catalog.load_sienna()["live"] if i["ecu"] == "7D2"]
+    battery = [i for i in catalog.load_sienna()["live"] if i["ecu"] == "7D2" and i["key"] in READY_VALUES]
     live_data.read(link, battery)
     requests = [r for ecu in link.panda.ecus.values() for r in ecu.requests]
     assert sorted(requests) == [bytes.fromhex("221809"), bytes.fromhex("221813")]

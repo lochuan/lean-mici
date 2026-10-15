@@ -1,4 +1,4 @@
-"""懒加载 Sienna 4 代目录 data/sienna_catalog.json（Carista 数据源，tools/lanlink/build_toyota_sienna_catalog.py 生成）。"""
+"""懒加载 Sienna 4 代目录 data/sienna_catalog.json（Carista 数据源，tools/lanlink/build_toyota_sienna_catalog.py 生成；另有 Techstream 第二数据源，由 tools/lanlink/merge_sienna_techstream_items.py 叠加，未上车验证）。"""
 import json
 import os
 from functools import cache

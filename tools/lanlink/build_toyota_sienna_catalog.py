@@ -7,6 +7,8 @@
 - sienna_zh.json：人工中文翻译，由 `carista/translations/build_sienna_zh.py` 生成。
 「常用」8 项、分类图标、实时数据主题是人工选择，写在本脚本里（与用户认可的原型一致）。
 
+生成后需再跑 merge_sienna_techstream_items.py 叠加 Techstream 的 ECU 与实时数据项（第二数据源）。
+
 用法：
   tools/lanlink/build_toyota_sienna_catalog.py <sienna_snapshot.json> <sienna_zh.json> <输出 json>
 """

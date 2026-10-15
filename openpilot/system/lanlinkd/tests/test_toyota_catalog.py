@@ -10,13 +10,23 @@ def _is_chinese(text: str) -> bool:
 class TestSiennaCatalog:
   def test_counts_match_the_car(self):
     sienna = catalog.load_sienna()
-    # 实车报告支持 132 项定制，剔除两项脚踢感应灵敏度；41 个 ECU 应答；36 项实时数据（24 项是动力电池）
+    # 实车报告支持 132 项定制，剔除两项脚踢感应灵敏度；41 个 ECU 应答；
+    # 36 项 Carista 实时数据（24 项是动力电池）+ 47 项 Techstream 新增
     assert len(sienna["settings"]) == 130
     assert len(sienna["ecus"]) == 41
-    assert len(sienna["live"]) == 36
+    assert len(sienna["live"]) == 83
     assert len(sienna["categories"]) == 18
-    assert [t["id"] for t in sienna["liveTools"]] == ["wheels", "engine", "hvac"]
+    assert [t["id"] for t in sienna["liveTools"]] == ["wheels", "engine", "hvac", "tpms", "hv_battery", "chassis"]
     assert not [s for s in sienna["settings"] if "kick_sensor" in s["key"]]
+
+  def test_techstream_items_are_merged(self):
+    sienna = catalog.load_sienna()
+    tpms = catalog.live_item("car_tpms_id1_pressure")
+    assert (tpms["ecu"], tpms["did"]) == ("750/2A", "1005")
+    live_keys = {i["key"] for i in sienna["live"]}
+    tools = {t["id"]: t for t in sienna["liveTools"]}
+    assert all(tools[i]["keys"] and set(tools[i]["keys"]) <= live_keys for i in ("tpms", "hv_battery", "chassis"))
+    assert not [i for i in sienna["live"] if "source" in i]
 
   def test_window_ecus_use_toyota_can(self):
     sienna = catalog.load_sienna()

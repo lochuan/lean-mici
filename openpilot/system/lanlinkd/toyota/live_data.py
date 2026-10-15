@@ -1,4 +1,4 @@
-"""Sienna 4 代实时数据（规则来自 Carista 逆向，见 spec-v2 §1.6；目录项见 catalog.load_sienna()["live"]）。
+"""Sienna 4 代实时数据（规则来自 Carista 逆向，见 spec-v2 §1.6；目录项见 catalog.load_sienna()["live"]；另有 Techstream 第二数据源，由 tools/lanlink/merge_sienna_techstream_items.py 叠加，未上车验证）。
 
 - 全部 UDS 22 DID → 62 DID payload；同一 (ECU, DID) 的项合并成一次请求。
 - raw = payload[byteIndex : byteIndex + 掩码字节数] 大端 & mask；signed 按掩码位宽取补码。
