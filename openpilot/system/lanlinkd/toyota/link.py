@@ -16,6 +16,7 @@ from opendbc.car.uds import CanClient, InvalidSubAddressError, IsoTpMessage
 HEARTBEAT_PERIOD_S = 0.5
 RESPONSE_PENDING = 0x78
 NEGATIVE_RESPONSE = 0x7F
+EXTENDED_SESSION = b"\x10\x03"
 
 
 class NoResponseError(Exception):

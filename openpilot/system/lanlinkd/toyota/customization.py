@@ -7,12 +7,11 @@
 from collections.abc import Callable
 
 from openpilot.system.lanlinkd.toyota import catalog, coding
-from openpilot.system.lanlinkd.toyota.link import (ECU_COMMUNICATION_ERRORS, EcuRejectedError, MalformedResponseError, NoResponseError,
-                                                   expect_positive, read_error_text)
+from openpilot.system.lanlinkd.toyota.link import (ECU_COMMUNICATION_ERRORS, EXTENDED_SESSION, EcuRejectedError, MalformedResponseError,
+                                                   NoResponseError, expect_positive, read_error_text)
 
 Address = tuple[int, int | None]
 READ_CAN_MASK_TABLE = b"\xa8\x03"
-EXTENDED_SESSION = b"\x10\x03"
 NRC_SERVICE_NOT_SUPPORTED_IN_SESSION = 0x7F
 
 

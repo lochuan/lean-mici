@@ -140,16 +140,19 @@ class FakeUdsEcu(FakeEcu):
 
   writes_need_extended_session：默认会话下 2E 回 7F 2E 7F，发过 10 03 才能写。
   ignore_writes：2E 照回肯定应答但内存不变（写入没生效，回读校验应失败）。
+  clear_needs_extended_session：默认会话下 14 FFFFFF 回 7F 14 11，发过 10 03 才查 responses 表。
   其余请求（3E、19 02 8D、14 FFFFFF…）查 responses 表，查不到回 7F xx 11。
   """
 
   def __init__(self, memory: dict[int, bytes], responses: dict[bytes, bytes | list[bytes]] | None = None,
-               reject_writes: bytes | None = None, writes_need_extended_session: bool = False, ignore_writes: bool = False):
+               reject_writes: bytes | None = None, writes_need_extended_session: bool = False, ignore_writes: bool = False,
+               clear_needs_extended_session: bool = False):
     super().__init__(responses, handler=self._handle)
     self.memory = dict(memory)
     self.reject_writes = reject_writes
     self.writes_need_extended_session = writes_need_extended_session
     self.ignore_writes = ignore_writes
+    self.clear_needs_extended_session = clear_needs_extended_session
     self.extended_session = False
 
   @classmethod
@@ -184,4 +187,6 @@ class FakeUdsEcu(FakeEcu):
       if not self.ignore_writes:
         self.memory[did] = request[3:]
       return [b"\x7f\x2e\x78", b"\x6e" + request[1:3]]
+    if request[0] == 0x14 and self.clear_needs_extended_session and not self.extended_session:
+      return b"\x7f\x14\x11"
     return self.responses.get(request, b"\x7f" + request[:1] + b"\x11")

@@ -8,6 +8,7 @@ from openpilot.system.lanlinkd.toyota.link import DiagLink
 from .test_toyota_customization_flow import PROBE
 from .toyota_fakes import FakeEcu, FakePanda, FakeUdsEcu
 
+UDS_CLEAR = bytes.fromhex("14ffffff")
 DTC_TEXT = catalog.load_sienna()["dtcText"]
 
 
@@ -128,17 +129,37 @@ class TestScanToyotaCan:
 
 
 class TestClear:
-  @pytest.mark.parametrize("ecu_id, address, request_hex", [
-    ("750/40", (0x750, 0x40), "14ffffff"),
-    ("750/90", (0x750, 0x90), "14"),
+  @pytest.mark.parametrize("ecu_id, address, request_hexes", [
+    ("750/40", (0x750, 0x40), ["1003", "14ffffff"]),
+    ("750/90", (0x750, 0x90), ["14"]),
   ])
-  def test_clear_by_protocol(self, ecu_id, address, request_hex):
-    fake = FakeEcu({bytes.fromhex(request_hex): [b"\x7f\x14\x78", b"\x54"]})
+  def test_clear_by_protocol(self, ecu_id, address, request_hexes):
+    fake = FakeEcu({b"\x10\x03": b"\x50\x03", bytes.fromhex(request_hexes[-1]): [b"\x7f\x14\x78", b"\x54"]})
     assert dtc.clear(_link({address: fake}), catalog.ecu(ecu_id)) == {"ecu": ecu_id, "ok": True}
-    assert fake.requests == [bytes.fromhex(request_hex)]
+    assert fake.requests == [bytes.fromhex(h) for h in request_hexes]
+
+  def test_uds_ecu_that_refuses_clear_in_default_session(self):
+    fake = FakeUdsEcu({}, {UDS_CLEAR: [b"\x7f\x14\x78", b"\x54"]}, clear_needs_extended_session=True)
+    assert dtc.clear(_link({(0x750, 0x29): fake}), catalog.ecu("750/29")) == {"ecu": "750/29", "ok": True}
+    assert fake.requests == [bytes.fromhex("1003"), UDS_CLEAR]
+
+  def test_obd_clear_first(self):
+    fake = FakeEcu({b"\x04": b"\x44"})
+    assert dtc.clear(_link({(0x7D2, None): fake}), catalog.ecu("7D2")) == {"ecu": "7D2", "ok": True}
+    assert fake.requests == [b"\x04"]
+
+  def test_obd_first_falls_back_to_uds_clear(self):
+    fake = FakeUdsEcu({}, {UDS_CLEAR: b"\x54"})
+    assert dtc.clear(_link({(0x7B0, None): fake}), catalog.ecu("7B0")) == {"ecu": "7B0", "ok": True}
+    assert fake.requests == [b"\x04", bytes.fromhex("1003"), UDS_CLEAR]
+
+  def test_uds_first_falls_back_to_obd_clear(self):
+    fake = FakeUdsEcu({}, {UDS_CLEAR: bytes.fromhex("7f1411"), b"\x04": b"\x44"})
+    assert dtc.clear(_link({(0x705, None): fake}), catalog.ecu("705")) == {"ecu": "705", "ok": True}
+    assert fake.requests == [bytes.fromhex("1003"), UDS_CLEAR, b"\x04"]
 
   def test_rejected(self):
-    fake = FakeEcu({bytes.fromhex("14ffffff"): bytes.fromhex("7f1422")})
+    fake = FakeUdsEcu({}, {UDS_CLEAR: bytes.fromhex("7f1422")})
     assert dtc.clear(_link({(0x750, 0x40): fake}), catalog.ecu("750/40")) == {"ecu": "750/40", "ok": False, "error": "NRC 22"}
 
   def test_offline(self):
