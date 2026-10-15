@@ -1,0 +1,1156 @@
+{
+ "origin": "kaikozlov/toyota-diagnostics 元数据(Techstream/GTS+ 逆向),Sienna HV 车型,未上车验证;Techstream 另列 750/5F、69、6B、70、A8、D4,实车 3E 无应答,未收录。胎压 1005 raw 0/1、转向角 100D raw 1、EBU 轮速 108D raw 1 为无效码,未做 options(选项按物理值相等匹配,浮点不可靠),上车时按无效值看待;108D 与 Carista 1002 轮速重复,上车对比后二选一;needsEngineRunning 全为 false 待核对;轮胎 ID5 实车无数据，已去掉（ID1–4 对应轮位待核对）",
+ "ecus": [],
+ "live": [
+  {
+   "key": "car_tpms_id1_pressure",
+   "name": "轮胎 ID1 胎压",
+   "ecu": "750/2A",
+   "did": "1005",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 1.72,
+   "offset": -49.88,
+   "precision": 2,
+   "unit": "kPa",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1005",
+    "ref_name": "ID 1 Tire Inflation Pressure",
+    "ref_bits": "MSB0 0-15 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*172/1) + -4988) / 10^2"
+   }
+  },
+  {
+   "key": "car_tpms_id2_pressure",
+   "name": "轮胎 ID2 胎压",
+   "ecu": "750/2A",
+   "did": "1005",
+   "byteIndex": 2,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 1.72,
+   "offset": -49.88,
+   "precision": 2,
+   "unit": "kPa",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1005",
+    "ref_name": "ID 2 Tire Inflation Pressure",
+    "ref_bits": "MSB0 16-31 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*172/1) + -4988) / 10^2"
+   }
+  },
+  {
+   "key": "car_tpms_id3_pressure",
+   "name": "轮胎 ID3 胎压",
+   "ecu": "750/2A",
+   "did": "1005",
+   "byteIndex": 4,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 1.72,
+   "offset": -49.88,
+   "precision": 2,
+   "unit": "kPa",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1005",
+    "ref_name": "ID 3 Tire Inflation Pressure",
+    "ref_bits": "MSB0 32-47 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*172/1) + -4988) / 10^2"
+   }
+  },
+  {
+   "key": "car_tpms_id4_pressure",
+   "name": "轮胎 ID4 胎压",
+   "ecu": "750/2A",
+   "did": "1005",
+   "byteIndex": 6,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 1.72,
+   "offset": -49.88,
+   "precision": 2,
+   "unit": "kPa",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1005",
+    "ref_name": "ID 4 Tire Inflation Pressure",
+    "ref_bits": "MSB0 48-63 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*172/1) + -4988) / 10^2"
+   }
+  },
+  {
+   "key": "car_tpms_id1_temperature",
+   "name": "轮胎 ID1 胎温",
+   "ecu": "750/2A",
+   "did": "1004",
+   "byteIndex": 0,
+   "mask": "FF",
+   "signed": false,
+   "mult": 1.0,
+   "offset": -40.0,
+   "precision": 0,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1004",
+    "ref_name": "ID 1 Temperature in Tire",
+    "ref_bits": "MSB0 0-7 (8 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + -40) / 10^0"
+   }
+  },
+  {
+   "key": "car_tpms_id2_temperature",
+   "name": "轮胎 ID2 胎温",
+   "ecu": "750/2A",
+   "did": "1004",
+   "byteIndex": 1,
+   "mask": "FF",
+   "signed": false,
+   "mult": 1.0,
+   "offset": -40.0,
+   "precision": 0,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1004",
+    "ref_name": "ID 2 Temperature in Tire",
+    "ref_bits": "MSB0 8-15 (8 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + -40) / 10^0"
+   }
+  },
+  {
+   "key": "car_tpms_id3_temperature",
+   "name": "轮胎 ID3 胎温",
+   "ecu": "750/2A",
+   "did": "1004",
+   "byteIndex": 2,
+   "mask": "FF",
+   "signed": false,
+   "mult": 1.0,
+   "offset": -40.0,
+   "precision": 0,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1004",
+    "ref_name": "ID 3 Temperature in Tire",
+    "ref_bits": "MSB0 16-23 (8 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + -40) / 10^0"
+   }
+  },
+  {
+   "key": "car_tpms_id4_temperature",
+   "name": "轮胎 ID4 胎温",
+   "ecu": "750/2A",
+   "did": "1004",
+   "byteIndex": 3,
+   "mask": "FF",
+   "signed": false,
+   "mult": 1.0,
+   "offset": -40.0,
+   "precision": 0,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1004",
+    "ref_name": "ID 4 Temperature in Tire",
+    "ref_bits": "MSB0 24-31 (8 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + -40) / 10^0"
+   }
+  },
+  {
+   "key": "car_tpms_id1_low_pressure_status",
+   "name": "轮胎 ID1 低压状态",
+   "ecu": "750/2A",
+   "did": "1036",
+   "byteIndex": 1,
+   "mask": "80",
+   "signed": false,
+   "mult": 0.0078125,
+   "offset": 0.0,
+   "precision": 0,
+   "unit": "",
+   "options": [
+    {
+     "value": 0,
+     "label": "正常"
+    },
+    {
+     "value": 1,
+     "label": "低压"
+    }
+   ],
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1036",
+    "ref_name": "ID 1 Low-pressure Status",
+    "ref_bits": "MSB0 8-8 (1 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^0"
+   }
+  },
+  {
+   "key": "car_tpms_id2_low_pressure_status",
+   "name": "轮胎 ID2 低压状态",
+   "ecu": "750/2A",
+   "did": "1036",
+   "byteIndex": 1,
+   "mask": "40",
+   "signed": false,
+   "mult": 0.015625,
+   "offset": 0.0,
+   "precision": 0,
+   "unit": "",
+   "options": [
+    {
+     "value": 0,
+     "label": "正常"
+    },
+    {
+     "value": 1,
+     "label": "低压"
+    }
+   ],
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1036",
+    "ref_name": "ID 2 Low-pressure Status",
+    "ref_bits": "MSB0 9-9 (1 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^0"
+   }
+  },
+  {
+   "key": "car_tpms_id3_low_pressure_status",
+   "name": "轮胎 ID3 低压状态",
+   "ecu": "750/2A",
+   "did": "1036",
+   "byteIndex": 1,
+   "mask": "20",
+   "signed": false,
+   "mult": 0.03125,
+   "offset": 0.0,
+   "precision": 0,
+   "unit": "",
+   "options": [
+    {
+     "value": 0,
+     "label": "正常"
+    },
+    {
+     "value": 1,
+     "label": "低压"
+    }
+   ],
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1036",
+    "ref_name": "ID 3 Low-pressure Status",
+    "ref_bits": "MSB0 10-10 (1 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^0"
+   }
+  },
+  {
+   "key": "car_tpms_id4_low_pressure_status",
+   "name": "轮胎 ID4 低压状态",
+   "ecu": "750/2A",
+   "did": "1036",
+   "byteIndex": 1,
+   "mask": "10",
+   "signed": false,
+   "mult": 0.0625,
+   "offset": 0.0,
+   "precision": 0,
+   "unit": "",
+   "options": [
+    {
+     "value": 0,
+     "label": "正常"
+    },
+    {
+     "value": 1,
+     "label": "低压"
+    }
+   ],
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1036",
+    "ref_name": "ID 4 Low-pressure Status",
+    "ref_bits": "MSB0 11-11 (1 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^0"
+   }
+  },
+  {
+   "key": "car_tpms_wheel_speed_sensor_fault",
+   "name": "轮速传感器故障",
+   "ecu": "750/2A",
+   "did": "1040",
+   "byteIndex": 1,
+   "mask": "80",
+   "signed": false,
+   "mult": 0.0078125,
+   "offset": 0.0,
+   "precision": 0,
+   "unit": "",
+   "options": [
+    {
+     "value": 0,
+     "label": "正常"
+    },
+    {
+     "value": 1,
+     "label": "异常"
+    }
+   ],
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1040",
+    "ref_name": "Wheel Speed Sensor Malfunction",
+    "ref_bits": "MSB0 8-8 (1 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^0"
+   }
+  },
+  {
+   "key": "car_hv_soc",
+   "name": "动力电池 SOC",
+   "ecu": "7D2",
+   "did": "1F5B",
+   "byteIndex": 0,
+   "mask": "FF",
+   "signed": false,
+   "mult": 0.39215686274509803,
+   "offset": 0.0,
+   "precision": 2,
+   "unit": "%",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1F5B",
+    "ref_name": "Hybrid/EV Battery SOC",
+    "ref_bits": "MSB0 0-7 (8 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*2000/51) + 0) / 10^2"
+   }
+  },
+  {
+   "key": "car_hv_voltage",
+   "name": "动力电池总电压",
+   "ecu": "7D2",
+   "did": "1F9A",
+   "byteIndex": 2,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.015625,
+   "offset": 0.0,
+   "precision": 2,
+   "unit": "V",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1F9A",
+    "ref_name": "Hybrid/EV Battery Voltage",
+    "ref_bits": "MSB0 16-31 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*25/16) + 0) / 10^2"
+   }
+  },
+  {
+   "key": "car_hv_current",
+   "name": "动力电池电流",
+   "ecu": "7D2",
+   "did": "1F9A",
+   "byteIndex": 4,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.1,
+   "offset": -3276.8,
+   "precision": 1,
+   "unit": "A",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1F9A",
+    "ref_name": "Hybrid/EV Battery Current",
+    "ref_bits": "MSB0 32-47 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + -32768) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_1",
+   "name": "动力电池温度 1",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 1",
+    "ref_bits": "MSB0 0-15 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_2",
+   "name": "动力电池温度 2",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 2,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 2",
+    "ref_bits": "MSB0 16-31 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_3",
+   "name": "动力电池温度 3",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 4,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 3",
+    "ref_bits": "MSB0 32-47 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_4",
+   "name": "动力电池温度 4",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 6,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 4",
+    "ref_bits": "MSB0 48-63 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_5",
+   "name": "动力电池温度 5",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 8,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 5",
+    "ref_bits": "MSB0 64-79 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_6",
+   "name": "动力电池温度 6",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 10,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 6",
+    "ref_bits": "MSB0 80-95 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_7",
+   "name": "动力电池温度 7",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 12,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 7",
+    "ref_bits": "MSB0 96-111 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_8",
+   "name": "动力电池温度 8",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 14,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 8",
+    "ref_bits": "MSB0 112-127 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_9",
+   "name": "动力电池温度 9",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 16,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 9",
+    "ref_bits": "MSB0 128-143 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_10",
+   "name": "动力电池温度 10",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 18,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 10",
+    "ref_bits": "MSB0 144-159 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_11",
+   "name": "动力电池温度 11",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 20,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 11",
+    "ref_bits": "MSB0 160-175 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_12",
+   "name": "动力电池温度 12",
+   "ecu": "7D2",
+   "did": "1814",
+   "byteIndex": 22,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1814",
+    "ref_name": "Hybrid/EV Battery Temperature 12",
+    "ref_bits": "MSB0 176-191 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_max",
+   "name": "动力电池最高温度",
+   "ecu": "7D2",
+   "did": "1829",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1829",
+    "ref_name": "Hybrid/EV Battery Maximum Temperature",
+    "ref_bits": "MSB0 0-15 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_hv_temperature_min",
+   "name": "动力电池最低温度",
+   "ecu": "7D2",
+   "did": "182A",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.00390625,
+   "offset": -50.0,
+   "precision": 1,
+   "unit": "°C",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "182A",
+    "ref_name": "Hybrid/EV Battery Minimum Temperature",
+    "ref_bits": "MSB0 0-15 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*5/128) + -500) / 10^1"
+   }
+  },
+  {
+   "key": "car_chassis_front_right_wheel_speed_ebu",
+   "name": "右前轮速（EBU 节点）",
+   "ecu": "7B0",
+   "did": "108D",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.1,
+   "offset": 0.0,
+   "precision": 1,
+   "unit": "km/h",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "108D",
+    "ref_name": "FR Wheel Speed (EBU node)",
+    "ref_bits": "MSB0 0-15 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^1"
+   }
+  },
+  {
+   "key": "car_chassis_front_left_wheel_speed_ebu",
+   "name": "左前轮速（EBU 节点）",
+   "ecu": "7B0",
+   "did": "108D",
+   "byteIndex": 2,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.1,
+   "offset": 0.0,
+   "precision": 1,
+   "unit": "km/h",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "108D",
+    "ref_name": "FL Wheel Speed (EBU node)",
+    "ref_bits": "MSB0 16-31 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^1"
+   }
+  },
+  {
+   "key": "car_chassis_rear_right_wheel_speed_ebu",
+   "name": "右后轮速（EBU 节点）",
+   "ecu": "7B0",
+   "did": "108D",
+   "byteIndex": 4,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.1,
+   "offset": 0.0,
+   "precision": 1,
+   "unit": "km/h",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "108D",
+    "ref_name": "RR Wheel Speed (EBU node)",
+    "ref_bits": "MSB0 32-47 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^1"
+   }
+  },
+  {
+   "key": "car_chassis_rear_left_wheel_speed_ebu",
+   "name": "左后轮速（EBU 节点）",
+   "ecu": "7B0",
+   "did": "108D",
+   "byteIndex": 6,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.1,
+   "offset": 0.0,
+   "precision": 1,
+   "unit": "km/h",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "108D",
+    "ref_name": "RL Wheel Speed (EBU node)",
+    "ref_bits": "MSB0 48-63 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^1"
+   }
+  },
+  {
+   "key": "car_chassis_steering_angle",
+   "name": "转向角",
+   "ecu": "7B0",
+   "did": "100D",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.1,
+   "offset": -3276.8,
+   "precision": 1,
+   "unit": "°",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "100D",
+    "ref_name": "Steering Angle Value",
+    "ref_bits": "MSB0 0-15 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + -32768) / 10^1"
+   }
+  },
+  {
+   "key": "car_chassis_yaw_rate",
+   "name": "横摆角速度",
+   "ecu": "7B0",
+   "did": "100A",
+   "byteIndex": 0,
+   "mask": "FF",
+   "signed": false,
+   "mult": 1.0,
+   "offset": -128.0,
+   "precision": 0,
+   "unit": "°/s",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "100A",
+    "ref_name": "Yaw Rate Sensor Value",
+    "ref_bits": "MSB0 0-7 (8 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + -128) / 10^0"
+   }
+  },
+  {
+   "key": "car_chassis_lateral_g",
+   "name": "横向加速度",
+   "ecu": "7B0",
+   "did": "1008",
+   "byteIndex": 0,
+   "mask": "FF",
+   "signed": true,
+   "mult": 0.196133,
+   "offset": 0.0,
+   "precision": 3,
+   "unit": "m/s²",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1008",
+    "ref_name": "Lateral G",
+    "ref_bits": "MSB0 0-7 (8 bit, signed=True)",
+    "ref_formula": "phys = (trunc(raw*196133/1000) + 0) / 10^3"
+   }
+  },
+  {
+   "key": "car_chassis_longitudinal_g",
+   "name": "纵向加速度",
+   "ecu": "7B0",
+   "did": "1008",
+   "byteIndex": 1,
+   "mask": "FF",
+   "signed": true,
+   "mult": 0.196133,
+   "offset": 0.0,
+   "precision": 3,
+   "unit": "m/s²",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1008",
+    "ref_name": "Forward and Rearward G",
+    "ref_bits": "MSB0 8-15 (8 bit, signed=True)",
+    "ref_formula": "phys = (trunc(raw*196133/1000) + 0) / 10^3"
+   }
+  },
+  {
+   "key": "car_chassis_master_cylinder_pressure",
+   "name": "主缸压力",
+   "ecu": "7B0",
+   "did": "1004",
+   "byteIndex": 0,
+   "mask": "FF",
+   "signed": false,
+   "mult": 0.098,
+   "offset": -1.0,
+   "precision": 2,
+   "unit": "MPa",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1004",
+    "ref_name": "Master Cylinder Sensor 1",
+    "ref_bits": "MSB0 0-7 (8 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*49/5) + -100) / 10^2"
+   }
+  },
+  {
+   "key": "car_chassis_gear_position",
+   "name": "档位",
+   "ecu": "7B0",
+   "did": "1019",
+   "byteIndex": 0,
+   "mask": "FF",
+   "signed": false,
+   "mult": 1.0,
+   "offset": 0.0,
+   "precision": 0,
+   "unit": "",
+   "options": [
+    {
+     "value": 0,
+     "label": "失效"
+    },
+    {
+     "value": 1,
+     "label": "1 档"
+    },
+    {
+     "value": 2,
+     "label": "2 档"
+    },
+    {
+     "value": 3,
+     "label": "3 档"
+    },
+    {
+     "value": 4,
+     "label": "4 档"
+    },
+    {
+     "value": 5,
+     "label": "5 档"
+    },
+    {
+     "value": 6,
+     "label": "6 档"
+    },
+    {
+     "value": 7,
+     "label": "7 档"
+    },
+    {
+     "value": 8,
+     "label": "8 档"
+    },
+    {
+     "value": 9,
+     "label": "9 档"
+    },
+    {
+     "value": 10,
+     "label": "10 档"
+    },
+    {
+     "value": 13,
+     "label": "P/N"
+    },
+    {
+     "value": 14,
+     "label": "R"
+    },
+    {
+     "value": 255,
+     "label": "不支持"
+    }
+   ],
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1019",
+    "ref_name": "Gear Position",
+    "ref_bits": "MSB0 0-7 (8 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^0"
+   }
+  },
+  {
+   "key": "car_chassis_shift_lever_position",
+   "name": "换挡杆位置",
+   "ecu": "7B0",
+   "did": "101A",
+   "byteIndex": 0,
+   "mask": "FF",
+   "signed": false,
+   "mult": 1.0,
+   "offset": 0.0,
+   "precision": 0,
+   "unit": "",
+   "options": [
+    {
+     "value": 0,
+     "label": "失效"
+    },
+    {
+     "value": 1,
+     "label": "1 档"
+    },
+    {
+     "value": 2,
+     "label": "2 档"
+    },
+    {
+     "value": 3,
+     "label": "3 档"
+    },
+    {
+     "value": 4,
+     "label": "4 档"
+    },
+    {
+     "value": 5,
+     "label": "5 档"
+    },
+    {
+     "value": 6,
+     "label": "6 档"
+    },
+    {
+     "value": 10,
+     "label": "B"
+    },
+    {
+     "value": 11,
+     "label": "D/M"
+    },
+    {
+     "value": 12,
+     "label": "N"
+    },
+    {
+     "value": 13,
+     "label": "P"
+    },
+    {
+     "value": 14,
+     "label": "R"
+    },
+    {
+     "value": 15,
+     "label": "无输入"
+    },
+    {
+     "value": 255,
+     "label": "不支持"
+    }
+   ],
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "101A",
+    "ref_name": "Shift Lever Position",
+    "ref_bits": "MSB0 0-7 (8 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^0"
+   }
+  },
+  {
+   "key": "car_chassis_vehicle_speed",
+   "name": "车速",
+   "ecu": "7B0",
+   "did": "1012",
+   "byteIndex": 0,
+   "mask": "FFFF",
+   "signed": false,
+   "mult": 0.1,
+   "offset": 0.0,
+   "precision": 1,
+   "unit": "km/h",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1012",
+    "ref_name": "Vehicle Speed",
+    "ref_bits": "MSB0 0-15 (16 bit, signed=False)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^1"
+   }
+  },
+  {
+   "key": "car_steering_sensor_angle_signal",
+   "name": "转向角信号",
+   "ecu": "7B3",
+   "did": "1004",
+   "byteIndex": 0,
+   "mask": "0FFF",
+   "signed": true,
+   "mult": 1.5,
+   "offset": 0.0,
+   "precision": 1,
+   "unit": "°",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1004",
+    "ref_name": "Steering Angle Signal Information",
+    "ref_bits": "MSB0 4-15 (12 bit, signed=True)",
+    "ref_formula": "phys = (trunc(raw*15/1) + 0) / 10^1"
+   }
+  },
+  {
+   "key": "car_steering_sensor_angle_expansion_signal",
+   "name": "转向角扩展信号",
+   "ecu": "7B3",
+   "did": "1004",
+   "byteIndex": 2,
+   "mask": "0F",
+   "signed": true,
+   "mult": 0.1,
+   "offset": 0.0,
+   "precision": 1,
+   "unit": "°",
+   "options": null,
+   "needsEngineRunning": false,
+   "source": {
+    "ref_did": "1004",
+    "ref_name": "Steering Angle Expansion Signal Information",
+    "ref_bits": "MSB0 20-23 (4 bit, signed=True)",
+    "ref_formula": "phys = (trunc(raw*1/1) + 0) / 10^1"
+   }
+  }
+ ],
+ "liveTools": [
+  {
+   "id": "tpms",
+   "name": "胎压",
+   "icon": "gauge",
+   "keys": [
+    "car_tpms_id1_pressure",
+    "car_tpms_id2_pressure",
+    "car_tpms_id3_pressure",
+    "car_tpms_id4_pressure",
+    "car_tpms_id1_temperature",
+    "car_tpms_id2_temperature",
+    "car_tpms_id3_temperature",
+    "car_tpms_id4_temperature",
+    "car_tpms_id1_low_pressure_status",
+    "car_tpms_id2_low_pressure_status",
+    "car_tpms_id3_low_pressure_status",
+    "car_tpms_id4_low_pressure_status",
+    "car_tpms_wheel_speed_sensor_fault"
+   ]
+  },
+  {
+   "id": "hv_battery",
+   "name": "动力电池",
+   "icon": "battery-charging",
+   "keys": [
+    "car_hv_soc",
+    "car_hv_voltage",
+    "car_hv_current",
+    "car_hv_temperature_1",
+    "car_hv_temperature_2",
+    "car_hv_temperature_3",
+    "car_hv_temperature_4",
+    "car_hv_temperature_5",
+    "car_hv_temperature_6",
+    "car_hv_temperature_7",
+    "car_hv_temperature_8",
+    "car_hv_temperature_9",
+    "car_hv_temperature_10",
+    "car_hv_temperature_11",
+    "car_hv_temperature_12",
+    "car_hv_temperature_max",
+    "car_hv_temperature_min"
+   ]
+  },
+  {
+   "id": "chassis",
+   "name": "底盘动态",
+   "icon": "circle-gauge",
+   "keys": [
+    "car_chassis_front_right_wheel_speed_ebu",
+    "car_chassis_front_left_wheel_speed_ebu",
+    "car_chassis_rear_right_wheel_speed_ebu",
+    "car_chassis_rear_left_wheel_speed_ebu",
+    "car_chassis_steering_angle",
+    "car_chassis_yaw_rate",
+    "car_chassis_lateral_g",
+    "car_chassis_longitudinal_g",
+    "car_chassis_master_cylinder_pressure",
+    "car_chassis_gear_position",
+    "car_chassis_shift_lever_position",
+    "car_chassis_vehicle_speed",
+    "car_steering_sensor_angle_signal",
+    "car_steering_sensor_angle_expansion_signal"
+   ]
+  }
+ ]
+}
