@@ -27,7 +27,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 ## 实现口径
 
 1. **编码前配对**：两路 VisionIPC 线程收帧→`warpNv12` 写进 512×256 编码缓冲（venus 对齐、
-   `VENUS_BUFFER_SIZE`，21 号 EINVAL 坑；取帧线程 road→core 2、wide→core 6（避开 core 4/5 上 FIFO 53 的 control/ui 与 core 7 上 FIFO 54 的 modeld）、FIFO 50，warp ~2.3 ms/路）→按 `timestamp_sof` 邻近配对
+   `VENUS_BUFFER_SIZE`，21 号 EINVAL 坑；取帧线程 road→core 2、wide→core 6（避开 core 4/5 上 FIFO 53 的 control/ui 与 core 7 上 FIFO 54 的 modeld）、FIFO 50，warp ~2.3 ms/路；两路编码 dequeue 线程都在 core 6，90 号）→按 `timestamp_sof` 邻近配对
    （单槽/流，10 ms 容差）→两路同时 `encode_frame`。未配对死亡帧只计数/`LOGW` 并归还缓冲，
    不进编码器、不上报调度器；缺半帧不会中断码流。
    拷贝后的 VisionIPC 缓冲立即可复用（配对等待不占上游缓冲）。
@@ -78,7 +78,8 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
    锁序 sender.mtx > state_mtx > 叶子锁（ev 队列/meta 缓存/buf 池）。sender 事件回调在其
    锁内只记账+入队，状态机转移与 request_keyframe 在下一次组帧前按序执行（落点不变且
    不反向取锁）。SCHED_FIFO 53 + 绑核 EINVAL 容忍（`util::set_realtime_priority`/
-   `set_core_affinity`，仿 `encoderd.cc:214-216`）。
+   `set_core_affinity`，仿 `encoderd.cc:214-216`）。writer/reply 空闲只等事件（提交/断连唤醒 writer，
+   REPLY 可读或 socket shutdown 唤醒 reply），100 ms 超时只作退出检查；未连接与写阻塞仍 2 ms 重试（90 号）。
     `frame_idx = (road.timestamp_sof - sof_base + 25 ms) / 50 ms`（整数除），`sof_base` 是
     `kNewConnection` 后第一个被编号 road SOF（组帧或 road 配对杀帧，先到为准）；重连时重置。
     标称 50 ms 间隔编号 +1，100 ms 空槽编号 +2；相机缺帧/配对失败会留下时间槽空洞，属于

@@ -75,6 +75,7 @@ struct UplinkSenderConfig {
   uint64_t stall_ms = 200;         // 假死阈值
   int connect_timeout_ms = 1000;   // 每次重连超时
   int max_connect_failures = 3;    // 连续失败升级「连接丢失」
+  int poll_ms = 2;                 // 未连接的重连间隔 / socket 写阻塞的重试间隔（这两种状态无事件可等）
 };
 
 class UplinkSender {
@@ -98,11 +99,13 @@ class UplinkSender {
   // 发送循环单步（发送线程）；返回本次是否有进展（无进展时调用方可以小睡）。
   bool step();
 
-  // step() 无进展时发送线程在此等：有 submit_* 即返回 true，否则 timeout_ms 后 false
-  //（超时兜底 socket 写阻塞/假死计时这类无提交的推进）。
-  bool wait_for_work(int timeout_ms);
+  // step() 无进展时发送线程在此等：有 submit_* / notify_disconnect 即返回 true，否则超时 false。
+  // 超时按状态定、以 max_wait_ms 封顶（调用方的退出检查周期）：空闲只等事件；在途帧只等 wide
+  // 时等到假死判定点；未连接 / socket 写阻塞按 poll_ms 重试。
+  // ponytail: 写阻塞仍是 poll_ms 轮询（只在网络卡住时出现）；要事件化需给 UplinkSocket 加带 fd 的 wait_writable。
+  bool wait_for_work(int max_wait_ms);
 
-  // 读侧发现断连/EOF/ERR（REPLY 接收线程）→ 走重连路径。
+  // 读侧发现断连/EOF/ERR（REPLY 接收线程）→ 走重连路径（唤醒发送线程立即重连）。
   void notify_disconnect();
 
   // 码流断档（编码输出缺帧/段长超限，编码回调线程）→ 序列头门重新关门：

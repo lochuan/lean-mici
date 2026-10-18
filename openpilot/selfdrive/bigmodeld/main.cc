@@ -87,8 +87,32 @@ const std::vector<int> kCpuAffinity = {2};
 // 更多压在 locationd 所在核（eagled 曾因高优先级拖慢 sensord 致 locationdTemporaryError），不取。
 constexpr int kCaptureFifoPrio = 50;
 const std::vector<int> kCaptureCore[2] = {{2}, {6}};
+// 编码器 dequeue 线程（dq-bgmRoad/dq-bgmWide）由 V4LEncoder 在取帧线程里创建，原先继承其 FIFO 50 / 绑核。
+// 90 号 C1：dq-bgmRoad 在 core 2 低于同核 writer/reply（FIFO 53），submit_road 一唤醒 writer 就被抢占，
+// 车机实测每 10 s 等 116 ms（运行仅 64 ms）。两路 dequeue 都绑 core 6，该核上（87 号实测）：
+//   - camerad（TS）：会被 dequeue 抢占（road 每帧 ~0.3 ms），挡不住 dequeue；
+//   - 同为 FIFO 50 的本进程 bgm_wide（warp ~0.9 ms/帧）与 dq-bgmWide（~0.1 ms/次）：同级不抢占，但 warp
+//     必在配对提交前做完，road 编码输出（提交后 ~2.2 ms）到时 bgm_wide 已在等下一帧，实际只会与
+//     dq-bgmWide 的回调前后排队（~0.1–0.3 ms）。
+// 不取 core 7：modeld（FIFO 54，每帧 ~9.6 ms、随帧到达起跑）恰好覆盖编码输出时刻。core 0–5 依次有
+// ui / sensord（FIFO 1）/ 本进程 writer·reply / pandad / controlsd·card / plannerd·radard，且 0–3 是
+// locationd 系与 sensord 中断线程的核。writer/reply 的 FIFO 53 / core 2 不动（上面台架 A/B 结论）。
+constexpr int kDequeueFifoPrio = 50;  // 与取帧同级（即原先继承来的值）
+const std::vector<int> kDequeueCore = {6};
+// writer/reply 空闲时只等事件，此值只是 do_exit 检查周期（同取帧 vipc.recv 的 100 ms）
+constexpr int kIdleWaitMs = 100;
 
 enum StreamId { kRoad = 0, kWide = 1 };
+
+// 每路线程标识：取帧线程日志名 / 编码器名（V4LEncoder 据此把 dequeue 线程命名为 "dq-" + 编码器名，
+// v4l_encoder.cc:74）/ dequeue 线程日志名
+struct StreamThreadNames {
+  const char* capture;
+  const char* encoder;
+  const char* dequeue;
+};
+constexpr StreamThreadNames kThreadNames[2] = {{"bgm_road", "bgmRoad", "dq-bgmRoad"},
+                                               {"bgm_wide", "bgmWide", "dq-bgmWide"}};
 
 void setup_realtime(const char* who, int prio = kSchedFifoPrio, const std::vector<int>& cores = kCpuAffinity) {
   if (util::set_realtime_priority(prio) != 0) {
@@ -190,7 +214,8 @@ class TcpSocket : public UplinkSocket {
   }
 
   // 可读即返回（REPLY 到达即醒，不睡满轮询周期）；poll 在锁外，免得挡住发送线程。
-  // 期间 fd 被并发关闭只会让 poll 提前返回，调用方随后 read_some 自会报错重连。
+  // 发送线程断连走 close_locked 的 shutdown，会让在等的 poll 立即返回（POLLHUP），调用方随后
+  // 重查连接状态；只有「取 fd 后、进 poll 前」被关且编号被复用这一极窄窗口会睡满 timeout_ms。
   void wait_readable(int timeout_ms) {
     int fd;
     {
@@ -205,6 +230,8 @@ class TcpSocket : public UplinkSocket {
  private:
   void close_locked() {
     if (fd_ >= 0) {
+      // 单 close 唤不醒别的线程里在等这个 fd 的 poll（poll 持有文件引用）；shutdown 才会
+      ::shutdown(fd_, SHUT_RDWR);
       ::close(fd_);
       fd_ = -1;
     }
@@ -285,7 +312,7 @@ class Bigmodeld {
 
   // ===== 取帧/配对线程（×2）=====
   void capture_thread(StreamId sid) {
-    setup_realtime(sid == kRoad ? "bgm_road" : "bgm_wide", kCaptureFifoPrio, kCaptureCore[sid]);
+    setup_realtime(kThreadNames[sid].capture, kCaptureFifoPrio, kCaptureCore[sid]);
 
     VisionStreamType type = sid == kRoad ? VISION_STREAM_NARROW_ROAD : VISION_STREAM_WIDE_ROAD;
     VisionIpcClient vipc("camerad", type, false);
@@ -329,7 +356,7 @@ class Bigmodeld {
   void writer_thread() {
     setup_realtime("bgm_writer");
     while (!do_exit) {
-      if (!sender_->step()) sender_->wait_for_work(2);
+      if (!sender_->step()) sender_->wait_for_work(kIdleWaitMs);
     }
   }
 
@@ -361,7 +388,7 @@ class Bigmodeld {
         continue;
       }
       if (n == 0) {
-        sock_.wait_readable(2);
+        sock_.wait_readable(kIdleWaitMs);
         continue;
       }
       buf.insert(buf.end(), tmp, tmp + n);
@@ -486,7 +513,7 @@ class Bigmodeld {
     ctx_[sid].pool.init(kEncBufSize, chipmunk::kModelW, chipmunk::kModelH, kEncStride, kEncUvOffset);
 
     EncoderInfo info{};
-    info.publish_name = sid == kRoad ? "bgmRoad" : "bgmWide";  // 仅日志标识（不建 PubMaster）
+    info.publish_name = kThreadNames[sid].encoder;  // 仅日志标识（不建 PubMaster）
     info.fps = kFps;
     int bitrate = bitrate_;
     info.get_settings = [bitrate](int) {
@@ -702,6 +729,12 @@ class Bigmodeld {
   // ---- 编码输出回调（编码器 dequeue 线程）----
   void on_encoded(StreamId sid, VisionIpcBufExtra& extra, unsigned int flags,
                   kj::ArrayPtr<capnp::byte> header, kj::ArrayPtr<capnp::byte> dat) {
+    // 90 号 C1：dequeue 线程是 V4LEncoder 私有成员、拿不到句柄，首个输出回调里自己改绑
+    thread_local bool dq_pinned = false;
+    if (!dq_pinned) {
+      setup_realtime(kThreadNames[sid].dequeue, kDequeueFifoPrio, kDequeueCore);
+      dq_pinned = true;
+    }
     MetaCache::Result r = ctx_[sid].meta.take(CamFrameId{extra.frame_id});
     if (r.st != MetaTake::kHit) {
       if (r.st == MetaTake::kStaleMiss) {

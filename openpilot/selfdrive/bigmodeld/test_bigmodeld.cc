@@ -562,6 +562,86 @@ static void test_sender_wait_for_work_wakes_on_submit() {
   CHECK(s.wait_for_work(0));
 }
 
+// 90 号 C2：wait_for_work 的参数只是上限（退出检查兜底），实际等多久由发送状态定——
+// 空闲睡满上限、只等事件；无事件可等的状态（未连接重试、socket 写阻塞）仍按 poll_ms 轮询；
+// 在途帧只等 wide 时最晚在假死判定点醒
+static void test_sender_wait_idle_sleeps_full_cap() {
+  using namespace std::chrono;
+  FakeSock sock;
+  uint64_t now = 0;
+  UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{}, nullptr);
+  s.step();
+  const auto t0 = steady_clock::now();
+  CHECK(!s.wait_for_work(60));
+  CHECK(steady_clock::now() - t0 >= milliseconds(50));
+}
+
+static void test_sender_wait_disconnected_keeps_retry_gap() {
+  using namespace std::chrono;
+  FakeSock sock;
+  sock.connect_ok = false;
+  uint64_t now = 0;
+  UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{}, nullptr);
+  CHECK(!s.step());  // 建连失败
+  const auto t0 = steady_clock::now();
+  CHECK(!s.wait_for_work(1000));
+  CHECK(steady_clock::now() - t0 < milliseconds(200));  // 重连间隔仍是 poll_ms，不睡满上限
+}
+
+static void test_sender_wait_socket_blocked_keeps_polling() {
+  using namespace std::chrono;
+  FakeSock sock;
+  uint64_t now = 0;
+  UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{}, nullptr);
+  s.step();
+  sock.mode = FakeSock::kBlock;
+  const uint8_t p[3] = {1, 2, 3};
+  open_head(s, u32(s.conn_epoch()), 0, p, sizeof p, p, sizeof p);
+  s.step();            // 转在途，写不动
+  s.wait_for_work(0);  // 消费提交唤醒
+  const auto t0 = steady_clock::now();
+  CHECK(!s.wait_for_work(1000));
+  CHECK(steady_clock::now() - t0 < milliseconds(200));  // socket 可写无事件：按 poll_ms 重试
+}
+
+static void test_sender_wait_wide_until_stall_deadline() {
+  using namespace std::chrono;
+  FakeSock sock;
+  uint64_t now = 0;
+  UplinkSenderConfig cfg;
+  cfg.stall_ms = 60;
+  UplinkSender s(&sock, [&] { return now; }, cfg, nullptr);
+  s.step();
+  const uint8_t p[3] = {1, 2, 3};
+  open_head(s, u32(s.conn_epoch()), 0, p, sizeof p, p, sizeof p);
+  s.step();  // 头对发完，开流
+  s.submit_road(s.conn_epoch(), FrameIdx{1}, test_hdr(), p, sizeof p, false, false, false);
+  s.step();  // chunk1 发出，在途帧等 wide
+  s.wait_for_work(0);
+  now += 20;  // 距在途帧起点已过 20 ms：离假死判定还剩 40 ms
+  const auto t0 = steady_clock::now();
+  CHECK(!s.wait_for_work(1000));
+  const auto dt = steady_clock::now() - t0;
+  CHECK(dt >= milliseconds(30) && dt < milliseconds(500));
+}
+
+static void test_sender_notify_disconnect_wakes_writer() {
+  using namespace std::chrono;
+  FakeSock sock;
+  uint64_t now = 0;
+  UplinkSender s(&sock, [&] { return now; }, UplinkSenderConfig{}, nullptr);
+  s.step();
+  std::thread reader([&] {
+    std::this_thread::sleep_for(milliseconds(20));
+    s.notify_disconnect();
+  });
+  const auto t0 = steady_clock::now();
+  CHECK(s.wait_for_work(2000));  // 读侧断连：发送线程立即醒来走重连
+  CHECK(steady_clock::now() - t0 < milliseconds(1000));
+  reader.join();
+  CHECK(!s.connected());
+}
+
 static void test_sender_write_error() {
   FakeSock sock;
   uint64_t now = 0;
@@ -1352,6 +1432,11 @@ int main() {
   test_sender_partial_writes();
   test_sender_write_error();
   test_sender_wait_for_work_wakes_on_submit();
+  test_sender_wait_idle_sleeps_full_cap();
+  test_sender_wait_disconnected_keeps_retry_gap();
+  test_sender_wait_socket_blocked_keeps_polling();
+  test_sender_wait_wide_until_stall_deadline();
+  test_sender_notify_disconnect_wakes_writer();
   test_link_state();
   test_avahi_parse();
   test_avahi_scope();
