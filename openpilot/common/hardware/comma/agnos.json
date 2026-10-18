@@ -56,24 +56,24 @@
   },
   {
     "name": "boot",
-    "url": "https://dl.diaperastiko.top/agnos/19.6.28/boot-86275abcfd705451a58f5e248f6bcbcc16c6e4284713887efba09a8456251eed.img.xz",
-    "hash": "86275abcfd705451a58f5e248f6bcbcc16c6e4284713887efba09a8456251eed",
-    "hash_raw": "86275abcfd705451a58f5e248f6bcbcc16c6e4284713887efba09a8456251eed",
+    "url": "https://dl.diaperastiko.top/agnos/19.6.29/boot-580a777f1e773e5c2e04705d37af0373e4854072ef61d551347c663b2a8b1e4b.img.xz",
+    "hash": "580a777f1e773e5c2e04705d37af0373e4854072ef61d551347c663b2a8b1e4b",
+    "hash_raw": "580a777f1e773e5c2e04705d37af0373e4854072ef61d551347c663b2a8b1e4b",
     "size": 49043456,
     "sparse": false,
     "full_check": true,
     "has_ab": true,
-    "ondevice_hash": "752e095b3519d658e4fbcabc3d6ee225cc685012d88e67536a43d4cf2a28421c"
+    "ondevice_hash": "77a248b4704b6e982f407b7077db67d32e433d35f087370965cc727bc293f42a"
   },
   {
     "name": "system",
-    "url": "https://dl.diaperastiko.top/agnos/19.6.28/system-ad973ef270a4e07679c5ee408e7e0d16373338cfafa23225b92854cb3214e88e.img.xz",
-    "hash": "27a957240ad06aee6b4c3f0987473115907b8393585942482d75c37f28809d19",
-    "hash_raw": "ad973ef270a4e07679c5ee408e7e0d16373338cfafa23225b92854cb3214e88e",
+    "url": "https://dl.diaperastiko.top/agnos/19.6.29/system-92676a49121d47d205c78462ceb07cc71ed9b40a0d78d43fee46bf4691f402ac.img.xz",
+    "hash": "2ff1c5c2ed0367691741929c68378a8a18ef754185bc8f89e4c72a55dbebc536",
+    "hash_raw": "92676a49121d47d205c78462ceb07cc71ed9b40a0d78d43fee46bf4691f402ac",
     "size": 4718592000,
     "sparse": true,
     "full_check": false,
     "has_ab": true,
-    "ondevice_hash": "f1423dab8b429ec1d5c647d7ac69072e49e11522af71fcaf402b7e5a06686d80"
+    "ondevice_hash": "3adfa58b76dfd0493e0840c4a2fbc4dd935d5c79eb4979ae1a07b03e5bc10de3"
   }
 ]
