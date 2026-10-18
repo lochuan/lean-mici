@@ -744,6 +744,7 @@ int Localizer::locationd_thread() {
 
 int main() {
   util::set_realtime_priority(5);
+  util::set_core_affinity({0, 2, 3});  // = common/realtime.py LOCATIOND_FAMILY_CORES：避开 sensord 所在的 core 1
 
   Localizer localizer;
   return localizer.locationd_thread();

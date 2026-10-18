@@ -1,5 +1,5 @@
 # system/lanlinkd/statusd.py
-"""SubMaster 快照线程：1Hz 采集，线程安全缓存。capabilities 从持久化 params 生成（停车可用）。"""
+"""SubMaster 快照线程：逐条消息累计、快照 1Hz，线程安全缓存。capabilities 从持久化 params 生成（停车可用）。"""
 import threading
 import time
 from collections import deque
@@ -24,6 +24,9 @@ _CAP_PARAM_KEYS = (
   "AlphaLongitudinalEnabled", "IntelligentCruiseButtonManagement")
 _TORQUE_TOGGLE_KEYS = ("EnforceTorqueControl", "LiveTorqueParamsToggle", "SpeedDependentTorqueToggle")
 TORQUE_LIVE_TIMEOUT = 5.0  # s；torqued 4Hz，超过即视为未运行（停车），改读落盘缓存
+# carState 100Hz 让 sm.update 几乎每 10 ms 返回一次；若每轮都读 params + 组快照，这个线程要占掉
+# 大核 40% 以上（Chipmunk OS 94 号实测）。累计量（模型来源帧、诊断积分）仍逐条消息更新，只有快照限到 1Hz。
+SNAPSHOT_INTERVAL = 1.0  # s
 
 
 def _bundle_or_none(v):
@@ -86,6 +89,7 @@ class StatusCache:
     except Exception:
       cloudlog.exception("lanlink statusd: SubMaster init failed")
       return
+    next_snapshot_t = 0.0
     while not exit_event.is_set():
       sm.update(1000)
       if sm.updated['modelV2']:
@@ -96,6 +100,10 @@ class StatusCache:
       if sm.updated['lateralTorqueParameters']:
         self._torque_live = torque_params_dict(sm['lateralTorqueParameters'])
         self._torque_live_t = time.monotonic()
+      now = time.monotonic()
+      if now < next_snapshot_t:
+        continue
+      next_snapshot_t = now + SNAPSHOT_INTERVAL
       try:
         caps = self._capabilities_from_params()
         snap = build_snapshot({name: sm[name] for name in SERVICES}, self._version_info, caps)

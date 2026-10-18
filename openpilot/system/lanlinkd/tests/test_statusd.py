@@ -40,6 +40,7 @@ class TestStatusdRun:
     cache = StatusCache({"Version": "0.11.2"}, "tici",
                         params=NS(get=lambda k: None, get_bool=lambda k: False))
     with patch.object(statusd.messaging, "SubMaster", fake_cls), \
+         patch.object(statusd, "SNAPSHOT_INTERVAL", 0.0), \
          patch.object(statusd, "build_snapshot", flaky_snapshot), \
          patch.object(statusd, "build_capabilities", lambda *a, **k: {}):
       cache.run(exit_event)
@@ -81,6 +82,7 @@ class TestStatusdRun:
     params = NS(get=lambda k: "connected" if k == "BigmodelLinkState" else None, get_bool=lambda k: k == "BigmodelToggle")
     cache = StatusCache({}, "tici", params=params)
     with patch.object(statusd.messaging, "SubMaster", FakeSubMaster), \
+         patch.object(statusd, "SNAPSHOT_INTERVAL", 0.0), \
          patch.object(statusd, "build_snapshot", lambda *a: {}), \
          patch.object(statusd, "build_capabilities", lambda *a, **k: {}):
       cache.run(exit_event)
@@ -149,8 +151,9 @@ class TestTorqueStatus:
 
 
 class TestDiagnostics:
-  def _run(self, steps, params):
-    """steps：每轮 SubMaster.update 后置为 updated 的服务集合；消息由 msgs 提供。"""
+  def _run(self, steps, params, clock=None, on_build=None):
+    """steps：每轮 SubMaster.update 后置为 updated 的服务集合；消息由 msgs 提供。
+    clock：给定则每轮推进 clock["dt"] 秒；on_build：每次组快照时回调。"""
     exit_event = threading.Event()
     msgs = {
       "deviceState": NS(started=True),
@@ -172,16 +175,24 @@ class TestDiagnostics:
         for k in self.updated:
           self.updated[k] = k in steps[self.calls]
         self.calls += 1
+        if clock is not None:
+          clock["t"] += clock["dt"]
         if self.calls >= len(steps):
           exit_event.set()
 
       def __getitem__(self, name):
         return msgs.get(name, NS())
 
+    def fake_snapshot(*a):
+      if on_build is not None:
+        on_build()
+      return {}
+
     cache = StatusCache({}, "tici", params=params)
     with patch.object(statusd.messaging, "SubMaster", FakeSubMaster), \
-         patch.object(statusd, "build_snapshot", lambda *a: {}), \
-         patch.object(statusd, "build_capabilities", lambda *a, **k: {}):
+         patch.object(statusd, "build_snapshot", fake_snapshot), \
+         patch.object(statusd, "build_capabilities", lambda *a, **k: {}), \
+         patch.object(statusd.time, "monotonic", (lambda: clock["t"]) if clock is not None else statusd.time.monotonic):
       cache.run(exit_event)
     return cache
 
@@ -199,3 +210,14 @@ class TestDiagnostics:
     cache = self._run([{"deviceState"}, {"modelV2"}, {"modelV2"}], params)
     assert "torque" in cache.snapshot()
     assert cache.diagnostics()["drift"]["seconds"] == 0
+
+  def test_snapshot_rate_limited_but_every_message_counted(self):
+    # carState 100 Hz 唤醒循环：快照（读 params + 组包）只 1 Hz，逐消息累计量（诊断积分、模型来源帧）不丢
+    params = NS(get=lambda k: None, get_bool=lambda k: False)
+    ctrl = {"carState", "carControl", "controlsState"}
+    steps = [{"deviceState"}] + [ctrl | ({"modelV2"} if i % 5 == 4 else set()) for i in range(250)]
+    builds = []
+    cache = self._run(steps, params, clock={"t": 100.0, "dt": 0.01}, on_build=lambda: builds.append(1))
+    assert len(builds) == 3  # 2.5 s 内：首轮、≈+1 s、≈+2 s
+    assert cache.diagnostics()["steering"]["activeSeconds"] == 2.5
+    assert len(cache.snapshot()["model"]["frames"]) == 40  # 最后一次快照（≈+2 s）时已收的 40 帧 modelV2

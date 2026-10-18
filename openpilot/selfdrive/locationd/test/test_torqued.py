@@ -40,4 +40,4 @@ class TestTorqued(OpenpilotTestCase):
          patch.object(torqued, "config_realtime_process", lambda cores, priority: calls.append(("realtime", cores, priority))):
       torqued.write_points_cache(params, est, valid=True)
     assert calls == ["drop_realtime", ("get_msg", True), ("put", "LiveTorqueParameters"),
-                     ("realtime", torqued.REALTIME_CORES, torqued.REALTIME_PRIORITY)]
+                     ("realtime", torqued.LOCATIOND_FAMILY_CORES, torqued.REALTIME_PRIORITY)]

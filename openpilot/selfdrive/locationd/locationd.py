@@ -9,7 +9,7 @@ from collections import defaultdict
 from openpilot.cereal import log, messaging
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.common.transformations.orientation import rot_from_euler
-from openpilot.common.realtime import config_realtime_process
+from openpilot.common.realtime import config_realtime_process, LOCATIOND_FAMILY_CORES
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.locationd.helpers import rotate_std
@@ -262,7 +262,7 @@ def sensor_all_checks(acc_msgs, gyro_msgs, sensor_valid, sensor_recv_time, senso
 
 
 def main():
-  config_realtime_process([0, 1, 2, 3], 5)
+  config_realtime_process(LOCATIOND_FAMILY_CORES, 5)
 
   DEBUG = bool(int(os.getenv("DEBUG", "0")))
   SIMULATION = bool(int(os.getenv("SIMULATION", "0")))

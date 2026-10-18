@@ -11,7 +11,7 @@ from opendbc.car.structs import car
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
-from openpilot.common.realtime import config_realtime_process
+from openpilot.common.realtime import config_realtime_process, LOCATIOND_FAMILY_CORES
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose, fft_next_good_size, parabolic_peak_interp
 from openpilot.sunnypilot.livedelay.lagd_toggle import LagdToggle
@@ -386,7 +386,7 @@ def retrieve_initial_lag(params: Params, CP: car.CarParams):
 
 
 def main():
-  config_realtime_process([0, 1, 2, 3], 5)
+  config_realtime_process(LOCATIOND_FAMILY_CORES, 5)
 
   DEBUG = bool(int(os.getenv("DEBUG", "0")))
 

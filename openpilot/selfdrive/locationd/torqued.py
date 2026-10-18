@@ -8,7 +8,7 @@ from openpilot.cereal import log
 from opendbc.car.structs import car
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.params import Params
-from openpilot.common.realtime import config_realtime_process, drop_realtime, DT_MDL
+from openpilot.common.realtime import config_realtime_process, drop_realtime, DT_MDL, LOCATIOND_FAMILY_CORES
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.locationd.helpers import PointBuckets, ParameterEstimator, PoseCalibrator, Pose
@@ -255,7 +255,6 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     return msg
 
 
-REALTIME_CORES = [0, 1, 2, 3]
 REALTIME_PRIORITY = 5
 POINTS_CACHE_PERIOD_FRAMES = int(60 / DT_MDL)
 
@@ -268,11 +267,11 @@ def write_points_cache(params, estimator, valid):
     msg = estimator.get_msg(valid=valid, with_points=True)
     params.put("LiveTorqueParameters", msg.to_bytes())
   finally:
-    config_realtime_process(REALTIME_CORES, REALTIME_PRIORITY)
+    config_realtime_process(LOCATIOND_FAMILY_CORES, REALTIME_PRIORITY)
 
 
 def main(demo=False):
-  config_realtime_process(REALTIME_CORES, REALTIME_PRIORITY)
+  config_realtime_process(LOCATIOND_FAMILY_CORES, REALTIME_PRIORITY)
 
   DEBUG = bool(int(os.getenv("DEBUG", "0")))
 

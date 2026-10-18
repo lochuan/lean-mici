@@ -16,6 +16,11 @@ DT_MDL = 0.05  # model
 DT_HW = 0.5  # hardwared and manager
 DT_DMON = 0.05  # driver monitoring
 
+# locationd 一族（locationd / paramsd / lagd / torqued / calibrationd，均为 FIFO 5）可用的核：避开 sensord 所在的 core 1。
+# 同核时它们的长运行片（locationd.py 最长 ~22 ms）会压住 FIFO 1 的 sensord，IMU 样本超时、locationd 报错
+# （Chipmunk OS 94 号实测）。C++ locationd（sunnypilot/selfdrive/locationd/locationd.cc）用同一组字面量。
+LOCATIOND_FAMILY_CORES = [0, 2, 3]
+
 
 class Priority:
   # CORE 2
