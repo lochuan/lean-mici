@@ -1,5 +1,5 @@
 # system/lanlinkd/statusd.py
-"""SubMaster 快照线程：逐条消息累计、快照 1Hz，线程安全缓存。capabilities 从持久化 params 生成（停车可用）。"""
+"""SubMaster 快照线程：每个模型帧（20Hz）累计一次、快照 1Hz，线程安全缓存。capabilities 从持久化 params 生成（停车可用）。"""
 import threading
 import time
 from collections import deque
@@ -24,9 +24,11 @@ _CAP_PARAM_KEYS = (
   "AlphaLongitudinalEnabled", "IntelligentCruiseButtonManagement")
 _TORQUE_TOGGLE_KEYS = ("EnforceTorqueControl", "LiveTorqueParamsToggle", "SpeedDependentTorqueToggle")
 TORQUE_LIVE_TIMEOUT = 5.0  # s；torqued 4Hz，超过即视为未运行（停车），改读落盘缓存
-# carState 100Hz 让 sm.update 几乎每 10 ms 返回一次；若每轮都读 params + 组快照，这个线程要占掉
-# 大核 40% 以上（Chipmunk OS 94 号实测）。累计量（模型来源帧、诊断积分）仍逐条消息更新，只有快照限到 1Hz。
-SNAPSHOT_INTERVAL = 1.0  # s
+# 循环只在每个模型帧醒一次：poll modeld 每帧最后发的 modelDataV2SP（modelV2 先发），两路模型帧一帧不丢；
+# 停车没有模型帧时 sm.update 超时，循环约 1Hz。若 poll 全部服务，100Hz 的 carState 等让它每秒醒 200 多次，
+# 这个线程要占大核 ~11%（只限快照后）到 40% 以上（每轮都组快照）（Chipmunk OS 94 / 95 号实测）。
+POLL_SERVICE = 'modelDataV2SP'
+SNAPSHOT_INTERVAL = 1.0  # s；读 params + 组快照
 
 
 def _bundle_or_none(v):
@@ -85,7 +87,7 @@ class StatusCache:
 
   def run(self, exit_event: threading.Event) -> None:
     try:
-      sm = messaging.SubMaster(SERVICES)
+      sm = messaging.SubMaster(SERVICES, poll=POLL_SERVICE)
     except Exception:
       cloudlog.exception("lanlink statusd: SubMaster init failed")
       return

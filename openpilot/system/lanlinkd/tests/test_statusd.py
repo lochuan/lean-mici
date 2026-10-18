@@ -2,6 +2,8 @@ import threading
 from types import SimpleNamespace as NS
 from unittest.mock import patch
 
+import pytest
+
 from openpilot.system.lanlinkd import statusd
 from openpilot.system.lanlinkd.status_snapshot import STAGE_FIELDS
 from openpilot.system.lanlinkd.statusd import StatusCache
@@ -11,7 +13,7 @@ def make_fake_submaster_cls(exit_event, stop_after):
   state = {"calls": 0}
 
   class FakeSubMaster:
-    def __init__(self, services):
+    def __init__(self, services, poll=None):
       self.updated = dict.fromkeys(services, False)
 
     def update(self, timeout):
@@ -49,7 +51,7 @@ class TestStatusdRun:
     assert cache.snapshot()["stale"] is False
 
   def test_submaster_init_failure_returns(self):
-    def boom(services):
+    def boom(services, poll=None):
       raise RuntimeError("ctor failed")
 
     cache = StatusCache({"Version": "0.11.2"}, "tici",
@@ -63,7 +65,7 @@ class TestStatusdRun:
     n = 60
 
     class FakeSubMaster:
-      def __init__(self, services):
+      def __init__(self, services, poll=None):
         self.updated = dict.fromkeys(services, False)
         self.calls = 0
 
@@ -108,7 +110,7 @@ class TestTorqueStatus:
     ltp = self._ltp(2.2)
 
     class FakeSubMaster:
-      def __init__(self, services):
+      def __init__(self, services, poll=None):
         self.updated = dict.fromkeys(services, False)
         self.calls = 0
 
@@ -151,9 +153,12 @@ class TestTorqueStatus:
 
 
 class TestDiagnostics:
-  def _run(self, steps, params, clock=None, on_build=None):
+  MSG_DT = 0.05  # 每轮 = 一个模型帧，消息时间（logMonoTime）推进 50 ms
+
+  def _run(self, steps, params, clock=None, on_build=None, seen=None):
     """steps：每轮 SubMaster.update 后置为 updated 的服务集合；消息由 msgs 提供。
-    clock：给定则每轮推进 clock["dt"] 秒；on_build：每次组快照时回调。"""
+    clock：给定则每轮按 clock["dt"] 循环推进处理时刻，最后一轮再跳 1 s（确保收尾组一次快照）；
+    on_build：每次组快照时回调；seen：记录 SubMaster 的 poll 参数。"""
     exit_event = threading.Event()
     msgs = {
       "deviceState": NS(started=True),
@@ -164,19 +169,27 @@ class TestDiagnostics:
       "controlsState": NS(desiredCurvature=0.0, curvature=0.0,
                           lateralControlState=NS(which=lambda: "torqueState", torqueState=NS(saturated=False, output=0.1))),
       "modelV2": NS(big=False),
+      "modelDataV2SP": NS(bigStages=NS(**dict.fromkeys(STAGE_FIELDS, 0.)), bigSource='big', bigLateReplyCount=0,
+                          bigDeadlineMs=70.),
     }
+    msg_dt = self.MSG_DT
 
     class FakeSubMaster:
-      def __init__(self, services):
+      def __init__(self, services, poll=None):
         self.updated = dict.fromkeys(services, False)
+        self.logMonoTime = dict.fromkeys(services, 0)
         self.calls = 0
+        if seen is not None:
+          seen["poll"] = poll
 
       def update(self, timeout):
         for k in self.updated:
           self.updated[k] = k in steps[self.calls]
+          if self.updated[k]:
+            self.logMonoTime[k] = int((self.calls + 1) * msg_dt * 1e9)
         self.calls += 1
         if clock is not None:
-          clock["t"] += clock["dt"]
+          clock["t"] += clock["dt"][self.calls % len(clock["dt"])] + (1.0 if self.calls == len(steps) else 0.0)
         if self.calls >= len(steps):
           exit_event.set()
 
@@ -211,13 +224,16 @@ class TestDiagnostics:
     assert "torque" in cache.snapshot()
     assert cache.diagnostics()["drift"]["seconds"] == 0
 
-  def test_snapshot_rate_limited_but_every_message_counted(self):
-    # carState 100 Hz 唤醒循环：快照（读 params + 组包）只 1 Hz，逐消息累计量（诊断积分、模型来源帧）不丢
+  def test_loop_paced_by_model_frames(self):
+    # 每个模型帧醒一次（poll modeld 每帧最后发的 modelDataV2SP）：两路模型帧一帧不丢；100 Hz 的 carState /
+    # controlsState 只取最新一条，时长按消息时间积分（处理时刻有抖动也不影响）；快照仍只 1 Hz
     params = NS(get=lambda k: None, get_bool=lambda k: False)
-    ctrl = {"carState", "carControl", "controlsState"}
-    steps = [{"deviceState"}] + [ctrl | ({"modelV2"} if i % 5 == 4 else set()) for i in range(250)]
-    builds = []
-    cache = self._run(steps, params, clock={"t": 100.0, "dt": 0.01}, on_build=lambda: builds.append(1))
-    assert len(builds) == 3  # 2.5 s 内：首轮、≈+1 s、≈+2 s
-    assert cache.diagnostics()["steering"]["activeSeconds"] == 2.5
-    assert len(cache.snapshot()["model"]["frames"]) == 40  # 最后一次快照（≈+2 s）时已收的 40 帧 modelV2
+    frame = {"modelV2", "modelDataV2SP", "carState", "carControl", "controlsState"}
+    steps = [{"deviceState"}] + [frame] * 60  # 3 s
+    builds, seen = [], {}
+    cache = self._run(steps, params, clock={"t": 100.0, "dt": (0.02, 0.08)}, on_build=lambda: builds.append(1), seen=seen)
+    assert seen["poll"] == "modelDataV2SP"
+    assert len(builds) <= 5  # 3 s + 收尾一次，而不是每帧
+    assert cache.diagnostics()["steering"]["activeSeconds"] == pytest.approx(59 * self.MSG_DT, abs=0.02)
+    model = cache.snapshot()["model"]
+    assert len(model["frames"]) == 50 and model["timing"]["window"] == 60

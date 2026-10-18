@@ -35,6 +35,12 @@ class FakeSM:
       "lateralDelay": None,
     }
     self.updated = dict.fromkeys(self.msgs, False)
+    self.clock = lambda: 0.0
+
+  @property
+  def logMonoTime(self):
+    # 消息时间：默认就是驱动器的当前时间（真实 SubMaster 为各消息的 logMonoTime）
+    return dict.fromkeys(self.msgs, int(self.clock() * 1e9))
 
   def __getitem__(self, name):
     return self.msgs[name]
@@ -58,6 +64,7 @@ class Drive:
     self.diag = diag or Diagnostics()
     self.sm = FakeSM()
     self.now = t0
+    self.sm.clock = lambda: self.now
     self.sm.updated["deviceState"] = True
     self.diag.update(self.sm, self.now)
     self._clear()
@@ -408,3 +415,28 @@ class TestDriveLifecycle:
     diag = Diagnostics()
     r = diag.report(FakeParams(), None, 5.0)
     assert r["drive"] == {"started": False, "seconds": 0}
+
+
+class TestSampling:
+  def test_durations_integrate_message_time_not_processing_time(self):
+    # 状态线程每个模型帧（20 Hz）才取一次 100 Hz 的 carState / controlsState：处理时刻抖动（20 / 80 ms 交替），
+    # 时长仍按相邻两次所取消息的时间差积分
+    d = Drive()
+    msg_log_time_s = {"s": d.now}
+    d.sm.clock = lambda: msg_log_time_s["s"]
+    d.sm.msgs["carState"].vEgo = 20.0
+    # 弯道 2.0 m/s²、饱和、输出 0.9（第 5 档）：弯道 / 饱和 / 用量三项时长也走同一积分
+    d.sm.msgs["controlsState"] = NS(desiredCurvature=0.005, curvature=0.004,
+                                    lateralControlState=LateralControlState("torqueState", saturated=True, output=0.9))
+    for i in range(200):  # 消息时间 10 s
+      msg_log_time_s["s"] += DT_MDL
+      d.now += 0.02 if i % 2 else 0.08
+      d.sm.updated["carState"] = d.sm.updated["controlsState"] = True
+      d.diag.update(d.sm, d.now)
+      d._clear()
+    r = d.report()
+    assert r["steering"]["activeSeconds"] == pytest.approx(10.0, abs=0.06)
+    assert r["steering"]["curveSeconds"] == pytest.approx(10.0, abs=0.06)
+    assert r["steering"]["saturatedCurveSeconds"] == pytest.approx(10.0, abs=0.06)
+    assert r["steering"]["usage"] == pytest.approx([0, 0, 0, 0, 10.0], abs=0.06)
+    assert r["bsm"]["watchSeconds"] == pytest.approx(10.0, abs=0.06)

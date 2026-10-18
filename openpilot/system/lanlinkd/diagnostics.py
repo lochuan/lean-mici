@@ -12,7 +12,7 @@ import numpy as np
 
 from openpilot.cereal import log, messaging
 from opendbc.car.structs import car
-from openpilot.common.realtime import DT_CTRL, DT_MDL
+from openpilot.common.realtime import DT_MDL
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.locationd.calibrationd import PITCH_LIMITS, YAW_LIMITS
 
@@ -46,6 +46,9 @@ USAGE_BINS = 5
 # 盲区监测：BSM 约 16 km/h 以上才工作（丰田手册），低于此车速不计入等待触发的时长
 BSM_MIN_SPEED = 16 / 3.6
 
+# 相邻两次取到的 carState / controlsState 的消息时间（logMonoTime）差上限：超过视为中断（进程停 / 掉线），只计这么多
+MAX_MSG_TIME_GAP_S = 4 * DT_MDL
+
 
 def _parse_param_memoized(params, key: str, parse, memo: dict):
   """字节型 param -> parse(raw)；按字节记忆，避免每次请求重复解析。缺失或解析失败返回 None。"""
@@ -70,6 +73,17 @@ def _cached_service_msg(params, key: str, service: str, memo: dict):
 
 def _car_params(params, memo: dict):
   return _parse_param_memoized(params, "CarParamsPersistent", lambda raw: messaging.log_from_bytes(raw, car.CarParams), memo)
+
+
+def _msg_log_time_s(sm, service: str) -> float:
+  return sm.logMonoTime[service] * 1e-9
+
+
+def _elapsed_since(prev_msg_log_time_s: float | None, msg_log_time_s: float) -> float:
+  """相邻两次取到的消息时间差（秒），封顶 MAX_MSG_TIME_GAP_S；第一条只记时间，计 0。"""
+  if prev_msg_log_time_s is None:
+    return 0.0
+  return min(max(msg_log_time_s - prev_msg_log_time_s, 0.0), MAX_MSG_TIME_GAP_S)
 
 
 def _weave_window(ts: list[float], ys: list[float]) -> tuple[float, float | None]:
@@ -105,7 +119,7 @@ class _DriveStats:
     self.trace: deque[float | None] = deque([None] * TRACE_LEN, maxlen=TRACE_LEN)
     self.trace_bucket: int | None = None
     self.last_model_t: float | None = None
-    self.last_controls_t: float | None = None
+    self.last_controls_log_time_s: float | None = None
     self.lateral_control = ""
     self.active_s = 0.0
     self.curve_s = 0.0
@@ -117,7 +131,7 @@ class _DriveStats:
     self.prev_temp_fault = False
     self.car_state_seen = False
     self.accurate_angle = False
-    self.last_car_state_t: float | None = None
+    self.last_car_state_log_time_s: float | None = None
     self.bsm_left_occupied = False
     self.bsm_right_occupied = False
     self.bsm_left_events = 0
@@ -137,6 +151,10 @@ class Diagnostics:
   # ---- 输入 ----
 
   def update(self, sm, now: float) -> None:
+    """now：处理时刻（monotonic 秒）。时间基准：状态线程每个模型帧（20 Hz）才调用一次，100 Hz 的 carState /
+    controlsState 只有最新一条（conflate），所以它们的时长按相邻两次取到的消息时间（logMonoTime）差积分，不受唤醒
+    抖动影响；_on_model 的跑偏时长与摆动窗口仍用处理时刻（与 poll 同为 20 Hz，偏差小）。两次采样之间 <50 ms 的
+    脉冲会漏掉，影响 EPS 临时故障与 BSM 占用的边沿计数。"""
     if sm.updated["deviceState"]:
       started = bool(sm["deviceState"].started)
       if started and not self._started:
@@ -149,16 +167,16 @@ class Diagnostics:
       if sm.updated[service]:
         self._live[service] = (now, sm[service])
     if sm.updated["carState"]:
-      self._on_car_state(sm["carState"], sm["carControl"], now)
+      self._on_car_state(sm["carState"], sm["carControl"], _msg_log_time_s(sm, "carState"))
     if sm.updated["controlsState"]:
-      self._on_controls(sm["controlsState"], sm["carState"], sm["carControl"], now)
+      self._on_controls(sm["controlsState"], sm["carState"], sm["carControl"], _msg_log_time_s(sm, "controlsState"))
     if sm.updated["modelV2"]:
       self._on_model(sm["modelV2"], sm["carState"], sm["carControl"], sm["controlsState"], now)
 
-  def _on_car_state(self, cs, cc, now: float) -> None:
+  def _on_car_state(self, cs, cc, msg_log_time_s: float) -> None:
     stats = self._stats
-    dt = DT_CTRL if stats.last_car_state_t is None else min(max(now - stats.last_car_state_t, 0.0), 5 * DT_CTRL)
-    stats.last_car_state_t = now
+    dt = _elapsed_since(stats.last_car_state_log_time_s, msg_log_time_s)
+    stats.last_car_state_log_time_s = msg_log_time_s
     stats.car_state_seen = True
     left, right = bool(cs.leftBlindspot), bool(cs.rightBlindspot)
     stats.bsm_left_events += int(left and not stats.bsm_left_occupied)
@@ -174,10 +192,10 @@ class Diagnostics:
     if cs.steerFaultPermanent:
       stats.eps_permanent = True
 
-  def _on_controls(self, ctl, cs, cc, now: float) -> None:
+  def _on_controls(self, ctl, cs, cc, msg_log_time_s: float) -> None:
     stats = self._stats
-    dt = DT_CTRL if stats.last_controls_t is None else min(max(now - stats.last_controls_t, 0.0), 5 * DT_CTRL)
-    stats.last_controls_t = now
+    dt = _elapsed_since(stats.last_controls_log_time_s, msg_log_time_s)
+    stats.last_controls_log_time_s = msg_log_time_s
     if not cc.latActive or cs.vEgo < MIN_STEER_SPEED:
       return
     kind = ctl.lateralControlState.which()
