@@ -66,7 +66,6 @@ PROCS = {
   "openpilot.system.loggerd.deleter": 1.0,
   "openpilot.system.qcomgpsd.qcomgpsd": 1.0,
   "openpilot.common.hardware.comma.modem": 10.0,
-  "openpilot.sunnypilot.system.statsd": 1.0,
 }
 
 TIMINGS = {
