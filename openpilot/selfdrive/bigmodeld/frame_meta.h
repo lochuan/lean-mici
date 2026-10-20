@@ -50,7 +50,8 @@ class MetaProvider {
   void reset_desire_latch();
 
   // 生成一帧的头元数据。t_eof = road 帧 timestamp_eof（ns）。
-  // 只填 t_eof/desire/traffic_convention/action_t/warp_*；flags/frame_idx/road_len/wide_len 归调用方。
+  // 填 t_eof/desire/traffic_convention/action_t/warp_*，另把 gnss/vehicle 置「无数据」（v3，暂无生产者）；
+  // flags/frame_idx/road_len/wide_len 归调用方。
   void fill(uint64_t t_eof, bgm1::FrameHeader* out) const;
 
   // 当前 warp 矩阵（wide=false → road/MED，true → wide/SBIG），与 fill 写进帧头的同一份。

@@ -1,12 +1,15 @@
 // 宿主单测（16 号）：纯逻辑模块全转移 + 发送器（假 socket/假时钟）+ warp golden + 编解码往返。
 // 无设备依赖，Mac/Linux 直接编译（README「宿主测试」）：
-//   clang++ -std=c++17 -O1 test_bigmodeld.cc frame_codec.cpp frame_meta.cpp \
-//           frame_scheduler.cpp uplink_sender.cpp -o /tmp/test_bigmodeld && /tmp/test_bigmodeld
+//   clang++ -std=c++17 -O1 test_bigmodeld.cc frame_codec.cpp frame_meta.cpp frame_scheduler.cpp \
+//           uplink_sender.cpp server_locator.cpp -o /tmp/test_bigmodeld
+//   BGM1_GOLDEN_DIR=<chipmunk-os>/app/tests/fixtures /tmp/test_bigmodeld
+// 跨端 golden 互解默认必跑（目录未设置 / golden 缺失或为空都判失败）；显式跳过：BGM1_GOLDEN_SKIP=1
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -274,7 +277,7 @@ static void test_sender_road_out_goes() {
   CHECK(evs.size() == 2 && evs[1].ev == UplinkEvent::kFrameSent && evs[1].idx == 0);
   CHECK(sock.written.size() == bgm1::frame_wire_size(sizeof road, sizeof wide));
 
-  // 字节布局：头 ‖ road ‖ wide_len ‖ wide ‖ MAC(零)
+  // 字节布局：头 ‖ road ‖ wide_len ‖ wide ‖ 尾部保留 16 B(零)
   bgm1::FrameView fv;
   CHECK(bgm1::parse_frame(sock.written.data(), sock.written.size(), &fv) == bgm1::Err::kOk);
   CHECK(fv.hdr.frame_idx == 0 && fv.hdr.road_len == sizeof road && fv.hdr.wide_len == sizeof wide);
@@ -283,7 +286,7 @@ static void test_sender_road_out_goes() {
   CHECK_NEAR(fv.hdr.warp_road[8], 9.0, 1e-6);
   CHECK(std::memcmp(fv.road, road, sizeof road) == 0);
   CHECK(std::memcmp(fv.wide, wide, sizeof wide) == 0);
-  for (size_t i = sock.written.size() - bgm1::kMacSize; i < sock.written.size(); i++) {
+  for (size_t i = sock.written.size() - bgm1::kTailReservedSize; i < sock.written.size(); i++) {
     CHECK(sock.written[i] == 0);
   }
 
@@ -786,6 +789,10 @@ static void test_frame_codec_roundtrip() {
   CHECK(fv.hdr.flags == bgm1::kFlagRoadIdr && fv.hdr.road_idr() && !fv.hdr.wide_idr());
   CHECK(fv.hdr.frame_idx == 33 && fv.hdr.road_len == 11 && fv.hdr.wide_len == 5);
   CHECK(fv.hdr.t_eof == h.t_eof);
+  // v3 常量与缺省：头 168 B，缺省 GNSS 全 0（无定位）、VEHICLE 为无效值
+  CHECK(bgm1::kVersion == 3 && bgm1::kFrameHdrSize == 168 && bgm1::frame_wire_size(1000, 700) == 1888);
+  CHECK(buf[4] == 3 && !fv.hdr.gnss.has_fix() && fv.hdr.vehicle.yaw_rate_cdps == INT16_MIN &&
+        fv.hdr.vehicle.bearing_acc_hdeg == 255);
   for (int i = 0; i < 8; i++) CHECK_NEAR(fv.hdr.desire[i], h.desire[i], 1e-6);
   for (int i = 0; i < 9; i++) {
     CHECK_NEAR(fv.hdr.warp_road[i], h.warp_road[i], 1e-6);
@@ -806,10 +813,32 @@ static void test_frame_codec_roundtrip() {
   CHECK(bgm1::parse_frame(bad.data(), bad.size(), &fv) == bgm1::Err::kBadType);
   CHECK(bgm1::parse_frame(buf.data(), buf.size() - 1, &fv) == bgm1::Err::kLenMismatch);
   CHECK(bgm1::parse_frame(buf.data(), bgm1::kFrameMinSize - 1, &fv) == bgm1::Err::kTruncated);
+  // 旧 v2（160 B 头）/ 未来 v4：ver 在前 16 B 先拒
+  bad = buf;
+  bad[4] = 2;
+  CHECK(bgm1::parse_frame(bad.data(), bad.size(), &fv) == bgm1::Err::kBadVersion);
+  bad[4] = 4;
+  CHECK(bgm1::parse_frame(bad.data(), bad.size(), &fv) == bgm1::Err::kBadVersion);
+  CHECK(bgm1::version_mismatch_detail(2, 3) == 0x0203u);
   // road_len 超上限 → kLenTooLarge（不是截断）
   bad = buf;
   bad[12] = 0xff; bad[13] = 0xff; bad[14] = 0xff; bad[15] = 0xff;
   CHECK(bgm1::parse_frame(bad.data(), bad.size(), &fv) == bgm1::Err::kLenTooLarge);
+
+  // GNSS / VEHICLE 往返（边界 + 饱和）
+  bgm1::FrameHeader g = test_hdr();
+  g.road_len = 11;
+  g.wide_len = 5;
+  g.gnss = {900000000, -1800000000, 0xFFFE, 35999, bgm1::kGnssHAccMax,
+            bgm1::make_fix_age_flags(100000, true, true, true)};
+  g.vehicle = {32767, bgm1::kVehicleYawValid | bgm1::kVehicleReverse, bgm1::kBearingAccMax};
+  CHECK(bgm1::pack_frame(g, road, wide, buf.data(), buf.size()) == buf.size());
+  CHECK(bgm1::parse_frame(buf.data(), buf.size(), &fv) == bgm1::Err::kOk);
+  CHECK(fv.hdr.gnss.lat_e7 == 900000000 && fv.hdr.gnss.lon_e7 == -1800000000 && fv.hdr.gnss.bearing_cdeg == 35999);
+  CHECK(fv.hdr.gnss.age_ms() == 4095 && fv.hdr.gnss.has_fix() && fv.hdr.gnss.h_acc_dm == 0xFFFE);
+  CHECK(fv.hdr.vehicle.yaw_rate_cdps == 32767 && fv.hdr.vehicle.reverse() && fv.hdr.vehicle.yaw_valid() &&
+        !fv.hdr.vehicle.standstill() && fv.hdr.vehicle.bearing_acc_hdeg == 254);
+  CHECK(buf[164] == 0 && buf[165] == 0 && buf[166] == 0 && buf[167] == 0);  // VEHICLE 保留 4 B 恒 0
 
   // HELLO 往返（06 号；同源副本守卫：与 android/ 的 frame_codec 同一实现）
   bgm1::Hello hello;
@@ -821,9 +850,9 @@ static void test_frame_codec_roundtrip() {
   CHECK(bgm1::parse_hello(hbuf.data(), hbuf.size(), &h2) == bgm1::Err::kOk);
   CHECK(h2.instance_id == hello.instance_id && h2.max_frame == hello.max_frame);
   CHECK(bgm1::parse_hello(hbuf.data(), bgm1::kHelloWireSize - 1, &h2) == bgm1::Err::kTruncated);
-  // golden 逐字节钉死（android/tests/fixtures/hello_golden.bin 同一样例，跨仓库镜像互证）
+  // golden 逐字节钉死（app/tests/fixtures/hello_golden.bin 同一样例，跨仓库镜像互证；ver=3）
   static const uint8_t kHelloGolden[bgm1::kHelloWireSize] = {
-      0x42, 0x47, 0x4D, 0x31, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x42, 0x47, 0x4D, 0x31, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x10, 0x00, 0x00, 0x00, 0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01,
       0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   };
@@ -848,22 +877,242 @@ static void test_reply_err_roundtrip() {
   for (size_t i = 0; i < bgm1::kReplyOutputsCount; i++) outputs_ok &= (out.outputs[i] == r.outputs[i]);
   CHECK(outputs_ok);
   for (size_t i = 0; i < bgm1::kReplyTelemetryCount; i++) CHECK(out.telemetry[i] == r.telemetry[i]);
+  // v3：REPLY 8480 B / len 8440；缺省 Reply 的 NavExt 160 B 全 0（present=0 = 无导航数据）
+  CHECK(bgm1::kReplyWireSize == 8480 && bgm1::kReplyPayloadSize == 8440 && bgm1::kReplyNavExtSize == 160);
+  bool nav_zero = out.nav_ext.present == 0 && out.nav_ext.nav_health == 0;
+  for (size_t i = 8304; i < 8464; i++) nav_zero &= buf[i] == 0;
+  CHECK(nav_zero);
+
+  // NavExt 往返：四个子结构 + present / nav_health 位；CURVE count=3 → 第 3–7 点 pack 为 0
+  r.nav_ext.present = bgm1::kNavPresentNavState | bgm1::kNavPresentRoadAttr | bgm1::kNavPresentCurveAhead |
+                      bgm1::kNavPresentNavDebug;
+  r.nav_ext.nav_health = bgm1::kNavHealthGpsOk | bgm1::kNavHealthRerouting;
+  r.nav_ext.nav_state = {3, 20, 255, 2, 350, 0xFFFFFFFFu, 987, 40, 0x0F, 254, 0xFFFF};
+  r.nav_ext.road_attr = {80, 1, 0, 255, 0xFFFF, 1000, 0x85, 3, 25};
+  r.nav_ext.curve_ahead.count = 3;
+  r.nav_ext.curve_ahead.a_lat_max_dmps2 = 20;
+  r.nav_ext.curve_ahead.horizon_m = 600;
+  for (int i = 0; i < 8; i++) r.nav_ext.curve_ahead.points[i] = {1000 * i, -2000 * i, uint16_t(50 + i), uint8_t(40 + i), uint8_t(i)};
+  r.nav_ext.nav_debug = {4200, 1800, 35, 27};
+  CHECK(bgm1::pack_reply(r, buf.data(), buf.size()) == bgm1::kReplyWireSize);
+  bool tail_zero = true;
+  for (size_t i = 8356 + 12 * 3; i < 8452; i++) tail_zero &= buf[i] == 0;
+  CHECK(tail_zero);
+  CHECK(bgm1::parse_reply(buf.data(), buf.size(), &out) == bgm1::Err::kOk);
+  CHECK(out.nav_ext.present == 0x0F && out.nav_ext.nav_health == 0x09);
+  CHECK(out.nav_ext.nav_state.maneuver_type == 20 && out.nav_ext.nav_state.next_maneuver_type == 255 &&
+        out.nav_ext.nav_state.route_remaining_m == 0xFFFFFFFFu && out.nav_ext.nav_state.heading_cdeg == 0xFFFF);
+  CHECK(out.nav_ext.road_attr.speed_limit_kph == 80 && out.nav_ext.road_attr.road_class == 255 &&
+        out.nav_ext.road_attr.speed_limit_ahead_dist_m == 0xFFFF && out.nav_ext.road_attr.edge_flags == 0x85);
+  CHECK(out.nav_ext.curve_ahead.count == 3 && out.nav_ext.curve_ahead.points[2].lat_e7 == 2000 &&
+        out.nav_ext.curve_ahead.points[3].lat_e7 == 0 && out.nav_ext.curve_ahead.points[7].dist_m == 0);
+  CHECK(out.nav_ext.nav_debug.render_us == 4200 && out.nav_ext.nav_debug.nav_cpu_pct == 27);
+  // present 位为 0 的子结构读作 0（即使线上有垃圾）
+  std::vector<uint8_t> garbage = buf;
+  garbage[8304] = bgm1::kNavPresentNavState;
+  std::memset(garbage.data() + 8332, 0x55, 120);
+  CHECK(bgm1::parse_reply(garbage.data(), garbage.size(), &out) == bgm1::Err::kOk);
+  CHECK(out.nav_ext.nav_state.maneuver_type == 20 && out.nav_ext.road_attr.speed_limit_kph == 0 &&
+        out.nav_ext.curve_ahead.count == 0 && out.nav_ext.nav_debug.render_us == 0);
 
   CHECK(bgm1::parse_reply(buf.data(), buf.size() - 1, &out) == bgm1::Err::kTruncated);
+  // len 不符 / 多 1 字节 → kLenMismatch；旧 v2 的 8320 B REPLY（len=8280）→ kBadVersion（ver 先于长度）
+  std::vector<uint8_t> lenbad = buf;
+  lenbad[12] = 0x58; lenbad[13] = 0x20;  // len = 8280
+  CHECK(bgm1::parse_reply(lenbad.data(), lenbad.size(), &out) == bgm1::Err::kLenMismatch);
+  lenbad = buf;
+  lenbad.push_back(0);
+  CHECK(bgm1::parse_reply(lenbad.data(), lenbad.size(), &out) == bgm1::Err::kLenMismatch);
+  std::vector<uint8_t> v2(buf.begin(), buf.begin() + 8320);
+  v2[4] = 2;
+  v2[12] = 0x58; v2[13] = 0x20;
+  CHECK(bgm1::parse_reply(v2.data(), v2.size(), &out) == bgm1::Err::kBadVersion);
   std::vector<uint8_t> bad = buf;
   bad[5] = bgm1::kTypeFrame;
   CHECK(bgm1::parse_reply(bad.data(), bad.size(), &out) == bgm1::Err::kBadType);
 
   bgm1::ErrMsg e;
   e.code = bgm1::kErrVersionMismatch;
-  e.detail = 2;
+  e.detail = bgm1::version_mismatch_detail(2, bgm1::kVersion);
   e.frame_idx = 13;
   std::vector<uint8_t> ebuf(bgm1::kErrWireSize);
   CHECK(bgm1::pack_err(e, ebuf.data(), ebuf.size()) == bgm1::kErrWireSize);
   bgm1::ErrMsg eout;
   CHECK(bgm1::parse_err(ebuf.data(), ebuf.size(), &eout) == bgm1::Err::kOk);
-  CHECK(eout.code == bgm1::kErrVersionMismatch && eout.detail == 2 && eout.frame_idx == 13);
+  CHECK(eout.code == bgm1::kErrVersionMismatch && eout.detail == 0x0203u && eout.frame_idx == 13);
   CHECK(bgm1::parse_err(ebuf.data(), ebuf.size() - 1, &eout) == bgm1::Err::kTruncated);
+}
+
+
+// v3 规范化（与手机 test_frame_codec.cpp 同口径）：has_fix=0、CURVE 坏块、保留位掩码、yaw 一致性
+static void test_v3_normalisation() {
+  uint8_t buf[bgm1::kFrameHdrSize];
+  bgm1::FrameHeader back;
+  auto le16 = [&](const uint8_t* p) { return uint16_t(p[0] | (p[1] << 8)); };
+
+  // has_fix=0：位置类字段与 bearing_acc 规范化；speed + speed_valid + age 保留
+  bgm1::FrameHeader nofix;
+  nofix.gnss = {123, -456, 789, 1011, 12, bgm1::make_fix_age_flags(50, false, true, true)};
+  nofix.vehicle = {-300, bgm1::kVehicleYawValid, 7};
+  bgm1::pack_frame_header(nofix, buf);
+  bool pos_zero = true;
+  for (int i = 144; i < 152; i++) pos_zero &= buf[i] == 0;
+  CHECK(pos_zero && le16(buf + 154) == 0 && le16(buf + 156) == 0);
+  CHECK(le16(buf + 152) == 789 && le16(buf + 158) == (50 | bgm1::kGnssSpeedValid) && buf[163] == 255);
+  CHECK(bgm1::parse_frame_header(buf, &back) == bgm1::Err::kOk);
+  CHECK(!back.gnss.has_fix() && back.gnss.speed_cms == 789 && back.gnss.speed_valid() && back.gnss.age_ms() == 50 &&
+        !back.gnss.bearing_valid() && back.gnss.lat_e7 == 0 && back.vehicle.bearing_acc_hdeg == 255 &&
+        back.vehicle.yaw_rate_cdps == -300);
+  // has_fix=1：带 valid 位的字段以 valid 位为准（无效写 0），h_acc（无 valid 位）保留 0xFFFF 哨兵
+  bgm1::FrameHeader gv;
+  gv.gnss = {374220000, -1220840000, 500, 9000, 0xFFFF, bgm1::make_fix_age_flags(10, true, false, true)};
+  bgm1::pack_frame_header(gv, buf);
+  CHECK(le16(buf + 152) == 0 && le16(buf + 154) == 9000 && le16(buf + 156) == 0xFFFF);  // speed_valid=0
+  CHECK(bgm1::parse_frame_header(buf, &back) == bgm1::Err::kOk && back.gnss.speed_cms == 0 && !back.gnss.speed_valid() &&
+        back.gnss.bearing_cdeg == 9000 && back.gnss.h_acc_dm == 0xFFFF);
+  gv.gnss.fix_age_flags = bgm1::make_fix_age_flags(10, true, true, false);
+  bgm1::pack_frame_header(gv, buf);
+  CHECK(le16(buf + 152) == 500 && le16(buf + 154) == 0);  // bearing_valid=0
+  CHECK(bgm1::parse_frame_header(buf, &back) == bgm1::Err::kOk && back.gnss.bearing_cdeg == 0 && !back.gnss.bearing_valid() &&
+        back.gnss.speed_cms == 500);
+  buf[154] = 0x78; buf[155] = 0x56;  // 线上 bearing_valid=0 时的垃圾
+  CHECK(bgm1::parse_frame_header(buf, &back) == bgm1::Err::kOk && back.gnss.bearing_cdeg == 0);
+  bgm1::FrameHeader empty;  // 完全无数据：GNSS 整块 0
+  bgm1::pack_frame_header(empty, buf);
+  bool zero16 = true;
+  for (int i = 144; i < 160; i++) zero16 &= buf[i] == 0;
+  CHECK(zero16);
+
+  // 保留位强制 0；yaw 与 yaw_valid 一致
+  bgm1::FrameHeader rsv;
+  rsv.gnss = {1, 2, 3, 4, 5, 0xFFFF};
+  rsv.vehicle = {100, 0xFF, 7};
+  bgm1::pack_frame_header(rsv, buf);
+  CHECK(le16(buf + 158) == 0xDFFF && buf[162] == 0x07);
+  rsv.vehicle = {bgm1::kYawRateInvalid, bgm1::kVehicleYawValid | bgm1::kVehicleStandstill, 7};
+  bgm1::pack_frame_header(rsv, buf);
+  CHECK(buf[162] == bgm1::kVehicleStandstill);
+  rsv.vehicle = {-1234, bgm1::kVehicleReverse, 7};
+  bgm1::pack_frame_header(rsv, buf);
+  CHECK(buf[160] == 0x00 && buf[161] == 0x80 && buf[162] == bgm1::kVehicleReverse);
+
+  // NavExt 保留位
+  std::vector<uint8_t> rb(bgm1::kReplyWireSize);
+  bgm1::Reply r;
+  r.nav_ext.present = 0xFF;
+  r.nav_ext.nav_health = 0xFF;
+  r.nav_ext.nav_state.input_flags = 0xFF;
+  r.nav_ext.road_attr.edge_flags = 0xFF;
+  r.nav_ext.curve_ahead.flags = 0xFF;
+  bgm1::pack_reply(r, rb.data(), rb.size());
+  CHECK(rb[8304] == 0x0F && rb[8305] == 0x0F && rb[8308 + 18] == 0x0F && rb[8332 + 8] == 0xBF && rb[8348 + 6] == 0x07);
+
+  // CURVE count>8：打包钳到 8；线上 count>8 = 坏块，清 present bit2、子块整块缺省
+  r = bgm1::Reply{};
+  r.nav_ext.present = bgm1::kNavPresentCurveAhead | bgm1::kNavPresentNavDebug;
+  r.nav_ext.curve_ahead.count = 200;
+  r.nav_ext.curve_ahead.horizon_m = 600;
+  r.nav_ext.nav_debug.render_us = 4200;
+  bgm1::pack_reply(r, rb.data(), rb.size());
+  CHECK(rb[8348] == 8);
+  rb[8348] = 9;
+  bgm1::Reply out;
+  CHECK(bgm1::parse_reply(rb.data(), rb.size(), &out) == bgm1::Err::kOk);
+  CHECK(!(out.nav_ext.present & bgm1::kNavPresentCurveAhead) && (out.nav_ext.present & bgm1::kNavPresentNavDebug));
+  CHECK(out.nav_ext.curve_ahead.count == 0 && out.nav_ext.curve_ahead.horizon_m == 0 &&
+        out.nav_ext.curve_ahead.points[0].lat_e7 == 0);
+  CHECK(out.nav_ext.nav_debug.render_us == 4200);  // 其余子块不受影响
+}
+
+// =====================================================================
+// 跨端 golden 互解：读 chipmunk 仓库 app/tests/fixtures（Python 生成）的四份字节样例，
+//   车机 parse 出字段与期望一致，车机 pack 逐字节等于 golden（=手机 C++/Python 解析的同一份字节）。
+// golden 被 .gitignore 的 *.bin 排除、不在本仓库，故由 BGM1_GOLDEN_DIR 指定目录；默认必跑，
+// 未设置或文件缺失 / 为空都判失败，显式跳过用 BGM1_GOLDEN_SKIP=1。
+// 期望值与 chipmunk app/tests/make_frame_golden.py 一致（改动须同步）。
+// =====================================================================
+
+static bool read_golden(const std::string& dir, const char* name, std::vector<uint8_t>* out) {
+  FILE* f = fopen((dir + "/" + name).c_str(), "rb");
+  if (!f) return false;
+  uint8_t b[4096];
+  size_t n;
+  out->clear();
+  while ((n = fread(b, 1, sizeof b, f)) > 0) out->insert(out->end(), b, b + n);
+  fclose(f);
+  return true;
+}
+
+static void test_cross_end_golden() {
+  const char* dir = std::getenv("BGM1_GOLDEN_DIR");
+  const char* skip = std::getenv("BGM1_GOLDEN_SKIP");
+  if (skip && skip[0] == '1') {
+    printf("SKIP test_cross_end_golden（BGM1_GOLDEN_SKIP=1，显式跳过）\n");
+    return;
+  }
+  if (!dir) {  // 默认必跑：没指目录就是配置错误，不是静默跳过
+    printf("FAIL test_cross_end_golden：未设置 BGM1_GOLDEN_DIR（显式跳过用 BGM1_GOLDEN_SKIP=1）\n");
+    CHECK(dir != nullptr);
+    return;
+  }
+  std::vector<uint8_t> gf, gr, ge, gh;
+  CHECK(read_golden(dir, "frame_hevc_golden.bin", &gf) && !gf.empty());
+  CHECK(read_golden(dir, "reply_golden.bin", &gr) && !gr.empty());
+  CHECK(read_golden(dir, "err_golden.bin", &ge) && !ge.empty());
+  CHECK(read_golden(dir, "hello_golden.bin", &gh) && !gh.empty());
+  if (gf.empty() || gr.empty() || ge.empty() || gh.empty()) return;
+
+  // FRAME：parse 字段 + pack == golden
+  bgm1::FrameHeader h;
+  h.flags = bgm1::kFlagRoadIdr | bgm1::kFlagWideIdr;
+  h.frame_idx = 0x11223344u;
+  h.road_len = 1000;
+  h.wide_len = 700;
+  h.t_eof = 0x0011223344556677ull;
+  const float desire[8] = {0.5f, 1.5f, -2.25f, 3.75f, -0.125f, 0.0f, 2.0f, -1.0f};
+  std::memcpy(h.desire, desire, sizeof desire);
+  h.traffic_convention[0] = 1.0f;
+  h.action_t[0] = 1.25f;
+  h.action_t[1] = -0.5f;
+  for (int i = 0; i < 9; i++) {
+    h.warp_road[i] = i * 0.25f + 0.5f;
+    h.warp_wide[i] = 1.25f - i * 0.5f;
+  }
+  h.gnss = {374220000, -1220840000, 1388, 27315, 35, 0xD050};
+  h.vehicle = {-1234, bgm1::kVehicleYawValid | bgm1::kVehicleStandstill, 6};
+  std::vector<uint8_t> road(1000), wide(700), packed(gf.size());
+  for (size_t i = 0; i < road.size(); i++) road[i] = (uint8_t)(i % 251);
+  for (size_t i = 0; i < wide.size(); i++) wide[i] = (uint8_t)((i * 7 + 3) % 256);
+  CHECK(bgm1::pack_frame(h, road.data(), wide.data(), packed.data(), packed.size()) == gf.size());
+  CHECK(packed == gf);
+  bgm1::FrameView fv;
+  CHECK(bgm1::parse_frame(gf.data(), gf.size(), &fv) == bgm1::Err::kOk);
+  CHECK(fv.hdr.gnss.lat_e7 == 374220000 && fv.hdr.gnss.fix_age_flags == 0xD050 && fv.hdr.gnss.age_ms() == 80);
+  CHECK(fv.hdr.vehicle.yaw_rate_cdps == -1234 && fv.hdr.vehicle.bearing_acc_hdeg == 6 && fv.hdr.vehicle.standstill());
+
+  // REPLY：parse 后重新 pack 逐字节回 golden，并核对 NavExt 关键字段
+  bgm1::Reply r;
+  CHECK(bgm1::parse_reply(gr.data(), gr.size(), &r) == bgm1::Err::kOk);
+  CHECK(r.nav_ext.present == 0x0F && r.nav_ext.nav_health == 0x07);
+  CHECK(r.nav_ext.nav_state.maneuver_type == 26 && r.nav_ext.nav_state.route_remaining_m == 12345);
+  CHECK(r.nav_ext.road_attr.speed_limit_kph == 80 && r.nav_ext.road_attr.edge_flags == 0x85);
+  CHECK(r.nav_ext.curve_ahead.count == 8 && r.nav_ext.curve_ahead.points[7].lat_e7 == 374220000 + 7000 &&
+        r.nav_ext.curve_ahead.points[7].curv_e4 == 150);
+  CHECK(r.nav_ext.nav_debug.render_us == 4200 && r.nav_ext.nav_debug.nav_cpu_pct == 27);
+  std::vector<uint8_t> rpacked(bgm1::kReplyWireSize);
+  CHECK(bgm1::pack_reply(r, rpacked.data(), rpacked.size()) == bgm1::kReplyWireSize);
+  CHECK(rpacked == gr);
+
+  // ERR / HELLO
+  bgm1::ErrMsg e;
+  CHECK(bgm1::parse_err(ge.data(), ge.size(), &e) == bgm1::Err::kOk);
+  CHECK(e.code == bgm1::kErrBadFrame && e.detail == 7 && e.frame_idx == 0x11223344u);
+  std::vector<uint8_t> epacked(bgm1::kErrWireSize);
+  CHECK(bgm1::pack_err(e, epacked.data(), epacked.size()) == bgm1::kErrWireSize && epacked == ge);
+  bgm1::Hello hello;
+  CHECK(bgm1::parse_hello(gh.data(), gh.size(), &hello) == bgm1::Err::kOk);
+  std::vector<uint8_t> hpacked(bgm1::kHelloWireSize);
+  CHECK(bgm1::pack_hello(hello, hpacked.data(), hpacked.size()) == bgm1::kHelloWireSize && hpacked == gh);
 }
 
 // =====================================================================
@@ -921,6 +1170,11 @@ static void test_meta_provider() {
   mp.fill(42, &h);
 
   CHECK(h.t_eof == 42);
+  // v3：GNSS / VEHICLE 暂无生产者 → 「无数据」（GNSS 全 0 = 无定位；yaw 无效、航向精度未知）
+  CHECK(h.gnss.lat_e7 == 0 && h.gnss.lon_e7 == 0 && h.gnss.speed_cms == 0 && h.gnss.bearing_cdeg == 0 &&
+        h.gnss.h_acc_dm == 0 && h.gnss.fix_age_flags == 0 && !h.gnss.has_fix());
+  CHECK(h.vehicle.yaw_rate_cdps == bgm1::kYawRateInvalid && h.vehicle.vehicle_flags == 0 &&
+        h.vehicle.bearing_acc_hdeg == bgm1::kBearingAccUnknown);
   CHECK(h.traffic_convention[0] == 1.f && h.traffic_convention[1] == 0.f);
   for (int i = 0; i < 8; i++) CHECK(h.desire[i] == 0.f);
   CHECK(h.action_t[0] == 0.f && h.action_t[1] == 0.f);
@@ -1444,6 +1698,8 @@ int main() {
 
   test_frame_codec_roundtrip();
   test_reply_err_roundtrip();
+  test_v3_normalisation();
+  test_cross_end_golden();
 
   test_warp_golden();
   test_meta_provider();

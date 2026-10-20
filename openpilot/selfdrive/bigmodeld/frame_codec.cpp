@@ -22,9 +22,13 @@ inline void put_u64(uint8_t* p, uint64_t v) {
 inline uint16_t get_u16(const uint8_t* p) {
   return uint16_t(p[0]) | (uint16_t(p[1]) << 8);
 }
+inline void put_i16(uint8_t* p, int16_t v) { put_u16(p, uint16_t(v)); }
+inline void put_i32(uint8_t* p, int32_t v) { put_u32(p, uint32_t(v)); }
 inline uint32_t get_u32(const uint8_t* p) {
   return read_u32_le(p);  // 实现收在 frame_codec.h（bgm1_server 等 streaming 消费方共用）
 }
+inline int16_t get_i16(const uint8_t* p) { return int16_t(get_u16(p)); }
+inline int32_t get_i32(const uint8_t* p) { return int32_t(get_u32(p)); }
 inline uint64_t get_u64(const uint8_t* p) {
   return uint64_t(get_u32(p)) | (uint64_t(get_u32(p + 4)) << 32);
 }
@@ -64,6 +68,15 @@ void put_msg_hdr(uint8_t out[kMsgHdrSize], uint8_t type, uint16_t flags,
   put_u32(out + 12, len);
 }
 
+// 规格保留位的屏蔽：pack 把这些位强制写 0（调用方给的保留位不上线）
+constexpr uint16_t kFixAgeFlagsMask = 0xDFFF;  // 清 bit13
+constexpr uint8_t kVehicleFlagsMask = kVehicleYawValid | kVehicleReverse | kVehicleStandstill;  // 清 bit3–7
+constexpr uint8_t kNavPresentMask = 0x0F;
+constexpr uint8_t kNavHealthMask = 0x0F;
+constexpr uint8_t kNavInputFlagsMask = 0x0F;   // 清 bit4–7
+constexpr uint8_t kRoadEdgeFlagsMask = 0xBF;   // 清 bit6
+constexpr uint8_t kCurveFlagsMask = 0x07;      // 清 bit3–7
+
 }  // namespace
 
 void pack_frame_header(const FrameHeader& hdr, uint8_t out[kFrameHdrSize]) {
@@ -75,7 +88,25 @@ void pack_frame_header(const FrameHeader& hdr, uint8_t out[kFrameHdrSize]) {
   for (int i = 0; i < 2; i++) put_f32(out + 64 + 4 * i, hdr.action_t[i]);
   for (int i = 0; i < 9; i++) put_f32(out + 72 + 4 * i, hdr.warp_road[i]);
   for (int i = 0; i < 9; i++) put_f32(out + 108 + 4 * i, hdr.warp_wide[i]);
-  // 144..159 保留，置 0
+  // GNSS：has_fix=0 时位置类字段（lat/lon/bearing/h_acc/bearing_valid）无意义，保持 0；
+  // speed + speed_valid（vEgo，与定位无关）与 age_ms（上次 fix 的年龄）保留。完全无数据时整块仍为 0
+  if (hdr.gnss.has_fix()) {
+    put_i32(out + 144, hdr.gnss.lat_e7);
+    put_i32(out + 148, hdr.gnss.lon_e7);
+    put_u16(out + 152, hdr.gnss.speed_valid() ? hdr.gnss.speed_cms : 0);        // valid=0 ⇒ 写 0
+    put_u16(out + 154, hdr.gnss.bearing_valid() ? hdr.gnss.bearing_cdeg : 0);
+    put_u16(out + 156, hdr.gnss.h_acc_dm);  // 无 valid 位，用 0xFFFF 哨兵
+    put_u16(out + 158, hdr.gnss.fix_age_flags & kFixAgeFlagsMask);
+  } else {
+    put_u16(out + 152, hdr.gnss.speed_valid() ? hdr.gnss.speed_cms : 0);
+    put_u16(out + 158, hdr.gnss.fix_age_flags & (kGnssAgeMask | kGnssSpeedValid));
+  }
+  // VEHICLE：yaw 与 yaw_valid 保持一致（INT16_MIN ⇔ yaw_valid=0），保留位强制 0
+  const bool yaw_ok = hdr.vehicle.yaw_valid() && hdr.vehicle.yaw_rate_cdps != kYawRateInvalid;
+  put_i16(out + 160, yaw_ok ? hdr.vehicle.yaw_rate_cdps : kYawRateInvalid);
+  out[162] = uint8_t(hdr.vehicle.vehicle_flags & kVehicleFlagsMask & (yaw_ok ? 0xFF : ~kVehicleYawValid));
+  out[163] = hdr.gnss.has_fix() ? hdr.vehicle.bearing_acc_hdeg : kBearingAccUnknown;  // 无 fix → 255
+  // 164..167 保留，置 0
 }
 
 Err parse_msg_hdr(const uint8_t in[kMsgHdrSize], uint8_t* type, uint16_t* flags,
@@ -102,6 +133,23 @@ Err parse_frame_header(const uint8_t in[kFrameHdrSize], FrameHeader* out) {
   for (int i = 0; i < 2; i++) h.action_t[i] = get_f32(in + 64 + 4 * i);
   for (int i = 0; i < 9; i++) h.warp_road[i] = get_f32(in + 72 + 4 * i);
   for (int i = 0; i < 9; i++) h.warp_wide[i] = get_f32(in + 108 + 4 * i);
+  const uint16_t fix_age_flags = get_u16(in + 158);
+  if (fix_age_flags & kGnssHasFix) {
+    h.gnss.lat_e7 = get_i32(in + 144);
+    h.gnss.lon_e7 = get_i32(in + 148);
+    h.gnss.speed_cms = (fix_age_flags & kGnssSpeedValid) ? get_u16(in + 152) : 0;  // valid=0 ⇒ 读作 0
+    h.gnss.bearing_cdeg = (fix_age_flags & kGnssBearingValid) ? get_u16(in + 154) : 0;
+    h.gnss.h_acc_dm = get_u16(in + 156);
+    h.gnss.fix_age_flags = fix_age_flags;
+  } else if (fix_age_flags & kGnssSpeedValid) {  // 无 fix：位置类字段读作 0，车速与 age 保留
+    h.gnss.speed_cms = get_u16(in + 152);
+    h.gnss.fix_age_flags = fix_age_flags & (kGnssAgeMask | kGnssSpeedValid);
+  } else {
+    h.gnss.fix_age_flags = fix_age_flags & kGnssAgeMask;
+  }
+  h.vehicle.yaw_rate_cdps = get_i16(in + 160);
+  h.vehicle.vehicle_flags = in[162];
+  h.vehicle.bearing_acc_hdeg = h.gnss.has_fix() ? in[163] : kBearingAccUnknown;
   if (out) *out = h;
   return Err::kOk;
 }
@@ -114,7 +162,7 @@ size_t pack_frame(const FrameHeader& hdr, const uint8_t* road, const uint8_t* wi
   std::memcpy(out + kFrameHdrSize, road, hdr.road_len);
   put_u32(out + kFrameHdrSize + hdr.road_len, hdr.wide_len);
   std::memcpy(out + kFrameHdrSize + hdr.road_len + kWideLenSize, wide, hdr.wide_len);
-  std::memset(out + kFrameHdrSize + hdr.road_len + kWideLenSize + hdr.wide_len, 0, kMacSize);
+  std::memset(out + kFrameHdrSize + hdr.road_len + kWideLenSize + hdr.wide_len, 0, kTailReservedSize);  // 尾部保留 16 B
   return total;
 }
 
@@ -142,6 +190,140 @@ Err parse_frame(const uint8_t* data, size_t size, FrameView* out,
   return Err::kOk;
 }
 
+namespace {
+
+// NavExt 子结构偏移（相对 NavExt 起点 = REPLY 偏移 8304）
+constexpr size_t kNavExtOff = kReplyHdrSize + kReplyOutputsSize + kReplyTelemetryCount * 4;
+constexpr size_t kOffNavState = 4, kOffRoadAttr = 28, kOffCurve = 44, kOffDebug = 148;
+constexpr size_t kOffCurvePoints = 8, kCurvePointSize = 12;
+
+size_t clamp_curve_count(uint8_t count) { return count > kCurveMaxPoints ? kCurveMaxPoints : count; }
+
+void pack_nav_ext(const NavExt& n, uint8_t* p) {  // p 已清零；present 为 0 的子结构保持 0
+  const uint8_t present = n.present & kNavPresentMask;  // 保留位不上线
+  p[0] = present;
+  p[1] = n.nav_health & kNavHealthMask;
+  if (present & kNavPresentNavState) {
+    uint8_t* q = p + kOffNavState;
+    const NavState& s = n.nav_state;
+    q[0] = s.nav_status;
+    q[1] = s.maneuver_type;
+    q[2] = s.next_maneuver_type;
+    q[3] = s.roundabout_exit;
+    put_u32(q + 4, s.dist_to_maneuver_m);
+    put_u32(q + 8, s.route_remaining_m);
+    put_u32(q + 12, s.route_remaining_s);
+    put_u16(q + 16, s.age_ms);
+    q[18] = s.input_flags & kNavInputFlagsMask;
+    q[19] = s.off_route_m;
+    put_u16(q + 20, s.heading_cdeg);
+  }
+  if (present & kNavPresentRoadAttr) {
+    uint8_t* q = p + kOffRoadAttr;
+    const RoadAttr& r = n.road_attr;
+    q[0] = r.speed_limit_kph;
+    q[1] = r.speed_limit_src;
+    q[2] = r.speed_limit_ahead_kph;
+    q[3] = r.road_class;
+    put_u16(q + 4, r.speed_limit_ahead_dist_m);
+    put_u16(q + 6, r.age_ms);
+    q[8] = r.edge_flags & kRoadEdgeFlagsMask;
+    q[9] = r.lane_count;
+    put_u16(q + 12, r.match_dist_dm);
+  }
+  if (present & kNavPresentCurveAhead) {
+    uint8_t* q = p + kOffCurve;
+    const CurveAhead& c = n.curve_ahead;
+    const size_t count = clamp_curve_count(c.count);
+    q[0] = uint8_t(count);
+    q[1] = c.a_lat_max_dmps2;
+    put_u16(q + 2, c.horizon_m);
+    put_u16(q + 4, c.age_ms);
+    q[6] = c.flags & kCurveFlagsMask;
+    for (size_t i = 0; i < count; i++) {
+      uint8_t* pt = q + kOffCurvePoints + kCurvePointSize * i;
+      put_i32(pt, c.points[i].lat_e7);
+      put_i32(pt + 4, c.points[i].lon_e7);
+      put_u16(pt + 8, c.points[i].dist_m);
+      pt[10] = c.points[i].v_target_kph;
+      pt[11] = c.points[i].curv_e4;
+    }
+  }
+  if (present & kNavPresentNavDebug) {
+    uint8_t* q = p + kOffDebug;
+    put_u16(q, n.nav_debug.render_us);
+    put_u16(q + 2, n.nav_debug.match_us);
+    put_u16(q + 4, n.nav_debug.route_ms);
+    q[6] = n.nav_debug.nav_cpu_pct;
+  }
+}
+
+// 原地填充 *out。*out 必须是刚构造的缺省值：present 为 0 的子结构、坏块（CURVE count>8）靠「保持缺省」
+// 表达，这里不再逐字段清零（省拷贝）。以后若让 parse_reply 直接写调用方的 *out（不经局部 Reply），
+// 必须先把 *out 的 nav_ext 清零。
+void parse_nav_ext(const uint8_t* p, NavExt* out) {
+  NavExt& n = *out;
+  n.present = p[0];
+  n.nav_health = p[1];
+  if (n.present & kNavPresentNavState) {
+    const uint8_t* q = p + kOffNavState;
+    NavState& s = n.nav_state;
+    s.nav_status = q[0];
+    s.maneuver_type = q[1];
+    s.next_maneuver_type = q[2];
+    s.roundabout_exit = q[3];
+    s.dist_to_maneuver_m = get_u32(q + 4);
+    s.route_remaining_m = get_u32(q + 8);
+    s.route_remaining_s = get_u32(q + 12);
+    s.age_ms = get_u16(q + 16);
+    s.input_flags = q[18];
+    s.off_route_m = q[19];
+    s.heading_cdeg = get_u16(q + 20);
+  }
+  if (n.present & kNavPresentRoadAttr) {
+    const uint8_t* q = p + kOffRoadAttr;
+    RoadAttr& r = n.road_attr;
+    r.speed_limit_kph = q[0];
+    r.speed_limit_src = q[1];
+    r.speed_limit_ahead_kph = q[2];
+    r.road_class = q[3];
+    r.speed_limit_ahead_dist_m = get_u16(q + 4);
+    r.age_ms = get_u16(q + 6);
+    r.edge_flags = q[8];
+    r.lane_count = q[9];
+    r.match_dist_dm = get_u16(q + 12);
+  }
+  // 线上 count>8 = 坏块（这些点要喂纵向）：清 present bit2，子块整块按缺省（与 present=0 统一：其余字段无意义）
+  if ((n.present & kNavPresentCurveAhead) && p[kOffCurve] > kCurveMaxPoints) n.present &= uint8_t(~kNavPresentCurveAhead);
+  if (n.present & kNavPresentCurveAhead) {
+    const uint8_t* q = p + kOffCurve;
+    CurveAhead& c = n.curve_ahead;
+    const size_t count = q[0];
+    c.count = uint8_t(count);
+    c.a_lat_max_dmps2 = q[1];
+    c.horizon_m = get_u16(q + 2);
+    c.age_ms = get_u16(q + 4);
+    c.flags = q[6];
+    for (size_t i = 0; i < count; i++) {
+      const uint8_t* pt = q + kOffCurvePoints + kCurvePointSize * i;
+      c.points[i].lat_e7 = get_i32(pt);
+      c.points[i].lon_e7 = get_i32(pt + 4);
+      c.points[i].dist_m = get_u16(pt + 8);
+      c.points[i].v_target_kph = pt[10];
+      c.points[i].curv_e4 = pt[11];
+    }
+  }
+  if (n.present & kNavPresentNavDebug) {
+    const uint8_t* q = p + kOffDebug;
+    n.nav_debug.render_us = get_u16(q);
+    n.nav_debug.match_us = get_u16(q + 2);
+    n.nav_debug.route_ms = get_u16(q + 4);
+    n.nav_debug.nav_cpu_pct = q[6];
+  }
+}
+
+}  // namespace
+
 size_t pack_reply(const Reply& r, uint8_t* out, size_t cap) {
   if (cap < kReplyWireSize) return 0;
   std::memset(out, 0, kReplyWireSize);
@@ -150,17 +332,21 @@ size_t pack_reply(const Reply& r, uint8_t* out, size_t cap) {
   for (size_t i = 0; i < kReplyOutputsCount; i++) put_f32(out + kReplyHdrSize + 4 * i, r.outputs[i]);
   for (size_t i = 0; i < kReplyTelemetryCount; i++)
     put_u32(out + kReplyHdrSize + kReplyOutputsSize + 4 * i, r.telemetry[i]);
-  // 尾部 16 B MAC 置零
+  pack_nav_ext(r.nav_ext, out + kNavExtOff);
+  // 尾部保留 16 B 置零
   return kReplyWireSize;
 }
 
 Err parse_reply(const uint8_t* data, size_t size, Reply* out) {
-  if (size < kReplyWireSize) return Err::kTruncated;
+  // 版本先于长度：旧 v2 的 8320 B REPLY 在这里报 kBadVersion 而不是 kTruncated
+  if (size < kMsgHdrSize) return Err::kTruncated;
   uint16_t flags;
   uint32_t frame_idx, len;
   Err err = parse_msg_hdr_typed(data, kTypeReply, &flags, &frame_idx, &len);
   if (err != Err::kOk) return err;
-  if (len != kReplyPayloadSize || size != kReplyWireSize) return Err::kLenMismatch;
+  if (len != kReplyPayloadSize) return Err::kLenMismatch;
+  if (size < kReplyWireSize) return Err::kTruncated;
+  if (size != kReplyWireSize) return Err::kLenMismatch;
 
   Reply r;
   r.flags = flags;
@@ -169,6 +355,7 @@ Err parse_reply(const uint8_t* data, size_t size, Reply* out) {
   for (size_t i = 0; i < kReplyOutputsCount; i++) r.outputs[i] = get_f32(data + kReplyHdrSize + 4 * i);
   for (size_t i = 0; i < kReplyTelemetryCount; i++)
     r.telemetry[i] = get_u32(data + kReplyHdrSize + kReplyOutputsSize + 4 * i);
+  parse_nav_ext(data + kNavExtOff, &r.nav_ext);
   if (out) *out = r;
   return Err::kOk;
 }
@@ -179,7 +366,7 @@ size_t pack_err(const ErrMsg& e, uint8_t* out, size_t cap) {
   put_msg_hdr(out, kTypeErr, 0, e.frame_idx, uint32_t(kErrPayloadSize));
   put_u32(out + kMsgHdrSize, e.code);
   put_u32(out + kMsgHdrSize + 4, e.detail);
-  // 尾部 16 B MAC 置零
+  // 尾部保留 16 B 置零
   return kErrWireSize;
 }
 
@@ -205,7 +392,7 @@ size_t pack_hello(const Hello& h, uint8_t* out, size_t cap) {
   put_msg_hdr(out, kTypeHello, 0, 0, uint32_t(kHelloPayloadSize));
   put_u64(out + kMsgHdrSize, h.instance_id);
   put_u32(out + kMsgHdrSize + 8, h.max_frame);
-  // 保留 u32 与尾部 16 B MAC 置零
+  // 保留 u32 与尾部保留 16 B 置零
   return kHelloWireSize;
 }
 

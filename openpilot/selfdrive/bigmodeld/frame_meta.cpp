@@ -148,4 +148,7 @@ void MetaProvider::fill(uint64_t t_eof, bgm1::FrameHeader* out) const {
   out->action_t[1] = action_t_[1];
   std::memcpy(out->warp_road, warp_road_, sizeof warp_road_);
   std::memcpy(out->warp_wide, warp_wide_, sizeof warp_wide_);
+  // v3 GNSS / VEHICLE 暂无生产者：填「无数据」（GNSS 全 0：has_fix=0 ⇒ 无定位；yaw 无效、航向精度未知）
+  out->gnss = bgm1::Gnss{};
+  out->vehicle = bgm1::Vehicle{};
 }

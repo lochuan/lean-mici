@@ -2,18 +2,18 @@
 
 生命周期跟随 modeld（`system/manager/process_config.py` 注册 `only_onroad`）：从 camerad 的
 VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_ROAD`）两路帧，
-在取帧线程按标定矩阵 warp 成模型视图 512×256 NV12（协议 v2，App 只做 pack），
+在取帧线程按标定矩阵 warp 成模型视图 512×256 NV12（App 只做 pack），
 用 `logger_lib` 的 `V4LEncoder` 双路硬编（HEVC Main、VBR、无 B 帧、GOP 20、venus realtime 优先级、
 默认每路 2 Mb/s 可调），按 10 号布局组 FRAME 经 TCP 发出（road 出包即发）。不落盘、不进 loggerd（编码输出
-回调 ⇒ 不建 PubMaster ⇒ loggerd 无编码数据）。`frame_codec.{h,cpp}` 与 chipmunk App 的 `frame_codec.h` 为同一线协议的两份镜像，改一边须同步另一边。
+回调 ⇒ 不建 PubMaster ⇒ loggerd 无编码数据）。`frame_codec.{h,cpp}` 与 chipmunk App 的 `frame_codec.h` 为同一线协议（BGM1 v3，见下「线协议 v3」）的两份镜像，须逐字节同源，改一边须同步另一边。
 
 ## 模块
 
 | 文件 | 职责 |
 |---|---|
-| `frame_codec.{h,cpp}` | BGM1 线协议 FRAME/REPLY/ERR 编解码（与 chipmunk `android/app/src/main/cpp/` 原样同源，勿改） |
-| `warp_pack.{h,cpp}` | NEON warp：`warpNv12` 相机帧 → 512×256 NV12（协议 v2 在 C4 上 warp，手机只做 pack） |
-| `frame_meta.{h,cpp}` | 帧头元数据：warp 矩阵 C++ 复刻 + MetaProvider（标定喂 rpyCalib，modeld 喂 desire/action_t） |
+| `frame_codec.{h,cpp}` | BGM1 线协议 FRAME/REPLY/ERR 编解码（与 chipmunk `app/app/src/main/cpp/` 原样同源，勿改；布局表见其头注释） |
+| `warp_pack.{h,cpp}` | NEON warp：`warpNv12` 相机帧 → 512×256 NV12（协议 v3 在 C4 上 warp，手机只做 pack） |
+| `frame_meta.{h,cpp}` | 帧头元数据：warp 矩阵 C++ 复刻 + MetaProvider（标定喂 rpyCalib，modeld 喂 desire/action_t；GNSS/VEHICLE 暂填「无数据」） |
 | `frame_scheduler.{h,cpp}` | I 帧/丢帧状态机（纯逻辑事件输出，调用方执行 request_keyframe） |
 | `meta_cache.h` | 编码输出查表（FIFO/路）：miss 分类（stale 静默 / gap=断档上报），查不到不弹队 |
 | `uplink_sender.{h,cpp}` | 发送/重连状态机（可注入 socket/时钟） |
@@ -42,8 +42,8 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
     `kNewConnection` 重置连接状态并新开序列。配对杀帧只计数/日志，时间槽空洞不触发恢复；
     GOP 相位按实际提交帧数推进。`kHeadBarrier`（序列头门丢弃）虽非断档，也落
     `on_frame_dropped` 起新序列 + 双路 request（语义见 `frame_scheduler.h`）。
-3. **发送**：submit_road 即组 chunk1（头 160 B‖road 段，flags bit0=road 段 IDR、
-   bit1=wide 段 IDR）先发（road 出包即发）；submit_wide 组 chunk2（wide_len‖wide‖MAC16 零）。槽：在途 1 + 排队 1
+3. **发送**：submit_road 即组 chunk1（头 168 B‖road 段，flags bit0=road 段 IDR、
+   bit1=wide 段 IDR）先发（road 出包即发）；submit_wide 组 chunk2（wide_len‖wide‖尾部保留 16 B 零）。槽：在途 1 + 排队 1
    （只留最新；新包覆盖=丢旧包报 kDrop；旧 frame_idx 迟到包静默丢）。
    **序列头门（18 号 #1/#2）**：建连/重连/断档后第一个发出的帧必须是「预测双 IDR +
    实测双 IDR」对，不合格整对丢弃报 `kHeadBarrier`（调用方补 request），头对在排队槽
@@ -95,6 +95,41 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
    状态串写 Param `BigmodelLinkState`（07 号读）。连接目标 = 手动 IP（Params
    `BigmodelServerHost` 非空）或 mDNS 自动发现（限 wlan0 子网，见 `server_locator.h`）。
 
+## 线协议 v3（BGM1，`kVersion = 3`）
+
+锁步升级、不做版本兼容：`MsgHdr.ver` 严格等于 3，不符即 `kBadVersion`。实际路径：手机收到版本不符的 FRAME 回
+ERR `VERSION_MISMATCH`（code 1，`detail` = 对端 ver « 8 ‖ 本端 ver，如 `0x0203`）并断连；**本端以 HELLO 判版本**——
+手机连上先发 HELLO，`parse_hello` 得 `kBadVersion` 即版本不符（日志 `got_ver/want_ver`，断连重连；
+`BigmodelLinkState=version_mismatch` 由后续票在这里写）。v2 手机的 REPLY（len 8280 ≠ 8440）在 `reply_thread`
+分帧处就以「协议头非法」断连，到不了 `parse_reply`；真版本不一致时对端 ERR 的 ver 也不同，`parse_err` 同样得
+`kBadVersion`（只记日志），所以不靠 ERR.detail 判版本。`parse_reply` 本身先验 MsgHdr 再验长度，旧 8320 B REPLY
+报 `kBadVersion`（宿主测试锁定）。
+权威布局表在 `frame_codec.h` 头注释（两端同源），这里是摘要：
+
+| 消息 | v2 | v3 | 变化 |
+|---|---|---|---|
+| FRAME 头 | 160 B | **168 B** | 偏移 144 的保留 16 B → **GNSS**；偏移 160 追加 **VEHICLE** 8 B；线长 = 168 + road + 4 + wide + 16 |
+| REPLY | 8320 B（len 8280） | **8480 B（len 8440）** | 遥测之后追加定长 **NavExt** 160 B（偏移 8304），尾部保留 16 B 在 8464 |
+| HELLO / ERR | 48 / 40 B | 不变 | 只有 ver=3；ERR `VERSION_MISMATCH.detail` 编码见上 |
+
+**GNSS（FRAME 偏移 144，16 B，WGS-84）**：`lat_e7 i32` · `lon_e7 i32` · `speed_cms u16`（vEgo，`0xFFFF` 无效）·
+`bearing_cdeg u16`（`0xFFFF` 无效）· `h_acc_dm u16`（`0xFFFF` 未知，饱和 `0xFFFE`）· `fix_age_flags u16`
+（bit0–11 age_ms 饱和 4095 · bit12 has_fix · bit14 speed_valid · bit15 bearing_valid）。`has_fix=0` 时位置类字段（lat / lon / bearing / h_acc / bearing_valid）无意义，写 0；`speed_cms` + `speed_valid`（vEgo）与 `age_ms` 保留；车机完全无数据时整块 16 B 为 0；带 valid 位的字段（speed / bearing）以 valid 位为准，无效写 0，仅无 valid 位的 `h_acc_dm` 用 `0xFFFF` 哨兵；`age_ms` 只在 `has_fix=1` 或 `speed_valid=1` 时有意义。
+
+**VEHICLE（偏移 160，8 B）**：`yaw_rate_cdps i16`（0.01°/s 左转为正，`INT16_MIN` 无效）· `vehicle_flags u8`
+（bit0 yaw_valid · bit1 reverse · bit2 standstill）· `bearing_acc_hdeg u8`（0.5°，255 未知 / 无 fix，饱和 254）·
+保留 4 B（pack 置 0，解析忽略）。
+
+**NavExt（REPLY 偏移 8304，160 B）**：健康头 4（`present` bit0 NAV_STATE · bit1 ROAD_ATTR · bit2 CURVE_AHEAD ·
+bit3 NAV_DEBUG；`nav_health` bit0 gps_ok · bit1 route_ok · bit2 nav_ok · bit3 rerouting）‖ NAV_STATE 24 ‖
+ROAD_ATTR 16 ‖ CURVE_AHEAD 104（头 8 + 8 点 × 12）‖ NAV_DEBUG 8 ‖ 保留 4。`present` 位为 0 的子结构全 0，
+本端当「无此功能」；CURVE_AHEAD 线上 `count>8` 当坏块，清 `present` bit2、子块整块按缺省（点要喂纵向）。各子结构字段、单位、无效值见 `frame_codec.h`。
+
+**本进程现状**：票 A 只落编解码——FRAME 的 GNSS / VEHICLE 填「无数据」（GNSS 全 0，VEHICLE yaw 无效、航向精度
+255），REPLY 的 NavExt 由 `parse_reply` 解析但 `main.cc` 暂不消费（模型输出照旧）。GNSS 订阅、`navStateSP`、
+`/dev/shm/params` 弯道写入是后续票。
+
+
 ## 构建
 
 - **设备（comma_arm64）**：`scons -j8`（SConstruct 已注册，仅 comma_arm64 构建；
@@ -109,7 +144,10 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 cd openpilot/selfdrive/bigmodeld
 clang++ -std=c++17 -O1 test_bigmodeld.cc frame_codec.cpp frame_meta.cpp \
         frame_scheduler.cpp uplink_sender.cpp server_locator.cpp \
-        -o /tmp/test_bigmodeld && /tmp/test_bigmodeld
+        -o /tmp/test_bigmodeld
+# 跨端 golden 互解（默认必跑；golden 由 chipmunk 仓库 app/tests/make_frame_golden.py 生成，*.bin 不入库）。
+# 未设置目录 / 文件缺失或为空都判失败；显式跳过：BGM1_GOLDEN_SKIP=1
+BGM1_GOLDEN_DIR=<chipmunk-os>/app/tests/fixtures /tmp/test_bigmodeld
 # warp 查找表（需 arm64/NEON，Apple Silicon 可直接编）
 clang++ -std=c++17 -O1 test_warp_lut.cc warp_pack.cpp frame_meta.cpp frame_codec.cpp \
         -o /tmp/test_warp_lut && /tmp/test_warp_lut

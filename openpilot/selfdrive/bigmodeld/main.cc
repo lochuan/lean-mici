@@ -391,7 +391,8 @@ class Bigmodeld {
         } else if (type == bgm1::kTypeErr && len == bgm1::kErrPayloadSize) {
           need = bgm1::kErrWireSize;
         } else {
-          LOGE("bigmodeld: REPLY 流协议错 type=0x%02x len=%u", type, len);
+          LOGE("bigmodeld: REPLY 流协议错 type=0x%02x len=%u got_ver=%u want_ver=%u", type, len,
+               unsigned(buf[4]), unsigned(bgm1::kVersion));
           fail("协议头非法");
           break;
         }
@@ -402,7 +403,10 @@ class Bigmodeld {
           bgm1::Hello h;
           bgm1::Err pe = hello_seen_ ? bgm1::Err::kBadType : bgm1::parse_hello(buf.data(), need, &h);
           if (pe != bgm1::Err::kOk) {
-            LOGE("bigmodeld: HELLO 解析失败 err=%d", int(pe));
+            // HELLO 是版本判定落点：parse_hello 得 kBadVersion = 协议版本不符（票 C 在此写 version_mismatch）
+            LOGE("bigmodeld: HELLO 解析失败 err=%d%s got_ver=%u want_ver=%u", int(pe),
+                 pe == bgm1::Err::kBadVersion ? "（协议版本不符）" : "", unsigned(buf[4]),
+                 unsigned(bgm1::kVersion));
             fail("HELLO 非法/重复");
             break;
           }
@@ -418,7 +422,10 @@ class Bigmodeld {
         } else if (type == bgm1::kTypeReply) {
           const uint64_t reply_ns = nanos_since_boot();
           bgm1::Reply r;
-          if (bgm1::parse_reply(buf.data(), need, &r) != bgm1::Err::kOk) {
+          const bgm1::Err re = bgm1::parse_reply(buf.data(), need, &r);
+          if (re != bgm1::Err::kOk) {
+            LOGE("bigmodeld: REPLY 解析失败 err=%d got_ver=%u want_ver=%u", int(re), unsigned(buf[4]),
+                 unsigned(bgm1::kVersion));
             fail("REPLY 解析失败");
             break;
           }
@@ -445,8 +452,12 @@ class Bigmodeld {
           pm_.send("bigModelReply", msg);
         } else {
           bgm1::ErrMsg e;
-          if (bgm1::parse_err(buf.data(), need, &e) == bgm1::Err::kOk) {
+          const bgm1::Err ee = bgm1::parse_err(buf.data(), need, &e);
+          if (ee == bgm1::Err::kOk) {
             LOGE("bigmodeld: 服务端 ERR code=%u detail=%u frame_idx=%u", e.code, e.detail, e.frame_idx);
+          } else {  // 版本真不一致时对端 ERR 的 ver 也不同，会落在这里
+            LOGE("bigmodeld: 服务端 ERR 解析失败 err=%d got_ver=%u want_ver=%u", int(ee), unsigned(buf[4]),
+                 unsigned(bgm1::kVersion));
           }
           sender_->notify_disconnect();
           hello_seen_ = false;
