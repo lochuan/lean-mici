@@ -13,7 +13,7 @@
 //   action_t[2] = modeld chestnut 公式直通（13 号 / research/02 §4，权威在 modeld）。
 //   GNSS 16 B / VEHICLE 8 B = 协议 v3 §1.2.1/§1.2.2：set_gnss/set_vehicle 存原始单位，
 //     fill 按 t_eof 算 age_ms / has_fix / yaw_valid 并编码单位；线上规范形（无 fix 清位置类
-//     字段、valid=0 写 0、bearing_acc_hdeg 无 fix 255）归 frame_codec 的 pack。
+//     字段、valid=0 写 0、bearing_accuracy_half_deg 无 fix 255）归 frame_codec 的 pack。
 //
 // 纯逻辑（仅 std），宿主单测直接编译；fill 路径不堆分配。
 
@@ -37,16 +37,16 @@ extern const float kNarrowRoadIntrinsics[9];
 extern const float kWideRoadIntrinsics[9];
 
 // GNSS 原始样本（gpsLocationExternal，10 Hz）：单位同 cereal，未编码。
-// t_msg_ns = 消息 logMonoTime；fill 用上次 fix 的 t_msg_ns 与 t_eof 算 age_ms（饱和 4095）。
+// message_time_ns = 消息 logMonoTime；fill 用上次 fix 的 message_time_ns 与 t_eof 算 age_ms（饱和 4095）。
 struct GnssSample {
-  double lat_deg = 0;           // WGS-84
-  double lon_deg = 0;
-  double bearing_deg = 0;       // 0.01° 线上编码；正北顺时针，fill 回绕到 [0, 360)
-  double h_acc_m = 0;           // 水平精度 1σ（m）
-  double bearing_acc_deg = 0;   // 航向精度 1σ（°）
+  double latitude_deg = 0;            // WGS-84
+  double longitude_deg = 0;           // WGS-84
+  double bearing_deg = 0;             // 0.01° 线上编码；正北顺时针，fill 回绕到 [0, 360)
+  double horizontal_accuracy_m = 0;   // 水平精度 1σ（m）
+  double bearing_accuracy_deg = 0;    // 航向精度 1σ（°）
   bool has_fix = false;
-  bool valid = true;            // cereal Event.valid（ubloxd 恒 true，仍按 B5 检查）
-  uint64_t t_msg_ns = 0;
+  bool event_valid = true;      // cereal Event.valid（ubloxd 恒 true，仍按 B5 检查）
+  uint64_t message_time_ns = 0;
 };
 
 // extrinsicsCalibration.calStatus；只有 invalid 时禁用 yaw/speed，
@@ -63,27 +63,27 @@ enum class ExtrinsicsCalibStatus : uint8_t {
 //   calib_from_device = device_from_calib^T
 //   v_body = calib_from_device · velocityDevice
 //   w_body = calib_from_device · angularVelocityDevice
-// yaw_source_ok  = valid ∧ sensorsOK ∧ calStatus != invalid ∧ w_body.z 有限
-// speed_source_ok = valid ∧ sensorsOK ∧ inputsOK ∧ posenetOK ∧ calStatus != invalid ∧ v_body.x 有限
+// yaw_source_ok  = event_valid ∧ sensorsOK ∧ calStatus != invalid ∧ w_body.z 有限
+// speed_source_ok = event_valid ∧ sensorsOK ∧ inputsOK ∧ posenetOK ∧ calStatus != invalid ∧ v_body.x 有限
 struct VehicleSample {
-  float v_forward_mps = 0;      // 车体系 x（带符号）
-  float v_lateral_mps = 0;      // 车体系 y
-  float yaw_rate_radps = 0;     // 车体系 z，右转（顺时针）为正，与 bearing 同向
-  bool reverse = false;         // v_forward < −0.3 m/s
-  bool standstill = false;      // hypot(v_forward, v_lateral) < 0.1 m/s
+  float forward_speed_m_per_s = 0;     // 车体系 x（带符号）
+  float lateral_speed_m_per_s = 0;     // 车体系 y
+  float yaw_rate_rad_per_s = 0;        // 车体系 z，右转（顺时针）为正，与 bearing 同向
+  bool reversing = false;              // forward_speed < −0.3 m/s
+  bool standstill = false;             // hypot(forward_speed, lateral_speed) < 0.1 m/s
   bool yaw_source_ok = false;
   bool speed_source_ok = false;
-  uint64_t t_msg_ns = 0;
+  uint64_t message_time_ns = 0;
 };
 
 // deviceMotion 消息的判据快照（I1 / m-b）
 struct DeviceMotionFlags {
-  bool valid = false;              // cereal Event.valid
+  bool event_valid = false;        // cereal Event.valid
   bool sensors_ok = false;         // deviceMotion.sensorsOK
   bool inputs_ok = false;          // deviceMotion.inputsOK
   bool posenet_ok = false;         // deviceMotion.posenetOK
   ExtrinsicsCalibStatus calib_status = ExtrinsicsCalibStatus::kUncalibrated;
-  uint64_t t_msg_ns = 0;
+  uint64_t message_time_ns = 0;
 };
 
 VehicleSample vehicle_sample_from_device_motion(const float rpy[3],
@@ -118,7 +118,7 @@ class MetaProvider {
   void fill(uint64_t t_eof, bgm1::FrameHeader* out) const;
 
   // 当前 warp 矩阵（wide=false → road/MED，true → wide/SBIG），与 fill 写进帧头的同一份。
-  // capture 线程据此在 C4 上 warp（协议 v2）。
+  // capture 线程据此在 C4 上 warp（协议 v3）。
   void warp(bool wide, float out[9]) const;
 
  private:
@@ -131,7 +131,7 @@ class MetaProvider {
   float action_t_[2] = {0.f, 0.f};
   uint8_t desire_class_ = 0;
   mutable uint8_t prev_desire_class_ = 0;  // pulse 边沿 latch：每次 fill() 采样
-  GnssSample gnss_;                        // 最近一条 gpsLocationExternal（has_fix 已按 valid/坐标清洗）
+  GnssSample gnss_;                        // 最近一条 gpsLocationExternal（has_fix 已按 event_valid/坐标清洗）
   bool gnss_seen_ = false;
   GnssSample last_fix_;                    // 上次有效 fix（位置/精度/时刻；B3）
   bool have_fix_ = false;

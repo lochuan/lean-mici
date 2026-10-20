@@ -523,18 +523,18 @@ class Bigmodeld {
           meta_.set_model_inputs(a, sp.getDesireClass());
         }
       }
-      // v3 GNSS（协议 §1.2.1）：u-blox 10 Hz；valid 也检查（B5，ubloxd 恒 true）。
+      // v3 GNSS（协议 §1.2.1）：u-blox 10 Hz；event_valid 也检查（B5，ubloxd 恒 true）。
       if (sm.updated("gpsLocationExternal")) {
         auto g = sm["gpsLocationExternal"].getGpsLocationExternal();
         GnssSample s;
-        s.lat_deg = g.getLatitude();
-        s.lon_deg = g.getLongitude();
+        s.latitude_deg = g.getLatitude();
+        s.longitude_deg = g.getLongitude();
         s.bearing_deg = g.getBearingDeg();
-        s.h_acc_m = g.getHorizontalAccuracy();
-        s.bearing_acc_deg = g.getBearingAccuracyDeg();
+        s.horizontal_accuracy_m = g.getHorizontalAccuracy();
+        s.bearing_accuracy_deg = g.getBearingAccuracyDeg();
         s.has_fix = g.getHasFix();
-        s.valid = sm["gpsLocationExternal"].getValid();
-        s.t_msg_ns = sm["gpsLocationExternal"].getLogMonoTime();
+        s.event_valid = sm["gpsLocationExternal"].getValid();
+        s.message_time_ns = sm["gpsLocationExternal"].getLogMonoTime();
         meta_.set_gnss(s);
       }
       // v3 VEHICLE（协议 §1.2.2）：deviceMotion 20 Hz，经 rpyCalib 转到车体系。
@@ -546,12 +546,12 @@ class Bigmodeld {
         const float v[3] = {vel.getX(), vel.getY(), vel.getZ()};
         const float w[3] = {ang.getX(), ang.getY(), ang.getZ()};
         DeviceMotionFlags f;
-        f.valid = sm["deviceMotion"].getValid();
+        f.event_valid = sm["deviceMotion"].getValid();
         f.sensors_ok = dm.getSensorsOK();
         f.inputs_ok = dm.getInputsOK();
         f.posenet_ok = dm.getPosenetOK();
         f.calib_status = calib_status;
-        f.t_msg_ns = sm["deviceMotion"].getLogMonoTime();
+        f.message_time_ns = sm["deviceMotion"].getLogMonoTime();
         meta_.set_vehicle(vehicle_sample_from_device_motion(rpy, v, w, f));
       }
     }
