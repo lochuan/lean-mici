@@ -12,6 +12,9 @@
 //   取帧×2（state_mtx：配对/状态机/索引 + 编码缓冲池）、编码器 dequeue×2（输出回调：
 //   meta 缓存 → sender.submit_*）、writer（sender.step）、REPLY reader（read_some →
 //   parse → msgq）、标定/输入元数据（SubMaster → MetaProvider.set_rpy/set_model_inputs）。
+//   标定线程另订阅 gpsLocationExternal(10 Hz) / deviceMotion(20 Hz)；msgq 每条消息对每个订阅线程
+//   发 SIGUSR2（与是否 poll 无关），因此线程每秒会多约 30 次信号唤醒，但 SubMaster 只 poll 原有
+//   节拍源，用户态循环不会多跑。
 //   锁序：sender.mtx > state_mtx > {ev_mtx, meta 缓存, buf 池, 分段计时}（叶子锁，绝不反向嵌套）。
 //   sender 事件回调在其锁内触发 ⇒ 回调只记账 + 推事件队列（ev_mtx），状态机转移与
 //   request_keyframe 在下一次组帧前由 drain_events_locked() 按序执行（事件仍落在
@@ -471,16 +474,44 @@ class Bigmodeld {
   }
 
   // ===== 标定/输入元数据线程：extrinsicsCalibration.rpyCalib + modelDataV2SP → 帧头 =====
+  // gpsLocationExternal(10 Hz) / deviceMotion(20 Hz) 只在消息更新时取最新一条，不进 poll：
+  // SubMaster 只 poll 原有 4 Hz + 20 Hz 节拍源，用户态循环不会因它们多跑。注意 msgq 的每条
+  // 消息都会对每个订阅线程发 SIGUSR2（msgq_msg_send 末尾的 thread_signal），所以线程每秒仍会
+  // 被这两路额外信号唤醒约 30 次；这是 msgq 语义，不是 poll 集合能避免的。
+  // SubMaster 的 socket 是 conflate=true（socketmaster.cc:53）；update() 在 poll 返回后对未 poll
+  // 的服务做非阻塞 receive(true)，拿到各自最新一条，队列不积压。
   void calib_thread() {
-    SubMaster sm({"extrinsicsCalibration", "modelDataV2SP"});
+    SubMaster sm({"extrinsicsCalibration", "modelDataV2SP", "gpsLocationExternal", "deviceMotion"},
+                 {"extrinsicsCalibration", "modelDataV2SP"});
+    // 车体系换算用的 rpyCalib：与 MetaProvider.set_rpy 同一份（最近一条 extrinsics）。
+    float rpy[3] = {0.f, 0.f, 0.f};
+    // m-b：只有 calStatus==invalid 禁用 yaw/speed；uncalibrated/recalibrating 照常用当前 rpy。
+    ExtrinsicsCalibStatus calib_status = ExtrinsicsCalibStatus::kUncalibrated;
+
     while (!do_exit) {
       sm.update(1000);
       if (sm.updated("extrinsicsCalibration")) {
         auto c = sm["extrinsicsCalibration"].getExtrinsicsCalibration();
-        auto rpy = c.getRpyCalib();
-        if (rpy.size() == 3) {
-          float r[3] = {rpy[0], rpy[1], rpy[2]};
-          meta_.set_rpy(r);
+        auto calib_rpy = c.getRpyCalib();
+        if (calib_rpy.size() == 3) {
+          rpy[0] = calib_rpy[0];
+          rpy[1] = calib_rpy[1];
+          rpy[2] = calib_rpy[2];
+          meta_.set_rpy(rpy);
+        }
+        switch (c.getCalStatus()) {
+          case cereal::ExtrinsicsCalibration::Status::CALIBRATED:
+            calib_status = ExtrinsicsCalibStatus::kCalibrated;
+            break;
+          case cereal::ExtrinsicsCalibration::Status::INVALID:
+            calib_status = ExtrinsicsCalibStatus::kInvalid;
+            break;
+          case cereal::ExtrinsicsCalibration::Status::RECALIBRATING:
+            calib_status = ExtrinsicsCalibStatus::kRecalibrating;
+            break;
+          default:
+            calib_status = ExtrinsicsCalibStatus::kUncalibrated;
+            break;
         }
       }
       // 04 号 C-2：modeld 权威元数据（电平采样，迟到 ≤2 帧按 04 号口径接受）
@@ -491,6 +522,37 @@ class Bigmodeld {
           float a[2] = {at[0], at[1]};
           meta_.set_model_inputs(a, sp.getDesireClass());
         }
+      }
+      // v3 GNSS（协议 §1.2.1）：u-blox 10 Hz；valid 也检查（B5，ubloxd 恒 true）。
+      if (sm.updated("gpsLocationExternal")) {
+        auto g = sm["gpsLocationExternal"].getGpsLocationExternal();
+        GnssSample s;
+        s.lat_deg = g.getLatitude();
+        s.lon_deg = g.getLongitude();
+        s.bearing_deg = g.getBearingDeg();
+        s.h_acc_m = g.getHorizontalAccuracy();
+        s.bearing_acc_deg = g.getBearingAccuracyDeg();
+        s.has_fix = g.getHasFix();
+        s.valid = sm["gpsLocationExternal"].getValid();
+        s.t_msg_ns = sm["gpsLocationExternal"].getLogMonoTime();
+        meta_.set_gnss(s);
+      }
+      // v3 VEHICLE（协议 §1.2.2）：deviceMotion 20 Hz，经 rpyCalib 转到车体系。
+      // 消息 → 车体系样本的换算在纯函数里（可单测）；只在消息更新时调 set_vehicle（m6）。
+      if (sm.updated("deviceMotion")) {
+        auto dm = sm["deviceMotion"].getDeviceMotion();
+        auto vel = dm.getVelocityDevice();
+        auto ang = dm.getAngularVelocityDevice();
+        const float v[3] = {vel.getX(), vel.getY(), vel.getZ()};
+        const float w[3] = {ang.getX(), ang.getY(), ang.getZ()};
+        DeviceMotionFlags f;
+        f.valid = sm["deviceMotion"].getValid();
+        f.sensors_ok = dm.getSensorsOK();
+        f.inputs_ok = dm.getInputsOK();
+        f.posenet_ok = dm.getPosenetOK();
+        f.calib_status = calib_status;
+        f.t_msg_ns = sm["deviceMotion"].getLogMonoTime();
+        meta_.set_vehicle(vehicle_sample_from_device_motion(rpy, v, w, f));
       }
     }
   }

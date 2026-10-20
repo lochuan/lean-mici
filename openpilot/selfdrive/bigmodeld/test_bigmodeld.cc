@@ -6,11 +6,13 @@
 // 跨端 golden 互解默认必跑（目录未设置 / golden 缺失或为空都判失败）；显式跳过：BGM1_GOLDEN_SKIP=1
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <string>
 #include <thread>
 #include <vector>
@@ -23,6 +25,24 @@
 #include "pair_matcher.h"
 #include "server_locator.h"
 #include "uplink_sender.h"
+
+// 全局分配计数：test_meta_fill_zero_alloc 用（MetaProvider::fill 不得堆分配）。
+// 覆盖全局 operator new/delete 只计数，行为与默认一致；本测试进程全是纯逻辑模块。
+static std::atomic<uint64_t> g_alloc_count{0};
+void* operator new(std::size_t n) {
+  g_alloc_count.fetch_add(1, std::memory_order_relaxed);
+  if (void* p = std::malloc(n ? n : 1)) return p;
+  throw std::bad_alloc();
+}
+void* operator new[](std::size_t n) {
+  g_alloc_count.fetch_add(1, std::memory_order_relaxed);
+  if (void* p = std::malloc(n ? n : 1)) return p;
+  throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete[](void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 // ---- 极简测试框架 ----
 static int g_checks = 0;
@@ -1170,7 +1190,7 @@ static void test_meta_provider() {
   mp.fill(42, &h);
 
   CHECK(h.t_eof == 42);
-  // v3：GNSS / VEHICLE 暂无生产者 → 「无数据」（GNSS 全 0 = 无定位；yaw 无效、航向精度未知）
+  // v3：没有 GNSS / deviceMotion 样本 → 「无数据」（GNSS 全 0 = 无定位；yaw 无效、航向精度未知）
   CHECK(h.gnss.lat_e7 == 0 && h.gnss.lon_e7 == 0 && h.gnss.speed_cms == 0 && h.gnss.bearing_cdeg == 0 &&
         h.gnss.h_acc_dm == 0 && h.gnss.fix_age_flags == 0 && !h.gnss.has_fix());
   CHECK(h.vehicle.yaw_rate_cdps == bgm1::kYawRateInvalid && h.vehicle.vehicle_flags == 0 &&
@@ -1261,6 +1281,588 @@ static void test_meta_provider_model_inputs() {
   mp3.reset_desire_latch();                               // 双路 IDR/重连 → 新序列
   mp3.fill(22, &h);
   CHECK(h.desire[3] == 1.f);                              // 重出 pulse（d→0→d）
+}
+
+// ---- v3 FRAME GNSS / VEHICLE（票 B，第二轮：deviceMotion 源）----
+// fill 只填原始编码；has_fix=0 清位置类字段、valid=0 写 0、无 fix 时 bearing_acc_hdeg=255
+// 都是票 A 的 pack 规范形。这里 fill → pack → parse 验最终线上语义。
+
+static bgm1::FrameHeader fill_wire(MetaProvider& mp, uint64_t t_eof) {
+  bgm1::FrameHeader h;
+  std::memset(&h, 0x5a, sizeof h);
+  mp.fill(t_eof, &h);
+  uint8_t wire[bgm1::kFrameHdrSize];
+  bgm1::pack_frame_header(h, wire);
+  bgm1::FrameHeader back;
+  CHECK(bgm1::parse_frame_header(wire, &back) == bgm1::Err::kOk);
+  return back;
+}
+
+static GnssSample make_gnss(double lat, double lon, double bearing_deg, double h_acc_m,
+                            double bearing_acc_deg, bool has_fix, bool valid, uint64_t t_msg_ns) {
+  GnssSample g;
+  g.lat_deg = lat;
+  g.lon_deg = lon;
+  g.bearing_deg = bearing_deg;
+  g.h_acc_m = h_acc_m;
+  g.bearing_acc_deg = bearing_acc_deg;
+  g.has_fix = has_fix;
+  g.valid = valid;
+  g.t_msg_ns = t_msg_ns;
+  return g;
+}
+
+// 车体系样本（deviceMotion 经 R^T 后的分量）；source_ok 由组装层给出
+static VehicleSample make_vehicle(float v_forward, float v_lateral, float yaw_rate,
+                                  bool yaw_ok, bool speed_ok, uint64_t t_msg_ns) {
+  VehicleSample v;
+  v.v_forward_mps = v_forward;
+  v.v_lateral_mps = v_lateral;
+  v.yaw_rate_radps = yaw_rate;
+  v.reverse = v_forward < -0.3f;
+  v.standstill = std::hypot(v_forward, v_lateral) < 0.1f;
+  v.yaw_source_ok = yaw_ok;
+  v.speed_source_ok = speed_ok;
+  v.t_msg_ns = t_msg_ns;
+  return v;
+}
+
+static DeviceMotionFlags make_dm_flags(bool valid = true, bool sensors_ok = true,
+                                       bool inputs_ok = true, bool posenet_ok = true,
+                                       ExtrinsicsCalibStatus calib = ExtrinsicsCalibStatus::kCalibrated,
+                                       uint64_t t_msg_ns = 0) {
+  DeviceMotionFlags f;
+  f.valid = valid;
+  f.sensors_ok = sensors_ok;
+  f.inputs_ok = inputs_ok;
+  f.posenet_ok = posenet_ok;
+  f.calib_status = calib;
+  f.t_msg_ns = t_msg_ns;
+  return f;
+}
+
+// 正常 fix：单位换算 + age + 航向精度
+static void test_meta_gnss_fix() {
+  MetaProvider mp;
+  const uint64_t t_eof = 10'000'000'000ULL;
+  mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof - 150'000'000ULL));
+  mp.set_vehicle(make_vehicle(12.5f, 0.f, 0.25f, true, true, t_eof - 5'000'000ULL));
+
+  bgm1::FrameHeader h = fill_wire(mp, t_eof);
+  CHECK(h.gnss.has_fix());
+  CHECK(h.gnss.age_ms() == 150);
+  CHECK(h.gnss.lat_e7 == 375000000);
+  CHECK(h.gnss.lon_e7 == -1222500000);
+  CHECK(h.gnss.speed_valid() && h.gnss.speed_cms == 1250);
+  CHECK(h.gnss.bearing_valid() && h.gnss.bearing_cdeg == 9000);
+  CHECK(h.gnss.h_acc_dm == 125);
+  CHECK(h.vehicle.bearing_acc_hdeg == 3);  // 1.5° / 0.5° = 3
+  CHECK(h.vehicle.yaw_valid());
+  CHECK(h.vehicle.yaw_rate_cdps == 1432);  // 0.25 rad/s = 14.3239 °/s
+  CHECK(!h.vehicle.reverse() && !h.vehicle.standstill());
+}
+
+// B3：age 是「上次 fix」的年龄；has_fix = 最新消息 hasFix ∧ age ≤ 2000；
+// 从未有过 fix 但 speed_valid=1 时 age=4095。
+static void test_meta_gnss_no_fix_and_age() {
+  const uint64_t t_eof = 10'000'000'000ULL;
+
+  {  // 从未有过 fix、只有车速：age=4095，位置类线上为 0
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(12.5f, 0.f, 0.f, true, true, t_eof));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 4095);
+    CHECK(h.gnss.lat_e7 == 0 && h.gnss.lon_e7 == 0 && h.gnss.bearing_cdeg == 0 && h.gnss.h_acc_dm == 0);
+    CHECK(h.gnss.speed_valid() && h.gnss.speed_cms == 1250);
+    CHECK(h.vehicle.bearing_acc_hdeg == 255);
+  }
+
+  {  // 边界：上次 fix 在 2000 ms 前，最新消息 hasFix=true → 仍算有 fix
+    MetaProvider mp;
+    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof - 2'000'000'000ULL));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(h.gnss.has_fix() && h.gnss.age_ms() == 2000);
+    CHECK(h.gnss.lat_e7 == 375000000 && h.gnss.h_acc_dm == 125);
+  }
+
+  {  // 边界外：2001 ms → has_fix 0，位置类清 0，age 保留
+    MetaProvider mp;
+    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof - 2'001'000'000ULL));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 2001);
+    CHECK(h.gnss.lat_e7 == 0 && h.gnss.lon_e7 == 0 && h.gnss.bearing_cdeg == 0 && h.gnss.h_acc_dm == 0);
+    CHECK(h.vehicle.bearing_acc_hdeg == 255);
+  }
+
+  {  // 500 ms 前有过 fix，随后一条 hasFix=false：age 仍取上次 fix（500），但 has_fix=0
+    MetaProvider mp;
+    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof - 500'000'000ULL));
+    mp.set_gnss(make_gnss(0, 0, 0, 0, 0, false, true, t_eof - 50'000'000ULL));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 500);
+    CHECK(h.gnss.lat_e7 == 0 && h.gnss.lon_e7 == 0);
+  }
+
+  {  // 极旧 fix：age 饱和 4095，has_fix=0
+    MetaProvider mp;
+    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, 0));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 4095);
+  }
+
+  {  // m9：gnss.t_msg > t_eof（消息比帧新）→ age=0，仍算 fix
+    MetaProvider mp;
+    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof + 5'000'000ULL));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(h.gnss.has_fix() && h.gnss.age_ms() == 0);
+  }
+
+  {  // m9：完全没有数据 → 线上 GNSS 16 B 全 0，VEHICLE 缺省
+    MetaProvider mp;
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(h.gnss.lat_e7 == 0 && h.gnss.lon_e7 == 0 && h.gnss.speed_cms == 0 &&
+          h.gnss.bearing_cdeg == 0 && h.gnss.h_acc_dm == 0 && h.gnss.fix_age_flags == 0);
+    CHECK(!h.gnss.has_fix() && !h.gnss.speed_valid() && !h.gnss.bearing_valid());
+    CHECK(h.vehicle.yaw_rate_cdps == bgm1::kYawRateInvalid && h.vehicle.vehicle_flags == 0 &&
+          h.vehicle.bearing_acc_hdeg == 255);
+  }
+
+  {  // gps valid=false：不算 fix，也不更新「上次 fix」
+    MetaProvider mp;
+    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, false, t_eof - 50'000'000ULL));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 0);
+    CHECK(h.gnss.lat_e7 == 0 && h.gnss.speed_valid() == false);
+  }
+}
+
+// m2/m3 与量程边界：h_acc、bearing_acc、经纬度范围、bearing 有限性、量程饱和
+static void test_meta_gnss_saturation() {
+  const uint64_t t_eof = 10'000'000'000ULL;
+  const VehicleSample veh = make_vehicle(0.f, 0.f, 0.f, true, true, t_eof);
+
+  {  // h_acc：≤0/NaN → 0xFFFF；0<m<0.05 → 1 dm；超量程 → 0xFFFE
+    MetaProvider mp;
+    mp.set_vehicle(veh);
+    mp.set_gnss(make_gnss(0, 0, 0, 0.0, 0, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).gnss.h_acc_dm == 0xFFFF);
+    mp.set_gnss(make_gnss(0, 0, 0, 0.04, 0, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).gnss.h_acc_dm == 1);
+    mp.set_gnss(make_gnss(0, 0, 0, std::nan(""), 0, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).gnss.h_acc_dm == 0xFFFF);
+    mp.set_gnss(make_gnss(0, 0, 0, 10000.0, 0, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).gnss.h_acc_dm == 0xFFFE);
+  }
+
+  {  // bearing_acc：≤0/NaN → 255；0<x<0.25 → 1；饱和 254
+    MetaProvider mp;
+    mp.set_vehicle(veh);
+    mp.set_gnss(make_gnss(0, 0, 0, 1, 0.0, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).vehicle.bearing_acc_hdeg == 255);
+    mp.set_gnss(make_gnss(0, 0, 0, 1, 0.1, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).vehicle.bearing_acc_hdeg == 1);
+    mp.set_gnss(make_gnss(0, 0, 0, 1, std::nan(""), true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).vehicle.bearing_acc_hdeg == 255);
+    mp.set_gnss(make_gnss(0, 0, 0, 1, 1000.0, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).vehicle.bearing_acc_hdeg == 254);
+  }
+
+  {  // m3：|lat| ≤ 90、|lon| ≤ 180 才有 fix；负纬度、±90/±180 合法
+    MetaProvider mp;
+    mp.set_gnss(make_gnss(90.0, 180.0, 1, 1, 1, true, true, t_eof));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(h.gnss.has_fix() && h.gnss.lat_e7 == 900000000 && h.gnss.lon_e7 == 1800000000);
+    mp.set_gnss(make_gnss(-90.0, -180.0, 1, 1, 1, true, true, t_eof));
+    h = fill_wire(mp, t_eof);
+    CHECK(h.gnss.has_fix() && h.gnss.lat_e7 == -900000000 && h.gnss.lon_e7 == -1800000000);
+    mp.set_gnss(make_gnss(91.0, 0, 1, 1, 1, true, true, t_eof));
+    CHECK(!fill_wire(mp, t_eof).gnss.has_fix());
+    mp.set_gnss(make_gnss(-90.1, 0, 1, 1, 1, true, true, t_eof));
+    CHECK(!fill_wire(mp, t_eof).gnss.has_fix());
+    mp.set_gnss(make_gnss(0, 181.0, 1, 1, 1, true, true, t_eof));
+    CHECK(!fill_wire(mp, t_eof).gnss.has_fix());
+    mp.set_gnss(make_gnss(std::nan(""), 0, 1, 1, 1, true, true, t_eof));
+    CHECK(!fill_wire(mp, t_eof).gnss.has_fix());
+  }
+
+  {  // bearing 非有限 → bearing_valid=0（位置仍有 fix）；回绕到 [0, 36000)
+    MetaProvider mp;
+    mp.set_gnss(make_gnss(0, 0, std::nan(""), 1, 1, true, true, t_eof));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(h.gnss.has_fix() && !h.gnss.bearing_valid() && h.gnss.bearing_cdeg == 0);
+    mp.set_gnss(make_gnss(0, 0, 359.999, 1, 1, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).gnss.bearing_cdeg == 0);
+    mp.set_gnss(make_gnss(0, 0, -10.0, 1, 1, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).gnss.bearing_cdeg == 35000);
+  }
+
+  {  // 无 GNSS、只有车速：speed/speed_valid 独立于定位；其余为 0，age=4095
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(8.0f, 0.f, 0.f, true, true, t_eof));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 4095);
+    CHECK(h.gnss.speed_valid() && h.gnss.speed_cms == 800);
+    CHECK(h.gnss.lat_e7 == 0 && h.gnss.lon_e7 == 0);
+    CHECK(h.vehicle.bearing_acc_hdeg == 255);
+  }
+
+  {  // 车体系前向速度为负 → speed 取模长，reverse 位置位；阈值严格 < -0.3
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(-8.0f, 0.f, 0.f, true, true, t_eof));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(h.gnss.speed_valid() && h.gnss.speed_cms == 800);
+    CHECK(h.vehicle.reverse());
+    mp.set_vehicle(make_vehicle(-0.3f, 0.f, 0.f, true, true, t_eof));
+    CHECK(!fill_wire(mp, t_eof).vehicle.reverse());
+    mp.set_vehicle(make_vehicle(-0.31f, 0.f, 0.f, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).vehicle.reverse());
+  }
+
+  {  // standstill：水平模长 < 0.1 m/s
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(0.06f, 0.07f, 0.f, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).vehicle.standstill());
+    mp.set_vehicle(make_vehicle(0.08f, 0.08f, 0.f, true, true, t_eof));
+    CHECK(!fill_wire(mp, t_eof).vehicle.standstill());
+  }
+}
+
+// deviceMotion 有效性：100 ms 内（含）+ valid/sensorsOK + 有限值；yaw 与 speed 各自判
+static void test_meta_vehicle_device_motion() {
+  const uint64_t t_eof = 10'000'000'000ULL;
+
+  {  // 正常样本
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(10.f, 0.f, 0.25f, true, true, t_eof - 5'000'000ULL));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(h.vehicle.yaw_valid() && h.vehicle.yaw_rate_cdps == 1432);
+    CHECK(h.gnss.speed_valid() && h.gnss.speed_cms == 1000);
+  }
+  {  // 100 ms 边界内有效；超出 1 ns 无效
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(10.f, 0.f, 0.25f, true, true, t_eof - 100'000'000ULL));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(h.vehicle.yaw_valid() && h.gnss.speed_valid());
+    mp.set_vehicle(make_vehicle(10.f, 0.f, 0.25f, true, true, t_eof - 100'000'001ULL));
+    h = fill_wire(mp, t_eof);
+    CHECK(!h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+    CHECK(h.vehicle.yaw_rate_cdps == bgm1::kYawRateInvalid && h.gnss.speed_cms == 0);
+  }
+  {  // 明确 101 ms：yaw 与 speed 都无效
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(10.f, 0.f, 0.25f, true, true, t_eof - 101'000'000ULL));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(!h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+  }
+  {  // 消息比 t_eof 新也算新鲜
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(10.f, 0.f, 0.25f, true, true, t_eof + 5'000'000ULL));
+    CHECK(fill_wire(mp, t_eof).vehicle.yaw_valid());
+  }
+  {  // 组装层判出 source_ok=false（valid / sensorsOK 任一 false）→ 两个 valid 位都 0
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(10.f, 0.f, 0.25f, false, false, t_eof));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(!h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+  }
+  {  // 分量 NaN：yaw NaN 只废 yaw；速度 NaN 只废 speed
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(10.f, 0.f, std::nanf(""), true, true, t_eof));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(!h.vehicle.yaw_valid() && h.vehicle.yaw_rate_cdps == bgm1::kYawRateInvalid);
+    CHECK(h.gnss.speed_valid());
+    mp.set_vehicle(make_vehicle(std::nanf(""), 0.f, 0.25f, true, true, t_eof));
+    h = fill_wire(mp, t_eof);
+    CHECK(h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+  }
+  {  // yaw ±32767 饱和（避开 INT16_MIN）
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(1.f, 0.f, 100.0f, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).vehicle.yaw_rate_cdps == 32767);
+    mp.set_vehicle(make_vehicle(1.f, 0.f, -100.0f, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).vehicle.yaw_rate_cdps == -32767);
+  }
+  {  // speed 65535 饱和；负速度已在上面的 reverse 用例覆盖
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(1000.f, 0.f, 0.f, true, true, t_eof));
+    CHECK(fill_wire(mp, t_eof).gnss.speed_cms == 65535);
+  }
+  {  // speed 用前向分量：横向 NaN 不废 speed，但算不出 standstill
+    MetaProvider mp;
+    mp.set_vehicle(make_vehicle(1.f, std::nanf(""), 0.f, true, true, t_eof));
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(h.gnss.speed_valid() && h.gnss.speed_cms == 100);
+    CHECK(!h.vehicle.standstill());
+  }
+  {  // 无 deviceMotion：yaw/speed 都无效，整块 VEHICLE 缺省
+    MetaProvider mp;
+    bgm1::FrameHeader h = fill_wire(mp, t_eof);
+    CHECK(!h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+    CHECK(h.vehicle.vehicle_flags == 0 && h.vehicle.bearing_acc_hdeg == 255);
+  }
+}
+
+// 车体系换算与 Python rot_from_euler 数值对照（rpy=[0.01,-0.02,0.03]）
+static void test_device_motion_transform() {
+  const float rpy[3] = {0.01f, -0.02f, 0.03f};
+  const float vel[3] = {5.0f, 1.0f, 0.2f};
+  const float ang[3] = {0.1f, -0.2f, 0.3f};
+  const DeviceMotionFlags flags = make_dm_flags(true, true, true, true,
+                                                ExtrinsicsCalibStatus::kCalibrated, 123);
+
+  VehicleSample s = vehicle_sample_from_device_motion(rpy, vel, ang, flags);
+  CHECK(s.t_msg_ns == 123 && s.yaw_source_ok && s.speed_source_ok);
+  CHECK_NEAR(s.v_forward_mps, 5.03073988667, 1e-5);
+  CHECK_NEAR(s.v_lateral_mps, 0.85052415581, 1e-5);
+  CHECK_NEAR(s.yaw_rate_radps, 0.300075168029, 1e-5);
+  CHECK(!s.reverse && !s.standstill);
+
+  // 车体系判据：倒车向量 → reverse；零速 → standstill
+  const float back[3] = {-1.0f, 0.0f, 0.0f};
+  const float zero[3] = {0.0f, 0.0f, 0.0f};
+  s = vehicle_sample_from_device_motion(rpy, back, ang, flags);
+  CHECK(s.reverse && !s.standstill);
+  s = vehicle_sample_from_device_motion(rpy, zero, ang, flags);
+  CHECK(!s.reverse && s.standstill);
+
+  // 分量非有限 → 对应 source_ok false
+  const float bad_v[3] = {std::nanf(""), 0.f, 0.f};
+  const float bad_w[3] = {0.f, 0.f, std::nanf("")};
+  s = vehicle_sample_from_device_motion(rpy, bad_v, ang, flags);
+  CHECK(!s.speed_source_ok && s.yaw_source_ok);
+  s = vehicle_sample_from_device_motion(rpy, vel, bad_w, flags);
+  CHECK(s.speed_source_ok && !s.yaw_source_ok);
+}
+
+// S1：yaw 物理语义——rpy=0、ω_device=(0,0,+0.1) 表示从上往下看顺时针（右转），
+// 与 bearing 同向；+z 为车体系 FRD 的 z 轴（向下）。车机取 w_body.z 不变，只改注释。
+static void test_yaw_sign_convention() {
+  const float rpy0[3] = {0.f, 0.f, 0.f};
+  const float rpy_mount[3] = {0.f, 0.f, 0.05f};  // yaw 安装角
+  const float zero[3] = {0.f, 0.f, 0.f};
+  const float w_right[3] = {0.f, 0.f, 0.1f};   // +z：顺时针（右转）
+  const float w_left[3] = {0.f, 0.f, -0.1f};   // −z：逆时针（左转）
+  const DeviceMotionFlags flags = make_dm_flags(true, true, true, true,
+                                                ExtrinsicsCalibStatus::kCalibrated, 1000);
+
+  MetaProvider mp;
+  VehicleSample s = vehicle_sample_from_device_motion(rpy0, zero, w_right, flags);
+  CHECK_NEAR(s.yaw_rate_radps, 0.1, 1e-6);
+  mp.set_vehicle(s);
+  bgm1::FrameHeader h = fill_wire(mp, 1000);
+  CHECK(h.vehicle.yaw_valid() && h.vehicle.yaw_rate_cdps == 573);  // 0.1 rad/s = +5.7296 °/s
+
+  s = vehicle_sample_from_device_motion(rpy0, zero, w_left, flags);
+  CHECK_NEAR(s.yaw_rate_radps, -0.1, 1e-6);
+  mp.set_vehicle(s);
+  h = fill_wire(mp, 1000);
+  CHECK(h.vehicle.yaw_valid() && h.vehicle.yaw_rate_cdps == -573);
+
+  // 非零 yaw 安装角：纯 z 轴旋转不改变 z 分量，符号仍为正
+  s = vehicle_sample_from_device_motion(rpy_mount, zero, w_right, flags);
+  CHECK_NEAR(s.yaw_rate_radps, 0.1, 1e-6);
+  mp.set_vehicle(s);
+  CHECK(fill_wire(mp, 1000).vehicle.yaw_rate_cdps == 573);
+}
+
+// I1 / m-b：speed = valid ∧ sensorsOK ∧ inputsOK ∧ posenetOK ∧ 有限；
+// yaw = valid ∧ sensorsOK ∧ 有限（不看 inputsOK/posenetOK）；calStatus==invalid 两者都无效。
+static void test_device_motion_validity_flags() {
+  const float rpy[3] = {0.f, 0.f, 0.f};
+  const float vel[3] = {5.f, 0.f, 0.f};
+  const float ang[3] = {0.f, 0.f, 0.1f};
+
+  for (bool inputs : {true, false}) {
+    VehicleSample s = vehicle_sample_from_device_motion(
+        rpy, vel, ang, make_dm_flags(true, true, inputs, true));
+    CHECK(s.yaw_source_ok == true);
+    CHECK(s.speed_source_ok == inputs);
+  }
+  for (bool posenet : {true, false}) {
+    VehicleSample s = vehicle_sample_from_device_motion(
+        rpy, vel, ang, make_dm_flags(true, true, true, posenet));
+    CHECK(s.yaw_source_ok == true);
+    CHECK(s.speed_source_ok == posenet);
+  }
+  // valid / sensorsOK 任一 false → yaw 与 speed 都无效
+  for (bool valid : {true, false}) {
+    VehicleSample s = vehicle_sample_from_device_motion(
+        rpy, vel, ang, make_dm_flags(valid, true, true, true));
+    CHECK(s.yaw_source_ok == valid && s.speed_source_ok == valid);
+  }
+  for (bool sensors : {true, false}) {
+    VehicleSample s = vehicle_sample_from_device_motion(
+        rpy, vel, ang, make_dm_flags(true, sensors, true, true));
+    CHECK(s.yaw_source_ok == sensors && s.speed_source_ok == sensors);
+  }
+
+  // m-b：invalid 两者都无效；uncalibrated / calibrated / recalibrating 照常
+  using CS = ExtrinsicsCalibStatus;
+  for (CS st : {CS::kUncalibrated, CS::kCalibrated, CS::kRecalibrating}) {
+    VehicleSample s = vehicle_sample_from_device_motion(
+        rpy, vel, ang, make_dm_flags(true, true, true, true, st));
+    CHECK(s.yaw_source_ok && s.speed_source_ok);
+  }
+  VehicleSample s_invalid = vehicle_sample_from_device_motion(
+      rpy, vel, ang, make_dm_flags(true, true, true, true, CS::kInvalid));
+  CHECK(!s_invalid.yaw_source_ok && !s_invalid.speed_source_ok);
+
+  // 线上复核：I1 的 inputsOK/posenetOK 只废 speed；calStatus=invalid 两者都废
+  const uint64_t t_eof = 10'000'000'000ULL;
+  const DeviceMotionFlags f_inputs =
+      make_dm_flags(true, true, false, true, CS::kCalibrated, t_eof);
+  MetaProvider mp;
+  mp.set_vehicle(vehicle_sample_from_device_motion(rpy, vel, ang, f_inputs));
+  bgm1::FrameHeader h = fill_wire(mp, t_eof);
+  CHECK(h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+
+  const DeviceMotionFlags f_posenet =
+      make_dm_flags(true, true, true, false, CS::kCalibrated, t_eof);
+  mp.set_vehicle(vehicle_sample_from_device_motion(rpy, vel, ang, f_posenet));
+  h = fill_wire(mp, t_eof);
+  CHECK(h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+
+  const DeviceMotionFlags f_invalid =
+      make_dm_flags(true, true, true, true, CS::kInvalid, t_eof);
+  mp.set_vehicle(vehicle_sample_from_device_motion(rpy, vel, ang, f_invalid));
+  h = fill_wire(mp, t_eof);
+  CHECK(!h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+}
+
+// m-a：按真实因果链重写相位测试。
+//   t_eof(k) = base + k·50 ms
+//   modelDataV2SP 在 eof+M 唤醒 calib_thread（M = 30/45/60 ms，覆盖 bigModel REPLY 迟到范围）
+//   deviceMotion 在 eof+M+ε 发布（ε = 1..3 ms）→ 唤醒时读到上一帧样本
+//   打包在 eof+L（L = 3/5/10 ms）
+// 稳态下 yaw_valid 与 speed_valid 恒为 1。额外注入「第 40 帧 modelDataV2SP 迟到 60 ms
+// 或丢一帧」；丢帧时该帧的 deviceMotion（依赖 cameraOdometry）一并消失。
+// 断言无效帧 ≤2、之后恢复。窗口若改回 20 ms，本测试会大量红。
+struct PhaseResult {
+  int invalid = 0;
+  int max_run = 0;
+  int invalid_last10 = 0;
+};
+
+static PhaseResult run_phase(uint64_t M, uint64_t eps, uint64_t L, int anomaly,
+                             bool alternate_m = false) {
+  constexpr uint64_t P = 50'000'000;  // 20 Hz
+  constexpr uint64_t base = 5'000'000'000ULL;
+  constexpr int N = 80;
+  constexpr int kAnomalyFrame = 40;
+
+  std::vector<uint64_t> dms, wakes;
+  for (int k = 0; k < N; k++) {
+    const uint64_t Mk = alternate_m ? ((k % 2) ? 60'000'000ULL : 30'000'000ULL) : M;
+    if (anomaly == 1 && k == kAnomalyFrame) continue;  // 丢帧：modelDataV2SP + deviceMotion 一起消失
+    dms.push_back(base + uint64_t(k) * P + Mk + eps);
+    wakes.push_back(base + uint64_t(k) * P + Mk);
+  }
+  if (anomaly == 2) wakes[kAnomalyFrame] += 60'000'000;  // 迟到 60 ms
+  std::sort(wakes.begin(), wakes.end());
+
+  MetaProvider mp;
+  size_t wi = 0, di = 0;
+  uint64_t last_dm = 0, sample_t = 0;
+  bool have_dm = false, have_sample = false;
+  PhaseResult r;
+  int run = 0;
+
+  for (int k = 0; k < N; k++) {
+    const uint64_t eof = base + uint64_t(k) * P;
+    const uint64_t pack = eof + L;
+    // 按时间序处理打包前的唤醒与 deviceMotion（唤醒只消费已到达的最新一条）
+    for (;;) {
+      const bool wake_ready = wi < wakes.size() && wakes[wi] <= pack;
+      const bool dm_ready = di < dms.size() && dms[di] <= pack;
+      if (!wake_ready && !dm_ready) break;
+      if (dm_ready && (!wake_ready || dms[di] <= wakes[wi])) {
+        last_dm = dms[di];
+        have_dm = true;
+        di++;
+      } else {
+        if (have_dm && last_dm <= wakes[wi]) {
+          sample_t = last_dm;
+          have_sample = true;
+        }
+        wi++;
+      }
+    }
+    if (have_sample) {
+      mp.set_vehicle(make_vehicle(10.f, 0.f, 0.1f, true, true, sample_t));
+    }
+    bgm1::FrameHeader h = fill_wire(mp, eof);
+    const bool ok = h.vehicle.yaw_valid() && h.gnss.speed_valid();
+    if (k >= 3) {
+      if (!ok) {
+        r.invalid++;
+        run++;
+        r.max_run = std::max(r.max_run, run);
+        if (k >= N - 10) r.invalid_last10++;
+      } else {
+        run = 0;
+      }
+    }
+  }
+  return r;
+}
+
+static void test_meta_vehicle_phase() {
+  // 稳态：M 覆盖 30/45/60 ms（bigModel REPLY 截止 60 ms），全部相位组合恒有效
+  for (uint64_t M : {30'000'000ULL, 45'000'000ULL, 60'000'000ULL}) {
+    for (uint64_t eps : {1'000'000ULL, 2'000'000ULL, 3'000'000ULL}) {
+      for (uint64_t L : {3'000'000ULL, 5'000'000ULL, 10'000'000ULL}) {
+        PhaseResult r = run_phase(M, eps, L, 0);
+        CHECK(r.invalid == 0);
+      }
+    }
+  }
+
+  // 交替 M=30/60 ms：紧跟在 60 ms 帧之后的一帧允许无效；统计实际占比
+  int alt_invalid = 0;
+  int alt_frames = 0;
+  for (uint64_t eps : {1'000'000ULL, 3'000'000ULL}) {
+    for (uint64_t L : {3'000'000ULL, 10'000'000ULL}) {
+      PhaseResult r = run_phase(0, eps, L, 0, true);
+      CHECK(r.invalid <= 1);
+      CHECK(r.invalid_last10 == 0);
+      alt_invalid += r.invalid;
+      alt_frames += 77;  // 计 k=3..79
+    }
+  }
+  printf("phase alternate M=30/60: %d/%d invalid (%.1f%%)\n", alt_invalid, alt_frames,
+         alt_frames ? 100.0 * alt_invalid / alt_frames : 0.0);
+
+  // 异常：迟到 60 ms / 丢一帧（deviceMotion 一起去掉）→ 无效帧 ≤2，且之后恢复
+  for (uint64_t M : {30'000'000ULL, 45'000'000ULL, 60'000'000ULL}) {
+    for (uint64_t eps : {1'000'000ULL, 3'000'000ULL}) {
+      for (uint64_t L : {3'000'000ULL, 10'000'000ULL}) {
+        for (int anomaly : {1, 2}) {
+          PhaseResult r = run_phase(M, eps, L, anomaly);
+          CHECK(r.invalid <= 2);
+          CHECK(r.max_run <= 2);
+          CHECK(r.invalid_last10 == 0);
+        }
+      }
+    }
+  }
+}
+
+// fill 路径零堆分配：全局 operator new 计数在 1000 次 fill 前后不变
+static void test_meta_fill_zero_alloc() {
+  MetaProvider mp;
+  const uint64_t t_eof = 10'000'000'000ULL;
+  mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof));
+  mp.set_vehicle(make_vehicle(12.5f, 0.f, 0.25f, true, true, t_eof));
+
+  // 计数器自检：一次 4 KiB 分配必须被记到，避免覆盖未生效导致空测
+  const uint64_t self = g_alloc_count.load(std::memory_order_relaxed);
+  { std::vector<uint8_t> probe(4096, 1); CHECK(probe.size() == 4096); }
+  CHECK(g_alloc_count.load(std::memory_order_relaxed) > self);
+
+  bgm1::FrameHeader h;
+  const uint64_t before = g_alloc_count.load(std::memory_order_relaxed);
+  for (int i = 0; i < 1000; i++) mp.fill(t_eof + uint64_t(i) * 50'000'000ULL, &h);
+  CHECK(g_alloc_count.load(std::memory_order_relaxed) == before);
 }
 
 // ---- 配对状态机（16 号诊断修复：按 timestamp_sof 配对，不按 frame_id）----
@@ -1704,6 +2306,15 @@ int main() {
   test_warp_golden();
   test_meta_provider();
   test_meta_provider_model_inputs();
+  test_meta_gnss_fix();
+  test_meta_gnss_no_fix_and_age();
+  test_meta_gnss_saturation();
+  test_meta_vehicle_device_motion();
+  test_device_motion_transform();
+  test_yaw_sign_convention();
+  test_device_motion_validity_flags();
+  test_meta_vehicle_phase();
+  test_meta_fill_zero_alloc();
 
   test_pair_kill_does_not_recover();
   test_pair_off_fid_aligned_sof();

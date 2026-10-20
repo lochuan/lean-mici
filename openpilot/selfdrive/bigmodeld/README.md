@@ -112,12 +112,13 @@ ERR `VERSION_MISMATCH`（code 1，`detail` = 对端 ver « 8 ‖ 本端 ver，�
 | REPLY | 8320 B（len 8280） | **8480 B（len 8440）** | 遥测之后追加定长 **NavExt** 160 B（偏移 8304），尾部保留 16 B 在 8464 |
 | HELLO / ERR | 48 / 40 B | 不变 | 只有 ver=3；ERR `VERSION_MISMATCH.detail` 编码见上 |
 
-**GNSS（FRAME 偏移 144，16 B，WGS-84）**：`lat_e7 i32` · `lon_e7 i32` · `speed_cms u16`（vEgo，`0xFFFF` 无效）·
-`bearing_cdeg u16`（`0xFFFF` 无效）· `h_acc_dm u16`（`0xFFFF` 未知，饱和 `0xFFFE`）· `fix_age_flags u16`
-（bit0–11 age_ms 饱和 4095 · bit12 has_fix · bit14 speed_valid · bit15 bearing_valid）。`has_fix=0` 时位置类字段（lat / lon / bearing / h_acc / bearing_valid）无意义，写 0；`speed_cms` + `speed_valid`（vEgo）与 `age_ms` 保留；车机完全无数据时整块 16 B 为 0；带 valid 位的字段（speed / bearing）以 valid 位为准，无效写 0，仅无 valid 位的 `h_acc_dm` 用 `0xFFFF` 哨兵；`age_ms` 只在 `has_fix=1` 或 `speed_valid=1` 时有意义。
+**GNSS（FRAME 偏移 144，16 B，WGS-84）**：`lat_e7 i32` · `lon_e7 i32` · `speed_cms u16`（**`deviceMotion.velocityDevice`
+经 rpyCalib 转到车体系后的前向分量绝对值**；`speed_valid=0` ⇒ 写 0，不是 0xFFFF）·
+`bearing_cdeg u16`（`bearing_valid=0` ⇒ 写 0）· `h_acc_dm u16`（`0xFFFF` 未知，饱和 `0xFFFE`；≤0 视为未知）· `fix_age_flags u16`
+（bit0–11 **上次 fix 的** age_ms 饱和 4095；从未有过 fix 但 `speed_valid=1` → 4095 · bit12 has_fix = 最新消息 hasFix ∧ age ≤ 2000 · bit14 speed_valid · bit15 bearing_valid）。`speed_valid` = deviceMotion 100 ms 内 ∧ 消息 valid ∧ `sensorsOK` ∧ `inputsOK` ∧ `posenetOK` ∧ 分量有限；`has_fix=0` 时位置类字段（lat / lon / bearing / h_acc / bearing_valid）无意义，写 0；`speed_cms` + `speed_valid` 与 `age_ms` 保留；车机完全无数据时整块 16 B 为 0；带 valid 位的字段（speed / bearing）以 valid 位为准，无效写 0，仅无 valid 位的 `h_acc_dm` 用 `0xFFFF` 哨兵。
 
-**VEHICLE（偏移 160，8 B）**：`yaw_rate_cdps i16`（0.01°/s 左转为正，`INT16_MIN` 无效）· `vehicle_flags u8`
-（bit0 yaw_valid · bit1 reverse · bit2 standstill）· `bearing_acc_hdeg u8`（0.5°，255 未知 / 无 fix，饱和 254）·
+**VEHICLE（偏移 160，8 B）**：`yaw_rate_cdps i16`（`deviceMotion.angularVelocityDevice` 经 rpyCalib 转到车体系后的 z 分量，0.01°/s，**右转（顺时针）为正，与 bearing 同向**，`INT16_MIN` 无效；车机取 `w_body.z` 不取反）· `vehicle_flags u8`
+（bit0 yaw_valid（deviceMotion 100 ms 内 ∧ 消息 valid ∧ `sensorsOK` ∧ 有限；`calStatus == invalid` 时置 0）· bit1 reverse（车体系前向速度 < −0.3 m/s）· bit2 standstill（车体系水平速度模长 < 0.1 m/s））· `bearing_acc_hdeg u8`（0.5°，255 未知 / 无 fix，饱和 254；≤0 视为未知）·
 保留 4 B（pack 置 0，解析忽略）。
 
 **NavExt（REPLY 偏移 8304，160 B）**：健康头 4（`present` bit0 NAV_STATE · bit1 ROAD_ATTR · bit2 CURVE_AHEAD ·
@@ -125,9 +126,17 @@ bit3 NAV_DEBUG；`nav_health` bit0 gps_ok · bit1 route_ok · bit2 nav_ok · bit
 ROAD_ATTR 16 ‖ CURVE_AHEAD 104（头 8 + 8 点 × 12）‖ NAV_DEBUG 8 ‖ 保留 4。`present` 位为 0 的子结构全 0，
 本端当「无此功能」；CURVE_AHEAD 线上 `count>8` 当坏块，清 `present` bit2、子块整块按缺省（点要喂纵向）。各子结构字段、单位、无效值见 `frame_codec.h`。
 
-**本进程现状**：票 A 只落编解码——FRAME 的 GNSS / VEHICLE 填「无数据」（GNSS 全 0，VEHICLE yaw 无效、航向精度
-255），REPLY 的 NavExt 由 `parse_reply` 解析但 `main.cc` 暂不消费（模型输出照旧）。GNSS 订阅、`navStateSP`、
-`/dev/shm/params` 弯道写入是后续票。
+**本进程现状**：票 A 落编解码；票 B 让 `MetaProvider` 填真实 GNSS / VEHICLE——`calib_thread` 订阅
+`gpsLocationExternal`（10 Hz）与 `deviceMotion`（20 Hz），两者**不进 poll 集合**（conflate 非阻塞取最新一条），
+用户态循环仍只被原有 4 Hz + 20 Hz 节拍源唤醒。注意 msgq 每条消息都会对每个订阅线程发 SIGUSR2（与 poll
+无关），这两路会让线程每秒多约 30 次**信号唤醒**。`fill()` 按 `t_eof` 与消息 `logMonoTime` 算 `age_ms` /
+`has_fix` / `yaw_valid`；deviceMotion 的车体系换算照 `locationd/helpers.py` 的 `PoseCalibrator`
+（`calib_from_device = rot_from_euler(rpyCalib)^T`），yaw 取 `w_body.z`，右转（顺时针）为正、与 bearing
+同向。时钟时基：Python 发布者的 `logMonoTime` 是 CLOCK_MONOTONIC，`t_eof` 是 CLOCK_BOOTTIME，两者只在
+设备休眠后才会出现差值；openpilot 全局默认它们一致，本实现沿用该假设。yaw / speed 的有效率与大模型
+REPLY 的迟到率绑定：REPLY 迟到（M 接近 60 ms）时，紧接着的那一帧可能因样本超过 100 ms 而判为无效；
+上车时统计 `yaw_valid=0` 的占比，并和 `bigLateReplyCount` 对照。REPLY 的 NavExt 由 `parse_reply`
+解析但 `main.cc` 暂不消费（模型输出照旧）；`navStateSP`、`/dev/shm/params` 弯道写入是后续票。
 
 
 ## 构建
@@ -159,7 +168,9 @@ clang++ -std=c++17 -O1 test_warp_golden.cc warp_pack.cpp -o /tmp/test_warp_golde
 MetaCache（查不到不弹队、clean2 回归、miss 分类）、序列头门（开门条件/整对丢弃/断档后首帧双 IDR）、
 连接代号（重连窗口旧提交静默拒）、
 发送器（假 socket/假时钟：出包即发、覆盖丢弃、假死发完/截断、重连、kLinkLost 升级、迟到
-包静默丢、部分写不撕裂）、warp golden ≤1e-5、MetaProvider、frame_codec
+包静默丢、部分写不撕裂）、warp golden ≤1e-5、MetaProvider（含 v3 GNSS/VEHICLE：单位换算、
+age/has_fix/yaw_valid 边界、deviceMotion 车体系换算与 Python 对照、yaw 右转符号、20 Hz 采样相位
+（含丢帧/迟到 60 ms）、量程饱和、fill 零堆分配）、frame_codec
 往返与坏输入（含 HELLO）、LinkStateTracker（instance 对比判 blip/restart）、
 avahi 行解析/子网范围/发现节流（06 号）。golden 表生成（输出粘进 test_bigmodeld.cc）：
 

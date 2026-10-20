@@ -11,8 +11,11 @@
 //   desire[8] = modeld DesireHelper 电平（set_model_inputs 进）→ fill 转 pulse 边沿
 //     （MODEL_ABI §4.2：通道 0 恒 0、持续同 desire 只 pulse 一次）。
 //   action_t[2] = modeld chestnut 公式直通（13 号 / research/02 §4，权威在 modeld）。
+//   GNSS 16 B / VEHICLE 8 B = 协议 v3 §1.2.1/§1.2.2：set_gnss/set_vehicle 存原始单位，
+//     fill 按 t_eof 算 age_ms / has_fix / yaw_valid 并编码单位；线上规范形（无 fix 清位置类
+//     字段、valid=0 写 0、bearing_acc_hdeg 无 fix 255）归 frame_codec 的 pack。
 //
-// 纯逻辑（仅 std），宿主单测直接编译。
+// 纯逻辑（仅 std），宿主单测直接编译；fill 路径不堆分配。
 
 #include <cstdint>
 #include <mutex>
@@ -33,6 +36,61 @@ void get_warp_matrix(const float rpy[3], const float intrinsics[9], bool bigmode
 extern const float kNarrowRoadIntrinsics[9];
 extern const float kWideRoadIntrinsics[9];
 
+// GNSS 原始样本（gpsLocationExternal，10 Hz）：单位同 cereal，未编码。
+// t_msg_ns = 消息 logMonoTime；fill 用上次 fix 的 t_msg_ns 与 t_eof 算 age_ms（饱和 4095）。
+struct GnssSample {
+  double lat_deg = 0;           // WGS-84
+  double lon_deg = 0;
+  double bearing_deg = 0;       // 0.01° 线上编码；正北顺时针，fill 回绕到 [0, 360)
+  double h_acc_m = 0;           // 水平精度 1σ（m）
+  double bearing_acc_deg = 0;   // 航向精度 1σ（°）
+  bool has_fix = false;
+  bool valid = true;            // cereal Event.valid（ubloxd 恒 true，仍按 B5 检查）
+  uint64_t t_msg_ns = 0;
+};
+
+// extrinsicsCalibration.calStatus；只有 invalid 时禁用 yaw/speed，
+// uncalibrated / recalibrating 仍用当前 rpy（m-b）。
+enum class ExtrinsicsCalibStatus : uint8_t {
+  kUncalibrated = 0,
+  kCalibrated = 1,
+  kInvalid = 2,
+  kRecalibrating = 3,
+};
+
+// deviceMotion → 车体系样本（helpers.py PoseCalibrator）：
+//   device_from_calib = rot_from_euler(rpyCalib)
+//   calib_from_device = device_from_calib^T
+//   v_body = calib_from_device · velocityDevice
+//   w_body = calib_from_device · angularVelocityDevice
+// yaw_source_ok  = valid ∧ sensorsOK ∧ calStatus != invalid ∧ w_body.z 有限
+// speed_source_ok = valid ∧ sensorsOK ∧ inputsOK ∧ posenetOK ∧ calStatus != invalid ∧ v_body.x 有限
+struct VehicleSample {
+  float v_forward_mps = 0;      // 车体系 x（带符号）
+  float v_lateral_mps = 0;      // 车体系 y
+  float yaw_rate_radps = 0;     // 车体系 z，右转（顺时针）为正，与 bearing 同向
+  bool reverse = false;         // v_forward < −0.3 m/s
+  bool standstill = false;      // hypot(v_forward, v_lateral) < 0.1 m/s
+  bool yaw_source_ok = false;
+  bool speed_source_ok = false;
+  uint64_t t_msg_ns = 0;
+};
+
+// deviceMotion 消息的判据快照（I1 / m-b）
+struct DeviceMotionFlags {
+  bool valid = false;              // cereal Event.valid
+  bool sensors_ok = false;         // deviceMotion.sensorsOK
+  bool inputs_ok = false;          // deviceMotion.inputsOK
+  bool posenet_ok = false;         // deviceMotion.posenetOK
+  ExtrinsicsCalibStatus calib_status = ExtrinsicsCalibStatus::kUncalibrated;
+  uint64_t t_msg_ns = 0;
+};
+
+VehicleSample vehicle_sample_from_device_motion(const float rpy[3],
+                                                const float velocity_device[3],
+                                                const float angular_velocity_device[3],
+                                                const DeviceMotionFlags& flags);
+
 // 帧头元数据提供者：rpyCalib 由标定线程喂（extrinsicsCalibration），fill() 由取帧线程调。
 class MetaProvider {
  public:
@@ -40,6 +98,11 @@ class MetaProvider {
 
   // extrinsicsCalibration.rpyCalib 更新时调用（任意线程）。
   void set_rpy(const float rpy[3]);
+
+  // gpsLocationExternal / deviceMotion 更新时调用（任意线程，只存最新一条）。
+  // set_gnss 只在 hasFix 时更新「上次 fix」；set_vehicle 存 deviceMotion 换算后的车体系样本。
+  void set_gnss(const GnssSample& s);
+  void set_vehicle(const VehicleSample& s);
 
   // modeld 上行元数据（04 号 C-2，modelDataV2SP）更新时调用（任意线程）：
   // action_t = chestnut 公式（research/02 §4），desire_class = DH.desire 电平。
@@ -50,8 +113,8 @@ class MetaProvider {
   void reset_desire_latch();
 
   // 生成一帧的头元数据。t_eof = road 帧 timestamp_eof（ns）。
-  // 填 t_eof/desire/traffic_convention/action_t/warp_*，另把 gnss/vehicle 置「无数据」（v3，暂无生产者）；
-  // flags/frame_idx/road_len/wide_len 归调用方。
+  // 填 t_eof/desire/traffic_convention/action_t/warp_*/gnss/vehicle；flags/frame_idx/road_len/wide_len
+  // 归调用方。无样本时 gnss/vehicle 保持缺省（GNSS 全 0、yaw 无效、航向精度 255）。
   void fill(uint64_t t_eof, bgm1::FrameHeader* out) const;
 
   // 当前 warp 矩阵（wide=false → road/MED，true → wide/SBIG），与 fill 写进帧头的同一份。
@@ -68,4 +131,10 @@ class MetaProvider {
   float action_t_[2] = {0.f, 0.f};
   uint8_t desire_class_ = 0;
   mutable uint8_t prev_desire_class_ = 0;  // pulse 边沿 latch：每次 fill() 采样
+  GnssSample gnss_;                        // 最近一条 gpsLocationExternal（has_fix 已按 valid/坐标清洗）
+  bool gnss_seen_ = false;
+  GnssSample last_fix_;                    // 上次有效 fix（位置/精度/时刻；B3）
+  bool have_fix_ = false;
+  VehicleSample vehicle_;                  // 最近一条 deviceMotion（车体系）
+  bool vehicle_seen_ = false;
 };
