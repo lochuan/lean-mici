@@ -5,7 +5,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 在取帧线程按标定矩阵 warp 成模型视图 512×256 NV12（App 只做 pack），
 用 `logger_lib` 的 `V4LEncoder` 双路硬编（HEVC Main、VBR、无 B 帧、GOP 20、venus realtime 优先级、
 默认每路 2 Mb/s 可调），按 10 号布局组 FRAME 经 TCP 发出（road 出包即发）。不落盘、不进 loggerd（编码输出
-回调 ⇒ 不建 PubMaster ⇒ loggerd 无编码数据）。`frame_codec.{h,cpp}` 与 chipmunk App 的 `frame_codec.h` 为同一线协议（BGM1 v3，见下「线协议 v3」）的两份镜像，须逐字节同源，改一边须同步另一边。
+只进发送器，不发布编码数据服务）。`frame_codec.{h,cpp}` 与 chipmunk App 的 `frame_codec.h` 为同一线协议（BGM1 v3，见下「线协议 v3」）的两份镜像，须逐字节同源，改一边须同步另一边。
 
 ## 模块
 
@@ -13,7 +13,7 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 |---|---|
 | `frame_codec.{h,cpp}` | BGM1 线协议 FRAME/REPLY/ERR 编解码（与 chipmunk `app/app/src/main/cpp/` 原样同源，勿改；布局表见其头注释） |
 | `warp_pack.{h,cpp}` | NEON warp：`warpNv12` 相机帧 → 512×256 NV12（协议 v3 在 C4 上 warp，手机只做 pack） |
-| `frame_meta.{h,cpp}` | 帧头元数据：warp 矩阵 C++ 复刻 + MetaProvider（标定喂 rpyCalib，modeld 喂 desire/action_t；GNSS/VEHICLE 暂填「无数据」） |
+| `frame_meta.{h,cpp}` | 帧头元数据：warp 矩阵 C++ 复刻 + MetaProvider（标定喂 rpyCalib，modeld 喂 desire/action_t，calib 线程喂 GNSS / VEHICLE；`latest_gnss()` 供 MapTargetWriter 取最近一条定位） |
 | `frame_scheduler.{h,cpp}` | I 帧/丢帧状态机（纯逻辑事件输出，调用方执行 request_keyframe） |
 | `meta_cache.h` | 编码输出查表（FIFO/路）：miss 分类（stale 静默 / gap=断档上报），查不到不弹队 |
 | `uplink_sender.{h,cpp}` | 发送/重连状态机（可注入 socket/时钟） |
@@ -22,6 +22,8 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 | `gen_warp_golden.py` | 矩阵 golden 表生成（宿主测试对照 Python ≤1e-5） |
 | `make_warp_golden.py` · `fixtures/` | warp 对 tinygrad `make_frame_prepare` 的 golden 生成与数据（`test_warp_golden.cc` 对照） |
 | `server_locator.{h,cpp}` | 服务端定位（06 号）：手动 IP / 限 wlan0 子网的 mDNS 发现（avahi-browse） |
+| `msg_framer.h` | 下行定长消息分帧（HELLO 48 / REPLY 8480 / ERR 40 B，REPLY 被 TCP 拆包时按累计长度拼齐） |
+| `nav_outputs.{h,cpp}` | NavExt 的车机侧输出（纯逻辑）：REPLY → `navStateSP` 快照（弯道不含经纬度）；CURVE + GNSS → `/dev/shm/params`（`MapTargetWriter`，≤2 Hz、安全清空） |
 | `test_bigmodeld.cc` | 宿主单测（无设备依赖，Mac/Linux 直接编译） |
 
 ## 实现口径
@@ -73,8 +75,11 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
    （checklist 项自动满足）。可调码率：Params "BigmodelEncoderBitrate"（仿
    `encoderd.cc:54-60` 每帧读）+ `--bitrate` 初值。
 6. **线程/锁序**（`main.cc` 头注）：2 取帧/配对（state_mtx）+ writer（sender.step）+
-    REPLY reader（MsgHdr 分流 parse_reply/parse_err，EOF/ERR →
-   notify_disconnect）+ 标定（SubMaster(["extrinsicsCalibration"]) → MetaProvider.set_rpy）。
+    REPLY reader（`msg_framer.h` 分帧 → parse_reply/parse_err，每条 REPLY 发 `navStateSP`
+   并喂 `MapTargetWriter`；EOF/ERR → notify_disconnect）+ 标定
+   （SubMaster(["extrinsicsCalibration"]) → MetaProvider.set_rpy）。`MapTargetWriter` 只在 reply
+   线程做决策；mem Params 的**阻塞** put/remove 全在非实时的 calib_thread（它本来就按 20 Hz 被
+   节拍源唤醒，未设 SCHED_FIFO/绑核）或所有线程 join 后的退出路径，reply 回包路径不做文件 I/O。
    锁序 sender.mtx > state_mtx > 叶子锁（ev 队列/meta 缓存/buf 池）。sender 事件回调在其
    锁内只记账+入队，状态机转移与 request_keyframe 在下一次组帧前按序执行（落点不变且
    不反向取锁）。SCHED_FIFO 53 + 绑核 EINVAL 容忍（`util::set_realtime_priority`/
@@ -100,7 +105,8 @@ VisionIPC 取 road（`VISION_STREAM_NARROW_ROAD`）/wide（`VISION_STREAM_WIDE_R
 锁步升级、不做版本兼容：`MsgHdr.ver` 严格等于 3，不符即 `kBadVersion`。实际路径：手机收到版本不符的 FRAME 回
 ERR `VERSION_MISMATCH`（code 1，`detail` = 对端 ver « 8 ‖ 本端 ver，如 `0x0203`）并断连；**本端以 HELLO 判版本**——
 手机连上先发 HELLO，`parse_hello` 得 `kBadVersion` 即版本不符（日志 `got_ver/want_ver`，断连重连；
-`BigmodelLinkState=version_mismatch` 由后续票在这里写）。v2 手机的 REPLY（len 8280 ≠ 8440）在 `reply_thread`
+`BigmodelLinkState=version_mismatch` 在 `fail()` 之后写，一直保持到下一次 on_hello 成功；
+connecting / 新连接 / kStall / kLinkLost 都不覆盖它）。v2 手机的 REPLY（len 8280 ≠ 8440）在 `reply_thread`
 分帧处就以「协议头非法」断连，到不了 `parse_reply`；真版本不一致时对端 ERR 的 ver 也不同，`parse_err` 同样得
 `kBadVersion`（只记日志），所以不靠 ERR.detail 判版本。`parse_reply` 本身先验 MsgHdr 再验长度，旧 8320 B REPLY
 报 `kBadVersion`（宿主测试锁定）。
@@ -126,17 +132,51 @@ bit3 NAV_DEBUG；`nav_health_flags` bit0 gps_ok · bit1 route_ok · bit2 nav_ok 
 ROAD_ATTR 16 ‖ CURVE_AHEAD 104（头 8 + 8 点 × 12）‖ NAV_DEBUG 8 ‖ 保留 4。`present_flags` 位为 0 的子结构全 0，
 本端当「无此功能」；CURVE_AHEAD 线上 `point_count>8` 当坏块，清 `present_flags` bit2、子块整块按缺省（点要喂纵向）。各子结构字段、单位、无效值见 `frame_codec.h`。
 
-**本进程现状**：票 A 落编解码；票 B 让 `MetaProvider` 填真实 GNSS / VEHICLE——`calib_thread` 订阅
+**本进程现状（票 C 已落）**：`reply_thread` 每收一条 REPLY：
+
+- 发 `navStateSP`（capnp `Custom.NavStateSP`，占原 `CustomReserved11` 的 id / log.capnp 槽 @137；
+  `services.py` 20 Hz、decimation 10；decimation 只作用于 qlog，rlog 仍按 20 Hz 全量记录）。
+  健康位、`present_flags` 对应的
+  `hasNavState / hasRoadAttributes / hasCurveAhead / hasNavDebug`、NAV_STATE / ROAD_ATTR / NAV_DEBUG
+  一比一镜像；`CURVE_AHEAD` 只镜像 `pointCount` / 横向加速度上限 / 前视距离 / `ageMs` 与每点的
+  距离 / 目标速度 / 曲率，以及 `curve_flags` 的三位（`alongRoute / roadLookahead / smoothed`），
+  **不含经纬度**（决策 17）。
+- 把 CURVE_AHEAD（含点经纬度）+ `MetaProvider` 里票 B 已有的最近一条 `gpsLocationExternal` 快照写
+  `/dev/shm/params`：`LastGPSPosition` = `{"latitude","longitude"}`（**按 GNSS 节拍 ≈10 Hz**，
+  在 calib_thread 写），`MapTargetVelocities` = `[{"latitude","longitude","velocity"(m/s)}…]`
+  （与 `smart_cruise_control/tests/test_map_controller.py` 同格式，零改 `SmartCruiseControlMap`）。
+  弯道目标时机：内容变化 ≥500 ms（≤2 Hz）、内容不变 1 s 刷新、首次必写；**只要有目标点被删除
+  （含清空）或容差内同一点降速在下一拍写**（≤1 个 calib 拍：正常 ≤50 ms，modeld 不发时最长约 1 s；
+  SCC-map 对旧点有粘滞）。CURVE present=0 / 链路断开 / 数据过期 → `[]`；
+  数据过期用合成判断 `now − (t_eof − age_ms)` ≤2 s（两个 2 s 不叠加；t_eof = REPLY 回显的帧
+  `timestamp_eof`）。GNSS 无 fix、`event_valid=0`、fix >1 s（N3：GNSS 断流时不能靠 has_fix=0）、
+  水平精度未知或 >30 m（协议 T_acc）、坐标非法或 (0,0) → 不写 `LastGPSPosition`，
+  且 `MapTargetVelocities=[]`；`target_speed_kph=0` 的点跳过。
+  `MapTargetVelocities` 是 mem Params（不是 msgq 服务），不进 rlog。
+- 断连（EOF/ERR/kStall/未连接）即 `NavLinkCache::reset()`：重连后第一条 REPLY 到达前不会再拿旧
+  NavExt 写回弯道点；HELLO 成功也 reset。进程启动（起线程前）与退出（所有线程 join 后）都由
+  主线程阻塞写 `MapTargetVelocities=[]` 并删除 `LastGPSPosition`（崩溃/SIGKILL 重启也清残留）；
+  manager 在上路/下路切换时也对 mem Params 做同样清理（下路只是兜底；Darwin 不碰）。
+- `navStateSP` 的浮点字段存 SI 值（定点换算后），整数编码字段保留线上原值（无效哨兵原样保留）；
+  浮点无效值用 NaN（0 是有效值）。字段对照见 `cereal/custom.capnp` 的注释。
+- HELLO `parse_hello` 得 `kBadVersion` → `BigmodelLinkState=version_mismatch`，**一直保持到下一次
+  on_hello 成功**；connecting / 新连接 / kStall / kLinkLost 都不覆盖它。各解析失败日志带
+  `got_ver/want_ver`（票 A 已落；fail() 在头部可信时也带）。
+
+票 A 落编解码；票 B 让 `MetaProvider` 填真实 GNSS / VEHICLE——`calib_thread` 订阅
 `gpsLocationExternal`（10 Hz）与 `deviceMotion`（20 Hz），两者**不进 poll 集合**（conflate 非阻塞取最新一条），
 用户态循环仍只被原有 4 Hz + 20 Hz 节拍源唤醒。注意 msgq 每条消息都会对每个订阅线程发 SIGUSR2（与 poll
 无关），这两路会让线程每秒多约 30 次**信号唤醒**。`fill()` 按 `t_eof` 与消息 `logMonoTime` 算 `age_ms` /
 `has_fix` / `yaw_valid`；deviceMotion 的车体系换算照 `locationd/helpers.py` 的 `PoseCalibrator`
 （`calib_from_device = rot_from_euler(rpyCalib)^T`），yaw 取 `w_body.z`，右转（顺时针）为正、与 bearing
-同向。时钟时基：Python 发布者的 `logMonoTime` 是 CLOCK_MONOTONIC，`t_eof` 是 CLOCK_BOOTTIME，两者只在
+同向。时钟时基：`nanos_since_boot()` 是 CLOCK_BOOTTIME；camerad 的 `timestamp_eof` 来自内核 SOF
+时间戳 + sensor 读出时间，camerad 自己就用 `nanos_since_boot() - timestamp_eof` 算 processing_time
+（`spectra.cc:1521-1530`），所以 t_eof 与 `nanos_since_boot()` 同为 CLOCK_BOOTTIME。
+Python 发布者的 `logMonoTime` 是 CLOCK_MONOTONIC，两者只在
 设备休眠后才会出现差值；openpilot 全局默认它们一致，本实现沿用该假设。yaw / speed 的有效率与大模型
 REPLY 的迟到率绑定：REPLY 迟到（M 接近 60 ms）时，紧接着的那一帧可能因样本超过 100 ms 而判为无效；
 上车时统计 `yaw_valid=0` 的占比，并和 `bigLateReplyCount` 对照。REPLY 的 NavExt 由 `parse_reply`
-解析但 `main.cc` 暂不消费（模型输出照旧）；`navStateSP`、`/dev/shm/params` 弯道写入是后续票。
+解析后进 `navStateSP` 与 `/dev/shm/params`（见上「本进程现状」）；`bigModelReply` 的模型输出路径不变。
 
 
 ## 构建
@@ -152,7 +192,7 @@ REPLY 的迟到率绑定：REPLY 迟到（M 接近 60 ms）时，紧接着的那
 ```sh
 cd openpilot/selfdrive/bigmodeld
 clang++ -std=c++17 -O1 test_bigmodeld.cc frame_codec.cpp frame_meta.cpp \
-        frame_scheduler.cpp uplink_sender.cpp server_locator.cpp \
+        frame_scheduler.cpp uplink_sender.cpp server_locator.cpp nav_outputs.cpp \
         -o /tmp/test_bigmodeld
 # 跨端 golden 互解（默认必跑；golden 由 chipmunk 仓库 app/tests/make_frame_golden.py 生成，*.bin 不入库）。
 # 未设置目录 / 文件缺失或为空都判失败；显式跳过：BGM1_GOLDEN_SKIP=1
@@ -172,7 +212,12 @@ MetaCache（查不到不弹队、clean2 回归、miss 分类）、序列头门�
 age/has_fix/yaw_valid 边界、deviceMotion 车体系换算与 Python 对照、yaw 右转符号、20 Hz 采样相位
 （含丢帧/迟到 60 ms）、量程饱和、fill 零堆分配）、frame_codec
 往返与坏输入（含 HELLO）、LinkStateTracker（instance 对比判 blip/restart）、
-avahi 行解析/子网范围/发现节流（06 号）。golden 表生成（输出粘进 test_bigmodeld.cc）：
+下行分帧（8480 B REPLY 分两次到达、切点在 NavExt 中间；旧 v2 头拒绝）、
+navStateSP 快照（present→has*、单位换算、无效→NaN、弯道经纬度不影响输出）、
+MapTargetWriter（8 点 JSON、空列表、失效/删点/降速在下一 calib 拍清空、无 fix/精度不达标不写位置、
+1 Hz 刷新 / 2 Hz 上限、位置 10 Hz + 目标 ≤2 Hz 的 20 Hz×10 s 节拍、20 Hz 调用耗时）、
+NavLinkCache 断连复位、退出清理 ops、avahi 行解析/子网范围/发现节流（06 号）。
+golden 表生成（输出粘进 test_bigmodeld.cc）：
 
 ```sh
 /Users/kevin/Documents/Projects/1b-model-qnn/.venv/bin/python \

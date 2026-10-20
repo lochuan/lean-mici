@@ -287,11 +287,12 @@ ConnEpoch UplinkSender::conn_epoch() const {
 
 void LinkStateTracker::on_connecting() {
   std::lock_guard<std::mutex> lk(mtx_);
-  state_ = "connecting";
+  if (!version_mismatch_) state_ = "connecting";
 }
 
 void LinkStateTracker::on_hello(uint64_t instance_id) {
   std::lock_guard<std::mutex> lk(mtx_);
+  version_mismatch_ = false;  // 新 HELLO 版本已对：解除
   if (have_instance_) state_ = (instance_id == last_instance_) ? "blip" : "restart";
   else state_ = "connected";
   last_instance_ = instance_id;
@@ -300,7 +301,13 @@ void LinkStateTracker::on_hello(uint64_t instance_id) {
 
 void LinkStateTracker::on_lost() {
   std::lock_guard<std::mutex> lk(mtx_);
-  state_ = "lost";
+  if (!version_mismatch_) state_ = "lost";
+}
+
+void LinkStateTracker::on_version_mismatch() {
+  std::lock_guard<std::mutex> lk(mtx_);
+  version_mismatch_ = true;
+  state_ = "version_mismatch";
 }
 
 std::string LinkStateTracker::value() const {

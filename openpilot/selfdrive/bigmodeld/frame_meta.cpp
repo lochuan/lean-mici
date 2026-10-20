@@ -247,6 +247,13 @@ void MetaProvider::set_vehicle(const VehicleSample& s) {
   vehicle_seen_ = true;
 }
 
+bool MetaProvider::latest_gnss(GnssSample* out) const {
+  std::lock_guard<std::mutex> lk(mtx_);
+  if (!gnss_seen_) return false;
+  *out = gnss_;
+  return true;
+}
+
 void MetaProvider::reset_desire_latch() {
   std::lock_guard<std::mutex> lk(mtx_);
   prev_desire_class_ = 0;

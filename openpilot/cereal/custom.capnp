@@ -514,7 +514,98 @@ struct BigModelReply @0xcb9fd56c7057593a {
   stages @3 :ModelDataV2SP.BigStageTimes;  # bigmodeld 填 capture..replyWait、phoneTotal
 }
 
-struct CustomReserved11 @0xc2243c65e0340384 {
+struct NavStateSP @0xc2243c65e0340384 {
+  # 导航状态（BGM1 REPLY 的 NavExt 8304 → 车机）：每条 REPLY 一条，20 Hz，记 rlog。
+  # 单位口径：定点字段换算成 SI 浮点（名字里的单位即存的值）；整数编码字段保留线上原值
+  # （无效哨兵原样保留，如 distanceToManeuverM 的 0xFFFFFFFF）；浮点字段用 NaN 表示线上
+  # 0xFFFF 无效（0 是有效值，不能拿 0 表示缺失）。CURVE 点不含经纬度（决策 17）。
+  frameIndex @0 :UInt32;
+  timestampEofNs @1 :UInt64;
+
+  gpsOk @2 :Bool;          # nav_health_flags bit0
+  routeOk @3 :Bool;        # bit1
+  navOk @4 :Bool;          # bit2
+  rerouting @5 :Bool;      # bit3
+
+  hasNavState @6 :Bool;         # present_flags bit0（位 0 ⇒ 对应子结构全 0）
+  hasRoadAttributes @7 :Bool;   # bit1
+  hasCurveAhead @8 :Bool;       # bit2
+  hasNavDebug @9 :Bool;         # bit3
+
+  navState @10 :NavState;
+  roadAttributes @11 :RoadAttributes;
+  curveAhead @12 :CurveAhead;
+  navDebug @13 :NavDebug;
+
+  struct NavState {
+    status @0 :Status;
+    maneuverType @1 :UInt8;           # Valhalla 0–43；255 无效
+    nextManeuverType @2 :UInt8;
+    roundaboutExitIndex @3 :UInt8;
+    distanceToManeuverM @4 :UInt32;   # 0xFFFFFFFF 无效
+    routeRemainingM @5 :UInt32;       # 0xFFFFFFFF 无效
+    routeRemainingSeconds @6 :UInt32; # 0xFFFFFFFF 无效
+    ageMs @7 :UInt16;                 # 0xFFFE 饱和；0xFFFF 未知/无效
+    navMapFed @8 :Bool;               # nav_input_flags bit0
+    navigationFed @9 :Bool;           # bit1
+    onRoute @10 :Bool;                # bit2
+    offRouteDistanceM @11 :UInt8;     # 255 无效
+    # 线上 0.01°；NaN = 0xFFFF 无效。没有 hasNavState 时默认 0，消费者必须先看 has*。
+    headingDeg @12 :Float32;
+
+    enum Status {
+      notRunning @0;
+      idle @1;
+      navigating @2;
+      rerouting @3;
+      positionLost @4;
+      arrived @5;
+      mapMissing @6;
+      fault @7;
+    }
+  }
+
+  struct RoadAttributes {
+    speedLimitKph @0 :UInt8;              # 0 无数据；254 无限速
+    speedLimitSource @1 :UInt8;           # 0 无 · 1 OSM 显式 · 2 隐含/默认 · 3 其他
+    speedLimitAheadKph @2 :UInt8;         # 0 无数据
+    speedLimitAheadDistanceM @3 :UInt16;  # 0xFFFF 无效
+    roadClass @4 :UInt8;                  # 255 无效
+    ramp @5 :Bool;                        # road_edge_flags bit0
+    tunnel @6 :Bool;                      # bit1
+    bridge @7 :Bool;                      # bit2
+    roundabout @8 :Bool;                  # bit3
+    toll @9 :Bool;                        # bit4
+    oneway @10 :Bool;                     # bit5
+    laneCount @11 :UInt8;                 # 0 未知
+    matchDistanceM @12 :Float32;          # 线上 0.1 m；NaN = 0xFFFF 未匹配
+    matchTrusted @13 :Bool;               # bit7
+    ageMs @14 :UInt16;                    # 0xFFFE 饱和；0xFFFF 未知/无效
+  }
+
+  struct CurveAhead {
+    pointCount @0 :UInt8;                 # 0–8；与 points 长度一致
+    maxLateralAccelerationMPerS2 @1 :Float32;  # 线上 0.1 m/s²，换算成 m/s²
+    horizonDistanceM @2 :UInt16;          # 采样覆盖的前方距离 m
+    ageMs @3 :UInt16;                     # 0xFFFE 饱和；0xFFFF 未知/无效
+    points @4 :List(CurvePoint);          # 不含经纬度（决策 17）
+    alongRoute @5 :Bool;                  # curve_flags bit0：点沿路线取
+    roadLookahead @6 :Bool;               # bit1：沿当前道路前扫（无路线）
+    smoothed @7 :Bool;                    # bit2：曲率已平滑
+
+    struct CurvePoint {
+      distanceAlongRouteM @0 :UInt16;     # 0xFFFF 无效
+      targetSpeedKph @1 :UInt8;           # 0 无
+      curvaturePerM @2 :Float32;          # 线上 1e-4 /m，换算成 1/m；0 = 直线
+    }
+  }
+
+  struct NavDebug {
+    renderDurationUs @0 :UInt16;          # 0xFFFF 无效（饱和 65534）
+    mapMatchDurationUs @1 :UInt16;        # 0xFFFF 无效
+    routeComputeDurationMs @2 :UInt16;    # 0xFFFF 无效
+    navCpuUsagePercent @3 :UInt8;         # 254 饱和，255 无效
+  }
 }
 
 struct CustomReserved12 @0x9ccdc8676701b412 {

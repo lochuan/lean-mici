@@ -179,17 +179,21 @@ class UplinkSender {
 //   blip        网络闪断后已恢复（重连后 instance_id 相同）
 //   restart     服务端重启后已恢复（重连后 instance_id 变了）
 //   lost        连接丢失（连败升级 kLinkLost，仍在重试）
+//   version_mismatch  HELLO 的 ver 与本端 kVersion 不符（锁步升级，不做兼容）。
+//                    一直保持到下一次 on_hello 成功；connecting/lost 不覆盖。
 // 纯逻辑 + 内部互斥（reply 线程喂 on_hello、发送事件线程喂其余）。
 class LinkStateTracker {
  public:
   void on_connecting();               // 断连/重连中
   void on_hello(uint64_t instance_id);  // HELLO 到达：按 instance_id 对比判 blip/restart
   void on_lost();                     // kLinkLost
+  void on_version_mismatch();         // HELLO parse_hello → kBadVersion
   std::string value() const;
 
  private:
   mutable std::mutex mtx_;
   uint64_t last_instance_ = 0;
   bool have_instance_ = false;
+  bool version_mismatch_ = false;
   const char* state_ = "connecting";
 };

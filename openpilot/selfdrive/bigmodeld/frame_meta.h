@@ -112,6 +112,10 @@ class MetaProvider {
   // MODEL_ABI §4.3 清 previousDesire，持续中的 desire 在新序列首帧重出 pulse。
   void reset_desire_latch();
 
+  // 最近一条 gpsLocationExternal（has_fix 已按 event_valid / 坐标清洗）。false = 从未收到。
+  // 票 C 的 MapTargetWriter 取这份快照写 LastGPSPosition，不新增订阅。
+  bool latest_gnss(GnssSample* out) const;
+
   // 生成一帧的头元数据。t_eof = road 帧 timestamp_eof（ns）。
   // 填 t_eof/desire/traffic_convention/action_t/warp_*/gnss/vehicle；flags/frame_idx/road_len/wide_len
   // 归调用方。无样本时 gnss/vehicle 保持缺省（GNSS 全 0、yaw 无效、航向精度 255）。

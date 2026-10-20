@@ -22,6 +22,8 @@
 #include "frame_scheduler.h"
 #include "frame_stages.h"
 #include "meta_cache.h"
+#include "msg_framer.h"
+#include "nav_outputs.h"
 #include "pair_matcher.h"
 #include "server_locator.h"
 #include "uplink_sender.h"
@@ -716,6 +718,16 @@ static void test_link_state() {
   t.on_connecting();
   t.on_hello(0xC);
   CHECK(t.value() == "restart");     // lost 后换 instance = 重启
+
+  t.on_version_mismatch();
+  CHECK(t.value() == "version_mismatch");  // HELLO kBadVersion（锁步升级，不做兼容）
+  t.on_connecting();
+  CHECK(t.value() == "version_mismatch");  // M2：重连中不能被 connecting 覆盖
+  t.on_version_mismatch();
+  t.on_lost();
+  CHECK(t.value() == "version_mismatch");  // kLinkLost 也不能覆盖
+  t.on_hello(0xC);
+  CHECK(t.value() == "blip");              // 下一次 on_hello 成功才解除
 }
 
 // =====================================================================
@@ -2268,7 +2280,705 @@ static void test_frame_stages_ring_no_mismatch() {
   CHECK(!log.on_reply(FrameIdx{1 + FrameStageLog::kSlots}, 50, &s));  // 新帧还没编码/写完
 }
 
+// =====================================================================
+// navStateSP：REPLY NavExt → 纯字段快照（main.cc 再写 capnp）
+// =====================================================================
+
+static bgm1::Reply nav_reply_fixture() {
+  bgm1::Reply r;
+  r.frame_idx = 4242;
+  r.t_eof = 987654321ULL;
+  r.nav_ext.nav_health_flags = bgm1::kNavHealthGpsOk | bgm1::kNavHealthNavOk;
+  r.nav_ext.nav_state = {2, 20, 255, 2, 350, 12000, 900, 40, 0x07, 254, 9000};
+  r.nav_ext.road_attr = {80, 1, 60, 3, 150, 1000, 0x85, 3, 25};
+  r.nav_ext.curve_ahead.point_count = 3;
+  r.nav_ext.curve_ahead.max_lateral_acceleration_dm_per_s2 = 20;
+  r.nav_ext.curve_ahead.horizon_distance_m = 600;
+  r.nav_ext.curve_ahead.age_ms = 120;
+  r.nav_ext.curve_ahead.curve_flags = 0x05;  // 沿路线 + 已平滑
+  for (int i = 0; i < 3; i++) {
+    r.nav_ext.curve_ahead.points[i] = {374220000 + 100 * i, -1220840000 - 100 * i,
+                                       uint16_t(50 + 10 * i), uint8_t(40 + i), uint8_t(200 + i)};
+  }
+  r.nav_ext.nav_debug = {4200, 1800, 35, 27};
+  return r;
+}
+
+static void test_nav_state_snapshot_present_flags() {
+  bgm1::Reply r = nav_reply_fixture();
+  r.nav_ext.present_flags = 0;
+  NavStateSnapshot s = nav_state_snapshot_from_reply(r);
+  CHECK(s.frame_index == 4242 && s.timestamp_eof_ns == 987654321ULL);
+  CHECK(s.gps_ok && !s.route_ok && s.nav_ok && !s.rerouting);
+  CHECK(!s.has_nav_state && !s.has_road_attributes && !s.has_curve_ahead && !s.has_nav_debug);
+
+  r.nav_ext.present_flags = bgm1::kNavPresentNavState;
+  s = nav_state_snapshot_from_reply(r);
+  CHECK(s.has_nav_state && !s.has_road_attributes && !s.has_curve_ahead && !s.has_nav_debug);
+
+  r.nav_ext.present_flags = bgm1::kNavPresentRoadAttr;
+  s = nav_state_snapshot_from_reply(r);
+  CHECK(!s.has_nav_state && s.has_road_attributes && !s.has_curve_ahead && !s.has_nav_debug);
+
+  r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead;
+  s = nav_state_snapshot_from_reply(r);
+  CHECK(!s.has_nav_state && !s.has_road_attributes && s.has_curve_ahead && !s.has_nav_debug);
+
+  r.nav_ext.present_flags = bgm1::kNavPresentNavDebug;
+  s = nav_state_snapshot_from_reply(r);
+  CHECK(!s.has_nav_state && !s.has_road_attributes && !s.has_curve_ahead && s.has_nav_debug);
+}
+
+static void test_nav_state_snapshot_values() {
+  bgm1::Reply r = nav_reply_fixture();
+  r.nav_ext.present_flags = 0x0F;
+  NavStateSnapshot s = nav_state_snapshot_from_reply(r);
+
+  CHECK(s.nav_state.status == 2 && s.nav_state.maneuver_type == 20 &&
+        s.nav_state.next_maneuver_type == 255 && s.nav_state.roundabout_exit_index == 2);
+  CHECK(s.nav_state.distance_to_maneuver_m == 350 && s.nav_state.route_remaining_m == 12000 &&
+        s.nav_state.route_remaining_seconds == 900 && s.nav_state.age_ms == 40);
+  CHECK(s.nav_state.nav_map_fed && s.nav_state.navigation_fed && s.nav_state.on_route);
+  CHECK(s.nav_state.off_route_distance_m == 254);
+  CHECK_NEAR(s.nav_state.heading_deg, 90.0, 1e-6);  // 9000 centideg
+
+  CHECK(s.road_attributes.speed_limit_kph == 80 && s.road_attributes.speed_limit_source == 1 &&
+        s.road_attributes.speed_limit_ahead_kph == 60 && s.road_attributes.road_class == 3 &&
+        s.road_attributes.speed_limit_ahead_distance_m == 150);
+  CHECK(s.road_attributes.ramp && !s.road_attributes.tunnel && s.road_attributes.bridge &&
+        !s.road_attributes.roundabout && !s.road_attributes.toll && !s.road_attributes.oneway &&
+        s.road_attributes.match_trusted);  // 0x85 = bit0 | bit2 | bit7
+  CHECK(s.road_attributes.lane_count == 3 && s.road_attributes.age_ms == 1000);
+  CHECK_NEAR(s.road_attributes.match_distance_m, 2.5, 1e-6);  // 25 dm
+
+  CHECK(s.curve_ahead.point_count == 3 && s.curve_ahead.horizon_distance_m == 600 &&
+        s.curve_ahead.age_ms == 120);
+  CHECK_NEAR(s.curve_ahead.max_lateral_acceleration_m_per_s2, 2.0, 1e-6);  // 20 × 0.1
+  CHECK(s.curve_ahead.points[0].distance_along_route_m == 50 &&
+        s.curve_ahead.points[2].target_speed_kph == 42);
+  CHECK_NEAR(s.curve_ahead.points[0].curvature_per_m, 0.0200, 1e-6);  // 200 × 1e-4
+  CHECK_NEAR(s.curve_ahead.points[2].curvature_per_m, 0.0202, 1e-6);
+  CHECK(s.curve_ahead.points[3].distance_along_route_m == 0);  // count 之外不镜像
+  CHECK(s.curve_ahead.along_route && !s.curve_ahead.road_lookahead && s.curve_ahead.smoothed);
+
+  CHECK(s.nav_debug.render_duration_us == 4200 && s.nav_debug.map_match_duration_us == 1800 &&
+        s.nav_debug.route_compute_duration_ms == 35 && s.nav_debug.nav_cpu_usage_percent == 27);
+
+  // 线上无效哨兵 → NaN（0 是有效值，不拿 0 表示缺失）
+  r.nav_ext.nav_state.heading_centideg = bgm1::kNavU16Invalid;
+  r.nav_ext.road_attr.match_distance_dm = bgm1::kNavU16Invalid;
+  s = nav_state_snapshot_from_reply(r);
+  CHECK(std::isnan(s.nav_state.heading_deg));
+  CHECK(std::isnan(s.road_attributes.match_distance_m));
+}
+
+static void test_nav_state_snapshot_curve_flags() {
+  bgm1::Reply r = nav_reply_fixture();
+  r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead;
+  r.nav_ext.curve_ahead.curve_flags = 0x02;  // 仅道路前扫
+  const NavStateSnapshot s = nav_state_snapshot_from_reply(r);
+  CHECK(!s.curve_ahead.along_route && s.curve_ahead.road_lookahead && !s.curve_ahead.smoothed);
+}
+
+// 决策 17：快照只读点的距离 / 速度 / 曲率，经纬度改动不影响任何输出字段
+static void test_nav_state_snapshot_ignores_curve_coordinates() {
+  bgm1::Reply a = nav_reply_fixture();
+  bgm1::Reply b = nav_reply_fixture();
+  a.nav_ext.present_flags = b.nav_ext.present_flags = bgm1::kNavPresentCurveAhead;
+  for (int i = 0; i < int(bgm1::kCurveMaxPoints); i++) {
+    b.nav_ext.curve_ahead.points[i].latitude_deg_x1e7 = -a.nav_ext.curve_ahead.points[i].latitude_deg_x1e7 + 7;
+    b.nav_ext.curve_ahead.points[i].longitude_deg_x1e7 = a.nav_ext.curve_ahead.points[i].longitude_deg_x1e7 + 1234567;
+  }
+  const NavStateSnapshot sa = nav_state_snapshot_from_reply(a);
+  const NavStateSnapshot sb = nav_state_snapshot_from_reply(b);
+  CHECK(sa.curve_ahead.point_count == sb.curve_ahead.point_count);
+  CHECK_NEAR(sa.curve_ahead.max_lateral_acceleration_m_per_s2, sb.curve_ahead.max_lateral_acceleration_m_per_s2, 0);
+  for (int i = 0; i < int(bgm1::kCurveMaxPoints); i++) {
+    CHECK(sa.curve_ahead.points[i].distance_along_route_m == sb.curve_ahead.points[i].distance_along_route_m);
+    CHECK(sa.curve_ahead.points[i].target_speed_kph == sb.curve_ahead.points[i].target_speed_kph);
+    CHECK(sa.curve_ahead.points[i].curvature_per_m == sb.curve_ahead.points[i].curvature_per_m);
+  }
+}
+
+// =====================================================================
+// MapTargetWriter：CURVE_AHEAD + 本机 GNSS → MapTargetVelocities（≤2 Hz；失效/删点/降速立即写）
+// =====================================================================
+
+static GnssSample map_gnss(uint64_t now_ns, double latitude_deg = 37.422,
+                           double longitude_deg = -122.084) {
+  GnssSample g;
+  g.has_fix = true;
+  g.event_valid = true;
+  g.latitude_deg = latitude_deg;
+  g.longitude_deg = longitude_deg;
+  g.horizontal_accuracy_m = 5.0;
+  g.message_time_ns = now_ns - 100'000'000;  // 100 ms 前的 fix
+  return g;
+}
+
+static MapTargetInput map_input(uint64_t now_ns = 10'000'000'000ULL) {
+  MapTargetInput in;
+  in.link_connected = true;
+  in.curve_present = true;
+  in.gnss_seen = true;
+  in.gnss = map_gnss(now_ns);
+  in.now_ns = now_ns;
+  in.last_reply_ns = now_ns - 50'000'000;  // 50 ms 前的 REPLY
+  in.t_eof = now_ns - 50'000'000;          // REPLY 回显的帧时刻（N7 的基准）
+  in.curve.point_count = 8;
+  in.curve.max_lateral_acceleration_dm_per_s2 = 20;
+  in.curve.horizon_distance_m = 600;
+  in.curve.age_ms = 100;
+  for (int i = 0; i < 8; i++) {
+    in.curve.points[i] = {374220000 + i, -1220840000 + i, uint16_t(10 * i),
+                          uint8_t(40 + i), uint8_t(200 + i)};
+  }
+  return in;
+}
+
+// 真实采样点间距 ~10 m；N1 的删点判定要在大于 0.55 m 容差的距离上测
+static MapTargetInput map_input_spaced(uint64_t now_ns) {
+  MapTargetInput in = map_input(now_ns);
+  for (int i = 0; i < 8; i++) {
+    in.curve.points[i].latitude_deg_x1e7 = 374220000 + i * 1000;
+    in.curve.points[i].longitude_deg_x1e7 = -1220840000 + i * 1000;
+  }
+  return in;
+}
+
+static void test_map_target_eight_points_json() {
+  MapTargetWriter w;
+  const auto out = w.update(map_input());
+  CHECK(out.has_value());
+  if (!out) return;
+  // 与 SmartCruiseControlMap 单测同一格式：[{"latitude","longitude","velocity"(m/s)}…]；
+  // velocity = target_speed_kph / 3.6
+  const char* expected =
+      "[{\"latitude\":37.4220000,\"longitude\":-122.0840000,\"velocity\":11.111},"
+      "{\"latitude\":37.4220001,\"longitude\":-122.0839999,\"velocity\":11.389},"
+      "{\"latitude\":37.4220002,\"longitude\":-122.0839998,\"velocity\":11.667},"
+      "{\"latitude\":37.4220003,\"longitude\":-122.0839997,\"velocity\":11.944},"
+      "{\"latitude\":37.4220004,\"longitude\":-122.0839996,\"velocity\":12.222},"
+      "{\"latitude\":37.4220005,\"longitude\":-122.0839995,\"velocity\":12.500},"
+      "{\"latitude\":37.4220006,\"longitude\":-122.0839994,\"velocity\":12.778},"
+      "{\"latitude\":37.4220007,\"longitude\":-122.0839993,\"velocity\":13.056}]";
+  CHECK(*out == expected);
+}
+
+static void test_map_target_count_zero_is_empty_list() {
+  MapTargetWriter w;
+  MapTargetInput in = map_input();
+  in.curve.point_count = 0;
+  const auto out = w.update(in);
+  CHECK(out.has_value() && *out == "[]");
+}
+
+// 失效路径都必须在 100 ms 内（不等 500 ms 节拍）发出清空（下一 calib 拍写盘）：
+// present=0、断链、S4 合成过期（t_eof 基准）、无 fix、fix 过期、event_valid=0、
+// 精度不达标/未知、目标速度全 0
+static void expect_immediate_clear(void (*mutate)(MapTargetInput*, uint64_t)) {
+  MapTargetWriter w;
+  const uint64_t now = 10'000'000'000ULL;
+  CHECK(w.update(map_input(now)).has_value());
+  MapTargetInput in = map_input(now + 100'000'000ULL);
+  mutate(&in, now + 100'000'000ULL);
+  const auto out = w.update(in);
+  CHECK(out.has_value() && *out == "[]");
+}
+
+static void test_map_target_invalid_paths_clear_immediately() {
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->curve_present = false; });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->link_connected = false; });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t now) {
+    in->t_eof = now - 1'990'000'000ULL;  // 帧 1.99 s 前
+    in->curve.age_ms = 1999;             // 数据时刻 ≈ 3.989 s 前 → 过期（S4）
+  });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t now) {
+    in->t_eof = now - 3'000'000'000ULL;  // 帧本身超过 2 s
+  });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->gnss.has_fix = false; });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->gnss.event_valid = false; });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t now) {
+    in->gnss.message_time_ns = now - 3'000'000'000ULL;  // fix 过期
+  });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) {
+    in->gnss.horizontal_accuracy_m = 31.0;              // >30 m（S7）
+  });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) {
+    in->gnss.horizontal_accuracy_m = -1.0;              // 未知哨兵（S7）
+  });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) {
+    in->curve.point_count = 2;                          // 目标速度 0 = 线上「无」
+    in->curve.points[0].target_speed_kph = 0;
+    in->curve.points[1].target_speed_kph = 0;
+  });
+
+  // S4/N7 边界：
+  //   ① t_eof 1.5 s 前 + age 600 ms → 数据 2.1 s 前，过期；
+  //   ② 同样 age、REPLY 1 ms 前到达，也过期（证明不再用到达时刻）。
+  MapTargetWriter w;
+  const uint64_t now = 10'000'000'000ULL;
+  CHECK(w.update(map_input(now)).has_value());
+  MapTargetInput in = map_input(now + 100'000'000ULL);
+  in.now_ns = now + 1'500'000'000ULL;
+  in.t_eof = now;
+  in.last_reply_ns = in.now_ns - 1'000'000ULL;
+  in.curve.age_ms = 600;
+  auto out = w.update(in);
+  CHECK(out.has_value() && *out == "[]");
+
+  // ② 用新的 writer，避免上一拍已经写过 [] 导致内容相同而不写
+  MapTargetWriter w2;
+  CHECK(w2.update(map_input(now)).has_value());
+  MapTargetInput in2 = map_input(now + 1'500'000'000ULL);
+  in2.now_ns = now + 1'500'000'000ULL;
+  in2.t_eof = now;
+  in2.last_reply_ns = in2.now_ns - 1'000'000ULL;  // REPLY 1 ms 前到达也不救
+  in2.curve.age_ms = 600;                          // 同 age：t_eof 1.5 s 前 + 0.6 s = 2.1 s 前 → 过期
+  const auto out2 = w2.update(in2);
+  CHECK(out2.has_value() && *out2 == "[]");
+}
+
+static int json_point_count(const std::string& json) {
+  int points = 0;
+  for (size_t pos = 0; (pos = json.find("{\"latitude\"", pos)) != std::string::npos; pos++) points++;
+  return points;
+}
+
+// N1：删点（即使总点数不变）也立即写
+static void test_map_target_removed_point_writes_immediately() {
+  // 目标点变少（没清空）
+  {
+    MapTargetWriter w;
+    const uint64_t now = 10'000'000'000ULL;
+    CHECK(w.update(map_input_spaced(now)).has_value());
+    MapTargetInput in = map_input_spaced(now + 100'000'000ULL);
+    in.curve.point_count = 7;
+    const auto out = w.update(in);
+    CHECK(out.has_value() && json_point_count(*out) == 7);
+  }
+  // 同数量替换首点：8 → 8，但旧点 0 不在新集合里
+  {
+    MapTargetWriter w;
+    const uint64_t now = 10'000'000'000ULL;
+    CHECK(w.update(map_input_spaced(now)).has_value());
+    MapTargetInput in = map_input_spaced(now + 100'000'000ULL);
+    for (int i = 0; i < 7; i++) in.curve.points[i] = in.curve.points[i + 1];
+    in.curve.points[7] = {374220000 + 99, -1220840000 + 99, 99, 40, 200};
+    const auto out = w.update(in);
+    CHECK(out.has_value() && json_point_count(*out) == 8);
+    CHECK(out && out->find("37.4220000") == std::string::npos);  // 旧首点必须被清掉
+  }
+  // 7 → 8：删 1 个、加 2 个
+  {
+    MapTargetWriter w;
+    const uint64_t now = 10'000'000'000ULL;
+    MapTargetInput first = map_input_spaced(now);
+    first.curve.point_count = 7;
+    CHECK(w.update(first).has_value());
+    MapTargetInput in = map_input_spaced(now + 100'000'000ULL);
+    in.curve.points[6] = {374220000 + 50, -1220840000 + 50, 60, 40, 200};
+    in.curve.points[7] = {374220000 + 51, -1220840000 + 51, 70, 40, 200};
+    const auto out = w.update(in);
+    CHECK(out.has_value() && json_point_count(*out) == 8);
+  }
+}
+
+// N2：容差内同一点降速立即写；提速仍走 500 ms
+static void test_map_target_speed_change_cadence() {
+  MapTargetWriter w;
+  const uint64_t now = 10'000'000'000ULL;
+  MapTargetInput first = map_input(now);
+  for (int i = 0; i < 8; i++) first.curve.points[i].target_speed_kph = 40;
+  CHECK(w.update(first).has_value());
+
+  // 40 → 20 km/h：100 ms 内必须写
+  MapTargetInput slower = map_input(now + 100'000'000ULL);
+  for (int i = 0; i < 8; i++) slower.curve.points[i].target_speed_kph = 20;
+  const auto out = w.update(slower);
+  CHECK(out.has_value() && out->find("\"velocity\":5.556") != std::string::npos);
+
+  // 20 → 40 km/h：仍走 500 ms
+  MapTargetWriter w2;
+  MapTargetInput slow_first = map_input(now);
+  for (int i = 0; i < 8; i++) slow_first.curve.points[i].target_speed_kph = 20;
+  CHECK(w2.update(slow_first).has_value());
+  MapTargetInput faster = map_input(now + 100'000'000ULL);
+  for (int i = 0; i < 8; i++) faster.curve.points[i].target_speed_kph = 40;
+  CHECK(!w2.update(faster).has_value());
+  faster.now_ns = now + 500'000'000ULL;
+  faster.t_eof = faster.now_ns - 50'000'000ULL;
+  faster.last_reply_ns = faster.now_ns - 50'000'000ULL;
+  CHECK(w2.update(faster).has_value());
+
+  // 容差匹配：点挪 0.3 m（27 × 1e-7 ≈ 0.30 m），速度也变
+  // 40 → 20：100 ms 内必须写
+  MapTargetWriter w3;
+  MapTargetInput base = map_input_spaced(now);
+  for (int i = 0; i < 8; i++) base.curve.points[i].target_speed_kph = 40;
+  CHECK(w3.update(base).has_value());
+  MapTargetInput moved_slower = map_input_spaced(now + 100'000'000ULL);
+  moved_slower.curve.points[0].latitude_deg_x1e7 += 27;  // ≈0.30 m，在 50 容差内
+  moved_slower.curve.points[0].target_speed_kph = 20;
+  const auto out_slower = w3.update(moved_slower);
+  CHECK(out_slower.has_value() && out_slower->find("\"velocity\":5.556") != std::string::npos);
+
+  // 20 → 40：100 ms 内不写
+  MapTargetWriter w4;
+  MapTargetInput slow_base = map_input_spaced(now);
+  for (int i = 0; i < 8; i++) slow_base.curve.points[i].target_speed_kph = 20;
+  CHECK(w4.update(slow_base).has_value());
+  MapTargetInput moved_faster = map_input_spaced(now + 100'000'000ULL);
+  moved_faster.curve.points[0].latitude_deg_x1e7 += 27;
+  moved_faster.curve.points[0].target_speed_kph = 40;
+  CHECK(!w4.update(moved_faster).has_value());
+}
+
+// 坐标校验：纬度 200° 与 (0,0) 的点跳过（S5）
+static void test_map_target_skips_bad_point_coordinates() {
+  MapTargetWriter w;
+  MapTargetInput in = map_input();
+  in.curve.point_count = 3;
+  in.curve.points[0].latitude_deg_x1e7 = 200 * 10'000'000;   // 纬度 200°
+  in.curve.points[1].latitude_deg_x1e7 = 0;                  // (0,0) 视为未填
+  in.curve.points[1].longitude_deg_x1e7 = 0;
+  const auto out = w.update(in);
+  CHECK(out.has_value());
+  if (out) {
+    int points = 0;
+    for (size_t pos = 0; (pos = out->find("{\"latitude\"", pos)) != std::string::npos; pos++) points++;
+    CHECK(points == 1);  // 只有第 3 个点
+    CHECK(out->find("\"latitude\":37.4220002") != std::string::npos);
+    CHECK(out->find("\"latitude\":200.") == std::string::npos);
+    CHECK(out->find("\"latitude\":0.0000000") == std::string::npos);
+  }
+}
+
+// R2：跨 ±180° 的 int32 相减不能溢出（-fsanitize=undefined 下验证）
+static void test_map_target_antimeridian_no_int_overflow() {
+  MapTargetWriter w;
+  const uint64_t now = 10'000'000'000ULL;
+  MapTargetInput first = map_input(now);
+  first.curve.point_count = 1;
+  first.curve.points[0].latitude_deg_x1e7 = 374220000;      // 纬度合法
+  first.curve.points[0].longitude_deg_x1e7 = 1799999900;    // +179.99999°
+  CHECK(w.update(first).has_value());
+
+  MapTargetInput second = map_input(now + 100'000'000ULL);
+  second.curve.point_count = 1;
+  second.curve.points[0].latitude_deg_x1e7 = 374220000;
+  second.curve.points[0].longitude_deg_x1e7 = -1799999900;  // -179.99999°
+  const auto out = w.update(second);  // 旧点被删除 → 立即写（差值走 int64）
+  CHECK(out.has_value() && json_point_count(*out) == 1);
+}
+
+// R4：容差内有多个候选时取最近的点；最近点降速必须判成降速
+static void test_map_target_tolerance_picks_nearest() {
+  MapTargetWriter w;
+  const uint64_t now = 10'000'000'000ULL;
+  MapTargetInput first = map_input(now);
+  first.curve.point_count = 1;
+  first.curve.points[0].latitude_deg_x1e7 = 374220000;
+  first.curve.points[0].target_speed_kph = 40;
+  CHECK(w.update(first).has_value());
+
+  MapTargetInput next = map_input(now + 100'000'000ULL);
+  next.curve.point_count = 2;
+  next.curve.points[0] = {374220030, -1220840000, 10, 40, 200};  // 远 40，速度不变（先命中）
+  next.curve.points[1] = {374220005, -1220840000, 10, 20, 200};  // 近 5，降速
+  const auto out = w.update(next);
+  CHECK(out.has_value() && out->find("\"velocity\":5.556") != std::string::npos);
+}
+
+// R5：一对一匹配；两个旧点靠得近、新集合只剩一个 → 另一个必须算删除（立即写）
+static void test_map_target_one_to_one_matching() {
+  MapTargetWriter w;
+  const uint64_t now = 10'000'000'000ULL;
+  MapTargetInput first = map_input(now);
+  first.curve.point_count = 2;
+  first.curve.points[0] = {374220000, -1220840000, 10, 40, 200};
+  first.curve.points[1] = {374220010, -1220840000, 20, 40, 200};  // 相距 10 单位
+  CHECK(w.update(first).has_value());
+
+  MapTargetInput next = map_input(now + 100'000'000ULL);
+  next.curve.point_count = 1;
+  next.curve.points[0] = {374220000, -1220840000, 10, 40, 200};
+  const auto out = w.update(next);
+  CHECK(out.has_value() && json_point_count(*out) == 1);  // 立即写，不等 500 ms
+}
+
+// NavLinkCache：断连 reset 后，即使 link_connected 又变真、旧曲线还在，也只写 []
+static void test_nav_link_cache_reset_clears_old_curve() {
+  NavLinkCache cache;
+  MapTargetWriter w;
+  bgm1::Reply r = nav_reply_fixture();
+  r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead;
+  const uint64_t now = 10'000'000'000ULL;
+  cache.on_reply(now, now - 50'000'000ULL, r.nav_ext);
+
+  auto input_from_cache = [&](uint64_t t, bool link) {
+    MapTargetInput in = map_input(t);
+    in.link_connected = link;
+    in.curve_present = cache.present_flags() & bgm1::kNavPresentCurveAhead;
+    in.curve = cache.curve();
+    in.last_reply_ns = cache.last_reply_ns();
+    in.t_eof = cache.t_eof();
+    return in;
+  };
+  CHECK(w.update(input_from_cache(now, true)).has_value());
+
+  // fail()：cache.reset() + link=false 立即写 []
+  cache.reset();
+  const auto cleared = w.update(input_from_cache(now, false));
+  CHECK(cleared.has_value() && *cleared == "[]");
+
+  // 600 ms 后重连、第一条新 REPLY 还没到：即使 link=true，也**绝不能**把旧点写回
+  // （修复前：old cache 仍在 2 s 内 → 这里会写回 3 个旧点）
+  const auto out = w.update(input_from_cache(now + 600'000'000ULL, true));
+  CHECK(!out.has_value() || *out == "[]");
+}
+
+// S3/S7：位置按 GNSS 节拍生成；无 fix / fix 过期 / 精度未知或 >30 m / 坐标非法都不写
+static void test_last_gps_position_gate() {
+  const uint64_t now = 10'000'000'000ULL;
+  GnssSample g = map_gnss(now);
+  const auto ok = last_gps_position_json(g, now);
+  CHECK(ok.has_value() && *ok == "{\"latitude\":37.4220000,\"longitude\":-122.0840000}");
+
+  g.horizontal_accuracy_m = 30.0;  // 边界：30 m 可用
+  CHECK(last_gps_position_json(g, now).has_value());
+  g.horizontal_accuracy_m = 30.001;
+  CHECK(!last_gps_position_json(g, now).has_value());
+  g.horizontal_accuracy_m = 0.0;  // 未知哨兵
+  CHECK(!last_gps_position_json(g, now).has_value());
+  g.horizontal_accuracy_m = -1.0;
+  CHECK(!last_gps_position_json(g, now).has_value());
+  g.horizontal_accuracy_m = NAN;
+  CHECK(!last_gps_position_json(g, now).has_value());
+
+  g = map_gnss(now);
+  g.has_fix = false;
+  CHECK(!last_gps_position_json(g, now).has_value());
+  g = map_gnss(now);
+  g.event_valid = false;  // N6
+  CHECK(!last_gps_position_json(g, now).has_value());
+  g = map_gnss(now);
+  g.message_time_ns = now - 950'000'000ULL;  // N3：0.95 s 仍有效
+  CHECK(last_gps_position_json(g, now).has_value());
+  g.message_time_ns = now - 1'050'000'000ULL;  // N3：1.05 s 过期
+  CHECK(!last_gps_position_json(g, now).has_value());
+  g = map_gnss(now);
+  g.message_time_ns = now + 10'000'000ULL;  // R3：fix 比 now 晚 10 ms（未来）按无效处理
+  CHECK(!last_gps_position_json(g, now).has_value());
+  g = map_gnss(now);
+  g.message_time_ns = now - 2'000'000'001ULL;
+  CHECK(!last_gps_position_json(g, now).has_value());
+  g = map_gnss(now);
+  g.latitude_deg = 91.0;
+  CHECK(!last_gps_position_json(g, now).has_value());
+  g = map_gnss(now);
+  g.latitude_deg = 0.0;
+  g.longitude_deg = 0.0;
+  CHECK(!last_gps_position_json(g, now).has_value());
+}
+
+// P6 主场景：20 Hz × 10 s，车在动（位置每 50 ms 变化），GNSS 10 Hz 刷新。
+// 位置写 ≈100 次（10 Hz），弯道目标 ≤21 次（首次 + ≤2 Hz）。
+static void test_map_target_and_position_cadence() {
+  MapTargetWriter w;
+  uint64_t now = 1'000'000'000ULL;
+  int position_writes = 0;
+  int target_writes = 0;
+  for (int tick = 0; tick < 200; tick++, now += 50'000'000ULL) {
+    GnssSample g = map_gnss(now, 37.422 + tick * 1e-7, -122.084);  // 车在动
+    g.message_time_ns = now;  // 只在 GNSS 更新拍（10 Hz）调用
+    if (tick % 2 == 0 && last_gps_position_json(g, now)) position_writes++;
+
+    MapTargetInput in = map_input(now);
+    in.gnss = g;
+    in.gnss.message_time_ns = now - 100'000'000;
+    in.last_reply_ns = now - 50'000'000;
+    if (w.update(in)) target_writes++;
+  }
+  CHECK(position_writes == 100);  // 10 s × 10 Hz
+  CHECK(target_writes >= 1 && target_writes <= 21);  // 首次 + ≤2 Hz（10 s）
+}
+
+// N5：HELLO 成功也 reset cache，堵「drop 后 reply 线程还没看到断连就已重连」的窗口
+static void test_conn_epoch_tracker() {
+  ConnEpochTracker t;
+  CHECK(t.update(5));   // 首次：启动复位
+  CHECK(!t.update(5));
+  CHECK(t.update(6));   // writer 线程重连，reply 线程还没看到 !connected
+  CHECK(!t.update(6));
+}
+
+// R1：epoch 变化 → main 实际执行的复位序列（hello_seen/framer/cache/清目标中的纯逻辑部分）
+static void test_conn_epoch_change_resets_nav_state() {
+  ConnEpochTracker tracker;
+  NavLinkCache cache;
+  MapTargetWriter w;
+  bgm1::Reply r = nav_reply_fixture();
+  r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead;
+  const uint64_t now = 10'000'000'000ULL;
+  CHECK(tracker.update(1));
+  cache.on_reply(now, now - 50'000'000ULL, r.nav_ext);
+
+  auto input_from_cache = [&](uint64_t t, bool link) {
+    MapTargetInput in = map_input(t);
+    in.link_connected = link;
+    in.curve_present = cache.present_flags() & bgm1::kNavPresentCurveAhead;
+    in.curve = cache.curve();
+    in.last_reply_ns = cache.last_reply_ns();
+    in.t_eof = cache.t_eof();
+    return in;
+  };
+  CHECK(w.update(input_from_cache(now, true)).has_value());
+
+  // drop 后 writer 线程已重连（epoch 2），reply 线程尚未看到断连
+  CHECK(tracker.update(2));
+  cache.reset();  // main：epoch 变化 → link_cache_.reset()
+  const auto cleared = w.update(input_from_cache(now, false));
+  CHECK(cleared.has_value() && *cleared == "[]");
+
+  // 新 HELLO 前的 idle 拍：不能写回旧点
+  const auto out = w.update(input_from_cache(now + 600'000'000ULL, true));
+  CHECK(!out.has_value() || *out == "[]");
+}
+
+// N10：点坐标每拍都变、点数不变，20 Hz × 10 s → 目标写 ≤21 次。
+// 位置节拍由 main.cc 的 gpsLocationExternal 回调保证（宿主跑不了 calib_thread），需上车验证。
+static void test_map_target_moving_points_cadence() {
+  MapTargetWriter w;
+  uint64_t now = 1'000'000'000ULL;
+  int writes = 0;
+  for (int tick = 0; tick < 200; tick++, now += 50'000'000ULL) {
+    MapTargetInput in = map_input_spaced(now);
+    for (int i = 0; i < 8; i++) in.curve.points[i].latitude_deg_x1e7 += tick;
+    if (w.update(in)) writes++;
+  }
+  CHECK(writes >= 1 && writes <= 21);  // 首次 + ≤2 Hz；10 s 窗口
+}
+
+static void test_map_target_reply_rate_cpu() {
+  // 20 Hz × 10 s（200 次）内容不变的 update：测量窗口 10 s 的模拟节拍、墙钟计时仅为 CPU 时间
+  MapTargetWriter w;
+  uint64_t now = 1'000'000'000ULL;
+  CHECK(w.update(map_input(now)).has_value());
+  const auto t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < 200; i++) {
+    now += 50'000'000ULL;
+    w.update(map_input(now));
+  }
+  const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
+  printf("MapTargetWriter: 200 calls in %.1f us (%.2f us/call)\n", us, us / 200.0);
+}
+
+// S1a：退出清理必须写 MapTargetVelocities=[] 并删 LastGPSPosition
+static void test_clear_map_targets_ops() {
+  std::vector<std::pair<std::string, std::string>> puts;
+  std::vector<std::string> removes;
+  clear_map_targets(MapParamsOps{
+      [&](const char* key, const std::string& value) { puts.emplace_back(key, value); },
+      [&](const char* key) { removes.emplace_back(key); }});
+  CHECK(puts.size() == 1 && puts[0].first == "MapTargetVelocities" && puts[0].second == "[]");
+  CHECK(removes.size() == 1 && removes[0] == "LastGPSPosition");
+}
+
+// =====================================================================
+// 下行分帧：REPLY 8480 B 分两次到达（切点在 NavExt 中间）→ 拼成整条
+// =====================================================================
+
+static void test_msg_framer_reply_split_inside_nav_ext() {
+  bgm1::Reply r;
+  r.frame_idx = 7;
+  r.t_eof = 123456789ULL;
+  r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead;
+  r.nav_ext.nav_health_flags = bgm1::kNavHealthNavOk;
+  r.nav_ext.curve_ahead.point_count = 8;
+  for (int i = 0; i < 8; i++) {
+    r.nav_ext.curve_ahead.points[i] = {374220000 + i, -1220840000 - i, uint16_t(10 * i),
+                                       uint8_t(40 + i), uint8_t(200 + i)};
+  }
+  std::vector<uint8_t> wire(bgm1::kReplyWireSize);
+  CHECK(bgm1::pack_reply(r, wire.data(), wire.size()) == wire.size());
+
+  // 切点：NavExt 内、CURVE_AHEAD 第 2 个点中间（REPLY 8304 + 44 + 8 + 12 + 6）
+  const size_t cut = 8304 + 44 + 8 + 12 + 6;
+  CHECK(cut > bgm1::kReplyHdrSize && cut < wire.size());
+
+  MsgFramer f;
+  MsgFramer::Message m;
+  f.append(wire.data(), cut);
+  CHECK(f.next(&m) == MsgFramer::Result::kNeedMore);
+  // 再少 1 字节仍须等（挡住「差一字节也交出整条」的 off-by-one）
+  f.append(wire.data() + cut, wire.size() - cut - 1);
+  CHECK(f.next(&m) == MsgFramer::Result::kNeedMore);
+  f.append(wire.data() + wire.size() - 1, 1);
+  CHECK(f.next(&m) == MsgFramer::Result::kMessage);
+  CHECK(m.type == bgm1::kTypeReply && m.size == bgm1::kReplyWireSize);
+  bgm1::Reply out;
+  CHECK(bgm1::parse_reply(f.data(), f.size(), &out) == bgm1::Err::kOk);
+  CHECK(out.frame_idx == 7 && out.nav_ext.curve_ahead.point_count == 8 &&
+        out.nav_ext.curve_ahead.points[7].curvature_per_m_x1e4 == 207);
+  f.consume(m.size);
+  CHECK(f.next(&m) == MsgFramer::Result::kNeedMore);
+
+  // 同一批字节里两条消息（REPLY + ERR）按序各取一条
+  bgm1::ErrMsg e;
+  e.code = bgm1::kErrBadFrame;
+  e.frame_idx = 7;
+  std::vector<uint8_t> two(wire.size() + bgm1::kErrWireSize);
+  std::memcpy(two.data(), wire.data(), wire.size());
+  CHECK(bgm1::pack_err(e, two.data() + wire.size(), bgm1::kErrWireSize) == bgm1::kErrWireSize);
+  MsgFramer g;
+  g.append(two.data(), two.size());
+  CHECK(g.next(&m) == MsgFramer::Result::kMessage && m.type == bgm1::kTypeReply);
+  g.consume(m.size);
+  CHECK(g.next(&m) == MsgFramer::Result::kMessage && m.type == bgm1::kTypeErr &&
+        m.size == bgm1::kErrWireSize);
+  g.consume(m.size);
+  CHECK(g.next(&m) == MsgFramer::Result::kNeedMore);
+}
+
+// 旧 v2 REPLY（len 8280）在分帧处就判协议头非法（到不了 parse_reply）
+static void test_msg_framer_rejects_v2_reply_header() {
+  uint8_t hdr[bgm1::kMsgHdrSize] = {};
+  hdr[0] = 'B'; hdr[1] = 'G'; hdr[2] = 'M'; hdr[3] = '1';
+  hdr[4] = 2;
+  hdr[5] = bgm1::kTypeReply;
+  hdr[12] = 0x88; hdr[13] = 0x20;  // 8280
+  MsgFramer f;
+  f.append(hdr, sizeof hdr);
+  MsgFramer::Message m;
+  CHECK(f.next(&m) == MsgFramer::Result::kBadHeader);
+  CHECK(f.peer_version() == 2);
+}
+
 int main() {
+  test_nav_state_snapshot_present_flags();
+  test_nav_state_snapshot_values();
+  test_nav_state_snapshot_curve_flags();
+  test_nav_state_snapshot_ignores_curve_coordinates();
+  test_map_target_eight_points_json();
+  test_map_target_count_zero_is_empty_list();
+  test_map_target_invalid_paths_clear_immediately();
+  test_map_target_removed_point_writes_immediately();
+  test_map_target_speed_change_cadence();
+  test_map_target_skips_bad_point_coordinates();
+  test_map_target_antimeridian_no_int_overflow();
+  test_map_target_tolerance_picks_nearest();
+  test_map_target_one_to_one_matching();
+  test_nav_link_cache_reset_clears_old_curve();
+  test_conn_epoch_tracker();
+  test_conn_epoch_change_resets_nav_state();
+  test_last_gps_position_gate();
+  test_map_target_and_position_cadence();
+  test_map_target_moving_points_cadence();
+  test_map_target_reply_rate_cpu();
+  test_clear_map_targets_ops();
+  test_msg_framer_reply_split_inside_nav_ext();
+  test_msg_framer_rejects_v2_reply_header();
   test_frame_stages_telescope();
   test_frame_stages_ring_no_mismatch();
   test_sched_gop();

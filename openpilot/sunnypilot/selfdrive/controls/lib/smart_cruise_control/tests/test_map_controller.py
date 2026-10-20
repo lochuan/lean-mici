@@ -72,4 +72,48 @@ class TestSmartCruiseControlMap(OpenpilotTestCase):
 
     self.assertAlmostEqual(self.scc_m.v_target, 24.0, delta=24.0 * 1e-6)
 
+  def test_bigmodeld_map_target_writer_payload(self):
+    # 与 openpilot/selfdrive/bigmodeld/test_bigmodeld.cc
+    # test_map_target_eight_points_json 同一份 JSON（C++ MapTargetWriter 的输出格式）：
+    # velocity 是 m/s（target_speed_kph / 3.6），键只有 latitude/longitude/velocity。
+    payload = ("["
+               "{\"latitude\":37.4220000,\"longitude\":-122.0840000,\"velocity\":11.111},"
+               "{\"latitude\":37.4220001,\"longitude\":-122.0839999,\"velocity\":11.389},"
+               "{\"latitude\":37.4220002,\"longitude\":-122.0839998,\"velocity\":11.667},"
+               "{\"latitude\":37.4220003,\"longitude\":-122.0839997,\"velocity\":11.944},"
+               "{\"latitude\":37.4220004,\"longitude\":-122.0839996,\"velocity\":12.222},"
+               "{\"latitude\":37.4220005,\"longitude\":-122.0839995,\"velocity\":12.500},"
+               "{\"latitude\":37.4220006,\"longitude\":-122.0839994,\"velocity\":12.778},"
+               "{\"latitude\":37.4220007,\"longitude\":-122.0839993,\"velocity\":13.056}]")
+    self.mem_params.put("LastGPSPosition", "{\"latitude\":37.4220000,\"longitude\":-122.0840000}", block=True)
+    self.mem_params.put("MapTargetVelocities", payload, block=True)
+
+    self.scc_m.update(True, False, 25.0, 0.0, 30.0)
+
+    # 最近点是第 0 个（0 m），目标速度最小 → 11.111 m/s
+    self.assertAlmostEqual(self.scc_m.v_target, 11.111, delta=1e-3)
+    # 状态机下一拍（v_cruise > v_target）才从 enabled 进 turning
+    self.scc_m.update(True, False, 25.0, 0.0, 30.0)
+    self.assertTrue(self.scc_m.is_active)
+
+  def test_bigmodeld_empty_map_target_velocities(self):
+    # 无效 CURVE / 断链时 bigmodeld 写 "[]"：SCC-map 没有候选，不会保持旧目标
+    self.mem_params.put("LastGPSPosition", "{\"latitude\":37.4220000,\"longitude\":-122.0840000}", block=True)
+    self.mem_params.put("MapTargetVelocities", "[]", block=True)
+
+    self.scc_m.update(True, False, 25.0, 0.0, 30.0)
+
+    self.assertFalse(self.scc_m.is_active)
+    self.assertEqual(self.scc_m.v_target, 100.0)  # min_v 初值：无候选
+
+  def test_bigmodeld_missing_map_params(self):
+    # 缺 key（首次上路 / mem Params 被清）：position 回 (0,0)、velocities 回 []，不抛异常
+    self.mem_params.remove("LastGPSPosition")
+    self.mem_params.remove("MapTargetVelocities")
+
+    self.scc_m.update(True, False, 25.0, 0.0, 30.0)
+
+    self.assertFalse(self.scc_m.is_active)
+    self.assertEqual(self.scc_m.v_target, 100.0)
+
   # TODO-SP: mock data from modelV2 to test other states

@@ -2651,7 +2651,7 @@ struct Event {
     liveMapDataSP @115 :Custom.LiveMapDataSP;
     modelDataV2SP @116 :Custom.ModelDataV2SP;
     bigModelReply @136 :Custom.BigModelReply;
-    customReserved11 @137 :Custom.CustomReserved11;
+    navStateSP @137 :Custom.NavStateSP;  # BGM1 NavExt 镜像（20 Hz，记 rlog；不含经纬度）
     customReserved12 @138 :Custom.CustomReserved12;
     customReserved13 @139 :Custom.CustomReserved13;
     customReserved14 @140 :Custom.CustomReserved14;

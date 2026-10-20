@@ -11,5 +11,5 @@ warp_pack = env.Object('warp_pack.cpp', CCFLAGS=env['CCFLAGS'] + ['-O3'])
 
 env.Program('bigmodeld',
             ['main.cc', 'frame_codec.cpp', 'frame_meta.cpp', 'frame_scheduler.cpp',
-             'uplink_sender.cpp', 'server_locator.cpp', warp_pack],
+             'uplink_sender.cpp', 'server_locator.cpp', 'nav_outputs.cpp', warp_pack],
             LIBS=libs)
