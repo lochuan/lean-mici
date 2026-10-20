@@ -193,8 +193,7 @@ Err parse_frame(const uint8_t* data, size_t size, FrameView* out,
 
 namespace {
 
-// NavExt 子结构偏移（相对 NavExt 起点 = REPLY 偏移 8304）
-constexpr size_t kNavExtOffset = kReplyHdrSize + kReplyOutputsSize + kReplyTelemetryCount * 4;
+// NavExt 子结构偏移（相对 NavExt 起点 kNavExtOffset = REPLY 偏移 8304）
 constexpr size_t kNavStateOffset = 4, kRoadAttrOffset = 28, kCurveAheadOffset = 44, kNavDebugOffset = 148;
 constexpr size_t kCurvePointsOffset = 8, kCurvePointSize = 12;
 

@@ -300,6 +300,10 @@ constexpr size_t kReplyPayloadSize =
     kReplyOutputsSize + kReplyTelemetryCount * 4 + kReplyNavExtSize;              // 8440
 constexpr size_t kReplyWireSize = kReplyHdrSize + kReplyPayloadSize + kTailReservedSize;  // 8480
 
+// NavExt 在 REPLY 里的起始偏移（头部 ‖ outputs ‖ 遥测之后）
+constexpr size_t kNavExtOffset = kReplyHdrSize + kReplyOutputsSize + kReplyTelemetryCount * 4;
+static_assert(kNavExtOffset == 8304, "NavExt 从 REPLY 偏移 8304 起");
+
 // ---- NavExt（REPLY 偏移 8304，160 B）：全部子结构缺省为 0，缺省 Reply = 「无导航数据」----
 
 constexpr uint8_t kNavPresentNavState = 1u << 0;

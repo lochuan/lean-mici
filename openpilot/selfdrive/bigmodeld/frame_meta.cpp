@@ -78,6 +78,7 @@ bool coords_ok(double lat, double lon) {
   return std::isfinite(lat) && std::isfinite(lon) && std::fabs(lat) <= 90.0 && std::fabs(lon) <= 180.0;
 }
 
+// 非有限值 → 0；范围不在此检查，靠调用前的 coords_ok 把关。
 int32_t degrees_to_x1e7(double deg) {
   if (!std::isfinite(deg)) return 0;
   return int32_t(std::llround(deg * 1e7));
@@ -93,7 +94,7 @@ void mat_vec(const double m[9], const float v[3], double out[3]) {
   for (int r = 0; r < 3; r++) out[r] = m[3 * r + 0] * v[0] + m[3 * r + 1] * v[1] + m[3 * r + 2] * v[2];
 }
 
-// 非有限值 → 0；其余回绕到 [0, 36000)（负角先 +360°，359.999° 进位成 360.00° 时折回 0）。
+// 非有限值 → 0；否则先 fmod 到 (-360, 360)，负值 +360°；四舍五入得到 36000 时折回 0，结果落在 [0, 36000)。
 uint16_t degrees_to_centidegrees(double deg) {
   if (!std::isfinite(deg)) return 0;
   double d = std::fmod(deg, 360.0);
@@ -120,6 +121,7 @@ uint16_t m_per_s_to_cm_per_s(float m_per_s) {
   return uint16_t(std::lround(cm_per_s));
 }
 
+// 非有限值 → INT16_MIN（无效哨兵）；结果钳在 ±32767，避开该哨兵。
 int16_t rad_per_s_to_centideg_per_s(float rad_per_s) {
   if (!std::isfinite(rad_per_s)) return bgm1::kYawRateInvalidCentidegPerS;
   const double centideg_per_s = double(rad_per_s) * kRadPerSToCentidegPerS;

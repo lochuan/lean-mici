@@ -773,7 +773,7 @@ static void test_avahi_scope() {
 
 static void test_avahi_locator() {
   int browses = 0;
-  ServerEndpoint found{"10.0.0.5", 7070, "a"};
+  ServerEndpoint found{"10.0.0.5", 7070, "a", ""};
   AvahiLocator loc([&](ServerEndpoint* out) { browses++; *out = found; return true; }, 3);
   ServerEndpoint ep;
   CHECK(loc.resolve(&ep) && ep.host == "10.0.0.5" && browses == 1);  // 首次现查
@@ -783,7 +783,7 @@ static void test_avahi_locator() {
   CHECK(loc.resolve(&ep) && browses == 1);                           // 连败 < 3 仍用缓存
   loc.on_connect_failure();                                          // 第 3 次 = kLinkLost 升级点
   CHECK(loc.resolve(&ep) && browses == 2);                           // 回到 mDNS 发现
-  found = {"10.0.0.9", 7070, "a"};
+  found = {"10.0.0.9", 7070, "a", ""};
   loc.on_connect_failure();
   loc.on_connect_failure();
   loc.on_connect_failure();
@@ -793,7 +793,7 @@ static void test_avahi_locator() {
   CHECK(!none.resolve(&ep));
   CHECK(!none.resolve(&ep));                                         // 没缓存，持续重试
 
-  FixedLocator fix({"192.168.1.7", 7070, ""});                       // 手动 IP 兜底
+  FixedLocator fix({"192.168.1.7", 7070, "", ""});                   // 手动 IP 兜底
   CHECK(fix.resolve(&ep) && ep.host == "192.168.1.7" && ep.port == 7070);
   fix.on_connect_failure();
   CHECK(fix.resolve(&ep) && ep.host == "192.168.1.7");               // 手动恒给定值，不发现
@@ -1325,14 +1325,15 @@ static GnssSample make_gnss(double lat, double lon, double bearing_deg, double h
 }
 
 // 车体系样本（deviceMotion 经 R^T 后的分量）；source_ok 由组装层给出
-static VehicleSample make_vehicle(float v_forward, float v_lateral, float yaw_rate,
+static VehicleSample make_vehicle(float forward_speed_m_per_s, float lateral_speed_m_per_s,
+                                  float yaw_rate_rad_per_s,
                                   bool yaw_ok, bool speed_ok, uint64_t message_time_ns) {
   VehicleSample v;
-  v.forward_speed_m_per_s = v_forward;
-  v.lateral_speed_m_per_s = v_lateral;
-  v.yaw_rate_rad_per_s = yaw_rate;
-  v.reversing = v_forward < -0.3f;
-  v.standstill = std::hypot(v_forward, v_lateral) < 0.1f;
+  v.forward_speed_m_per_s = forward_speed_m_per_s;
+  v.lateral_speed_m_per_s = lateral_speed_m_per_s;
+  v.yaw_rate_rad_per_s = yaw_rate_rad_per_s;
+  v.reversing = forward_speed_m_per_s < -0.3f;
+  v.standstill = std::hypot(forward_speed_m_per_s, lateral_speed_m_per_s) < 0.1f;
   v.yaw_source_ok = yaw_ok;
   v.speed_source_ok = speed_ok;
   v.message_time_ns = message_time_ns;
@@ -1918,8 +1919,8 @@ static void test_pair_off_fid_aligned_sof() {
     CHECK(!a1.pair);
     PM::Actions a2 = m.push(false, {5000 + (uint32_t)k, t + 50000000ULL * k + 70000, k});
     CHECK(a2.pair);
-    CHECK(a2.road.frame_id == 100 + k);
-    CHECK(a2.wide.frame_id == 5000 + k);
+    CHECK(a2.road.frame_id == 100 + (uint32_t)k);
+    CHECK(a2.wide.frame_id == 5000 + (uint32_t)k);
     CHECK(!a2.kill_road && !a2.kill_wide);
   }
 }
