@@ -2447,6 +2447,28 @@ static MapTargetInput map_input_spaced(uint64_t now_ns) {
   return in;
 }
 
+// AU-8：writer 输出与 tests/fixtures/map_target_eight_points.json 逐字节相等；SCC-map 的 Python 测试
+// （test_map_controller.py）读同一个文件，两端格式漂移时至少一端会红。文件缺失判失败。
+static std::string read_map_target_fixture() {
+  const char* dir_env = std::getenv("BGM1_FIXTURE_DIR");
+  std::string dir;
+  if (dir_env != nullptr) {
+    dir = dir_env;
+  } else {
+    dir = __FILE__;
+    dir = dir.substr(0, dir.find_last_of('/') + 1) + "tests/fixtures";
+  }
+  std::FILE* f = std::fopen((dir + "/map_target_eight_points.json").c_str(), "rb");
+  std::string text;
+  if (f != nullptr) {
+    char buf[1024];
+    size_t n;
+    while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) text.append(buf, n);
+    std::fclose(f);
+  }
+  return text;
+}
+
 static void test_map_target_eight_points_json() {
   MapTargetWriter w;
   const auto out = w.update(map_input());
@@ -2454,15 +2476,8 @@ static void test_map_target_eight_points_json() {
   if (!out) return;
   // 与 SmartCruiseControlMap 单测同一格式：[{"latitude","longitude","velocity"(m/s)}…]；
   // velocity = target_speed_kph / 3.6
-  const char* expected =
-      "[{\"latitude\":37.4220000,\"longitude\":-122.0840000,\"velocity\":11.111},"
-      "{\"latitude\":37.4220001,\"longitude\":-122.0839999,\"velocity\":11.389},"
-      "{\"latitude\":37.4220002,\"longitude\":-122.0839998,\"velocity\":11.667},"
-      "{\"latitude\":37.4220003,\"longitude\":-122.0839997,\"velocity\":11.944},"
-      "{\"latitude\":37.4220004,\"longitude\":-122.0839996,\"velocity\":12.222},"
-      "{\"latitude\":37.4220005,\"longitude\":-122.0839995,\"velocity\":12.500},"
-      "{\"latitude\":37.4220006,\"longitude\":-122.0839994,\"velocity\":12.778},"
-      "{\"latitude\":37.4220007,\"longitude\":-122.0839993,\"velocity\":13.056}]";
+  const std::string expected = read_map_target_fixture();
+  CHECK(!expected.empty());
   CHECK(*out == expected);
 }
 
@@ -2502,17 +2517,32 @@ static void test_map_target_invalid_paths_clear_immediately() {
   expect_immediate_clear([](MapTargetInput* in, uint64_t now) {
     in->gnss.message_time_ns = now - 3'000'000'000ULL;  // fix 过期
   });
-  expect_immediate_clear([](MapTargetInput* in, uint64_t) {
-    in->gnss.horizontal_accuracy_m = 31.0;              // >30 m（S7）
-  });
-  expect_immediate_clear([](MapTargetInput* in, uint64_t) {
-    in->gnss.horizontal_accuracy_m = -1.0;              // 未知哨兵（S7）
+  expect_immediate_clear([](MapTargetInput* in, uint64_t now) {
+    in->gnss.horizontal_accuracy_m = 45.0;              // >40 m 立即清空（AU-3 迟滞；S7）
+    in->gnss.message_time_ns = now;                     // 新样本
   });
   expect_immediate_clear([](MapTargetInput* in, uint64_t) {
     in->curve.point_count = 2;                          // 目标速度 0 = 线上「无」
     in->curve.points[0].target_speed_kph = 0;
     in->curve.points[1].target_speed_kph = 0;
   });
+
+  // AU-6：数据时刻 t_eof − age_ms 恰好 2 s 前仍有效（<=），再早 1 ns 过期
+  for (const bool one_ns_older : {false, true}) {
+    MapTargetWriter wb;
+    const uint64_t t = 10'000'000'000ULL;
+    CHECK(wb.update(map_input(t)).has_value());
+    MapTargetInput edge = map_input(t + 1'000'000'000ULL);
+    edge.curve.age_ms = 500;
+    edge.t_eof = edge.now_ns - 1'500'000'000ULL - (one_ns_older ? 1 : 0);  // 数据时刻 = now − 2 s (− 1 ns)
+    edge.gnss.message_time_ns = edge.now_ns - 100'000'000ULL;
+    const auto edge_out = wb.update(edge);
+    if (one_ns_older) {
+      CHECK(edge_out.has_value() && *edge_out == "[]");
+    } else {
+      CHECK(!edge_out.has_value() || *edge_out != "[]");
+    }
+  }
 
   // S4/N7 边界：
   //   ① t_eof 1.5 s 前 + age 600 ms → 数据 2.1 s 前，过期；
@@ -2708,12 +2738,106 @@ static void test_map_target_one_to_one_matching() {
   CHECK(out.has_value() && json_point_count(*out) == 1);  // 立即写，不等 500 ms
 }
 
+// AU-1：main.cc 的 reply 线程只调 NavLinkSession，宿主测试驱动同一个类（不再手抄 main 的接线）。
+static NavLinkTick link_tick(uint64_t now_ns) {
+  NavLinkTick tick;
+  tick.gnss.seen = true;
+  tick.gnss.gnss = map_gnss(now_ns);
+  tick.now_ns = now_ns;
+  return tick;
+}
+
+// 带沿路线 CURVE（fixture 的 curve_flags=0x05）的 REPLY；AU-4 要求 route_ok=1 才可用
+static bgm1::NavExt session_nav_ext() {
+  bgm1::Reply r = nav_reply_fixture();
+  r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead;
+  r.nav_ext.nav_health_flags |= bgm1::kNavHealthRouteOk;
+  return r.nav_ext;
+}
+
+// 连上并收到一条带 3 个弯道点的 REPLY → 已写出非空目标
+static void session_connect_with_curve(NavLinkSession* session, uint64_t now_ns) {
+  session->on_epoch(1, [&] { return link_tick(now_ns - 1'000'000'000ULL); });  // 连接建立（首拍写 []）
+  session->take_pending();
+  session->on_hello_ok();
+  session->on_reply(now_ns, now_ns - 50'000'000ULL, session_nav_ext(), link_tick(now_ns));
+  const auto pending = session->take_pending();
+  CHECK(pending.has_value() && json_point_count(*pending) == 3);
+}
+
+static void test_nav_link_session_clear_paths() {
+  const uint64_t now = 10'000'000'000ULL;
+  struct Case {
+    const char* name;
+    void (*clear)(NavLinkSession*, uint64_t);
+  };
+  const Case cases[] = {
+      {"fail/ERR/disconnect",
+       [](NavLinkSession* s, uint64_t t) { s->on_disconnect(link_tick(t)); }},
+      {"epoch change",
+       [](NavLinkSession* s, uint64_t t) { CHECK(s->on_epoch(2, [&] { return link_tick(t); })); }},
+      {"not connected idle", [](NavLinkSession* s, uint64_t t) { s->on_idle(false, link_tick(t)); }},
+  };
+  for (const Case& c : cases) {
+    NavLinkSession session;
+    session_connect_with_curve(&session, now);
+    CHECK(session.hello_seen());
+    c.clear(&session, now + 100'000'000ULL);
+    const auto cleared = session.take_pending();
+    if (!(cleared.has_value() && *cleared == "[]")) std::printf("  case: %s\n", c.name);
+    CHECK(cleared.has_value() && *cleared == "[]");
+    CHECK(!session.hello_seen());
+    // 重连窗口内第一条新 REPLY 前的空闲拍：连接已通，旧点不得写回
+    for (const uint64_t dt : {600'000'000ULL, 1'200'000'000ULL, 1'900'000'000ULL}) {
+      session.on_idle(true, link_tick(now + dt));
+      const auto idle = session.take_pending();
+      if (idle.has_value() && *idle != "[]") std::printf("  case: %s dt=%llu\n", c.name, (unsigned long long)dt);
+      CHECK(!idle.has_value() || *idle == "[]");
+    }
+  }
+}
+
+static void test_nav_link_session_live_reply_keeps_targets() {
+  const uint64_t now = 10'000'000'000ULL;
+  NavLinkSession session;
+  session_connect_with_curve(&session, now);
+  // 链路正常、数据新鲜的空闲拍（无新 REPLY）：1 s 刷新仍是同样 3 点，不被清掉
+  session.on_idle(true, link_tick(now + 1'000'000'000ULL));
+  const auto refreshed = session.take_pending();
+  CHECK(refreshed.has_value() && json_point_count(*refreshed) == 3);
+  // 同一个 epoch 再次出现：不复位
+  int ticks_taken = 0;
+  const auto counting_tick = [&] {
+    ticks_taken++;
+    return link_tick(now + 1'050'000'000ULL);
+  };
+  CHECK(!session.on_epoch(1, counting_tick));
+  CHECK(session.hello_seen());
+  // AF-3：epoch 没变时不取 GNSS 快照（reply 线程每轮循环都走这里，快照要加 MetaProvider 的锁）
+  CHECK(ticks_taken == 0);
+  CHECK(session.on_epoch(2, counting_tick));
+  CHECK(ticks_taken == 1);
+}
+
+// 旧 epoch 的 take_pending 只交出最后一次决策（覆盖语义）
+static void test_nav_link_session_pending_is_last_decision() {
+  const uint64_t now = 10'000'000'000ULL;
+  NavLinkSession session;
+  session_connect_with_curve(&session, now);
+  session.on_disconnect(link_tick(now + 100'000'000ULL));
+  session.on_idle(false, link_tick(now + 150'000'000ULL));
+  const auto pending = session.take_pending();
+  CHECK(pending.has_value() && *pending == "[]");
+  CHECK(!session.take_pending().has_value());  // 取走即空
+}
+
 // NavLinkCache：断连 reset 后，即使 link_connected 又变真、旧曲线还在，也只写 []
 static void test_nav_link_cache_reset_clears_old_curve() {
   NavLinkCache cache;
   MapTargetWriter w;
   bgm1::Reply r = nav_reply_fixture();
   r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead;
+  r.nav_ext.nav_health_flags |= bgm1::kNavHealthRouteOk;
   const uint64_t now = 10'000'000'000ULL;
   cache.on_reply(now, now - 50'000'000ULL, r.nav_ext);
 
@@ -2722,14 +2846,21 @@ static void test_nav_link_cache_reset_clears_old_curve() {
     in.link_connected = link;
     in.curve_present = cache.present_flags() & bgm1::kNavPresentCurveAhead;
     in.curve = cache.curve();
+    in.nav_health_flags = cache.nav_health_flags();
     in.last_reply_ns = cache.last_reply_ns();
     in.t_eof = cache.t_eof();
     return in;
   };
-  CHECK(w.update(input_from_cache(now, true)).has_value());
+  const auto first = w.update(input_from_cache(now, true));
+  CHECK(first.has_value() && json_point_count(*first) == 3);
+  CHECK(cache.nav_health_flags() == r.nav_ext.nav_health_flags);
 
   // fail()：cache.reset() + link=false 立即写 []
+  CHECK(cache.present_flags() == bgm1::kNavPresentCurveAhead && cache.curve().point_count > 0);
   cache.reset();
+  // AU-7：reset 必须真的清掉各字段（不能靠 t_eof=0 一个字段挡住新鲜度而掩盖其他字段残留）
+  CHECK(cache.present_flags() == 0 && cache.curve().point_count == 0 && cache.t_eof() == 0 &&
+        cache.last_reply_ns() == 0 && cache.nav_health_flags() == 0);
   const auto cleared = w.update(input_from_cache(now, false));
   CHECK(cleared.has_value() && *cleared == "[]");
 
@@ -2737,6 +2868,152 @@ static void test_nav_link_cache_reset_clears_old_curve() {
   // （修复前：old cache 仍在 2 s 内 → 这里会写回 3 个旧点）
   const auto out = w.update(input_from_cache(now + 600'000'000ULL, true));
   CHECK(!out.has_value() || *out == "[]");
+}
+
+// AU-3：定位精度迟滞。不可用→可用要 ≤30 m；可用→不可用要 >40 m，或连续 3 条 >30 m；未知视同不达标。
+// 计数按 GNSS 样本（message_time_ns 变化）推进，20 Hz 拍重复看到同一条样本不累加。
+static GnssSample gate_sample(uint64_t message_ns, double accuracy_m) {
+  GnssSample g = map_gnss(message_ns + 100'000'000ULL);
+  g.message_time_ns = message_ns;
+  g.horizontal_accuracy_m = accuracy_m;
+  return g;
+}
+
+static void test_gps_accuracy_gate_hysteresis() {
+  uint64_t t = 10'000'000'000ULL;
+  auto feed = [&](GpsAccuracyGate* gate, double accuracy_m, int ticks = 2) {
+    // 一条 GNSS 样本被 reply 线程的 `ticks` 个拍看到
+    const GnssSample g = gate_sample(t, accuracy_m);
+    bool usable = false;
+    for (int i = 0; i < ticks; i++) usable = gate->usable(g, t + 10'000'000ULL + i * 50'000'000ULL);
+    t += 100'000'000ULL;
+    return usable;
+  };
+
+  {  // 29/31 m 交替：一直可用
+    GpsAccuracyGate gate;
+    CHECK(feed(&gate, 29.0));
+    for (int i = 0; i < 40; i++) CHECK(feed(&gate, i % 2 ? 29.0 : 31.0));
+  }
+  {  // 连续 3 条 31 m 清空；2 条不清；每条被看到 2 次也只算 1 条
+    GpsAccuracyGate gate;
+    CHECK(feed(&gate, 5.0));
+    CHECK(feed(&gate, 31.0));
+    CHECK(feed(&gate, 31.0));
+    CHECK(!feed(&gate, 31.0));
+    // 清空后 31 m 仍不可用；要回到 ≤30 m 才恢复
+    CHECK(!feed(&gate, 31.0));
+    CHECK(!feed(&gate, 35.0));
+    CHECK(feed(&gate, 30.0));  // 30 m 边界可用
+  }
+  {  // 中间夹一条 ≤30 m：连续计数清零
+    GpsAccuracyGate gate;
+    CHECK(feed(&gate, 5.0));
+    CHECK(feed(&gate, 31.0));
+    CHECK(feed(&gate, 31.0));
+    CHECK(feed(&gate, 30.0));
+    CHECK(feed(&gate, 31.0));
+    CHECK(feed(&gate, 31.0));
+    CHECK(!feed(&gate, 31.0));
+  }
+  {  // 一条 >40 m 立即清空（40 m 本身不算）
+    GpsAccuracyGate gate;
+    CHECK(feed(&gate, 5.0));
+    CHECK(feed(&gate, 40.0));
+    CHECK(!feed(&gate, 40.001, 1));
+    GpsAccuracyGate gate2;
+    CHECK(feed(&gate2, 5.0));
+    CHECK(!feed(&gate2, 45.0, 1));
+  }
+  {  // 未知精度：从不可用恢复不了；可用时按「不达标」计入连续 3 条，但不立即清空
+    GpsAccuracyGate gate;
+    CHECK(!feed(&gate, 0.0));
+    CHECK(!feed(&gate, NAN));
+    CHECK(!feed(&gate, -1.0));
+    CHECK(feed(&gate, 5.0));
+    CHECK(feed(&gate, 0.0));
+    CHECK(feed(&gate, NAN));
+    CHECK(!feed(&gate, 0.0));
+  }
+  {  // 起始 31 m 不可用；fix 丢失 / event_valid=0 / 过期立即不可用，并复位迟滞状态
+    GpsAccuracyGate gate;
+    CHECK(!feed(&gate, 31.0));
+    CHECK(feed(&gate, 29.0));
+    GnssSample no_fix = gate_sample(t, 5.0);
+    no_fix.has_fix = false;
+    CHECK(!gate.usable(no_fix, t + 10'000'000ULL));
+    t += 100'000'000ULL;
+    CHECK(!feed(&gate, 31.0));  // 复位后 31 m 不能直接恢复
+    CHECK(feed(&gate, 29.0));
+    // 样本过期（>1 s 没新样本）
+    const GnssSample g = gate_sample(t, 5.0);
+    CHECK(gate.usable(g, t + 500'000'000ULL));
+    CHECK(!gate.usable(g, t + 1'100'000'000ULL));
+  }
+}
+
+// AU-3 端到端：29/31 m 交替（每条 GNSS 换一次），目标不再被反复清空写回
+static void test_map_target_accuracy_flapping_keeps_targets() {
+  for (const int period : {1, 2, 5, 10}) {
+    MapTargetWriter w;
+    const uint64_t t0 = 10'000'000'000ULL;
+    int clears = 0;
+    int present_ticks = 0;
+    bool have_targets = false;
+    for (int k = 0; k < 200; k++) {
+      const uint64_t now = t0 + uint64_t(k) * 50'000'000ULL;
+      MapTargetInput in = map_input_spaced(now);
+      in.curve.point_count = 1;
+      const double accuracy_m = ((k / 2 / period) % 2) ? 31.0 : 29.0;
+      in.gnss = gate_sample(t0 + uint64_t(k / 2) * 100'000'000ULL, accuracy_m);
+      if (const auto out = w.update(in)) {
+        if (*out == "[]") clears++;
+        have_targets = *out != "[]";
+      }
+      if (have_targets) present_ticks++;
+    }
+    // period=10：每 1 s 在 31 m 上停留 10 条（≥3 条）→ 合理清空；period ≤2：只有 1–2 条，不得清空
+    if (period <= 2) {
+      CHECK(clears == 0);
+      CHECK(present_ticks >= 199);
+    } else {
+      CHECK(clears >= 1);
+    }
+  }
+}
+
+// AU-4：偏航重算 / 已离开路线时，车机不用 CURVE 点
+static void test_map_target_rerouting_and_route_ok() {
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) {
+    in->nav_health_flags = bgm1::kNavHealthRerouting | bgm1::kNavHealthRouteOk;
+  });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) {
+    in->curve.curve_flags = 0x01;  // 沿路线
+    in->nav_health_flags = 0;      // route_ok=0
+  });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) {
+    in->curve.curve_flags = 0x05;  // 沿路线 + 平滑
+    in->nav_health_flags = bgm1::kNavHealthGpsOk;
+  });
+
+  // 沿路线 + route_ok=1：照常写
+  {
+    MapTargetWriter w;
+    MapTargetInput in = map_input();
+    in.curve.curve_flags = 0x01;
+    in.nav_health_flags = bgm1::kNavHealthRouteOk;
+    const auto out = w.update(in);
+    CHECK(out.has_value() && json_point_count(*out) == 8);
+  }
+  // 沿当前道路前扫（bit1）且 route_ok=0：没有路线也可用，照常写
+  {
+    MapTargetWriter w;
+    MapTargetInput in = map_input();
+    in.curve.curve_flags = 0x02;
+    in.nav_health_flags = 0;
+    const auto out = w.update(in);
+    CHECK(out.has_value() && json_point_count(*out) == 8);
+  }
 }
 
 // S3/S7：位置按 GNSS 节拍生成；无 fix / fix 过期 / 精度未知或 >30 m / 坐标非法都不写
@@ -2767,6 +3044,11 @@ static void test_last_gps_position_gate() {
   g.message_time_ns = now - 950'000'000ULL;  // N3：0.95 s 仍有效
   CHECK(last_gps_position_json(g, now).has_value());
   g.message_time_ns = now - 1'050'000'000ULL;  // N3：1.05 s 过期
+  CHECK(!last_gps_position_json(g, now).has_value());
+  g = map_gnss(now);
+  g.message_time_ns = now - 1'000'000'000ULL;  // AU-6：恰好 1 s 可用（within 是 <=）
+  CHECK(last_gps_position_json(g, now).has_value());
+  g.message_time_ns = now - 1'000'000'001ULL;  // AU-6：再早 1 ns 过期
   CHECK(!last_gps_position_json(g, now).has_value());
   g = map_gnss(now);
   g.message_time_ns = now + 10'000'000ULL;  // R3：fix 比 now 晚 10 ms（未来）按无效处理
@@ -2805,46 +3087,13 @@ static void test_map_target_and_position_cadence() {
   CHECK(target_writes >= 1 && target_writes <= 21);  // 首次 + ≤2 Hz（10 s）
 }
 
-// N5：HELLO 成功也 reset cache，堵「drop 后 reply 线程还没看到断连就已重连」的窗口
+// ConnEpochTracker：drop 后 writer 线程已重连而 reply 线程还没看到断连的窗口
 static void test_conn_epoch_tracker() {
   ConnEpochTracker t;
   CHECK(t.update(5));   // 首次：启动复位
   CHECK(!t.update(5));
   CHECK(t.update(6));   // writer 线程重连，reply 线程还没看到 !connected
   CHECK(!t.update(6));
-}
-
-// R1：epoch 变化 → main 实际执行的复位序列（hello_seen/framer/cache/清目标中的纯逻辑部分）
-static void test_conn_epoch_change_resets_nav_state() {
-  ConnEpochTracker tracker;
-  NavLinkCache cache;
-  MapTargetWriter w;
-  bgm1::Reply r = nav_reply_fixture();
-  r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead;
-  const uint64_t now = 10'000'000'000ULL;
-  CHECK(tracker.update(1));
-  cache.on_reply(now, now - 50'000'000ULL, r.nav_ext);
-
-  auto input_from_cache = [&](uint64_t t, bool link) {
-    MapTargetInput in = map_input(t);
-    in.link_connected = link;
-    in.curve_present = cache.present_flags() & bgm1::kNavPresentCurveAhead;
-    in.curve = cache.curve();
-    in.last_reply_ns = cache.last_reply_ns();
-    in.t_eof = cache.t_eof();
-    return in;
-  };
-  CHECK(w.update(input_from_cache(now, true)).has_value());
-
-  // drop 后 writer 线程已重连（epoch 2），reply 线程尚未看到断连
-  CHECK(tracker.update(2));
-  cache.reset();  // main：epoch 变化 → link_cache_.reset()
-  const auto cleared = w.update(input_from_cache(now, false));
-  CHECK(cleared.has_value() && *cleared == "[]");
-
-  // 新 HELLO 前的 idle 拍：不能写回旧点
-  const auto out = w.update(input_from_cache(now + 600'000'000ULL, true));
-  CHECK(!out.has_value() || *out == "[]");
 }
 
 // N10：点坐标每拍都变、点数不变，20 Hz × 10 s → 目标写 ≤21 次。
@@ -2972,7 +3221,12 @@ int main() {
   test_map_target_one_to_one_matching();
   test_nav_link_cache_reset_clears_old_curve();
   test_conn_epoch_tracker();
-  test_conn_epoch_change_resets_nav_state();
+  test_gps_accuracy_gate_hysteresis();
+  test_map_target_accuracy_flapping_keeps_targets();
+  test_map_target_rerouting_and_route_ok();
+  test_nav_link_session_clear_paths();
+  test_nav_link_session_live_reply_keeps_targets();
+  test_nav_link_session_pending_is_last_decision();
   test_last_gps_position_gate();
   test_map_target_and_position_cadence();
   test_map_target_moving_points_cadence();

@@ -150,13 +150,22 @@ ROAD_ATTR 16 ‖ CURVE_AHEAD 104（头 8 + 8 点 × 12）‖ NAV_DEBUG 8 ‖ 保
   SCC-map 对旧点有粘滞）。CURVE present=0 / 链路断开 / 数据过期 → `[]`；
   数据过期用合成判断 `now − (t_eof − age_ms)` ≤2 s（两个 2 s 不叠加；t_eof = REPLY 回显的帧
   `timestamp_eof`）。GNSS 无 fix、`event_valid=0`、fix >1 s（N3：GNSS 断流时不能靠 has_fix=0）、
-  水平精度未知或 >30 m（协议 T_acc）、坐标非法或 (0,0) → 不写 `LastGPSPosition`，
-  且 `MapTargetVelocities=[]`；`target_speed_kph=0` 的点跳过。
+  坐标非法或 (0,0) → 不写 `LastGPSPosition`，且 `MapTargetVelocities=[]`；
+  水平精度未知或 >30 m（协议 T_acc）→ 不写 `LastGPSPosition`（逐条判，无状态）；`MapTargetVelocities`
+  对精度带**迟滞**（`GpsAccuracyGate`，AU-3）：不可用 → 可用要 ≤30 m，可用 → 不可用要 >40 m 或连续
+  3 条 GNSS 样本 >30 m（未知精度视同不达标），避免精度在 30 m 上下抖动时目标反复清空写回；
+  计数按 GNSS 样本推进，20 Hz 的 reply 拍重复看到同一条不累加。
+  AU-4：REPLY `rerouting=1` → `[]`；`curve_flags.bit0`（沿路线）为 1 而 `route_ok=0` → `[]`
+  （bit1 沿当前道路前扫的点不依赖路线）；`target_speed_kph=0` 的点跳过。
   `MapTargetVelocities` 是 mem Params（不是 msgq 服务），不进 rlog。
-- 断连（EOF/ERR/kStall/未连接）即 `NavLinkCache::reset()`：重连后第一条 REPLY 到达前不会再拿旧
-  NavExt 写回弯道点；HELLO 成功也 reset。进程启动（起线程前）与退出（所有线程 join 后）都由
-  主线程阻塞写 `MapTargetVelocities=[]` 并删除 `LastGPSPosition`（崩溃/SIGKILL 重启也清残留）；
-  manager 在上路/下路切换时也对 mem Params 做同样清理（下路只是兜底；Darwin 不碰）。
+- reply 线程的链路状态全在 `NavLinkSession`（`nav_outputs.h`，AU-1）：epoch 变化 / fail / ERR / 未连接
+  都走 `on_epoch` / `on_disconnect` / `on_idle(false)`，复位 NavExt 摘要与 HELLO 标志并立即以
+  `link=false` 走 writer（→ `[]`）；重连后第一条 REPLY 到达前不会再拿旧 NavExt 写回弯道点。
+  main.cc 只把 `take_pending()` 交给 calib 线程（锁内只 swap）；宿主测试驱动同一个类。
+  进程启动（起线程前）与退出（所有线程 join 后）都由主线程阻塞写 `MapTargetVelocities=[]` 并删除
+  `LastGPSPosition`（崩溃/SIGKILL 重启也清残留）；reply / calib 线程退出循环时也各补一次清空。
+  manager 在上路/下路切换时也对 mem Params 做同样清理（下路只是兜底；Darwin 不碰）；上路期间
+  bigmodeld 不在运行（关开关 / 崩溃待重启 / 退出卡住）时，manager 每拍删掉这两个键（AU-5）。
 - `navStateSP` 的浮点字段存 SI 值（定点换算后），整数编码字段保留线上原值（无效哨兵原样保留）；
   浮点无效值用 NaN（0 是有效值）。字段对照见 `cereal/custom.capnp` 的注释。
 - HELLO `parse_hello` 得 `kBadVersion` → `BigmodelLinkState=version_mismatch`，**一直保持到下一次
@@ -196,6 +205,7 @@ clang++ -std=c++17 -O1 test_bigmodeld.cc frame_codec.cpp frame_meta.cpp \
         -o /tmp/test_bigmodeld
 # 跨端 golden 互解（默认必跑；golden 由 chipmunk 仓库 app/tests/make_frame_golden.py 生成，*.bin 不入库）。
 # 未设置目录 / 文件缺失或为空都判失败；显式跳过：BGM1_GOLDEN_SKIP=1
+# （先在 chipmunk-os/app 跑 `python3 tests/make_frame_golden.py` 生成 golden；AU-16）
 BGM1_GOLDEN_DIR=<chipmunk-os>/app/tests/fixtures /tmp/test_bigmodeld
 # warp 查找表（需 arm64/NEON，Apple Silicon 可直接编）
 clang++ -std=c++17 -O1 test_warp_lut.cc warp_pack.cpp frame_meta.cpp frame_codec.cpp \

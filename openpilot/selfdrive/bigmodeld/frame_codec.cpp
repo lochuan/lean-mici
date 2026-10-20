@@ -298,7 +298,7 @@ void parse_nav_ext(const uint8_t* p, NavExt* out) {
   if (n.present_flags & kNavPresentCurveAhead) {
     const uint8_t* q = p + kCurveAheadOffset;
     CurveAhead& c = n.curve_ahead;
-    const size_t point_count = q[0];
+    const size_t point_count = clamp_curve_count(q[0]);  // 上面已拦 >8；循环上界再钳一次做双保险
     c.point_count = uint8_t(point_count);
     c.max_lateral_acceleration_dm_per_s2 = q[1];
     c.horizon_distance_m = get_u16(q + 2);

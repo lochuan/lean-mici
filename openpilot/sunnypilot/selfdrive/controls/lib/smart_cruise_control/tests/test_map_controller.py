@@ -7,6 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 import json
 import math
 import platform
+from pathlib import Path
 
 
 from openpilot.cereal import custom
@@ -15,6 +16,8 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.car.cruise import V_CRUISE_UNSET
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.map_controller import R, SmartCruiseControlMap
 from openpilot.common.test import OpenpilotTestCase
+
+MAP_TARGET_EIGHT_POINTS_FIXTURE = Path(__file__).parents[6] / "selfdrive/bigmodeld/tests/fixtures/map_target_eight_points.json"
 
 MapState = VisionState = custom.LongitudinalPlanSP.SmartCruiseControl.MapState
 
@@ -73,18 +76,10 @@ class TestSmartCruiseControlMap(OpenpilotTestCase):
     self.assertAlmostEqual(self.scc_m.v_target, 24.0, delta=24.0 * 1e-6)
 
   def test_bigmodeld_map_target_writer_payload(self):
-    # 与 openpilot/selfdrive/bigmodeld/test_bigmodeld.cc
-    # test_map_target_eight_points_json 同一份 JSON（C++ MapTargetWriter 的输出格式）：
-    # velocity 是 m/s（target_speed_kph / 3.6），键只有 latitude/longitude/velocity。
-    payload = ("["
-               "{\"latitude\":37.4220000,\"longitude\":-122.0840000,\"velocity\":11.111},"
-               "{\"latitude\":37.4220001,\"longitude\":-122.0839999,\"velocity\":11.389},"
-               "{\"latitude\":37.4220002,\"longitude\":-122.0839998,\"velocity\":11.667},"
-               "{\"latitude\":37.4220003,\"longitude\":-122.0839997,\"velocity\":11.944},"
-               "{\"latitude\":37.4220004,\"longitude\":-122.0839996,\"velocity\":12.222},"
-               "{\"latitude\":37.4220005,\"longitude\":-122.0839995,\"velocity\":12.500},"
-               "{\"latitude\":37.4220006,\"longitude\":-122.0839994,\"velocity\":12.778},"
-               "{\"latitude\":37.4220007,\"longitude\":-122.0839993,\"velocity\":13.056}]")
+    # AU-8：读 C++ MapTargetWriter 的输出样例（test_bigmodeld.cc 的 test_map_target_eight_points_json
+    # 断言 writer 输出与该文件逐字节相等）：velocity 是 m/s（target_speed_kph / 3.6），
+    # 键只有 latitude/longitude/velocity。
+    payload = MAP_TARGET_EIGHT_POINTS_FIXTURE.read_text()
     self.mem_params.put("LastGPSPosition", "{\"latitude\":37.4220000,\"longitude\":-122.0840000}", block=True)
     self.mem_params.put("MapTargetVelocities", payload, block=True)
 

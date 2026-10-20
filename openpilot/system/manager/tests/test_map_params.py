@@ -36,3 +36,32 @@ def test_clear_map_params_none_is_noop():
 def test_darwin_never_uses_mem_params(monkeypatch):
   monkeypatch.setattr(map_params.platform, "system", lambda: "Darwin")
   assert map_params.open_mem_params() is None
+
+
+def _mem_with_targets(tmp_path):
+  mem = Params(str(tmp_path / "params"))
+  mem.put("LastGPSPosition", '{"latitude":1.0,"longitude":2.0}', block=True)
+  mem.put("MapTargetVelocities", '[{"latitude":1.0,"longitude":2.0,"velocity":10.0}]', block=True)
+  mem.put_bool("SmartCruiseControlMap", True, block=True)
+  return mem
+
+
+def test_writer_gone_onroad_removes_only_map_keys(tmp_path):
+  # AU-5：上路期间 bigmodeld 不在运行 → 删掉它留下的目标与位置；其他键不动，也不 clear_all
+  mem = _mem_with_targets(tmp_path)
+  map_params.remove_map_targets_if_writer_gone(mem, started=True, writer_running=False)
+  assert mem.get("LastGPSPosition") is None
+  assert mem.get("MapTargetVelocities") is None
+  assert mem.get_bool("SmartCruiseControlMap")
+
+
+def test_writer_running_or_offroad_keeps_keys(tmp_path):
+  mem = _mem_with_targets(tmp_path)
+  map_params.remove_map_targets_if_writer_gone(mem, started=True, writer_running=True)
+  map_params.remove_map_targets_if_writer_gone(mem, started=False, writer_running=False)
+  assert mem.get("LastGPSPosition") is not None
+  assert mem.get("MapTargetVelocities") is not None
+
+
+def test_writer_gone_with_no_mem_params_is_noop():
+  map_params.remove_map_targets_if_writer_gone(None, started=True, writer_running=False)

@@ -35,8 +35,10 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -382,28 +384,24 @@ class Bigmodeld {
         LOGE("bigmodeld: REPLY 流异常（%s），断连重连", why);
       }
       sender_->notify_disconnect();
-      hello_seen_ = false;
       link_mark_connecting();
       framer.clear();
       // S2：断连即丢弃 NavExt 摘要；旧弯道点不得继续驱动纵向（MapTargetVelocities → []）
-      link_cache_.reset();
-      update_map_targets(nanos_since_boot(), /*link_connected=*/false);
+      link_session_.on_disconnect(nav_link_tick());
+      publish_map_targets();
     };
 
     while (!do_exit) {
       // R1：连接代号变化 = drop 后 writer 线程已重连（reply 线程可能还没看到 !connected）。
-      // 立即复位 hello_seen_/半包/NavExt 摘要，避免旧弯道点在 idle 拍写回、新 HELLO 被判重复。
-      if (reply_epoch_.update(u32(sender_->conn_epoch()))) {
-        hello_seen_ = false;
+      // session 复位 hello 标志 / NavExt 摘要并清弯道目标；半包缓冲在这里清。
+      if (link_session_.on_epoch(u32(sender_->conn_epoch()), [&] { return nav_link_tick(); })) {
         framer.clear();
-        link_cache_.reset();
-        update_map_targets(nanos_since_boot(), /*link_connected=*/false);
+        publish_map_targets();
       }
       if (!sender_->connected()) {
-        hello_seen_ = false;
         // 未连接/启动即清空：不留下上一趟或本趟崩溃前的弯道点
-        link_cache_.reset();
-        update_map_targets(nanos_since_boot(), /*link_connected=*/false);
+        link_session_.on_idle(false, nav_link_tick());
+        publish_map_targets();
         util::sleep_for(50);
         continue;
       }
@@ -417,7 +415,8 @@ class Bigmodeld {
       if (n == 0) {
         sock_.wait_readable(kIdleWaitMs);
         // 无新 REPLY：NavExt / GNSS 过期时清掉旧弯道点（writer 只在需要时写）
-        update_map_targets(nanos_since_boot(), sender_->connected());
+        link_session_.on_idle(sender_->connected(), nav_link_tick());
+        publish_map_targets();
         continue;
       }
       framer.append(tmp, n);
@@ -441,7 +440,7 @@ class Bigmodeld {
         if (framed.type == bgm1::kTypeHello) {
           // 06 号：HELLO 必须是连接首条消息且每连接仅一条（ver/instance_id/max_frame）
           bgm1::Hello h;
-          bgm1::Err pe = hello_seen_ ? bgm1::Err::kBadType : bgm1::parse_hello(data, need, &h);
+          bgm1::Err pe = link_session_.hello_seen() ? bgm1::Err::kBadType : bgm1::parse_hello(data, need, &h);
           if (pe != bgm1::Err::kOk) {
             if (pe == bgm1::Err::kBadVersion) {
               // N12：先置 version_mismatch，再 fail()（connecting 被 sticky 状态挡住，
@@ -455,13 +454,13 @@ class Bigmodeld {
             }
             break;
           }
-          hello_seen_ = true;
+          link_session_.on_hello_ok();
           max_segment_.store(h.max_frame, std::memory_order_relaxed);  // 段长上限以 HELLO 为准（spec）
           link_.on_hello(h.instance_id);
           link_state_write();
           LOGW("bigmodeld: HELLO instance_id=0x%llx max_frame=%u（%s）",
                (unsigned long long)h.instance_id, h.max_frame, link_.value().c_str());
-        } else if (!hello_seen_) {
+        } else if (!link_session_.hello_seen()) {
           fail("首条消息不是 HELLO");
           break;
         } else if (framed.type == bgm1::kTypeReply) {
@@ -474,7 +473,6 @@ class Bigmodeld {
             fail("REPLY 解析失败", got_ver);
             break;
           }
-          link_cache_.on_reply(reply_ns, r.t_eof, r.nav_ext);
           // 04 号 C：REPLY 经 msgq 转交 modeld（outputs[0:2066) 与 flags 原样镜像，
           // 逐帧都发——App 侧解码跳帧的全零 outputs 也发，落回小模型由 modeld 判）
           MessageBuilder msg;
@@ -498,8 +496,9 @@ class Bigmodeld {
           pm_.send("bigModelReply", msg);
           // P1：回包给 modeld 之后再做 navStateSP 与 map 目标（回包路径不做多余的事）
           publish_nav_state(r);
-          // R3：用调用时刻而非 parse 前的 reply_ns（calib 可能已处理更新的 GNSS）
-          update_map_targets(nanos_since_boot(), /*link_connected=*/true);
+          // R3：决策时刻取 REPLY 处理完之后（nav_link_tick），而非 parse 前的 reply_ns
+          link_session_.on_reply(reply_ns, r.t_eof, r.nav_ext, nav_link_tick());
+          publish_map_targets();
         } else {
           bgm1::ErrMsg e;
           const bgm1::Err ee = bgm1::parse_err(data, need, &e);
@@ -510,16 +509,18 @@ class Bigmodeld {
                  unsigned(bgm1::kVersion));
           }
           sender_->notify_disconnect();
-          hello_seen_ = false;
           link_mark_connecting();
           framer.clear();
-          link_cache_.reset();
-          update_map_targets(nanos_since_boot(), /*link_connected=*/false);
+          link_session_.on_disconnect(nav_link_tick());
+          publish_map_targets();
           break;
         }
         framer.consume(need);
       }
     }
+    // AU-5：退出循环不留旧弯道点；calib 线程退出前还会再写一次
+    link_session_.on_disconnect(nav_link_tick());
+    publish_map_targets();
   }
 
   // ===== 标定/输入元数据线程：extrinsicsCalibration.rpyCalib + modelDataV2SP → 帧头 =====
@@ -610,6 +611,8 @@ class Bigmodeld {
         meta_.set_vehicle(vehicle_sample_from_device_motion(rpy, v, w, f));
       }
     }
+    // AU-5：退出前把 reply 线程最后交付的清空写出（所有线程 join 后 main 还会阻塞清一次）
+    write_pending_map_targets();
   }
 
   // 退出清理（main 在所有线程 join 之后调用）：阻塞写，确保旧弯道点/位置不留给下次进程（S1a）
@@ -868,27 +871,29 @@ class Bigmodeld {
     pm_.send("navStateSP", msg);
   }
 
-  // CURVE_AHEAD（含经纬度）+ MetaProvider 里票 B 已有的最近一条 GNSS → 弯道目标。
-  // 决策与序列化在 MapTargetWriter（纯逻辑、宿主单测）；reply 线程只把结果放进本次写入槽，
-  // 真正的 Params 文件 I/O 由非实时线程 calib_thread 做（P2）。
-  void update_map_targets(uint64_t now_ns, bool link_connected) {
-    MapTargetInput in;
-    in.link_connected = link_connected;
-    in.curve_present = link_cache_.present_flags() & bgm1::kNavPresentCurveAhead;
-    in.curve = link_cache_.curve();
-    in.last_reply_ns = link_cache_.last_reply_ns();
-    // N7：t_eof 与 nanos_since_boot 同为 CLOCK_BOOTTIME（camerad spectra.cc 用
-    // nanos_since_boot() − timestamp_eof 算 processing_time；SOF 时间戳来自内核）
-    in.t_eof = link_cache_.t_eof();
+  // reply 线程一次决策用的「现在」：先取 GNSS 快照，再取时刻（AU-13：时刻不早于快照，
+  // 刚到的新 GNSS 样本不会被判成未来时刻而误清空）。
+  NavLinkTick nav_link_tick() {
+    NavLinkTick tick;
     GnssSample gnss;
     if (meta_.latest_gnss(&gnss)) {
-      in.gnss_seen = true;
-      in.gnss = gnss;
+      tick.gnss.seen = true;
+      tick.gnss.gnss = gnss;
     }
-    in.now_ns = now_ns;
-    if (const auto velocities = map_targets_.update(in)) {
+    tick.now_ns = nanos_since_boot();
+    return tick;
+  }
+
+  // CURVE_AHEAD（含经纬度）+ MetaProvider 里票 B 已有的最近一条 GNSS → 弯道目标。
+  // 决策与序列化在 NavLinkSession / MapTargetWriter（纯逻辑、宿主单测）；reply 线程只把结果放进
+  // 本次写入槽，真正的 Params 文件 I/O 由非实时线程 calib_thread 做（P2）。
+  // 锁内只 swap 指针（AU-9）：旧值留在局部变量，出锁后释放，实时线程不在锁内分配/释放堆。
+  void publish_map_targets() {
+    std::optional<std::string> json = link_session_.take_pending();
+    if (!json) return;
+    {
       std::lock_guard<std::mutex> lk(map_params_mtx_);
-      pending_map_target_velocities_ = *velocities;
+      pending_map_target_velocities_.swap(json);
     }
   }
 
@@ -904,8 +909,14 @@ class Bigmodeld {
 
   // 阻塞 put 只在非实时线程（calib_thread）或所有线程 join 之后的退出路径调用；
   // Params::put 自身线程安全，且这里没有并发写者，故不持锁做 I/O（避免 reply 线程等锁）。
+  // AU-9：put 失败要留痕（SCC-map 读不到新目标）；按 key 限流 1 Hz，1 s 刷新会自愈。
   void write_mem_param(const char* key, const std::string& value) {
-    mem_params_.put(key, value);
+    if (mem_params_.put(key, value) == 0) return;  // Params::put 成功返回 0
+    const uint64_t now_ns = nanos_since_boot();
+    uint64_t& last_log_ns = mem_param_error_log_ns_[key];
+    if (now_ns - last_log_ns < 1'000'000'000ULL) return;
+    last_log_ns = now_ns;
+    LOGE("bigmodeld: 写 mem Params %s 失败", key);
   }
 
   // ---- sender 事件（sender.mtx 锁内回调：只记账 + 推队列 + 日志，不取 state_mtx）----
@@ -1055,17 +1066,15 @@ class Bigmodeld {
   FrameStageLog stages_;  // C4 本机分段计时（随 REPLY 上报）
 
   // 票 C：最近一条 REPLY 的 NavExt 摘要（reply 线程独占）；断连路径必须 reset()
-  ConnEpochTracker reply_epoch_;  // R1：conn_epoch 变化即复位（reply 线程独占）
-  NavLinkCache link_cache_;
-  MapTargetWriter map_targets_;
+  NavLinkSession link_session_;  // AU-1：epoch 跟踪 + NavExt 摘要 + 弯道目标 writer + HELLO 标志
   // reply 线程交付、calib_thread 写出的弯道目标（map_params_mtx_ 保护）
   std::optional<std::string> pending_map_target_velocities_;
   Params mem_params_{"/dev/shm/params"};  // SCC-map 读的 mem Params（与 Python Params 同一路径）
   std::mutex map_params_mtx_;             // 只保护 pending_map_target_velocities_（不包 I/O）
+  std::map<std::string, uint64_t> mem_param_error_log_ns_;  // write_mem_param 失败日志限流（calib 线程独占）
 
   // 06 号：链路状态（HELLO instance_id 对比 → blip/restart）→ Param "BigmodelLinkState"（07 号读）
   LinkStateTracker link_;
-  bool hello_seen_ = false;       // 本连接已收 HELLO（reply 线程独占）
   std::atomic<uint32_t> max_segment_{bgm1::kDefaultMaxSegment};  // 段长上限（HELLO 一到即更新）
   std::mutex link_param_mtx_;     // 串行化 Param 写（putNonBlocking 的 future 非线程安全）
 

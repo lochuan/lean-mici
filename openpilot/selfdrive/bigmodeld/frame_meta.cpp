@@ -201,7 +201,8 @@ void get_warp_matrix(const float rpy[3], const float intrinsics[9], bool bigmode
 }
 
 MetaProvider::MetaProvider() {
-  recompute_locked();
+  get_warp_matrix(rpy_, kNarrowRoadIntrinsics, false, warp_road_);
+  get_warp_matrix(rpy_, kWideRoadIntrinsics, true, warp_wide_);
 }
 
 void MetaProvider::warp(bool wide, float out[9]) const {
@@ -209,17 +210,16 @@ void MetaProvider::warp(bool wide, float out[9]) const {
   std::memcpy(out, wide ? warp_wide_ : warp_road_, sizeof warp_road_);
 }
 
-void MetaProvider::recompute_locked() {
-  get_warp_matrix(rpy_, kNarrowRoadIntrinsics, false, warp_road_);
-  get_warp_matrix(rpy_, kWideRoadIntrinsics, true, warp_wide_);
-}
-
 void MetaProvider::set_rpy(const float rpy[3]) {
+  // AU-12：两套 warp 矩阵在锁外算好，锁内只拷贝。calib 线程（SCHED_OTHER）持锁被抢占时，
+  // 等锁的 capture（FIFO 50）/ reply（FIFO 53）线程不会因 mutex 无优先级继承而被拖住。
+  float warp_road[9], warp_wide[9];
+  get_warp_matrix(rpy, kNarrowRoadIntrinsics, false, warp_road);
+  get_warp_matrix(rpy, kWideRoadIntrinsics, true, warp_wide);
   std::lock_guard<std::mutex> lk(mtx_);
-  rpy_[0] = rpy[0];
-  rpy_[1] = rpy[1];
-  rpy_[2] = rpy[2];
-  recompute_locked();
+  std::memcpy(rpy_, rpy, sizeof rpy_);
+  std::memcpy(warp_road_, warp_road, sizeof warp_road_);
+  std::memcpy(warp_wide_, warp_wide, sizeof warp_wide_);
 }
 
 void MetaProvider::set_model_inputs(const float action_t[2], uint8_t desire_class) {

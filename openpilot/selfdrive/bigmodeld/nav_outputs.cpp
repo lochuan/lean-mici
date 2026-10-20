@@ -12,7 +12,7 @@ constexpr float kCentidegToDeg = 0.01f;
 constexpr float kDmToM = 0.1f;
 
 constexpr int32_t kDegreesX1e7PerDegree = 10'000'000;
-constexpr double kMetersPerSecondPerKph = 1.0 / 3.6;
+constexpr double kKphToMPerS = 1.0 / 3.6;
 constexpr double kGpsUnknownAccuracyM = 0.0;  // cereal 未知精度 ≤0；本函数只认 (0, 30]
 
 // 事件时刻是否在 now 的 max_age 以内（事件时刻在未来 = 时钟回跳，按过期处理，安全侧）
@@ -37,7 +37,7 @@ void append_point_json(std::string* out, const bgm1::CurvePoint& p) {
   char point[128];
   const double latitude_deg = double(p.latitude_deg_x1e7) / kDegreesX1e7PerDegree;
   const double longitude_deg = double(p.longitude_deg_x1e7) / kDegreesX1e7PerDegree;
-  const double velocity_m_per_s = double(p.target_speed_kph) * kMetersPerSecondPerKph;
+  const double velocity_m_per_s = double(p.target_speed_kph) * kKphToMPerS;
   std::snprintf(point, sizeof point,
                 "{\"latitude\":%.7f,\"longitude\":%.7f,\"velocity\":%.3f}", latitude_deg,
                 longitude_deg, velocity_m_per_s);
@@ -124,6 +124,7 @@ void NavLinkCache::on_reply(uint64_t reply_ns, uint64_t t_eof, const bgm1::NavEx
   last_reply_ns_ = reply_ns;
   t_eof_ = t_eof;
   present_flags_ = ext.present_flags;
+  nav_health_flags_ = ext.nav_health_flags;
   curve_ = ext.curve_ahead;
 }
 
@@ -131,21 +132,56 @@ void NavLinkCache::reset() {
   last_reply_ns_ = 0;
   t_eof_ = 0;
   present_flags_ = 0;
+  nav_health_flags_ = 0;
   curve_ = bgm1::CurveAhead{};
 }
 
-bool gps_fix_usable(const GnssSample& gnss, uint64_t now_ns) {
+bool gps_fix_present(const GnssSample& gnss, uint64_t now_ns) {
   // N6：event_valid=0 视同没有 fix。N3：fix 新鲜度单独 1 s（FRAME.has_fix 的 2 s 不动）。
   if (!gnss.event_valid || !gnss.has_fix || !within(gnss.message_time_ns, now_ns, kGpsFixMaxAgeNs)) {
     return false;
   }
-  const double accuracy_m = gnss.horizontal_accuracy_m;
-  if (!std::isfinite(accuracy_m) || accuracy_m <= kGpsUnknownAccuracyM ||
-      accuracy_m > kGpsHorizontalAccuracyMaxM) {
-    return false;  // 未知（≤0 / NaN）与 >30 m 都按无 fix 处理（S7）
-  }
   return coords_ok(gnss.latitude_deg, gnss.longitude_deg) &&
          !(gnss.latitude_deg == 0.0 && gnss.longitude_deg == 0.0);
+}
+
+bool gps_fix_usable(const GnssSample& gnss, uint64_t now_ns) {
+  if (!gps_fix_present(gnss, now_ns)) return false;
+  const double accuracy_m = gnss.horizontal_accuracy_m;
+  return std::isfinite(accuracy_m) && accuracy_m > kGpsUnknownAccuracyM &&
+         accuracy_m <= kGpsHorizontalAccuracyMaxM;  // 未知（≤0 / NaN）与 >30 m 都按无 fix 处理（S7）
+}
+
+void GpsAccuracyGate::reset() {
+  usable_ = false;
+  consecutive_over_ = 0;
+  last_sample_ns_ = 0;
+}
+
+bool GpsAccuracyGate::usable(const GnssSample& gnss, uint64_t now_ns) {
+  if (!gps_fix_present(gnss, now_ns)) {
+    reset();
+    return false;
+  }
+  if (gnss.message_time_ns == last_sample_ns_) return usable_;  // 同一条样本：状态不推进
+  last_sample_ns_ = gnss.message_time_ns;
+
+  const double accuracy_m = gnss.horizontal_accuracy_m;
+  const bool known = std::isfinite(accuracy_m) && accuracy_m > kGpsUnknownAccuracyM;
+  const bool within_max = known && accuracy_m <= kGpsHorizontalAccuracyMaxM;
+  if (!usable_) {
+    usable_ = within_max;
+    consecutive_over_ = 0;
+  } else if (within_max) {
+    consecutive_over_ = 0;
+  } else if (known && accuracy_m > kGpsHorizontalAccuracyDropM) {
+    usable_ = false;  // 明显差：一条就清空
+    consecutive_over_ = 0;
+  } else if (++consecutive_over_ >= kGpsAccuracyDropSamples) {
+    usable_ = false;
+    consecutive_over_ = 0;
+  }
+  return usable_;
 }
 
 std::optional<std::string> last_gps_position_json(const GnssSample& gnss, uint64_t now_ns) {
@@ -229,9 +265,15 @@ std::optional<std::string> MapTargetWriter::update(const MapTargetInput& in) {
   const uint64_t age_ns = uint64_t(in.curve.age_ms) * 1'000'000ULL;
   const bool nav_fresh = in.t_eof != 0 && in.t_eof >= age_ns &&
                          within(in.t_eof - age_ns, in.now_ns, kNavDataMaxAgeNs);
-  const bool gnss_usable = in.gnss_seen && gps_fix_usable(in.gnss, in.now_ns);
+  if (!in.gnss_seen) gps_gate_.reset();
+  const bool gnss_usable = in.gnss_seen && gps_gate_.usable(in.gnss, in.now_ns);
+  // AU-4：偏航重算时旧路线前方的点不可信；沿路线取点（curve_flags.bit0）要求仍在路线上
+  const bool rerouting = in.nav_health_flags & bgm1::kNavHealthRerouting;
+  const bool along_route = in.curve.curve_flags & 0x01;
+  const bool route_ok = in.nav_health_flags & bgm1::kNavHealthRouteOk;
+  const bool route_usable = !rerouting && (!along_route || route_ok);
   const bool curve_valid = in.link_connected && in.curve_present && nav_fresh && gnss_usable &&
-                           in.curve.point_count <= bgm1::kCurveMaxPoints;
+                           route_usable && in.curve.point_count <= bgm1::kCurveMaxPoints;
 
   const int n = curve_valid ? usable_point_count(in) : 0;
   const bool same = wrote_ && same_points(in, n);
@@ -266,6 +308,43 @@ std::optional<std::string> MapTargetWriter::update(const MapTargetInput& in) {
     }
   }
   return json;
+}
+
+void NavLinkSession::decide(bool link_connected, const NavLinkTick& tick) {
+  MapTargetInput in;
+  in.link_connected = link_connected;
+  in.curve_present = cache_.present_flags() & bgm1::kNavPresentCurveAhead;
+  in.curve = cache_.curve();
+  in.nav_health_flags = cache_.nav_health_flags();
+  in.last_reply_ns = cache_.last_reply_ns();
+  // N7：t_eof 与 nanos_since_boot 同为 CLOCK_BOOTTIME（camerad spectra.cc 用
+  // nanos_since_boot() − timestamp_eof 算 processing_time；SOF 时间戳来自内核）
+  in.t_eof = cache_.t_eof();
+  in.gnss_seen = tick.gnss.seen;
+  in.gnss = tick.gnss.gnss;
+  in.now_ns = tick.now_ns;
+  if (auto json = writer_.update(in)) pending_ = std::move(json);
+}
+
+void NavLinkSession::on_disconnect(const NavLinkTick& tick) {
+  // S2：断连即丢弃 NavExt 摘要；旧弯道点不得继续驱动纵向（MapTargetVelocities → []）
+  hello_seen_ = false;
+  cache_.reset();
+  decide(/*link_connected=*/false, tick);
+}
+
+void NavLinkSession::on_reply(uint64_t reply_ns, uint64_t t_eof, const bgm1::NavExt& ext,
+                              const NavLinkTick& tick) {
+  cache_.on_reply(reply_ns, t_eof, ext);
+  decide(/*link_connected=*/true, tick);
+}
+
+void NavLinkSession::on_idle(bool connected, const NavLinkTick& tick) {
+  if (!connected) {
+    on_disconnect(tick);  // 未连接/启动即清空：不留下上一趟或本趟崩溃前的弯道点
+    return;
+  }
+  decide(/*link_connected=*/true, tick);
 }
 
 void clear_map_targets(const MapParamsOps& ops) {

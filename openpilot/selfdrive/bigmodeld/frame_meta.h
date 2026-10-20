@@ -126,8 +126,6 @@ class MetaProvider {
   void warp(bool wide, float out[9]) const;
 
  private:
-  void recompute_locked();
-
   mutable std::mutex mtx_;
   float rpy_[3] = {0.f, 0.f, 0.f};
   float warp_road_[9] = {0};
