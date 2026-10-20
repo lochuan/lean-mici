@@ -539,7 +539,7 @@ struct NavStateSP @0xc2243c65e0340384 {
 
   struct NavState {
     status @0 :Status;
-    maneuverType @1 :UInt8;           # Valhalla 0–43；255 无效
+    maneuverType @1 :UInt8;           # Valhalla 0–45；255 无效
     nextManeuverType @2 :UInt8;
     roundaboutExitIndex @3 :UInt8;
     distanceToManeuverM @4 :UInt32;   # 0xFFFFFFFF 无效

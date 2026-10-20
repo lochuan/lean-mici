@@ -10,6 +10,7 @@ import pyray as rl
 
 from openpilot.selfdrive.ui.mici.onroad import SIDE_PANEL_WIDTH
 from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
+from openpilot.selfdrive.ui.sunnypilot.mici.onroad.nav_card_renderer import NavCardRenderer
 from openpilot.selfdrive.ui.sunnypilot.npu_state import BigFrameWindow
 from openpilot.selfdrive.ui.sunnypilot.onroad.blind_spot_indicators import BlindSpotIndicators
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -32,11 +33,13 @@ class HudRendererSP(HudRenderer):
     super().__init__()
     self.blind_spot_indicators = BlindSpotIndicators()
     self._big_frames = BigFrameWindow()
+    self._nav_card = NavCardRenderer()
     self._txt_npu_green: rl.Texture = gui_app.texture('icons_mici/NPU_GREEN.png', *NPU_ICON_FIT_SIZE)
 
   def _update_state(self) -> None:
     super()._update_state()
     self.blind_spot_indicators.update()
+    self._nav_card.update()
     if not ui_state.started:
       self._big_frames.clear()
     elif ui_state.sm.updated['modelV2']:
@@ -48,9 +51,14 @@ class HudRendererSP(HudRenderer):
 
   def render_side_panel(self, rect: rl.Rectangle) -> None:
     """画在右竖条里（content 的 scissor 之外），rect 为整屏。"""
+    self._nav_card.render_icon(rect)
     if ui_state.bigmodel_enabled and self._big_frames.mostly_big():
       tex = self._txt_npu_green
       rl.draw_texture_ex(tex, npu_icon_origin(rect, tex.width, tex.height), 0.0, 1.0, rl.WHITE)
+
+  def render_nav_card(self, content_rect: rl.Rectangle) -> None:
+    """导航卡片：画在内容区、HUD 之上；调用方在出警告条时不调用（让位）。"""
+    self._nav_card.render_card(content_rect)
 
   def _has_blind_spot_detected(self) -> bool:
     return self.blind_spot_indicators.detected

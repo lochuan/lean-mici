@@ -122,6 +122,7 @@ def make_hud_with_big_frames(big_count: int) -> HudRendererSP:
   hud = HudRendererSP.__new__(HudRendererSP)  # skip __init__: it loads textures, which needs a window
   hud._txt_npu_green = SimpleNamespace(width=43, height=31)
   hud._big_frames = BigFrameWindow()
+  hud._nav_card = SimpleNamespace(render_icon=lambda rect: None, render_card=lambda rect: None, update=lambda: None)
   for i in range(BIG_FRAME_WINDOW):
     hud._big_frames.push(i < big_count)
   return hud
@@ -150,3 +151,13 @@ def test_hud_renderer_sp_keeps_blind_spot_hook_used_by_base_class():
 
 def test_augmented_road_view_takes_no_bookmark_callback():
   assert "bookmark_callback" not in inspect.signature(AugmentedRoadView).parameters
+
+
+def test_side_panel_draws_nav_icon_and_content_area_draws_nav_card():
+  hud = make_hud_with_big_frames(0)
+  calls = []
+  hud._nav_card = SimpleNamespace(render_icon=lambda rect: calls.append(('icon', rect.width)),
+                                  render_card=lambda rect: calls.append(('card', rect.width)))
+  hud.render_side_panel(SCREEN)
+  hud.render_nav_card(rl.Rectangle(0, 0, 476, 240))
+  assert calls == [('icon', 536), ('card', 476)]
