@@ -87,6 +87,55 @@ def test_no_arrow_types_keep_distance_and_eta():
   assert (c.arrow, c.distance_text, c.time_text, c.remaining_text) == (None, "350 m", "12 min", "8.4 km")
 
 
+def off_route_card(**kw):
+  """手机偏离路线 / 重算失败沿用旧路线：status 2，机动 255，距离与剩余值全是无效值（E3-3-21）。"""
+  args = {"maneuver": INVALID_MANEUVER, "distance": INVALID_U32, "remaining_m": INVALID_U32, "remaining_s": INVALID_U32}
+  args.update(kw)
+  return card(**args)
+
+
+def test_navigating_with_nothing_to_show_says_off_route_instead_of_blank_card():
+  c = off_route_card()
+  assert c is not None and c.phrase == "Off route"
+  assert (c.kind, c.arrow, c.exit_index, c.distance_text, c.time_text, c.remaining_text) == (CardKind.OFF_ROUTE, None, 0, None, None, None)
+
+
+@pytest.mark.parametrize("maneuver", [0, 28, 39, 45, 46, 254, INVALID_MANEUVER])
+def test_every_no_arrow_maneuver_with_nothing_else_to_show_says_off_route(maneuver):
+  assert off_route_card(maneuver=maneuver).kind == CardKind.OFF_ROUTE
+
+
+def test_maneuver_invalid_but_distance_valid_keeps_navigating_card_without_arrow():
+  c = off_route_card(distance=350)
+  assert (c.kind, c.arrow, c.distance_text, c.phrase) == (CardKind.NAVIGATING, None, "350 m", None)
+
+
+def test_maneuver_valid_but_distance_invalid_keeps_arrow_card():
+  c = off_route_card(maneuver=15)
+  assert (c.kind, c.arrow, c.distance_text, c.phrase) == (CardKind.NAVIGATING, Arrow.LEFT, None, None)
+
+
+@pytest.mark.parametrize("kw, time_text, remaining_text", [
+  ({"remaining_s": 720}, "12 min", None),
+  ({"remaining_m": 8400}, None, "8.4 km"),
+  ({"remaining_s": 720, "remaining_m": 8400}, "12 min", "8.4 km"),
+  ({"remaining_s": 0, "remaining_m": 0}, "1 min", "0 m"),
+])
+def test_maneuver_and_distance_both_invalid_but_eta_valid_still_shows_eta_not_the_hint(kw, time_text, remaining_text):
+  c = off_route_card(**kw)
+  assert (c.kind, c.arrow, c.distance_text, c.time_text, c.remaining_text, c.phrase) == (CardKind.NAVIGATING, None, None, time_text, remaining_text, None)
+
+
+@pytest.mark.parametrize("status", ["notRunning", "idle", "mapMissing", "fault"])
+def test_off_route_hint_only_for_navigating_status(status):
+  assert off_route_card(status=status) is None
+
+
+def test_rerouting_and_position_lost_phrases_win_over_off_route_sentinels():
+  assert off_route_card(status="rerouting").phrase == "Rerouting"
+  assert off_route_card(status="positionLost").phrase == "GPS lost"
+
+
 def test_rerouting_and_position_lost_cards_have_only_phrase():
   r, lost = card(status="rerouting"), card(status="positionLost")
   assert (r.kind, r.phrase, r.distance_text, r.time_text, r.remaining_text) == (CardKind.REROUTING, "Rerouting", None, None, None)

@@ -41,6 +41,7 @@ class CardKind(Enum):
   REROUTING = auto()
   POSITION_LOST = auto()
   ARRIVED = auto()
+  OFF_ROUTE = auto()   # status 2 但没有任何可画的内容：手机偏离锁存期间（>30 m 起，回到 ≤25 m 满 1 s 止，含判重算前与重算失败沿用旧路线）
 
 
 _A = Arrow
@@ -153,13 +154,18 @@ def card_content(has_nav_state: bool, status: str, maneuver_type: int, distance_
   if not has_nav_state:
     return None
   if status == "navigating":
-    return CardContent(
+    content = CardContent(
       CardKind.NAVIGATING,
       arrow=arrow_for_maneuver(maneuver_type),
       exit_index=roundabout_exit_index if maneuver_type == ROUNDABOUT_ENTER else 0,
       distance_text=None if distance_to_maneuver_m == INVALID_U32 else format_distance(distance_to_maneuver_m, is_metric),
       time_text=None if route_remaining_s == INVALID_U32 else format_minutes(route_remaining_s),
       remaining_text=None if route_remaining_m == INVALID_U32 else format_distance(route_remaining_m, is_metric))
+    # 手机偏离路线时机动 255、距离与剩余值全是无效值（协议无区分「刚偏离」与「重算失败」的字段）：
+    # 全高卡片里什么都没有，改写短卡片提示。在路线上时剩余距离 / 时间恒有效，所以不会误触发
+    if content.arrow is None and content.distance_text is None and content.time_text is None and content.remaining_text is None:
+      return CardContent(CardKind.OFF_ROUTE, phrase="Off route")
+    return content
   if status == "rerouting":
     return CardContent(CardKind.REROUTING, phrase="Rerouting")
   if status == "positionLost":

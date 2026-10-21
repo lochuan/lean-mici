@@ -9,7 +9,7 @@ from openpilot.cereal import messaging
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad import nav_card_renderer as module
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad.nav_card_renderer import NavCardRenderer
 from openpilot.selfdrive.ui.mici.onroad import augmented_road_view as road_view_module
-from openpilot.selfdrive.ui.sunnypilot.nav_card import Arrow, CardKind, NavIcon, format_distance, format_minutes
+from openpilot.selfdrive.ui.sunnypilot.nav_card import Arrow, CardKind, NavIcon, INVALID_MANEUVER, INVALID_U32, format_distance, format_minutes
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib import application as application_module
 
@@ -232,6 +232,75 @@ def test_short_card_phrase_colors(env, monkeypatch, status, color):
   feed(env, nav_message(status=status))
   env[1].render_card(CONTENT)
   assert drawn["text_colors"] == [color]
+
+
+def off_route_message(**kw):
+  """手机偏离路线：status 2，机动 255，距离与剩余值全无效（E3-3-21）。"""
+  args = {"maneuver": INVALID_MANEUVER, "distance": INVALID_U32, "remaining_m": INVALID_U32, "remaining_s": INVALID_U32}
+  args.update(kw)
+  return nav_message(**args)
+
+
+def test_off_route_card_is_short_with_only_the_hint_in_muted_gray(env, monkeypatch):
+  drawn = capture_draws(monkeypatch)
+  feed(env, off_route_message())
+  env[1].render_card(CONTENT)
+  background = drawn["rounded"][0]
+  assert (background.x + background.width, background.y, background.height) == (460, 16, 50)
+  assert len(drawn["rounded"]) == 1   # 没有 ETA 块
+  assert drawn["text"] == ["Off route"]
+  assert drawn["text_colors"] == [MUTED_RGB]
+
+
+def test_off_route_keeps_green_nav_icon(env):
+  feed(env, off_route_message())
+  assert env[1].icon() == NavIcon.GREEN
+  assert env[1].card().kind == CardKind.OFF_ROUTE
+
+
+DIM_RGB = (92, 104, 112)
+
+
+def line_colors(env, monkeypatch, message):
+  colors = []
+  capture_draws(monkeypatch)
+  monkeypatch.setattr(module.rl, "draw_line_ex", lambda a, b, t, c: colors.append((c.r, c.g, c.b)))
+  feed(env, message)
+  env[1].render_card(CONTENT)
+  return colors
+
+
+def test_off_route_card_draws_dim_straight_arrow_and_no_red_slash(env, monkeypatch):
+  colors = line_colors(env, monkeypatch, off_route_message())
+  assert DIM_RGB in colors
+  assert RED_RGB not in colors
+
+
+def test_rerouting_card_draws_dim_straight_arrow_and_no_red_slash(env, monkeypatch):
+  colors = line_colors(env, monkeypatch, nav_message(status="rerouting"))
+  assert DIM_RGB in colors
+  assert RED_RGB not in colors
+
+
+def test_card_returns_to_full_when_route_data_comes_back(env, monkeypatch):
+  drawn = capture_draws(monkeypatch)
+  feed(env, off_route_message())
+  feed(env, nav_message())
+  env[1].render_card(CONTENT)
+  assert drawn["rounded"][0].height == 82 and drawn["text"] == ["350 m", "12 min", "8.4 km"]
+
+
+@pytest.mark.parametrize("kw, texts", [
+  ({"distance": 350}, ["350 m"]),                                 # 机动 255 但距离有效：仍是导航卡，不写提示
+  ({"maneuver": 15}, []),                                         # 机动有效但距离无效：只画箭头
+  ({"maneuver": 0, "remaining_s": 720, "remaining_m": 8400}, ["12 min", "8.4 km"]),   # 无箭头机动、只有 ETA
+])
+def test_partially_valid_navigating_message_never_shows_off_route_hint(env, monkeypatch, kw, texts):
+  drawn = capture_draws(monkeypatch)
+  feed(env, off_route_message(**kw))
+  env[1].render_card(CONTENT)
+  assert "Off route" not in drawn["text"] and drawn["text"] == texts
+  assert drawn["rounded"][0].height == 82
 
 
 def test_navigating_text_colors(env, monkeypatch):
