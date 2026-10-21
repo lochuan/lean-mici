@@ -14,6 +14,7 @@
 # 分支参数（环境变量，缺省 = 主线发版）:
 #   SRC_BRANCH     源分支，缺省 lean-master
 #   RELEASE_BRANCH 发布分支，缺省 lean-release
+# LOCAL_SOURCE_SHA 非空：仅从 Mac 已传入 /data/build/.git/local-source/<sha> 的本地 Git 源取对象。
 # 例: SRC_BRANCH=big-uplink RELEASE_BRANCH=big-release bash device_release.sh
 set -Eeuo pipefail   # -E：ERR trap 继承进阶段函数
 
@@ -22,6 +23,7 @@ STAGE=/data/relstage
 REPO_URL=https://github.com/lochuan/lean-mici.git
 SRC_BRANCH="${SRC_BRANCH:-lean-master}"
 RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
+LOCAL_SOURCE_SHA="${LOCAL_SOURCE_SHA:-}"
 # 默认 2GB 会按 mtime 淘汰掉 ~71M 的 driving pkl，下次发版白编 ~11 分钟
 SCONS_CACHE_LIMIT=8e9
 export PATH="/usr/local/venv/bin:$PATH"
@@ -90,7 +92,13 @@ checkout_repo() {
   local dir="$1" url="$2" sha="$3"
   ensure_repo "$dir" "$url"
   if ! git -C "$dir" cat-file -e "$sha^{commit}" 2>/dev/null; then
+    if [ -n "$LOCAL_SOURCE_SHA" ]; then
+      git -C "$dir" fetch -q --update-shallow "$BUILD/.git/local-source/$sha" refs/heads/source \
+        || die "$dir 本地源 $sha 不可用，拒绝从网络补取"
+    else
+      # 保留原主线 fetch 命令及参数。
     git_fetch_retry -C "$dir" fetch -4 -q --depth=1 origin "$sha" || die "$dir fetch $sha 失败（3 次重试后）"
+    fi
   fi
   git -C "$dir" checkout -q --force --detach "$sha"
   git -C "$dir" clean -ffdxq
@@ -99,8 +107,15 @@ checkout_repo() {
 checkout_source() {
   ensure_repo "$BUILD" "$REPO_URL"
   cd "$BUILD"
+  if [ -n "$LOCAL_SOURCE_SHA" ]; then
+    git fetch -q --update-shallow "$BUILD/.git/local-source/$LOCAL_SOURCE_SHA" refs/heads/source \
+      || die "本地源 $LOCAL_SOURCE_SHA 不可用，拒绝从网络补取"
+  else
+    # 保留原主线 fetch 命令及参数。
   git_fetch_retry fetch -4 -q --depth=1 origin "$SRC_BRANCH" || die "$SRC_BRANCH fetch 失败（3 次重试后）"
+  fi
   SRC_SHA=$(git rev-parse FETCH_HEAD)
+  [ -z "$LOCAL_SOURCE_SHA" ] || [ "$SRC_SHA" = "$LOCAL_SOURCE_SHA" ] || die "本地源 commit 与指定 SHA 不符"
   checkout_repo "$BUILD" "$REPO_URL" "$SRC_SHA"
   # 先取进变量：进程替换里的失败不触发 set -e，会静默跳过所有子模块
   local submodules key path name
