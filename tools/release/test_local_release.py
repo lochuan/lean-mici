@@ -276,7 +276,11 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
       for command in ('ssh', 'scp', 'git', 'sleep', 'uv'):
         (binaries / command).symlink_to(stub)
       trace = root / 'trace.jsonl'
-      environment = {key: value for key, value in os.environ.items() if key not in ('SRC_BRANCH', 'RELEASE_BRANCH', 'ADB_SERIAL')}
+      fixture_environment_keys = (
+        'SRC_BRANCH', 'RELEASE_BRANCH', 'ADB_SERIAL', 'EXPECTED_SOURCE_SHA', 'LOCAL_SOURCE_SHA',
+        'FAIL_FORK', 'FAIL_TRANSFER', 'FAIL_PREPARE', 'FAIL_POSTBOOT', 'SOURCE_OUTPUT', 'WORKER_PHASE',
+      )
+      environment = {key: value for key, value in os.environ.items() if key not in fixture_environment_keys}
       environment.update(PATH=str(binaries) + ':' + os.environ['PATH'], DEVICE='comma@test', TRACE=str(trace))
       environment.update(extra_env or {})
       args = ['bash', str(scripts / 'publish_release_from_device.sh')]
@@ -292,6 +296,27 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
     expected = json.loads((HERE / 'testdata/mainline_publish_commands.json').read_text())
     self.assertEqual(calls, expected)
+
+  def test_fixture_isolates_real_deployment_environment_without_changing_parent(self):
+    source = '3667aca3a59e9a9e61da0cfe073251d93fffd466'
+    parent_environment = {'EXPECTED_SOURCE_SHA': source, 'LOCAL_SOURCE_SHA': source,
+                          'SRC_BRANCH': 'nav-test', 'RELEASE_BRANCH': 'nav-local-release', 'DEVICE': 'comma@10.0.0.27'}
+    with patch.dict(os.environ, parent_environment):
+      result, calls = self.run_publish(local=True)
+      self.assertEqual(os.environ['EXPECTED_SOURCE_SHA'], source)
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    launch = next(call[-1] for call in calls if call[0] == 'ssh' and 'bash /tmp/device_release.sh' in call[-1])
+    self.assertIn('LOCAL_SOURCE_SHA=' + 'a' * 40, launch)
+    self.assertTrue(all(call[-2] == 'comma@test' for call in calls if call[0] == 'ssh'))
+
+  def test_fixture_ignores_parent_fault_injection_settings(self):
+    parent_environment = {'FAIL_FORK': '1', 'FAIL_TRANSFER': '1', 'FAIL_PREPARE': '1', 'FAIL_POSTBOOT': '1',
+                          'SOURCE_OUTPUT': 'unexpected parent stdout', 'WORKER_PHASE': 'failed'}
+    with patch.dict(os.environ, parent_environment):
+      for local in (False, True):
+        with self.subTest(local=local):
+          result, _ = self.run_publish(local=local)
+          self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
   def test_default_fork_failure_retries_three_times_and_never_deploys(self):
     result, calls = self.run_publish(extra_env={'FAIL_FORK': '1'})
