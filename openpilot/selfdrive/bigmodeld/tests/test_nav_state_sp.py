@@ -32,7 +32,7 @@ def test_nav_state_sp_rlog_roundtrip():
   ns = evt.init("navStateSP")
   ns.frameIndex = 9
   ns.timestampEofNs = 123456789
-  ns.gpsOk = True
+  ns.phoneLocationOk = True
   ns.routeOk = True
   ns.navOk = True
   ns.rerouting = False
@@ -93,6 +93,7 @@ def test_nav_state_sp_rlog_roundtrip():
     assert back.which() == "navStateSP"
     got = back.navStateSP
     assert got.frameIndex == 9
+    assert got.phoneLocationOk
     assert got.hasCurveAhead
     assert got.curveAhead.pointCount == 2 and len(got.curveAhead.points) == 2
     assert got.curveAhead.maxLateralAccelerationMPerS2 == 2.0

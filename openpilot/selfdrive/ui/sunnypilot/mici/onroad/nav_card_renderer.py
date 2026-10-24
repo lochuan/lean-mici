@@ -90,6 +90,7 @@ class NavCardRenderer:
     self._arrived_since_ns: int | None = None
     self._time_block_width = 0.0
     self._remaining_block_width = 0.0
+    self._phrase_width = 0.0
 
   # ---- 状态 ----
   def update(self) -> None:
@@ -100,6 +101,8 @@ class NavCardRenderer:
   def _on_message(self, message, log_mono_ns: int) -> None:
     nav = message.navState
     status = str(nav.status)
+    if status in ("navigating", "rerouting") and not message.phoneLocationOk:
+      status = "positionLost"
     if status == "arrived":
       if self._arrived_since_ns is None:
         self._arrived_since_ns = log_mono_ns
@@ -114,6 +117,7 @@ class NavCardRenderer:
       is_metric=ui_state.is_metric,
       arrived_card_visible=self._arrived_since_ns is not None and arrived_visible(self._arrived_since_ns, log_mono_ns))
     content = self._content
+    self._phrase_width = _measure(self._bold, content.phrase, PHRASE_FONT_SIZE) if content and content.phrase else 0.0
     self._time_block_width = _measure(self._medium, content.time_text, ETA_FONT_SIZE) + 12 if content and content.time_text else 0.0
     self._remaining_block_width = _measure(self._medium, content.remaining_text, ETA_FONT_SIZE) + 12 if content and content.remaining_text else 0.0
 
@@ -155,10 +159,11 @@ class NavCardRenderer:
     content = self.card()
     if content is None:
       return
-    x = content_rect.x + CARD_RIGHT - self.card_width
+    width = max(self.card_width, TEXT_LEFT + self._phrase_width + ARROW_LEFT)
+    x = content_rect.x + CARD_RIGHT - width
     y = content_rect.y + CARD_TOP
     short = content.kind != CardKind.NAVIGATING
-    _rounded(rl.Rectangle(x, y, self.card_width, CARD_HEIGHT_SHORT if short else CARD_HEIGHT_FULL), CARD_RADIUS, CARD_BACKGROUND)
+    _rounded(rl.Rectangle(x, y, width, CARD_HEIGHT_SHORT if short else CARD_HEIGHT_FULL), CARD_RADIUS, CARD_BACKGROUND)
 
     if content.kind == CardKind.NAVIGATING:
       if content.arrow is not None:

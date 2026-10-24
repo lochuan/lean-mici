@@ -169,7 +169,7 @@ def card_content(has_nav_state: bool, status: str, maneuver_type: int, distance_
   if status == "rerouting":
     return CardContent(CardKind.REROUTING, phrase="Rerouting")
   if status == "positionLost":
-    return CardContent(CardKind.POSITION_LOST, phrase="GPS lost")
+    return CardContent(CardKind.POSITION_LOST, phrase="Phone location unavailable")
   if status == "arrived" and arrived_card_visible:
     return CardContent(CardKind.ARRIVED, arrow=Arrow.ARRIVE, phrase="Arrived")
   return None

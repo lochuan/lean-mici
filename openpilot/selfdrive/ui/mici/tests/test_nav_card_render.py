@@ -21,6 +21,7 @@ NOW = 1000.0
 def nav_message(status="navigating", maneuver=15, distance=350, has_nav_state=True, remaining_m=8400, remaining_s=720, exit_index=0):
   msg = messaging.new_message('navStateSP')
   msg.navStateSP.hasNavState = has_nav_state
+  msg.navStateSP.phoneLocationOk = True
   nav = msg.navStateSP.navState
   nav.status = status
   nav.maneuverType = maneuver
@@ -197,7 +198,7 @@ def test_card_geometry_and_eta_text(env, monkeypatch):
   assert drawn["text"] == ["350 m", "12 min", "8.4 km"]
 
 
-@pytest.mark.parametrize("status, text", [("rerouting", "Rerouting"), ("positionLost", "GPS lost"), ("arrived", "Arrived")])
+@pytest.mark.parametrize("status, text", [("rerouting", "Rerouting"), ("positionLost", "Phone location unavailable"), ("arrived", "Arrived")])
 def test_short_cards_have_no_eta_and_height_50(env, monkeypatch, status, text):
   drawn = capture_draws(monkeypatch)
   feed(env, nav_message(status=status))
@@ -436,3 +437,24 @@ def test_nav_card_yields_to_any_alert_including_fade_out(monkeypatch):
   # will_render() 在警告淡出期仍返回上一条警告，所以「有返回值」即覆盖淡出期
   calls = road_view_calls(monkeypatch, alert=SimpleNamespace(visual_alert=0))
   assert calls == ["model", "alert", "hud", "ball"]
+
+
+def test_phone_location_health_loss_hides_turn_and_eta(env):
+  message = nav_message()
+  message.phoneLocationOk = False
+  feed(env, message)
+  renderer = env[1]
+  assert renderer.icon() == NavIcon.SLASHED
+  assert renderer.card().kind == CardKind.POSITION_LOST
+  assert renderer.card().phrase == "Phone location unavailable"
+  assert renderer.card().time_text is None and renderer.card().distance_text is None
+
+
+def test_phone_unavailable_phrase_fits_short_card(env, monkeypatch):
+  drawn = capture_draws(monkeypatch)
+  feed(env, nav_message(status="positionLost"))
+  env[1].render_card(CONTENT)
+  background = drawn["rounded"][0]
+  assert background.width >= module.TEXT_LEFT + 10 * len("Phone location unavailable") + module.ARROW_LEFT
+  assert background.x >= 0 and background.x + background.width == module.CARD_RIGHT
+  assert background.height == module.CARD_HEIGHT_SHORT

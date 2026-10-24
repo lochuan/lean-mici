@@ -67,22 +67,10 @@ const double kSbigmodelIntrinsics[9] = {455, 0, 256,
                                         0, 455, 151.8,
                                         0, 0, 1};
 
-// ---- GNSS / VEHICLE 编码（协议 v3 §1.2.1/§1.2.2）----
-constexpr uint64_t kNsPerMs = 1'000'000;
-constexpr uint32_t kFixMaxAgeMs = 2000;             // has_fix = hasFix ∧ age ≤ 2000 ms
+// ---- VEHICLE 编码（协议 v4）----
 constexpr uint64_t kDeviceMotionMaxAgeNs = 100'000'000;  // 2 个 20 Hz FRAME
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kRadPerSToCentidegPerS = 180.0 * 100.0 / kPi;  // rad/s → 0.01 °/s（右转/顺时针为正）
-
-bool coords_ok(double lat, double lon) {
-  return std::isfinite(lat) && std::isfinite(lon) && std::fabs(lat) <= 90.0 && std::fabs(lon) <= 180.0;
-}
-
-// 非有限值 → 0；范围不在此检查，靠调用前的 coords_ok 把关。
-int32_t degrees_to_x1e7(double deg) {
-  if (!std::isfinite(deg)) return 0;
-  return int32_t(std::llround(deg * 1e7));
-}
 
 void mat_transpose(const double m[9], double out[9]) {
   for (int r = 0; r < 3; r++) {
@@ -92,25 +80,6 @@ void mat_transpose(const double m[9], double out[9]) {
 
 void mat_vec(const double m[9], const float v[3], double out[3]) {
   for (int r = 0; r < 3; r++) out[r] = m[3 * r + 0] * v[0] + m[3 * r + 1] * v[1] + m[3 * r + 2] * v[2];
-}
-
-// 非有限值 → 0；否则先 fmod 到 (-360, 360)，负值 +360°；四舍五入得到 36000 时折回 0，结果落在 [0, 36000)。
-uint16_t degrees_to_centidegrees(double deg) {
-  if (!std::isfinite(deg)) return 0;
-  double d = std::fmod(deg, 360.0);
-  if (d < 0) d += 360.0;
-  uint32_t cd = uint32_t(std::lround(d * 100.0));
-  if (cd >= 36000) cd -= 36000;  // 359.999° 四舍五入到 360.00 → 0
-  return uint16_t(cd);
-}
-
-// 非有限或 ≤0 → kGnssHorizontalAccuracyUnknownDm（0xFFFF）；<0.05 m 钳到 1 dm；
-// ≥ kGnssHorizontalAccuracyMaxDm/10（6553.4 m）饱和 0xFFFE（先饱和再四舍五入，避免溢出）。
-uint16_t meters_to_decimeters(double m) {
-  if (!std::isfinite(m) || m <= 0) return bgm1::kGnssHorizontalAccuracyUnknownDm;   // m2：≤0 视为未知
-  if (m < 0.05) return 1;                                       // m2：车机永不写 0 dm
-  if (m >= bgm1::kGnssHorizontalAccuracyMaxDm / 10.0) return bgm1::kGnssHorizontalAccuracyMaxDm;  // 先饱和，避免 lround 溢出
-  return uint16_t(std::lround(m * 10.0));
 }
 
 // 非有限值 → 0；先取绝对值再换 cm/s，≥ 65535 饱和。
@@ -128,14 +97,6 @@ int16_t rad_per_s_to_centideg_per_s(float rad_per_s) {
   if (centideg_per_s >= 32767.0) return 32767;
   if (centideg_per_s <= -32767.0) return -32767;  // 避开 INT16_MIN（无效哨兵）
   return int16_t(std::lround(centideg_per_s));
-}
-
-// 非有限或 ≤0 → 255（未知）；<0.25° 钳到 1（不写 0）；≥ 127° 饱和 254。
-uint8_t degrees_to_half_degrees(double deg) {
-  if (!std::isfinite(deg) || deg <= 0) return bgm1::kGnssBearingAccuracyUnknownHalfDeg;  // m2：≤0 视为未知
-  if (deg < 0.25) return 1;                                                            // m2：不写 0 half_deg
-  if (deg >= bgm1::kGnssBearingAccuracyMaxHalfDeg * 0.5) return bgm1::kGnssBearingAccuracyMaxHalfDeg;    // 127° 以上饱和
-  return uint8_t(std::lround(deg / 0.5));
 }
 
 }  // namespace
@@ -229,31 +190,10 @@ void MetaProvider::set_model_inputs(const float action_t[2], uint8_t desire_clas
   desire_class_ = desire_class;
 }
 
-void MetaProvider::set_gnss(const GnssSample& s) {
-  // B5：gpsLocationExternal.valid 也检查（ubloxd 恒 true）；
-  // m3：坐标非有限/越界时这条消息不算 fix，也不更新「上次 fix」。
-  GnssSample g = s;
-  g.has_fix = s.event_valid && s.has_fix && coords_ok(s.latitude_deg, s.longitude_deg);
-  std::lock_guard<std::mutex> lk(mtx_);
-  gnss_ = g;
-  gnss_seen_ = true;
-  if (g.has_fix) {
-    last_fix_ = g;  // B3：只有 hasFix=true 才更新上次 fix 的时刻与位置
-    have_fix_ = true;
-  }
-}
-
 void MetaProvider::set_vehicle(const VehicleSample& s) {
   std::lock_guard<std::mutex> lk(mtx_);
   vehicle_ = s;
   vehicle_seen_ = true;
-}
-
-bool MetaProvider::latest_gnss(GnssSample* out) const {
-  std::lock_guard<std::mutex> lk(mtx_);
-  if (!gnss_seen_) return false;
-  *out = gnss_;
-  return true;
 }
 
 void MetaProvider::reset_desire_latch() {
@@ -263,8 +203,6 @@ void MetaProvider::reset_desire_latch() {
 
 void MetaProvider::fill(uint64_t t_eof, bgm1::FrameHeader* out) const {
   // m6：锁内只拷样本快照（desire pulse 的 latch 也在此更新），换算全在锁外。
-  GnssSample gnss, last_fix;
-  bool gnss_seen, have_fix;
   VehicleSample veh;
   bool veh_seen;
   float action_t[2];
@@ -277,10 +215,6 @@ void MetaProvider::fill(uint64_t t_eof, bgm1::FrameHeader* out) const {
     if (d != 0 && d != prev_desire_class_ && d < 8) desire[d] = 1.f;
     prev_desire_class_ = d;
 
-    gnss = gnss_;
-    gnss_seen = gnss_seen_;
-    last_fix = last_fix_;
-    have_fix = have_fix_;
     veh = vehicle_;
     veh_seen = vehicle_seen_;
     std::memcpy(action_t, action_t_, sizeof action_t);
@@ -298,7 +232,6 @@ void MetaProvider::fill(uint64_t t_eof, bgm1::FrameHeader* out) const {
   std::memcpy(out->warp_wide, warp_wide, sizeof warp_wide);
 
   // VEHICLE：deviceMotion 100 ms 内 + 消息 event_valid/sensorsOK + 分量有限；yaw/speed 各自判。
-  out->gnss = bgm1::Gnss{};
   out->vehicle = bgm1::Vehicle{};
   const bool veh_fresh = veh_seen && veh.message_time_ns != 0 &&
                          t_eof <= veh.message_time_ns + kDeviceMotionMaxAgeNs;
@@ -306,7 +239,8 @@ void MetaProvider::fill(uint64_t t_eof, bgm1::FrameHeader* out) const {
   const bool yaw_valid = veh_fresh && veh.yaw_source_ok && std::isfinite(veh.yaw_rate_rad_per_s);
   uint8_t vehicle_state_flags = 0;
   if (speed_valid) {
-    out->gnss.speed_cm_per_s = m_per_s_to_cm_per_s(veh.forward_speed_m_per_s);
+    vehicle_state_flags |= bgm1::kVehicleSpeedValid;
+    out->vehicle.speed_cm_per_s = m_per_s_to_cm_per_s(veh.forward_speed_m_per_s);
     if (veh.reversing) vehicle_state_flags |= bgm1::kVehicleReverse;
     if (veh.standstill) vehicle_state_flags |= bgm1::kVehicleStandstill;
   }
@@ -316,26 +250,4 @@ void MetaProvider::fill(uint64_t t_eof, bgm1::FrameHeader* out) const {
   }
   out->vehicle.vehicle_state_flags = vehicle_state_flags;
 
-  // GNSS：age 是「上次 fix」的年龄（B3）；never fix 但 speed_valid → 4095。
-  uint32_t age_ms = 0;
-  bool has_fix = false;
-  if (have_fix) {
-    const uint64_t age_ns = t_eof > last_fix.message_time_ns ? t_eof - last_fix.message_time_ns : 0;
-    age_ms = uint32_t(std::min<uint64_t>(age_ns / kNsPerMs, bgm1::kGnssAgeMax));
-    has_fix = gnss_seen && gnss.has_fix && age_ms <= kFixMaxAgeMs;
-  } else if (speed_valid) {
-    age_ms = bgm1::kGnssAgeMax;
-  }
-
-  bool bearing_valid = false;
-  if (has_fix) {
-    // 无 fix 时位置类字段的清零与 bearing_accuracy_half_deg=255 由 pack 写规范形（票 A），此处不重复。
-    out->gnss.latitude_deg_x1e7 = degrees_to_x1e7(last_fix.latitude_deg);
-    out->gnss.longitude_deg_x1e7 = degrees_to_x1e7(last_fix.longitude_deg);
-    out->gnss.bearing_centideg = degrees_to_centidegrees(last_fix.bearing_deg);
-    out->gnss.horizontal_accuracy_dm = meters_to_decimeters(last_fix.horizontal_accuracy_m);
-    out->vehicle.bearing_accuracy_half_deg = degrees_to_half_degrees(last_fix.bearing_accuracy_deg);
-    bearing_valid = std::isfinite(last_fix.bearing_deg);
-  }
-  out->gnss.fix_age_and_valid_flags = bgm1::make_fix_age_and_valid_flags(age_ms, has_fix, speed_valid, bearing_valid);
 }

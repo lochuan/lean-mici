@@ -69,8 +69,7 @@ void put_msg_hdr(uint8_t out[kMsgHdrSize], uint8_t type, uint16_t flags,
 }
 
 // 规格保留位的屏蔽：pack 把这些位强制写 0（调用方给的保留位不上线）
-constexpr uint16_t kFixAgeAndValidFlagsMask = 0xDFFF;  // 清 bit13
-constexpr uint8_t kVehicleStateFlagsMask = kVehicleYawValid | kVehicleReverse | kVehicleStandstill;  // 清 bit3–7
+constexpr uint8_t kVehicleStateFlagsMask = kVehicleYawValid | kVehicleReverse | kVehicleStandstill | kVehicleSpeedValid;
 constexpr uint8_t kNavPresentMask = 0x0F;
 constexpr uint8_t kNavHealthMask = 0x0F;
 constexpr uint8_t kNavInputFlagsMask = 0x0F;   // 清 bit4–7
@@ -88,26 +87,15 @@ void pack_frame_header(const FrameHeader& hdr, uint8_t out[kFrameHdrSize]) {
   for (int i = 0; i < 2; i++) put_f32(out + 64 + 4 * i, hdr.action_t[i]);
   for (int i = 0; i < 9; i++) put_f32(out + 72 + 4 * i, hdr.warp_road[i]);
   for (int i = 0; i < 9; i++) put_f32(out + 108 + 4 * i, hdr.warp_wide[i]);
-  // GNSS：has_fix=0 时位置类字段（纬度/经度/航向/水平精度/bearing_valid）无意义，保持 0；
-  // speed + speed_valid（deviceMotion 车体系前向速度，与定位无关）与 age_ms（上次 fix 的年龄）保留。
-  // 完全无数据时整块仍为 0
-  if (hdr.gnss.has_fix()) {
-    put_i32(out + 144, hdr.gnss.latitude_deg_x1e7);
-    put_i32(out + 148, hdr.gnss.longitude_deg_x1e7);
-    put_u16(out + 152, hdr.gnss.speed_valid() ? hdr.gnss.speed_cm_per_s : 0);        // valid=0 ⇒ 写 0
-    put_u16(out + 154, hdr.gnss.bearing_valid() ? hdr.gnss.bearing_centideg : 0);
-    put_u16(out + 156, hdr.gnss.horizontal_accuracy_dm);  // 无 valid 位，用 0xFFFF 哨兵
-    put_u16(out + 158, hdr.gnss.fix_age_and_valid_flags & kFixAgeAndValidFlagsMask);
-  } else {
-    put_u16(out + 152, hdr.gnss.speed_valid() ? hdr.gnss.speed_cm_per_s : 0);
-    put_u16(out + 158, hdr.gnss.fix_age_and_valid_flags & (kGnssAgeMask | kGnssSpeedValid));
-  }
-  // VEHICLE：yaw 与 yaw_valid 保持一致（INT16_MIN ⇔ yaw_valid=0），保留位强制 0
-  const bool yaw_ok = hdr.vehicle.yaw_valid() && hdr.vehicle.yaw_rate_centideg_per_s != kYawRateInvalidCentidegPerS;
-  put_i16(out + 160, yaw_ok ? hdr.vehicle.yaw_rate_centideg_per_s : kYawRateInvalidCentidegPerS);
-  out[162] = uint8_t(hdr.vehicle.vehicle_state_flags & kVehicleStateFlagsMask & (yaw_ok ? 0xFF : ~kVehicleYawValid));
-  out[163] = hdr.gnss.has_fix() ? hdr.vehicle.bearing_accuracy_half_deg : kGnssBearingAccuracyUnknownHalfDeg;  // 无 fix → 255
-  // 164..167 保留，置 0
+  const auto& vehicle = hdr.vehicle;
+  const bool yaw_ok = vehicle.yaw_valid() && vehicle.yaw_rate_centideg_per_s != kYawRateInvalidCentidegPerS;
+  uint8_t flags = vehicle.vehicle_state_flags & kVehicleStateFlagsMask;
+  if (!yaw_ok) flags &= uint8_t(~kVehicleYawValid);
+  if (!vehicle.speed_valid()) flags &= uint8_t(~(kVehicleReverse | kVehicleStandstill));
+  put_u16(out + 144, vehicle.speed_valid() ? vehicle.speed_cm_per_s : 0);
+  put_i16(out + 146, yaw_ok ? vehicle.yaw_rate_centideg_per_s : kYawRateInvalidCentidegPerS);
+  out[148] = flags;
+
 }
 
 Err parse_msg_hdr(const uint8_t in[kMsgHdrSize], uint8_t* type, uint16_t* flags,
@@ -134,23 +122,17 @@ Err parse_frame_header(const uint8_t in[kFrameHdrSize], FrameHeader* out) {
   for (int i = 0; i < 2; i++) h.action_t[i] = get_f32(in + 64 + 4 * i);
   for (int i = 0; i < 9; i++) h.warp_road[i] = get_f32(in + 72 + 4 * i);
   for (int i = 0; i < 9; i++) h.warp_wide[i] = get_f32(in + 108 + 4 * i);
-  const uint16_t fix_age_and_valid_flags = get_u16(in + 158);
-  if (fix_age_and_valid_flags & kGnssHasFix) {
-    h.gnss.latitude_deg_x1e7 = get_i32(in + 144);
-    h.gnss.longitude_deg_x1e7 = get_i32(in + 148);
-    h.gnss.speed_cm_per_s = (fix_age_and_valid_flags & kGnssSpeedValid) ? get_u16(in + 152) : 0;  // valid=0 ⇒ 读作 0
-    h.gnss.bearing_centideg = (fix_age_and_valid_flags & kGnssBearingValid) ? get_u16(in + 154) : 0;
-    h.gnss.horizontal_accuracy_dm = get_u16(in + 156);
-    h.gnss.fix_age_and_valid_flags = fix_age_and_valid_flags;
-  } else if (fix_age_and_valid_flags & kGnssSpeedValid) {  // 无 fix：位置类字段读作 0，车速与 age 保留
-    h.gnss.speed_cm_per_s = get_u16(in + 152);
-    h.gnss.fix_age_and_valid_flags = fix_age_and_valid_flags & (kGnssAgeMask | kGnssSpeedValid);
-  } else {
-    h.gnss.fix_age_and_valid_flags = fix_age_and_valid_flags & kGnssAgeMask;
+  h.vehicle.speed_cm_per_s = get_u16(in + 144);
+  h.vehicle.yaw_rate_centideg_per_s = get_i16(in + 146);
+  h.vehicle.vehicle_state_flags = in[148] & kVehicleStateFlagsMask;
+  if (!h.vehicle.speed_valid()) {
+    h.vehicle.speed_cm_per_s = 0;
+    h.vehicle.vehicle_state_flags &= uint8_t(~(kVehicleReverse | kVehicleStandstill));
   }
-  h.vehicle.yaw_rate_centideg_per_s = get_i16(in + 160);
-  h.vehicle.vehicle_state_flags = in[162];
-  h.vehicle.bearing_accuracy_half_deg = h.gnss.has_fix() ? in[163] : kGnssBearingAccuracyUnknownHalfDeg;
+  if (!h.vehicle.yaw_valid() || h.vehicle.yaw_rate_centideg_per_s == kYawRateInvalidCentidegPerS) {
+    h.vehicle.yaw_rate_centideg_per_s = kYawRateInvalidCentidegPerS;
+    h.vehicle.vehicle_state_flags &= uint8_t(~kVehicleYawValid);
+  }
   if (out) *out = h;
   return Err::kOk;
 }
@@ -169,6 +151,9 @@ size_t pack_frame(const FrameHeader& hdr, const uint8_t* road, const uint8_t* wi
 
 Err parse_frame(const uint8_t* data, size_t size, FrameView* out,
                 uint32_t max_segment) {
+  if (size < kMsgHdrSize) return Err::kTruncated;
+  Err header_err = parse_msg_hdr(data, nullptr, nullptr, nullptr, nullptr);
+  if (header_err != Err::kOk) return header_err;
   if (size < kFrameMinSize) return Err::kTruncated;
 
   FrameHeader h;
@@ -371,11 +356,12 @@ size_t pack_err(const ErrMsg& e, uint8_t* out, size_t cap) {
 }
 
 Err parse_err(const uint8_t* data, size_t size, ErrMsg* out) {
-  if (size < kErrWireSize) return Err::kTruncated;
+  if (size < kMsgHdrSize) return Err::kTruncated;
   uint16_t flags;
   uint32_t frame_idx, len;
   Err err = parse_msg_hdr_typed(data, kTypeErr, &flags, &frame_idx, &len);
   if (err != Err::kOk) return err;
+  if (size < kErrWireSize) return Err::kTruncated;
   if (len != kErrPayloadSize || size != kErrWireSize) return Err::kLenMismatch;
 
   ErrMsg e;
@@ -397,11 +383,12 @@ size_t pack_hello(const Hello& h, uint8_t* out, size_t cap) {
 }
 
 Err parse_hello(const uint8_t* data, size_t size, Hello* out) {
-  if (size < kHelloWireSize) return Err::kTruncated;
+  if (size < kMsgHdrSize) return Err::kTruncated;
   uint16_t flags;
   uint32_t frame_idx, len;
   Err err = parse_msg_hdr_typed(data, kTypeHello, &flags, &frame_idx, &len);
   if (err != Err::kOk) return err;
+  if (size < kHelloWireSize) return Err::kTruncated;
   if (len != kHelloPayloadSize || size != kHelloWireSize) return Err::kLenMismatch;
 
   Hello h;

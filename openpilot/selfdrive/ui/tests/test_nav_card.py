@@ -133,13 +133,13 @@ def test_off_route_hint_only_for_navigating_status(status):
 
 def test_rerouting_and_position_lost_phrases_win_over_off_route_sentinels():
   assert off_route_card(status="rerouting").phrase == "Rerouting"
-  assert off_route_card(status="positionLost").phrase == "GPS lost"
+  assert off_route_card(status="positionLost").phrase == "Phone location unavailable"
 
 
 def test_rerouting_and_position_lost_cards_have_only_phrase():
   r, lost = card(status="rerouting"), card(status="positionLost")
   assert (r.kind, r.phrase, r.distance_text, r.time_text, r.remaining_text) == (CardKind.REROUTING, "Rerouting", None, None, None)
-  assert (lost.kind, lost.phrase) == (CardKind.POSITION_LOST, "GPS lost")
+  assert (lost.kind, lost.phrase) == (CardKind.POSITION_LOST, "Phone location unavailable")
 
 
 def test_arrived_card_only_while_visible():

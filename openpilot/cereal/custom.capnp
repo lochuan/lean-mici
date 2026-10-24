@@ -522,7 +522,7 @@ struct NavStateSP @0xc2243c65e0340384 {
   frameIndex @0 :UInt32;
   timestampEofNs @1 :UInt64;
 
-  gpsOk @2 :Bool;          # nav_health_flags bit0
+  phoneLocationOk @2 :Bool; # nav_health_flags bit0；手机精确位置有效
   routeOk @3 :Bool;        # bit1
   navOk @4 :Bool;          # bit2
   rerouting @5 :Bool;      # bit3

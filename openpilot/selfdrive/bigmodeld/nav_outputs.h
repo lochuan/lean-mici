@@ -6,10 +6,9 @@
 //      距离 / 目标速度 / 曲率，**不读点经纬度**（决策 17：rlog 与 UI 不含任何经纬度）。
 //   2. NavLinkCache：最近一条 REPLY 的 NavExt 摘要；断连必须 reset()，保证重连后第一条 REPLY
 //      到达前按「无数据」处理（S2：旧弯道点不能被写回）。
-//   3. MapTargetWriter：CURVE_AHEAD + 本机 GNSS 有效性 → MapTargetVelocities JSON（≤2 Hz，
-//      失效/删点/降速会在 ≤1 个 calib 拍内清空或更新）。位置 LastGPSPosition 由
-//      last_gps_position_json() 按 GNSS 节拍生成（S3）。
-//   4. clear_map_targets()：退出/上路清理，由 main 注入 Params 操作（阻塞 put/remove）。
+//   3. MapTargetWriter：手机位置健康 + CURVE 沿路线距离 → 带本机期限的 Params envelope。
+//      失效/删点/降速立即清空或更新，其余变化 ≤2 Hz，不变 1 Hz 刷新。
+//   4. clear_map_targets()：退出/上路清理，由 main 注入阻塞 Params put。
 //   5. NavLinkSession：reply 线程的链路状态（epoch / HELLO / NavLinkCache / MapTargetWriter）合成一个
 //      类，main.cc 的每条断连 / 空闲 / REPLY 路径只调它（AU-1）。
 //
@@ -22,14 +21,13 @@
 #include <string>
 
 #include "frame_codec.h"
-#include "frame_meta.h"  // GnssSample（票 B 的 MetaProvider 快照）
 
 // REPLY 的 NavExt 快照。has_* 来自 present_flags；四个子结构只在对应 has_* 为真时有意义
 // （parse_reply 已把 present=0 的子块读作 0）。
 struct NavStateSnapshot {
   uint32_t frame_index = 0;
   uint64_t timestamp_eof_ns = 0;
-  bool gps_ok = false;
+  bool phone_location_ok = false;
   bool route_ok = false;
   bool nav_ok = false;
   bool rerouting = false;
@@ -129,6 +127,7 @@ class NavLinkCache {
   uint8_t present_flags() const { return present_flags_; }
   uint8_t nav_health_flags() const { return nav_health_flags_; }
   const bgm1::CurveAhead& curve() const { return curve_; }
+  uint16_t nav_state_age_ms() const { return nav_state_age_ms_; }
 
  private:
   uint64_t last_reply_ns_ = 0;
@@ -136,56 +135,25 @@ class NavLinkCache {
   uint8_t present_flags_ = 0;
   uint8_t nav_health_flags_ = 0;
   bgm1::CurveAhead curve_;
+  uint16_t nav_state_age_ms_ = bgm1::kNavU16Invalid;
 };
 
-// 协议 §1.4 的 T_acc：车机 gps_ok 与手机一致，水平精度 ≤ 30 m。
-constexpr double kGpsHorizontalAccuracyMaxM = 30.0;
-constexpr uint64_t kNavDataMaxAgeNs = 2'000'000'000;  // §1.4 T_nav：NavExt 数据年龄
-// N3：GNSS 断流时不能靠 has_fix=0（没有消息就不会有它）；位置/弯道目标用更短的 1 s
-constexpr uint64_t kGpsFixMaxAgeNs = 1'000'000'000;
+constexpr uint64_t kNavDataMaxAgeNs = 2'000'000'000;  // 手机采样与距离结果各自的期限
 // N1 的 (lat,lon) 同一性匹配容差：50 × 1e-7° ≈ 0.55 m。手机重算/重采样会让同一点有厘米级抖动；
 // 若用严格相等，N10 的「点坐标每拍微动」会全部被判成删点，退回 20 Hz 写。
 // 注意：这是方框容差，纬度、经度分别比较；经度方向的实际距离是 0.55·cosφ m。
 constexpr int32_t kSamePointToleranceX1e7 = 50;
 
-// AU-3：精度迟滞的阈值。不可用 → 可用要 ≤ kGpsHorizontalAccuracyMaxM；可用 → 不可用要
-// > kGpsHorizontalAccuracyDropM，或连续 kGpsAccuracyDropSamples 条 > kGpsHorizontalAccuracyMaxM。
-constexpr double kGpsHorizontalAccuracyDropM = 40.0;
-constexpr int kGpsAccuracyDropSamples = 3;
-
-// 车机自己的定位是否可用写 LastGPSPosition：有 fix ∧ fix ≤1 s ∧ event_valid ∧
-// 精度已知且 ≤30 m ∧ 坐标有效（N3/N6/S7）。无状态：calib 线程按 GNSS 节拍逐条判。
-bool gps_fix_usable(const GnssSample& gnss, uint64_t now_ns);
-// 同上但不看精度（有 fix ∧ fix ≤1 s ∧ event_valid ∧ 坐标有效）：GpsAccuracyGate 的前提。
-bool gps_fix_present(const GnssSample& gnss, uint64_t now_ns);
-
-// AU-3：弯道目标用的定位可用性，带精度迟滞，避免精度在 30 m 上下抖动时目标反复清空写回。
-// 计数按 GNSS 样本（message_time_ns 变化）推进，20 Hz 的 reply 拍重复看到同一条不累加。
-// 有状态，reply 线程独占（MapTargetWriter 的成员）。未知精度（≤0 / NaN）视同不达标：
-// 不能让不可用恢复，可用时计入「连续 >30 m」但不单条清空。
-class GpsAccuracyGate {
- public:
-  bool usable(const GnssSample& gnss, uint64_t now_ns);
-  void reset();
-
- private:
-  bool usable_ = false;
-  int consecutive_over_ = 0;
-  uint64_t last_sample_ns_ = 0;
-};
-std::optional<std::string> last_gps_position_json(const GnssSample& gnss, uint64_t now_ns);
-
-// MapTargetWriter 的全部输入。GNSS 直接取 MetaProvider 里票 B 已有的最近一条样本，
-// 不新增订阅；last_reply_ns = 最近一条成功解析的 REPLY 到达时刻（0 = 无数据/已断连）。
+// 手机 NAV_STATE 和 CURVE 的年龄独立判期；时间基准为回显的 C4 t_eof。
 struct MapTargetInput {
   bool link_connected = false;
   bool curve_present = false;
+  bool nav_state_present = false;
+  uint16_t nav_state_age_ms = bgm1::kNavU16Invalid;
   bgm1::CurveAhead curve;
   uint8_t nav_health_flags = 0;  // REPLY 的 nav_health_flags（AU-4：rerouting / route_ok）
   uint64_t last_reply_ns = 0;  // 仅用于事实记录；数据新鲜度按 t_eof − age_ms（N7）
   uint64_t t_eof = 0;          // REPLY 回显的帧 timestamp_eof（ns，同 nanos_since_boot）
-  bool gnss_seen = false;
-  GnssSample gnss;  // MetaProvider::latest_gnss() 的原样快照
   uint64_t now_ns = 0;
 };
 
@@ -195,11 +163,9 @@ struct MapTargetInput {
 //   - 其他内容变化（上新点/提速）：≥500 ms（≤2 Hz）。
 //   - 内容不变：≥1 s 刷新（有意为之：可自愈被外部改写的值）。
 //   - 首次调用必写（清掉上趟进程遗留的弯道点）。
-//   - CURVE present=0 / 链路断开 / 数据超过 2 s（按 t_eof − age_ms 合成）→ []；
-//     GNSS 无 fix、event_valid=0、fix 超过 1 s 或水平精度不可用（AU-3 迟滞，见 GpsAccuracyGate）→ []。
-//   - AU-4：rerouting=1 → []；curve_flags.bit0（沿路线）为 1 而 route_ok=0 → []
-//     （road_lookahead 的点不依赖路线，route_ok=0 照常写）。
-//   - 目标速度为 0、坐标非法或 (0,0) 的点跳过。
+//   - NAV_STATE/CURVE 缺失、phone_location_ok=0、任一年龄未知/过期或断连 → []。
+//   - rerouting 或沿路线但 route_ok=0 → []；只接受 0..600 m 单调距离。
+//   - 目标坐标只作身份比较，不读取车机位置，也不计算地理距离。
 class MapTargetWriter {
  public:
   // 返回 nullopt = 本次不写。
@@ -213,6 +179,7 @@ class MapTargetWriter {
     int32_t latitude_deg_x1e7 = 0;
     int32_t longitude_deg_x1e7 = 0;
     uint8_t target_speed_kph = 0;
+    uint16_t distance_along_route_m = 0;
   };
 
   static bool point_usable(const bgm1::CurvePoint& p);
@@ -221,21 +188,13 @@ class MapTargetWriter {
   // N1/N2：上次写出的点被删除，或容差内同一点速度下调 → 下一拍写（≤1 个 calib 拍）
   bool urgent_change(const MapTargetInput& in, int n) const;
 
-  GpsAccuracyGate gps_gate_;
   bool wrote_ = false;
   uint64_t last_write_ns_ = 0;
   int last_point_count_ = 0;
   WrittenPoint last_points_[bgm1::kCurveMaxPoints];
 };
 
-// reply 线程在一次决策里用到的「现在」：GNSS 快照 + 时刻。先取 GNSS 再取 now（AU-13），
-// 这样刚到的新 GNSS 样本不会被判成「未来时刻」而误清空。
-struct GnssSnapshot {
-  bool seen = false;
-  GnssSample gnss;
-};
 struct NavLinkTick {
-  GnssSnapshot gnss;
   uint64_t now_ns = 0;
 };
 
@@ -247,8 +206,7 @@ struct NavLinkTick {
 class NavLinkSession {
  public:
   // epoch 变化（首次调用也算）→ 复位并返回 true；调用方据此 framer.clear()。
-  // make_tick 只在 epoch 变化时才调用：reply 线程每轮循环都进这里，GNSS 快照要加 MetaProvider 的锁，
-  // 绝大多数轮次不需要。make_tick 返回 NavLinkTick（先取快照后取 now，AU-13）。
+  // make_tick 仅在 epoch 变化时取当前车机 BOOTTIME。
   template <class MakeTick>
   bool on_epoch(uint32_t epoch, MakeTick&& make_tick) {
     if (!epoch_.update(epoch)) return false;
@@ -261,7 +219,7 @@ class NavLinkSession {
   bool hello_seen() const { return hello_seen_; }
   // 成功解析一条 REPLY：reply_ns 为到达时刻，t_eof 为 REPLY 回显的帧时刻。
   void on_reply(uint64_t reply_ns, uint64_t t_eof, const bgm1::NavExt& ext, const NavLinkTick& tick);
-  // 没有新 REPLY 的拍：NavExt / GNSS 过期时清掉旧弯道点。
+  // 没有新 REPLY 的拍：手机位置 / CURVE 过期时清掉旧弯道点。
   void on_idle(bool connected, const NavLinkTick& tick);
   // 取走待写的 MapTargetVelocities（只有最后一次决策有意义，取走即空）。
   std::optional<std::string> take_pending() {
@@ -280,10 +238,9 @@ class NavLinkSession {
   std::optional<std::string> pending_;
 };
 
-// 退出清理 / 上路清理的 Params 操作（main 注入：mem_params.put / remove，阻塞调用）。
+// 退出清理 / 上路清理的 Params 操作（main 注入：mem_params.put，阻塞调用）。
 struct MapParamsOps {
   std::function<void(const char*, const std::string&)> put;
-  std::function<void(const char*)> remove;
 };
-// MapTargetVelocities = "[]"、删除 LastGPSPosition。
+// MapTargetVelocities = "[]"。
 void clear_map_targets(const MapParamsOps& ops);

@@ -1,70 +1,15 @@
-// BGM1 线协议（v3）编解码 —— C4 上行进程（sunnypilot bigmodeld）与 App 服务端共用同一份实现，
-// 两端 frame_codec.{h,cpp} 必须逐字节同源。本注释即权威布局（设计文档：协议 v3 定稿）。
-// v3 不兼容 v2：线上 kVersion 锁步 2→3，一端版本不符即断连（见「版本」）。全小端。
-//
-// ===== 版本 =====
-//   MsgHdr.ver 严格等于 kVersion(3)；不符 → kBadVersion。parse_reply 先验 MsgHdr 再验长度：旧 v2 的
-//   8320 B REPLY（len 8280）在 parse_reply 里报 kBadVersion 而非截断；FRAME 的 ver 在头部前 16 B，
-//   parse_frame_header 先验它。
-//   实际路径：手机收到版本不符的 FRAME 回 ERR VERSION_MISMATCH（code 1）并断连。C4 侧版本不符
-//   由 HELLO 判定——手机连上先发 HELLO，C4 的 parse_hello 得 kBadVersion 即版本不符（日志带
-//   got/want，断连重连）；v2 手机的 REPLY 因 len≠8440 在 C4 分帧处就以「协议头非法」断连，
-//   到不了 parse_reply。真版本不一致时对端 ERR 的 ver 也不同，C4 的 parse_err 同样得 kBadVersion，
-//   所以 C4 不依赖 ERR.detail 判版本。ERR.detail = version_mismatch_detail(对端 ver, 本端 ver)
-//   = 对端 ver << 8 | 本端 ver（例：对端 2、本端 3 → 0x0203），供人读日志。
-//
-// ===== 字段语义通则 =====
-//   - 无效值：字段「没有」时填各自的无效值（见各表）；规格保留位 pack 强制写 0。
-//   - 子块「其余字段无意义」：NavExt 的 present_flags 位为 0 的子块全 0（缺省）。GNSS has_fix=0 时
-//     位置类字段（latitude_deg_x1e7、longitude_deg_x1e7、bearing_centideg、horizontal_accuracy_dm、
-//     bearing_valid，以及 VEHICLE.bearing_accuracy_half_deg → 255）无意义；speed_cm_per_s + speed_valid
-//     （deviceMotion 车体系前向速度，与定位无关）与 age_ms（上次 fix 的年龄，饱和 4095）保留，隧道航位
-//     推算靠它们（有 yaw 与 speed 即可推算）。车机完全没有数据时整块 16 B 为 0。
-//     pack 写规范形，parse 读作缺省，与调用方结构体里的值无关。
-//   - 带 valid 位的字段（speed_cm_per_s/speed_valid、bearing_centideg/bearing_valid）以 valid 位为准：
-//     无论 has_fix 取何值，valid=0 ⇒ 字段写 0（pack 与 parse 两侧都规范化），消费者看 valid 位；
-//     只有没有 valid 位的字段（如 horizontal_accuracy_dm）才用 0xFFFF 哨兵表示缺失。
-//   - age_ms 只在 has_fix=1 或 speed_valid=1 时有意义；完全无数据时整块为 0，此时 age_ms=0 没有含义。
-//   - VEHICLE：yaw_rate_centideg_per_s == INT16_MIN ⇔ yaw_valid=0；pack 保证两者一致。
-//
-// ===== FRAME（type 0x10）=====
-//     0   16  MsgHdr：magic "BGM1"、ver=3、type=0x10、flags（bit0=road IDR、bit1=wide IDR）、
-//                frame_idx u32、len u32 = road 段字节数
-//    16    8  t_eof u64（timestamp_eof，ns）
-//    24   32  desire f32[8]（本帧 pulse，全零=无事件）
-//    56    8  traffic_convention f32[2]
-//    64    8  action_t f32[2]（[lat, long] 秒）
-//    72   36  warp_road f32[9]（3×3 透视矩阵，行主序；C4 已应用的矩阵，仅遥测/dump，App 不再 warp）
-//   108   36  warp_wide f32[9]
-//   144   16  GNSS（见下表）
-//   160    8  VEHICLE（见下表）
-//   168   ..  road 段（road_len = MsgHdr.len，HEVC Annex-B 码流，warp 后 512×256 NV12 编码）
-//    ..    4  wide_len u32
-//    ..   ..  wide 段（HEVC Annex-B 码流）
-//    ..   16  尾部保留 16 B（恒填零；手机把非零当 wide_len 错位探针 → len_mismatch）
-//   线长 = 168 + road_len + 4 + wide_len + 16。
-//
-//   GNSS 16 B（偏移 144；WGS-84，不做 GCJ-02；has_fix=0 ⇒ 无定位，反之不成立：见通则）：
-//     144  i32  latitude_deg_x1e7          度 × 1e7（以 has_fix 判有效；has_fix=0 时写 0）
-//     148  i32  longitude_deg_x1e7         度 × 1e7
-//     152  u16  speed_cm_per_s             cm/s（deviceMotion.velocityDevice 车体系前向分量，与定位无关：
-//                                          has_fix=0 时只要 speed_valid 仍有效）；speed_valid=0 ⇒ 写 0
-//     154  u16  bearing_centideg           0.01°，正北顺时针；bearing_valid=0 ⇒ 写 0
-//     156  u16  horizontal_accuracy_dm     水平精度 0.1 m；0xFFFF = 未知，饱和 0xFFFE
-//     158  u16  fix_age_and_valid_flags    bit0–11 age_ms（fix 到达 C4 → 本帧 t_eof，饱和 4095）·
-//                                          bit12 has_fix（hasFix ∧ age ≤ 2000 ms）· bit13 保留 ·
-//                                          bit14 speed_valid · bit15 bearing_valid
-//   VEHICLE 8 B（偏移 160）：
-//     160  i16  yaw_rate_centideg_per_s    0.01 °/s，右转（顺时针）为正
-//                                          （deviceMotion.angularVelocityDevice 车体系 z 分量）；INT16_MIN = 无效
-//     162  u8   vehicle_state_flags        bit0 yaw_valid · bit1 reverse（倒车中）· bit2 standstill ·
-//                                          bit3–7 保留 0
-//     163  u8   bearing_accuracy_half_deg  航向精度 0.5°（1σ，gpsLocationExternal.bearingAccuracyDeg）；
-//                                          255 = 未知 / 无 fix，饱和 254
-//     164   4   保留（pack 置 0，解析端忽略）
-//
+// BGM1 v4，全部小端；与车机 frame_codec.h/.cpp 保持逐字节相同。
+// v3 不兼容：先验证前 16 B 的版本，再解释 payload。
+// FRAME: MsgHdr@0/16, t_eof@16/8, desire@24/32, traffic@56/8, action_t@64/8,
+// warp_road@72/36, warp_wide@108/36, Vehicle@144/8, road@152。
+// Vehicle: speed_cm_per_s u16@144, yaw i16@146 (INT16_MIN invalid), flags u8@148,
+// flags: bit0 yaw_valid, bit1 reverse, bit2 standstill, bit3 speed_valid; reserved@149/3=0。
+// speed_valid=0 时 speed/reverse/standstill 清零；yaw 独立有效。FRAME 不含位置观测。
+// 线长 = 172 + road_len + wide_len；相机 t_eof 不属于手机定位时钟域。
+// NAV_STATE.age_ms: phone_location_ok 时为手机采样年龄，正年龄向上取整到 ms；
+// 不可用时为状态发布年龄。CURVE.age_ms 仍是计算结果年龄，各自判期。
 // ===== REPLY（type 0x11）=====
-//     0   16  MsgHdr：magic "BGM1"、ver=3、type=0x11、flags（bit0=SEQ_RESET、bit1=ZERO_PAIR）、
+//     0   16  MsgHdr：magic "BGM1"、ver=4、type=0x11、flags（bit0=SEQ_RESET、bit1=ZERO_PAIR）、
 //                frame_idx u32（回显）、len u32 = 8440（payload 字节数，不含 t_eof）
 //    16    8  t_eof u64（回显）
 //    24 8264  outputs[0:2066) f32
@@ -77,7 +22,7 @@
 //     8304   4  健康头：present_flags u8 · nav_health_flags u8 · 保留 u16
 //                present_flags：bit0 NAV_STATE · bit1 ROAD_ATTR · bit2 CURVE_AHEAD · bit3 NAV_DEBUG
 //                各「有提供者」；位为 0 ⇒ 该子结构全 0，C4 当「无此功能」（pack 强制写 0，
-//                parse 读作 0）。nav_health_flags：bit0 gps_ok · bit1 route_ok · bit2 nav_ok ·
+//                parse 读作 0）。nav_health_flags：bit0 phone_location_ok · bit1 route_ok · bit2 nav_ok ·
 //                bit3 rerouting（手机 :nav 按判据算，C4 只读位）
 //     8308  24  NAV_STATE
 //     8332  16  ROAD_ATTR
@@ -85,7 +30,9 @@
 //     8452   8  NAV_DEBUG
 //     8460   4  保留（pack 置 0，解析端忽略）
 //   present_flags / nav_health_flags 高 4 位、nav_input_flags bit4–7、road_edge_flags bit6、curve_flags bit3–7 等规格保留位 pack 强制写 0。
-//   各子结构带 age_ms u16（数据最后更新 → 本帧收齐，饱和 0xFFFE，0xFFFF 未知）；有效时刻 ≈ t_eof − age_ms。
+//   age_ms u16：到本帧收齐的年龄，正年龄向上取整到 ms，饱和 0xFFFE，0xFFFF 未知。
+//   phone_location_ok=1 时 NAV_STATE.age_ms 来自手机采样，motion tick 不续期；不可用时
+//   按状态发布计龄且清 bit0。CURVE.age_ms 独立来自距离结果；有效时刻保守估计 t_eof−age_ms。
 //
 //   NAV_STATE（8308，24 B）：
 //     +0   u8   nav_status                0 未运行 · 1 空闲 · 2 导航中 · 3 偏航重算 · 4 定位丢失 · 5 到达 · 6 地图数据缺 · 7 故障
@@ -148,14 +95,14 @@
 namespace bgm1 {
 
 constexpr uint32_t kMagic = 0x314D4742u;  // "BGM1" 小端
-constexpr uint8_t kVersion = 3;  // v3：FRAME 头 +GNSS/VEHICLE、REPLY +NavExt；v2 = 已 warp 512×256 HEVC，v1 = 相机全幅
+constexpr uint8_t kVersion = 4;  // motion-only FRAME
 constexpr uint8_t kTypeFrame = 0x10;
 constexpr uint8_t kTypeReply = 0x11;
 constexpr uint8_t kTypeErr = 0x7F;
 constexpr uint8_t kTypeHello = 0x01;
 
 constexpr size_t kMsgHdrSize = 16;
-constexpr size_t kFrameHdrSize = 168;  // MsgHdr 16 + 扩展 152（元数据 128 + GNSS 16 + VEHICLE 8）
+constexpr size_t kFrameHdrSize = 152;  // MsgHdr 16 + metadata 128 + Vehicle 8
 constexpr size_t kWideLenSize = 4;
 constexpr size_t kTailReservedSize = 16;  // 各消息尾部保留 16 B（原 MAC 位，HMAC 已随 ADR-0003 撤销，恒零）
 constexpr size_t kFrameMinSize = kFrameHdrSize + kWideLenSize + kTailReservedSize;
@@ -181,50 +128,18 @@ enum class Err {
   kLenMismatch,   // 线长与 road_len/wide_len 声明不符
 };
 
-// ---- GNSS（FRAME 偏移 144，16 B）/ VEHICLE（偏移 160，8 B）----
-
-constexpr uint16_t kGnssAgeMask = 0x0FFF;      // fix_age_and_valid_flags bit0–11：age_ms
-constexpr uint16_t kGnssAgeMax = 4095;         // age_ms 饱和值
-constexpr uint16_t kGnssHasFix = 1u << 12;
-constexpr uint16_t kGnssSpeedValid = 1u << 14;
-constexpr uint16_t kGnssBearingValid = 1u << 15;
-constexpr uint16_t kGnssHorizontalAccuracyUnknownDm = 0xFFFF;      // horizontal_accuracy_dm 的未知哨兵（speed/bearing 以 valid 位为准，无效写 0）
-constexpr uint16_t kGnssHorizontalAccuracyMaxDm = 0xFFFE;      // horizontal_accuracy_dm 饱和值
-
-// 组 fix_age_and_valid_flags：age_ms 饱和到 4095，三个有效位按实参置位
-constexpr uint16_t make_fix_age_and_valid_flags(uint32_t age_ms, bool has_fix, bool speed_valid,
-                                                bool bearing_valid) {
-  return uint16_t((age_ms > kGnssAgeMax ? kGnssAgeMax : age_ms) | (has_fix ? kGnssHasFix : 0) |
-                  (speed_valid ? kGnssSpeedValid : 0) | (bearing_valid ? kGnssBearingValid : 0));
-}
-
-// 缺省全 0：has_fix=0 ⇒ 无定位（反之不成立），这是生产者完全无数据时的取值
-struct Gnss {
-  int32_t latitude_deg_x1e7 = 0;
-  int32_t longitude_deg_x1e7 = 0;
-  uint16_t speed_cm_per_s = 0;
-  uint16_t bearing_centideg = 0;
-  uint16_t horizontal_accuracy_dm = 0;
-  uint16_t fix_age_and_valid_flags = 0;
-
-  bool has_fix() const { return fix_age_and_valid_flags & kGnssHasFix; }
-  bool speed_valid() const { return fix_age_and_valid_flags & kGnssSpeedValid; }
-  bool bearing_valid() const { return fix_age_and_valid_flags & kGnssBearingValid; }
-  uint16_t age_ms() const { return fix_age_and_valid_flags & kGnssAgeMask; }
-};
-
 constexpr int16_t kYawRateInvalidCentidegPerS = -32768;  // INT16_MIN
 constexpr uint8_t kVehicleYawValid = 1u << 0;
 constexpr uint8_t kVehicleReverse = 1u << 1;
 constexpr uint8_t kVehicleStandstill = 1u << 2;
-constexpr uint8_t kGnssBearingAccuracyUnknownHalfDeg = 255;  // 未知 / 无 fix
-constexpr uint8_t kGnssBearingAccuracyMaxHalfDeg = 254;      // 饱和值（≥ 127°）
+constexpr uint8_t kVehicleSpeedValid = 1u << 3;
 
-// 缺省 = 无数据（yaw 无效、航向精度未知）；VEHICLE 保留 4 B 不入结构，pack 置 0、parse 忽略
 struct Vehicle {
   int16_t yaw_rate_centideg_per_s = kYawRateInvalidCentidegPerS;
   uint8_t vehicle_state_flags = 0;
-  uint8_t bearing_accuracy_half_deg = kGnssBearingAccuracyUnknownHalfDeg;
+  uint16_t speed_cm_per_s = 0;
+
+  bool speed_valid() const { return vehicle_state_flags & kVehicleSpeedValid; }
 
   bool yaw_valid() const { return vehicle_state_flags & kVehicleYawValid; }
   bool reversing() const { return vehicle_state_flags & kVehicleReverse; }
@@ -236,7 +151,7 @@ constexpr uint32_t version_mismatch_detail(uint8_t peer_ver, uint8_t local_ver) 
   return (uint32_t(peer_ver) << 8) | local_ver;
 }
 
-// FRAME 头（168 B）+ wide 长度。wide_len 不在 168 B 头内，序列化在 road 段之后。
+// FRAME 头（152 B）+ wide 长度。wide_len 不在 152 B 头内，序列化在 road 段之后。
 struct FrameHeader {
   uint16_t flags = 0;
   uint32_t frame_idx = 0;
@@ -248,7 +163,6 @@ struct FrameHeader {
   float action_t[2] = {0};
   float warp_road[9] = {0};
   float warp_wide[9] = {0};
-  Gnss gnss;
   Vehicle vehicle;
 
   bool road_idr() const { return flags & kFlagRoadIdr; }
@@ -262,14 +176,14 @@ struct FrameView {
   const uint8_t* wide = nullptr;
 };
 
-// 组帧头（168 B，小端）
+// 组帧头（152 B，小端）
 void pack_frame_header(const FrameHeader& hdr, uint8_t out[kFrameHdrSize]);
 
 // 解析 MsgHdr（16 B），校验 magic/ver/type
 Err parse_msg_hdr(const uint8_t in[kMsgHdrSize], uint8_t* type, uint16_t* flags,
                   uint32_t* frame_idx, uint32_t* len);
 
-// 解析 FRAME 头（168 B，含 MsgHdr；不校验载荷长度）
+// 解析 FRAME 头（152 B，含 MsgHdr；不校验载荷长度）
 Err parse_frame_header(const uint8_t in[kFrameHdrSize], FrameHeader* out);
 
 // FRAME 线长
@@ -311,7 +225,7 @@ constexpr uint8_t kNavPresentRoadAttr = 1u << 1;
 constexpr uint8_t kNavPresentCurveAhead = 1u << 2;
 constexpr uint8_t kNavPresentNavDebug = 1u << 3;
 
-constexpr uint8_t kNavHealthGpsOk = 1u << 0;
+constexpr uint8_t kNavHealthPhoneLocationOk = 1u << 0;
 constexpr uint8_t kNavHealthRouteOk = 1u << 1;
 constexpr uint8_t kNavHealthNavOk = 1u << 2;
 constexpr uint8_t kNavHealthRerouting = 1u << 3;

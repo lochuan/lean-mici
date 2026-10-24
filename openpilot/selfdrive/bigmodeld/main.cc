@@ -13,8 +13,8 @@
 //   meta 缓存 → sender.submit_*）、writer（sender.step）、REPLY reader（read_some →
 //   msg_framer → parse → msgq + navStateSP + /dev/shm/params）、
 //   标定/输入元数据（SubMaster → MetaProvider.set_rpy/set_model_inputs）。
-//   标定线程另订阅 gpsLocationExternal(10 Hz) / deviceMotion(20 Hz)；msgq 每条消息对每个订阅线程
-//   发 SIGUSR2（与是否 poll 无关），因此线程每秒会多约 30 次信号唤醒，但 SubMaster 只 poll 原有
+//   标定线程另订阅 deviceMotion(20 Hz)；msgq 每条消息对每个订阅线程
+//   发 SIGUSR2（与是否 poll 无关），因此线程每秒会多约 20 次信号唤醒，但 SubMaster 只 poll 原有
 //   节拍源，用户态循环不会多跑。
 //   锁序：sender.mtx > state_mtx > {ev_mtx, meta 缓存, buf 池, 分段计时}（叶子锁，绝不反向嵌套）。
 //   sender 事件回调在其锁内触发 ⇒ 回调只记账 + 推事件队列（ev_mtx），状态机转移与
@@ -414,7 +414,7 @@ class Bigmodeld {
       }
       if (n == 0) {
         sock_.wait_readable(kIdleWaitMs);
-        // 无新 REPLY：NavExt / GNSS 过期时清掉旧弯道点（writer 只在需要时写）
+        // 无新 REPLY：手机位置 / CURVE 过期时清掉旧弯道点（writer 只在需要时写）
         link_session_.on_idle(sender_->connected(), nav_link_tick());
         publish_map_targets();
         continue;
@@ -429,6 +429,11 @@ class Bigmodeld {
         const uint8_t got_ver = framer.peer_version();
         const uint8_t* data = framer.data();
         const size_t need = framed.size;
+        if (fr == MsgFramer::Result::kBadVersion) {
+          link_mark_version_mismatch();
+          fail("协议版本不符", got_ver);
+          break;
+        }
         if (fr == MsgFramer::Result::kBadHeader) {
           const uint32_t len = bgm1::read_u32_le(data + 12);
           LOGE("bigmodeld: REPLY 流协议错 type=0x%02x len=%u got_ver=%u want_ver=%u", framed.type, len,
@@ -524,14 +529,14 @@ class Bigmodeld {
   }
 
   // ===== 标定/输入元数据线程：extrinsicsCalibration.rpyCalib + modelDataV2SP → 帧头 =====
-  // gpsLocationExternal(10 Hz) / deviceMotion(20 Hz) 只在消息更新时取最新一条，不进 poll：
+  // deviceMotion(20 Hz) 只在消息更新时取最新一条，不进 poll：
   // SubMaster 只 poll 原有 4 Hz + 20 Hz 节拍源，用户态循环不会因它们多跑。注意 msgq 的每条
   // 消息都会对每个订阅线程发 SIGUSR2（msgq_msg_send 末尾的 thread_signal），所以线程每秒仍会
-  // 被这两路额外信号唤醒约 30 次；这是 msgq 语义，不是 poll 集合能避免的。
+  // 被这一路额外信号唤醒约 20 次；这是 msgq 语义，不是 poll 集合能避免的。
   // SubMaster 的 socket 是 conflate=true（socketmaster.cc:53）；update() 在 poll 返回后对未 poll
   // 的服务做非阻塞 receive(true)，拿到各自最新一条，队列不积压。
   void calib_thread() {
-    SubMaster sm({"extrinsicsCalibration", "modelDataV2SP", "gpsLocationExternal", "deviceMotion"},
+    SubMaster sm({"extrinsicsCalibration", "modelDataV2SP", "deviceMotion"},
                  {"extrinsicsCalibration", "modelDataV2SP"});
     // 车体系换算用的 rpyCalib：与 MetaProvider.set_rpy 同一份（最近一条 extrinsics）。
     float rpy[3] = {0.f, 0.f, 0.f};
@@ -575,25 +580,7 @@ class Bigmodeld {
           meta_.set_model_inputs(a, sp.getDesireClass());
         }
       }
-      // v3 GNSS（协议 §1.2.1）：u-blox 10 Hz；event_valid 也检查（B5，ubloxd 恒 true）。
-      if (sm.updated("gpsLocationExternal")) {
-        auto g = sm["gpsLocationExternal"].getGpsLocationExternal();
-        GnssSample s;
-        s.latitude_deg = g.getLatitude();
-        s.longitude_deg = g.getLongitude();
-        s.bearing_deg = g.getBearingDeg();
-        s.horizontal_accuracy_m = g.getHorizontalAccuracy();
-        s.bearing_accuracy_deg = g.getBearingAccuracyDeg();
-        s.has_fix = g.getHasFix();
-        s.event_valid = sm["gpsLocationExternal"].getValid();
-        s.message_time_ns = sm["gpsLocationExternal"].getLogMonoTime();
-        meta_.set_gnss(s);
-        // S3：位置按 GNSS 节拍（u-blox 10 Hz）写；S7 精度 ≤30 m、无 fix / fix 过期不写
-        if (const auto json = last_gps_position_json(s, nanos_since_boot())) {
-          write_mem_param("LastGPSPosition", *json);
-        }
-      }
-      // v3 VEHICLE（协议 §1.2.2）：deviceMotion 20 Hz，经 rpyCalib 转到车体系。
+      // v4 VEHICLE（协议 §1.2.2）：deviceMotion 20 Hz，经 rpyCalib 转到车体系。
       // 消息 → 车体系样本的换算在纯函数里（可单测）；只在消息更新时调 set_vehicle（m6）。
       if (sm.updated("deviceMotion")) {
         auto dm = sm["deviceMotion"].getDeviceMotion();
@@ -615,12 +602,11 @@ class Bigmodeld {
     write_pending_map_targets();
   }
 
-  // 退出清理（main 在所有线程 join 之后调用）：阻塞写，确保旧弯道点/位置不留给下次进程（S1a）
+  // 退出清理（main 在所有线程 join 之后调用）：阻塞写，确保旧弯道点不留给下次进程（S1a）
   void cleanup_map_params() {
     // 所有线程已 join，无并发读者/写者
     clear_map_targets(MapParamsOps{
-        [this](const char* key, const std::string& value) { mem_params_.put(key, value); },
-        [this](const char* key) { mem_params_.remove(key); }});
+        [this](const char* key, const std::string& value) { mem_params_.put(key, value); }});
   }
 
  private:
@@ -798,7 +784,7 @@ class Bigmodeld {
     auto ns = evt.initNavStateSP();
     ns.setFrameIndex(s.frame_index);
     ns.setTimestampEofNs(s.timestamp_eof_ns);
-    ns.setGpsOk(s.gps_ok);
+    ns.setPhoneLocationOk(s.phone_location_ok);
     ns.setRouteOk(s.route_ok);
     ns.setNavOk(s.nav_ok);
     ns.setRerouting(s.rerouting);
@@ -871,20 +857,11 @@ class Bigmodeld {
     pm_.send("navStateSP", msg);
   }
 
-  // reply 线程一次决策用的「现在」：先取 GNSS 快照，再取时刻（AU-13：时刻不早于快照，
-  // 刚到的新 GNSS 样本不会被判成未来时刻而误清空）。
   NavLinkTick nav_link_tick() {
-    NavLinkTick tick;
-    GnssSample gnss;
-    if (meta_.latest_gnss(&gnss)) {
-      tick.gnss.seen = true;
-      tick.gnss.gnss = gnss;
-    }
-    tick.now_ns = nanos_since_boot();
-    return tick;
+    return NavLinkTick{nanos_since_boot()};
   }
 
-  // CURVE_AHEAD（含经纬度）+ MetaProvider 里票 B 已有的最近一条 GNSS → 弯道目标。
+  // 手机 CURVE 沿路线距离 + 手机采样期限 → 弯道目标。
   // 决策与序列化在 NavLinkSession / MapTargetWriter（纯逻辑、宿主单测）；reply 线程只把结果放进
   // 本次写入槽，真正的 Params 文件 I/O 由非实时线程 calib_thread 做（P2）。
   // 锁内只 swap 指针（AU-9）：旧值留在局部变量，出锁后释放，实时线程不在锁内分配/释放堆。

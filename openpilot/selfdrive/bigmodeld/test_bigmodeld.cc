@@ -803,6 +803,22 @@ static void test_avahi_locator() {
 // frame_codec：往返 + 坏输入（冒烟）
 // =====================================================================
 
+static void test_v4_frame_contract() {
+  CHECK(bgm1::kVersion == 4);
+  CHECK(bgm1::kFrameHdrSize == 152 && bgm1::kFrameMinSize == 172);
+  bgm1::FrameHeader h;
+  uint8_t wire[bgm1::kFrameHdrSize];
+  bgm1::pack_frame_header(h, wire);
+  wire[4] = 3;
+  CHECK(bgm1::parse_frame(wire, 16, nullptr) == bgm1::Err::kBadVersion);
+  wire[5] = bgm1::kTypeHello;
+  CHECK(bgm1::parse_hello(wire, 16, nullptr) == bgm1::Err::kBadVersion);
+  wire[5] = bgm1::kTypeErr;
+  CHECK(bgm1::parse_err(wire, 16, nullptr) == bgm1::Err::kBadVersion);
+  wire[5] = bgm1::kTypeReply;
+  CHECK(bgm1::parse_reply(wire, 16, nullptr) == bgm1::Err::kBadVersion);
+}
+
 static void test_frame_codec_roundtrip() {
   bgm1::FrameHeader h = test_hdr();
   h.flags = bgm1::kFlagRoadIdr;
@@ -821,10 +837,8 @@ static void test_frame_codec_roundtrip() {
   CHECK(fv.hdr.flags == bgm1::kFlagRoadIdr && fv.hdr.road_idr() && !fv.hdr.wide_idr());
   CHECK(fv.hdr.frame_idx == 33 && fv.hdr.road_len == 11 && fv.hdr.wide_len == 5);
   CHECK(fv.hdr.t_eof == h.t_eof);
-  // v3 常量与缺省：头 168 B，缺省 GNSS 全 0（无定位）、VEHICLE 为无效值
-  CHECK(bgm1::kVersion == 3 && bgm1::kFrameHdrSize == 168 && bgm1::frame_wire_size(1000, 700) == 1888);
-  CHECK(buf[4] == 3 && !fv.hdr.gnss.has_fix() && fv.hdr.vehicle.yaw_rate_centideg_per_s == INT16_MIN &&
-        fv.hdr.vehicle.bearing_accuracy_half_deg == 255);
+  CHECK(bgm1::kVersion == 4 && bgm1::kFrameHdrSize == 152 && bgm1::frame_wire_size(1000, 700) == 1872);
+  CHECK(buf[4] == 4 && !fv.hdr.vehicle.speed_valid() && fv.hdr.vehicle.yaw_rate_centideg_per_s == INT16_MIN);
   for (int i = 0; i < 8; i++) CHECK_NEAR(fv.hdr.desire[i], h.desire[i], 1e-6);
   for (int i = 0; i < 9; i++) {
     CHECK_NEAR(fv.hdr.warp_road[i], h.warp_road[i], 1e-6);
@@ -845,32 +859,25 @@ static void test_frame_codec_roundtrip() {
   CHECK(bgm1::parse_frame(bad.data(), bad.size(), &fv) == bgm1::Err::kBadType);
   CHECK(bgm1::parse_frame(buf.data(), buf.size() - 1, &fv) == bgm1::Err::kLenMismatch);
   CHECK(bgm1::parse_frame(buf.data(), bgm1::kFrameMinSize - 1, &fv) == bgm1::Err::kTruncated);
-  // 旧 v2（160 B 头）/ 未来 v4：ver 在前 16 B 先拒
+  // 旧 v3 / 未来 v5：ver 在前 16 B 先拒
   bad = buf;
-  bad[4] = 2;
+  bad[4] = 3;
   CHECK(bgm1::parse_frame(bad.data(), bad.size(), &fv) == bgm1::Err::kBadVersion);
-  bad[4] = 4;
+  bad[4] = 5;
   CHECK(bgm1::parse_frame(bad.data(), bad.size(), &fv) == bgm1::Err::kBadVersion);
-  CHECK(bgm1::version_mismatch_detail(2, 3) == 0x0203u);
+  CHECK(bgm1::version_mismatch_detail(3, 4) == 0x0304u);
   // road_len 超上限 → kLenTooLarge（不是截断）
   bad = buf;
   bad[12] = 0xff; bad[13] = 0xff; bad[14] = 0xff; bad[15] = 0xff;
   CHECK(bgm1::parse_frame(bad.data(), bad.size(), &fv) == bgm1::Err::kLenTooLarge);
 
-  // GNSS / VEHICLE 往返（边界 + 饱和）
-  bgm1::FrameHeader g = test_hdr();
-  g.road_len = 11;
-  g.wide_len = 5;
-  g.gnss = {900000000, -1800000000, 0xFFFE, 35999, bgm1::kGnssHorizontalAccuracyMaxDm,
-            bgm1::make_fix_age_and_valid_flags(100000, true, true, true)};
-  g.vehicle = {32767, bgm1::kVehicleYawValid | bgm1::kVehicleReverse, bgm1::kGnssBearingAccuracyMaxHalfDeg};
+  bgm1::FrameHeader g = h;
+  g.vehicle = {32767, bgm1::kVehicleSpeedValid | bgm1::kVehicleYawValid | bgm1::kVehicleReverse, 65535};
   CHECK(bgm1::pack_frame(g, road, wide, buf.data(), buf.size()) == buf.size());
   CHECK(bgm1::parse_frame(buf.data(), buf.size(), &fv) == bgm1::Err::kOk);
-  CHECK(fv.hdr.gnss.latitude_deg_x1e7 == 900000000 && fv.hdr.gnss.longitude_deg_x1e7 == -1800000000 && fv.hdr.gnss.bearing_centideg == 35999);
-  CHECK(fv.hdr.gnss.age_ms() == 4095 && fv.hdr.gnss.has_fix() && fv.hdr.gnss.horizontal_accuracy_dm == 0xFFFE);
-  CHECK(fv.hdr.vehicle.yaw_rate_centideg_per_s == 32767 && fv.hdr.vehicle.reversing() && fv.hdr.vehicle.yaw_valid() &&
-        !fv.hdr.vehicle.standstill() && fv.hdr.vehicle.bearing_accuracy_half_deg == 254);
-  CHECK(buf[164] == 0 && buf[165] == 0 && buf[166] == 0 && buf[167] == 0);  // VEHICLE 保留 4 B 恒 0
+  CHECK(fv.hdr.vehicle.speed_cm_per_s == 65535 && fv.hdr.vehicle.speed_valid());
+  CHECK(fv.hdr.vehicle.yaw_rate_centideg_per_s == 32767 && fv.hdr.vehicle.reversing() && fv.hdr.vehicle.yaw_valid());
+  CHECK(buf[149] == 0 && buf[150] == 0 && buf[151] == 0);
 
   // HELLO 往返（06 号；同源副本守卫：与 android/ 的 frame_codec 同一实现）
   bgm1::Hello hello;
@@ -882,9 +889,9 @@ static void test_frame_codec_roundtrip() {
   CHECK(bgm1::parse_hello(hbuf.data(), hbuf.size(), &h2) == bgm1::Err::kOk);
   CHECK(h2.instance_id == hello.instance_id && h2.max_frame == hello.max_frame);
   CHECK(bgm1::parse_hello(hbuf.data(), bgm1::kHelloWireSize - 1, &h2) == bgm1::Err::kTruncated);
-  // golden 逐字节钉死（app/tests/fixtures/hello_golden.bin 同一样例，跨仓库镜像互证；ver=3）
+  // golden 逐字节钉死（app/tests/fixtures/hello_golden.bin 同一样例，跨仓库镜像互证；ver=4）
   static const uint8_t kHelloGolden[bgm1::kHelloWireSize] = {
-      0x42, 0x47, 0x4D, 0x31, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x42, 0x47, 0x4D, 0x31, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x10, 0x00, 0x00, 0x00, 0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01,
       0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   };
@@ -909,7 +916,7 @@ static void test_reply_err_roundtrip() {
   for (size_t i = 0; i < bgm1::kReplyOutputsCount; i++) outputs_ok &= (out.outputs[i] == r.outputs[i]);
   CHECK(outputs_ok);
   for (size_t i = 0; i < bgm1::kReplyTelemetryCount; i++) CHECK(out.telemetry[i] == r.telemetry[i]);
-  // v3：REPLY 8480 B / len 8440；缺省 Reply 的 NavExt 160 B 全 0（present_flags=0 = 无导航数据）
+  // v4：REPLY 8480 B / len 8440；缺省 Reply 的 NavExt 160 B 全 0（present_flags=0 = 无导航数据）
   CHECK(bgm1::kReplyWireSize == 8480 && bgm1::kReplyPayloadSize == 8440 && bgm1::kReplyNavExtSize == 160);
   bool nav_zero = out.nav_ext.present_flags == 0 && out.nav_ext.nav_health_flags == 0;
   for (size_t i = 8304; i < 8464; i++) nav_zero &= buf[i] == 0;
@@ -918,7 +925,7 @@ static void test_reply_err_roundtrip() {
   // NavExt 往返：四个子结构 + present_flags / nav_health_flags 位；CURVE point_count=3 → 第 3–7 点 pack 为 0
   r.nav_ext.present_flags = bgm1::kNavPresentNavState | bgm1::kNavPresentRoadAttr | bgm1::kNavPresentCurveAhead |
                       bgm1::kNavPresentNavDebug;
-  r.nav_ext.nav_health_flags = bgm1::kNavHealthGpsOk | bgm1::kNavHealthRerouting;
+  r.nav_ext.nav_health_flags = bgm1::kNavHealthPhoneLocationOk | bgm1::kNavHealthRerouting;
   r.nav_ext.nav_state = {3, 20, 255, 2, 350, 0xFFFFFFFFu, 987, 40, 0x0F, 254, 0xFFFF};
   r.nav_ext.road_attr = {80, 1, 0, 255, 0xFFFF, 1000, 0x85, 3, 25};
   r.nav_ext.curve_ahead.point_count = 3;
@@ -965,68 +972,40 @@ static void test_reply_err_roundtrip() {
 
   bgm1::ErrMsg e;
   e.code = bgm1::kErrVersionMismatch;
-  e.detail = bgm1::version_mismatch_detail(2, bgm1::kVersion);
+  e.detail = bgm1::version_mismatch_detail(3, bgm1::kVersion);
   e.frame_idx = 13;
   std::vector<uint8_t> ebuf(bgm1::kErrWireSize);
   CHECK(bgm1::pack_err(e, ebuf.data(), ebuf.size()) == bgm1::kErrWireSize);
   bgm1::ErrMsg eout;
   CHECK(bgm1::parse_err(ebuf.data(), ebuf.size(), &eout) == bgm1::Err::kOk);
-  CHECK(eout.code == bgm1::kErrVersionMismatch && eout.detail == 0x0203u && eout.frame_idx == 13);
+  CHECK(eout.code == bgm1::kErrVersionMismatch && eout.detail == 0x0304u && eout.frame_idx == 13);
   CHECK(bgm1::parse_err(ebuf.data(), ebuf.size() - 1, &eout) == bgm1::Err::kTruncated);
 }
 
-
-// v3 规范化（与手机 test_frame_codec.cpp 同口径）：has_fix=0、CURVE 坏块、保留位掩码、yaw 一致性
-static void test_v3_normalisation() {
+// v4 运动有效位与保留位；parse 同样规范化不可信输入。
+static void test_v4_normalisation() {
   uint8_t buf[bgm1::kFrameHdrSize];
-  bgm1::FrameHeader back;
-  auto le16 = [&](const uint8_t* p) { return uint16_t(p[0] | (p[1] << 8)); };
-
-  // has_fix=0：位置类字段与 bearing_accuracy_half_deg 规范化；speed + speed_valid + age 保留
-  bgm1::FrameHeader nofix;
-  nofix.gnss = {123, -456, 789, 1011, 12, bgm1::make_fix_age_and_valid_flags(50, false, true, true)};
-  nofix.vehicle = {-300, bgm1::kVehicleYawValid, 7};
-  bgm1::pack_frame_header(nofix, buf);
-  bool pos_zero = true;
-  for (int i = 144; i < 152; i++) pos_zero &= buf[i] == 0;
-  CHECK(pos_zero && le16(buf + 154) == 0 && le16(buf + 156) == 0);
-  CHECK(le16(buf + 152) == 789 && le16(buf + 158) == (50 | bgm1::kGnssSpeedValid) && buf[163] == 255);
+  bgm1::FrameHeader h, back;
+  h.vehicle = {-300, 0xFF, 789};
+  bgm1::pack_frame_header(h, buf);
+  CHECK(buf[144] == 0x15 && buf[145] == 0x03 && buf[146] == 0xD4 && buf[147] == 0xFE && buf[148] == 0x0F);
+  CHECK(buf[149] == 0 && buf[150] == 0 && buf[151] == 0);
   CHECK(bgm1::parse_frame_header(buf, &back) == bgm1::Err::kOk);
-  CHECK(!back.gnss.has_fix() && back.gnss.speed_cm_per_s == 789 && back.gnss.speed_valid() && back.gnss.age_ms() == 50 &&
-        !back.gnss.bearing_valid() && back.gnss.latitude_deg_x1e7 == 0 && back.vehicle.bearing_accuracy_half_deg == 255 &&
-        back.vehicle.yaw_rate_centideg_per_s == -300);
-  // has_fix=1：带 valid 位的字段以 valid 位为准（无效写 0），horizontal_accuracy（无 valid 位）保留 0xFFFF 哨兵
-  bgm1::FrameHeader gv;
-  gv.gnss = {374220000, -1220840000, 500, 9000, 0xFFFF, bgm1::make_fix_age_and_valid_flags(10, true, false, true)};
-  bgm1::pack_frame_header(gv, buf);
-  CHECK(le16(buf + 152) == 0 && le16(buf + 154) == 9000 && le16(buf + 156) == 0xFFFF);  // speed_valid=0
-  CHECK(bgm1::parse_frame_header(buf, &back) == bgm1::Err::kOk && back.gnss.speed_cm_per_s == 0 && !back.gnss.speed_valid() &&
-        back.gnss.bearing_centideg == 9000 && back.gnss.horizontal_accuracy_dm == 0xFFFF);
-  gv.gnss.fix_age_and_valid_flags = bgm1::make_fix_age_and_valid_flags(10, true, true, false);
-  bgm1::pack_frame_header(gv, buf);
-  CHECK(le16(buf + 152) == 500 && le16(buf + 154) == 0);  // bearing_valid=0
-  CHECK(bgm1::parse_frame_header(buf, &back) == bgm1::Err::kOk && back.gnss.bearing_centideg == 0 && !back.gnss.bearing_valid() &&
-        back.gnss.speed_cm_per_s == 500);
-  buf[154] = 0x78; buf[155] = 0x56;  // 线上 bearing_valid=0 时的垃圾
-  CHECK(bgm1::parse_frame_header(buf, &back) == bgm1::Err::kOk && back.gnss.bearing_centideg == 0);
-  bgm1::FrameHeader empty;  // 完全无数据：GNSS 整块 0
-  bgm1::pack_frame_header(empty, buf);
-  bool zero16 = true;
-  for (int i = 144; i < 160; i++) zero16 &= buf[i] == 0;
-  CHECK(zero16);
-
-  // 保留位强制 0；yaw 与 yaw_valid 一致
-  bgm1::FrameHeader rsv;
-  rsv.gnss = {1, 2, 3, 4, 5, 0xFFFF};
-  rsv.vehicle = {100, 0xFF, 7};
-  bgm1::pack_frame_header(rsv, buf);
-  CHECK(le16(buf + 158) == 0xDFFF && buf[162] == 0x07);
-  rsv.vehicle = {bgm1::kYawRateInvalidCentidegPerS, bgm1::kVehicleYawValid | bgm1::kVehicleStandstill, 7};
-  bgm1::pack_frame_header(rsv, buf);
-  CHECK(buf[162] == bgm1::kVehicleStandstill);
-  rsv.vehicle = {-1234, bgm1::kVehicleReverse, 7};
-  bgm1::pack_frame_header(rsv, buf);
-  CHECK(buf[160] == 0x00 && buf[161] == 0x80 && buf[162] == bgm1::kVehicleReverse);
+  CHECK(back.vehicle.speed_cm_per_s == 789 && back.vehicle.speed_valid() && back.vehicle.yaw_valid());
+  h.vehicle = {-300, bgm1::kVehicleYawValid | bgm1::kVehicleReverse | bgm1::kVehicleStandstill, 789};
+  bgm1::pack_frame_header(h, buf);
+  CHECK(buf[144] == 0 && buf[145] == 0 && buf[148] == bgm1::kVehicleYawValid);
+  buf[144] = 0xFF; buf[145] = 0xFF; buf[148] = 0xF7;
+  CHECK(bgm1::parse_frame_header(buf, &back) == bgm1::Err::kOk);
+  CHECK(back.vehicle.speed_cm_per_s == 0 && !back.vehicle.reversing() && !back.vehicle.standstill());
+  h.vehicle = {bgm1::kYawRateInvalidCentidegPerS, bgm1::kVehicleYawValid | bgm1::kVehicleSpeedValid, 0};
+  bgm1::pack_frame_header(h, buf);
+  CHECK(buf[146] == 0 && buf[147] == 0x80 && buf[148] == bgm1::kVehicleSpeedValid);
+  buf[148] |= bgm1::kVehicleYawValid;
+  CHECK(bgm1::parse_frame_header(buf, &back) == bgm1::Err::kOk && !back.vehicle.yaw_valid());
+  h.vehicle = {-1234, 0, 0};
+  bgm1::pack_frame_header(h, buf);
+  CHECK(buf[146] == 0 && buf[147] == 0x80 && buf[148] == 0);
 
   // NavExt 保留位
   std::vector<uint8_t> rb(bgm1::kReplyWireSize);
@@ -1110,8 +1089,7 @@ static void test_cross_end_golden() {
     h.warp_road[i] = i * 0.25f + 0.5f;
     h.warp_wide[i] = 1.25f - i * 0.5f;
   }
-  h.gnss = {374220000, -1220840000, 1388, 27315, 35, 0xD050};
-  h.vehicle = {-1234, bgm1::kVehicleYawValid | bgm1::kVehicleStandstill, 6};
+  h.vehicle = {-1234, bgm1::kVehicleYawValid | bgm1::kVehicleStandstill | bgm1::kVehicleSpeedValid, 1388};
   std::vector<uint8_t> road(1000), wide(700), packed(gf.size());
   for (size_t i = 0; i < road.size(); i++) road[i] = (uint8_t)(i % 251);
   for (size_t i = 0; i < wide.size(); i++) wide[i] = (uint8_t)((i * 7 + 3) % 256);
@@ -1119,8 +1097,8 @@ static void test_cross_end_golden() {
   CHECK(packed == gf);
   bgm1::FrameView fv;
   CHECK(bgm1::parse_frame(gf.data(), gf.size(), &fv) == bgm1::Err::kOk);
-  CHECK(fv.hdr.gnss.latitude_deg_x1e7 == 374220000 && fv.hdr.gnss.fix_age_and_valid_flags == 0xD050 && fv.hdr.gnss.age_ms() == 80);
-  CHECK(fv.hdr.vehicle.yaw_rate_centideg_per_s == -1234 && fv.hdr.vehicle.bearing_accuracy_half_deg == 6 && fv.hdr.vehicle.standstill());
+  CHECK(fv.hdr.vehicle.speed_valid() && fv.hdr.vehicle.speed_cm_per_s == 1388);
+  CHECK(fv.hdr.vehicle.yaw_rate_centideg_per_s == -1234 && fv.hdr.vehicle.standstill());
 
   // REPLY：parse 后重新 pack 逐字节回 golden，并核对 NavExt 关键字段
   bgm1::Reply r;
@@ -1202,11 +1180,8 @@ static void test_meta_provider() {
   mp.fill(42, &h);
 
   CHECK(h.t_eof == 42);
-  // v3：没有 GNSS / deviceMotion 样本 → 「无数据」（GNSS 全 0 = 无定位；yaw 无效、航向精度未知）
-  CHECK(h.gnss.latitude_deg_x1e7 == 0 && h.gnss.longitude_deg_x1e7 == 0 && h.gnss.speed_cm_per_s == 0 && h.gnss.bearing_centideg == 0 &&
-        h.gnss.horizontal_accuracy_dm == 0 && h.gnss.fix_age_and_valid_flags == 0 && !h.gnss.has_fix());
-  CHECK(h.vehicle.yaw_rate_centideg_per_s == bgm1::kYawRateInvalidCentidegPerS && h.vehicle.vehicle_state_flags == 0 &&
-        h.vehicle.bearing_accuracy_half_deg == bgm1::kGnssBearingAccuracyUnknownHalfDeg);
+  CHECK(h.vehicle.speed_cm_per_s == 0 && !h.vehicle.speed_valid());
+  CHECK(h.vehicle.yaw_rate_centideg_per_s == bgm1::kYawRateInvalidCentidegPerS && h.vehicle.vehicle_state_flags == 0);
   CHECK(h.traffic_convention[0] == 1.f && h.traffic_convention[1] == 0.f);
   for (int i = 0; i < 8; i++) CHECK(h.desire[i] == 0.f);
   CHECK(h.action_t[0] == 0.f && h.action_t[1] == 0.f);
@@ -1295,9 +1270,7 @@ static void test_meta_provider_model_inputs() {
   CHECK(h.desire[3] == 1.f);                              // 重出 pulse（d→0→d）
 }
 
-// ---- v3 FRAME GNSS / VEHICLE（票 B，第二轮：deviceMotion 源）----
-// fill 只填原始编码；has_fix=0 清位置类字段、valid=0 写 0、无 fix 时 bearing_accuracy_half_deg=255
-// 都是票 A 的 pack 规范形。这里 fill → pack → parse 验最终线上语义。
+// ---- v4 FRAME VEHICLE：fill → pack → parse 验最终运动语义 ----
 
 static bgm1::FrameHeader fill_wire(MetaProvider& mp, uint64_t t_eof) {
   bgm1::FrameHeader h;
@@ -1308,20 +1281,6 @@ static bgm1::FrameHeader fill_wire(MetaProvider& mp, uint64_t t_eof) {
   bgm1::FrameHeader back;
   CHECK(bgm1::parse_frame_header(wire, &back) == bgm1::Err::kOk);
   return back;
-}
-
-static GnssSample make_gnss(double lat, double lon, double bearing_deg, double horizontal_accuracy_m,
-                            double bearing_accuracy_deg, bool has_fix, bool event_valid, uint64_t message_time_ns) {
-  GnssSample g;
-  g.latitude_deg = lat;
-  g.longitude_deg = lon;
-  g.bearing_deg = bearing_deg;
-  g.horizontal_accuracy_m = horizontal_accuracy_m;
-  g.bearing_accuracy_deg = bearing_accuracy_deg;
-  g.has_fix = has_fix;
-  g.event_valid = event_valid;
-  g.message_time_ns = message_time_ns;
-  return g;
 }
 
 // 车体系样本（deviceMotion 经 R^T 后的分量）；source_ok 由组装层给出
@@ -1354,192 +1313,6 @@ static DeviceMotionFlags make_dm_flags(bool event_valid = true, bool sensors_ok 
   return f;
 }
 
-// 正常 fix：单位换算 + age + 航向精度
-static void test_meta_gnss_fix() {
-  MetaProvider mp;
-  const uint64_t t_eof = 10'000'000'000ULL;
-  mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof - 150'000'000ULL));
-  mp.set_vehicle(make_vehicle(12.5f, 0.f, 0.25f, true, true, t_eof - 5'000'000ULL));
-
-  bgm1::FrameHeader h = fill_wire(mp, t_eof);
-  CHECK(h.gnss.has_fix());
-  CHECK(h.gnss.age_ms() == 150);
-  CHECK(h.gnss.latitude_deg_x1e7 == 375000000);
-  CHECK(h.gnss.longitude_deg_x1e7 == -1222500000);
-  CHECK(h.gnss.speed_valid() && h.gnss.speed_cm_per_s == 1250);
-  CHECK(h.gnss.bearing_valid() && h.gnss.bearing_centideg == 9000);
-  CHECK(h.gnss.horizontal_accuracy_dm == 125);
-  CHECK(h.vehicle.bearing_accuracy_half_deg == 3);  // 1.5° / 0.5° = 3
-  CHECK(h.vehicle.yaw_valid());
-  CHECK(h.vehicle.yaw_rate_centideg_per_s == 1432);  // 0.25 rad/s = 14.3239 °/s
-  CHECK(!h.vehicle.reversing() && !h.vehicle.standstill());
-}
-
-// B3：age 是「上次 fix」的年龄；has_fix = 最新消息 hasFix ∧ age ≤ 2000；
-// 从未有过 fix 但 speed_valid=1 时 age=4095。
-static void test_meta_gnss_no_fix_and_age() {
-  const uint64_t t_eof = 10'000'000'000ULL;
-
-  {  // 从未有过 fix、只有车速：age=4095，位置类线上为 0
-    MetaProvider mp;
-    mp.set_vehicle(make_vehicle(12.5f, 0.f, 0.f, true, true, t_eof));
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 4095);
-    CHECK(h.gnss.latitude_deg_x1e7 == 0 && h.gnss.longitude_deg_x1e7 == 0 && h.gnss.bearing_centideg == 0 && h.gnss.horizontal_accuracy_dm == 0);
-    CHECK(h.gnss.speed_valid() && h.gnss.speed_cm_per_s == 1250);
-    CHECK(h.vehicle.bearing_accuracy_half_deg == 255);
-  }
-
-  {  // 边界：上次 fix 在 2000 ms 前，最新消息 hasFix=true → 仍算有 fix
-    MetaProvider mp;
-    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof - 2'000'000'000ULL));
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(h.gnss.has_fix() && h.gnss.age_ms() == 2000);
-    CHECK(h.gnss.latitude_deg_x1e7 == 375000000 && h.gnss.horizontal_accuracy_dm == 125);
-  }
-
-  {  // 边界外：2001 ms → has_fix 0，位置类清 0，age 保留
-    MetaProvider mp;
-    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof - 2'001'000'000ULL));
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 2001);
-    CHECK(h.gnss.latitude_deg_x1e7 == 0 && h.gnss.longitude_deg_x1e7 == 0 && h.gnss.bearing_centideg == 0 && h.gnss.horizontal_accuracy_dm == 0);
-    CHECK(h.vehicle.bearing_accuracy_half_deg == 255);
-  }
-
-  {  // 500 ms 前有过 fix，随后一条 hasFix=false：age 仍取上次 fix（500），但 has_fix=0
-    MetaProvider mp;
-    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof - 500'000'000ULL));
-    mp.set_gnss(make_gnss(0, 0, 0, 0, 0, false, true, t_eof - 50'000'000ULL));
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 500);
-    CHECK(h.gnss.latitude_deg_x1e7 == 0 && h.gnss.longitude_deg_x1e7 == 0);
-  }
-
-  {  // 极旧 fix：age 饱和 4095，has_fix=0
-    MetaProvider mp;
-    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, 0));
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 4095);
-  }
-
-  {  // m9：gnss.message_time_ns > t_eof（消息比帧新）→ age=0，仍算 fix
-    MetaProvider mp;
-    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof + 5'000'000ULL));
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(h.gnss.has_fix() && h.gnss.age_ms() == 0);
-  }
-
-  {  // m9：完全没有数据 → 线上 GNSS 16 B 全 0，VEHICLE 缺省
-    MetaProvider mp;
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(h.gnss.latitude_deg_x1e7 == 0 && h.gnss.longitude_deg_x1e7 == 0 && h.gnss.speed_cm_per_s == 0 &&
-          h.gnss.bearing_centideg == 0 && h.gnss.horizontal_accuracy_dm == 0 && h.gnss.fix_age_and_valid_flags == 0);
-    CHECK(!h.gnss.has_fix() && !h.gnss.speed_valid() && !h.gnss.bearing_valid());
-    CHECK(h.vehicle.yaw_rate_centideg_per_s == bgm1::kYawRateInvalidCentidegPerS && h.vehicle.vehicle_state_flags == 0 &&
-          h.vehicle.bearing_accuracy_half_deg == 255);
-  }
-
-  {  // gps event_valid=false：不算 fix，也不更新「上次 fix」
-    MetaProvider mp;
-    mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, false, t_eof - 50'000'000ULL));
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 0);
-    CHECK(h.gnss.latitude_deg_x1e7 == 0 && h.gnss.speed_valid() == false);
-  }
-}
-
-// m2/m3 与量程边界：horizontal_accuracy、bearing_accuracy_half_deg、经纬度范围、bearing 有限性、量程饱和
-static void test_meta_gnss_saturation() {
-  const uint64_t t_eof = 10'000'000'000ULL;
-  const VehicleSample veh = make_vehicle(0.f, 0.f, 0.f, true, true, t_eof);
-
-  {  // horizontal_accuracy：≤0/NaN → 0xFFFF；0<m<0.05 → 1 dm；超量程 → 0xFFFE
-    MetaProvider mp;
-    mp.set_vehicle(veh);
-    mp.set_gnss(make_gnss(0, 0, 0, 0.0, 0, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).gnss.horizontal_accuracy_dm == 0xFFFF);
-    mp.set_gnss(make_gnss(0, 0, 0, 0.04, 0, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).gnss.horizontal_accuracy_dm == 1);
-    mp.set_gnss(make_gnss(0, 0, 0, std::nan(""), 0, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).gnss.horizontal_accuracy_dm == 0xFFFF);
-    mp.set_gnss(make_gnss(0, 0, 0, 10000.0, 0, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).gnss.horizontal_accuracy_dm == 0xFFFE);
-  }
-
-  {  // bearing_accuracy_half_deg：≤0/NaN → 255；0<x<0.25 → 1；饱和 254
-    MetaProvider mp;
-    mp.set_vehicle(veh);
-    mp.set_gnss(make_gnss(0, 0, 0, 1, 0.0, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).vehicle.bearing_accuracy_half_deg == 255);
-    mp.set_gnss(make_gnss(0, 0, 0, 1, 0.1, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).vehicle.bearing_accuracy_half_deg == 1);
-    mp.set_gnss(make_gnss(0, 0, 0, 1, std::nan(""), true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).vehicle.bearing_accuracy_half_deg == 255);
-    mp.set_gnss(make_gnss(0, 0, 0, 1, 1000.0, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).vehicle.bearing_accuracy_half_deg == 254);
-  }
-
-  {  // m3：|lat| ≤ 90、|lon| ≤ 180 才有 fix；负纬度、±90/±180 合法
-    MetaProvider mp;
-    mp.set_gnss(make_gnss(90.0, 180.0, 1, 1, 1, true, true, t_eof));
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(h.gnss.has_fix() && h.gnss.latitude_deg_x1e7 == 900000000 && h.gnss.longitude_deg_x1e7 == 1800000000);
-    mp.set_gnss(make_gnss(-90.0, -180.0, 1, 1, 1, true, true, t_eof));
-    h = fill_wire(mp, t_eof);
-    CHECK(h.gnss.has_fix() && h.gnss.latitude_deg_x1e7 == -900000000 && h.gnss.longitude_deg_x1e7 == -1800000000);
-    mp.set_gnss(make_gnss(91.0, 0, 1, 1, 1, true, true, t_eof));
-    CHECK(!fill_wire(mp, t_eof).gnss.has_fix());
-    mp.set_gnss(make_gnss(-90.1, 0, 1, 1, 1, true, true, t_eof));
-    CHECK(!fill_wire(mp, t_eof).gnss.has_fix());
-    mp.set_gnss(make_gnss(0, 181.0, 1, 1, 1, true, true, t_eof));
-    CHECK(!fill_wire(mp, t_eof).gnss.has_fix());
-    mp.set_gnss(make_gnss(std::nan(""), 0, 1, 1, 1, true, true, t_eof));
-    CHECK(!fill_wire(mp, t_eof).gnss.has_fix());
-  }
-
-  {  // bearing 非有限 → bearing_valid=0（位置仍有 fix）；回绕到 [0, 36000)
-    MetaProvider mp;
-    mp.set_gnss(make_gnss(0, 0, std::nan(""), 1, 1, true, true, t_eof));
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(h.gnss.has_fix() && !h.gnss.bearing_valid() && h.gnss.bearing_centideg == 0);
-    mp.set_gnss(make_gnss(0, 0, 359.999, 1, 1, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).gnss.bearing_centideg == 0);
-    mp.set_gnss(make_gnss(0, 0, -10.0, 1, 1, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).gnss.bearing_centideg == 35000);
-  }
-
-  {  // 无 GNSS、只有车速：speed/speed_valid 独立于定位；其余为 0，age=4095
-    MetaProvider mp;
-    mp.set_vehicle(make_vehicle(8.0f, 0.f, 0.f, true, true, t_eof));
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(!h.gnss.has_fix() && h.gnss.age_ms() == 4095);
-    CHECK(h.gnss.speed_valid() && h.gnss.speed_cm_per_s == 800);
-    CHECK(h.gnss.latitude_deg_x1e7 == 0 && h.gnss.longitude_deg_x1e7 == 0);
-    CHECK(h.vehicle.bearing_accuracy_half_deg == 255);
-  }
-
-  {  // 车体系前向速度为负 → speed 取模长，reversing 位置位；阈值严格 < -0.3
-    MetaProvider mp;
-    mp.set_vehicle(make_vehicle(-8.0f, 0.f, 0.f, true, true, t_eof));
-    bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(h.gnss.speed_valid() && h.gnss.speed_cm_per_s == 800);
-    CHECK(h.vehicle.reversing());
-    mp.set_vehicle(make_vehicle(-0.3f, 0.f, 0.f, true, true, t_eof));
-    CHECK(!fill_wire(mp, t_eof).vehicle.reversing());
-    mp.set_vehicle(make_vehicle(-0.31f, 0.f, 0.f, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).vehicle.reversing());
-  }
-
-  {  // standstill：水平模长 < 0.1 m/s
-    MetaProvider mp;
-    mp.set_vehicle(make_vehicle(0.06f, 0.07f, 0.f, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).vehicle.standstill());
-    mp.set_vehicle(make_vehicle(0.08f, 0.08f, 0.f, true, true, t_eof));
-    CHECK(!fill_wire(mp, t_eof).vehicle.standstill());
-  }
-}
-
 // deviceMotion 有效性：100 ms 内（含）+ event_valid/sensorsOK + 有限值；yaw 与 speed 各自判
 static void test_meta_vehicle_device_motion() {
   const uint64_t t_eof = 10'000'000'000ULL;
@@ -1549,23 +1322,23 @@ static void test_meta_vehicle_device_motion() {
     mp.set_vehicle(make_vehicle(10.f, 0.f, 0.25f, true, true, t_eof - 5'000'000ULL));
     bgm1::FrameHeader h = fill_wire(mp, t_eof);
     CHECK(h.vehicle.yaw_valid() && h.vehicle.yaw_rate_centideg_per_s == 1432);
-    CHECK(h.gnss.speed_valid() && h.gnss.speed_cm_per_s == 1000);
+    CHECK(h.vehicle.speed_valid() && h.vehicle.speed_cm_per_s == 1000);
   }
   {  // 100 ms 边界内有效；超出 1 ns 无效
     MetaProvider mp;
     mp.set_vehicle(make_vehicle(10.f, 0.f, 0.25f, true, true, t_eof - 100'000'000ULL));
     bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(h.vehicle.yaw_valid() && h.gnss.speed_valid());
+    CHECK(h.vehicle.yaw_valid() && h.vehicle.speed_valid());
     mp.set_vehicle(make_vehicle(10.f, 0.f, 0.25f, true, true, t_eof - 100'000'001ULL));
     h = fill_wire(mp, t_eof);
-    CHECK(!h.vehicle.yaw_valid() && !h.gnss.speed_valid());
-    CHECK(h.vehicle.yaw_rate_centideg_per_s == bgm1::kYawRateInvalidCentidegPerS && h.gnss.speed_cm_per_s == 0);
+    CHECK(!h.vehicle.yaw_valid() && !h.vehicle.speed_valid());
+    CHECK(h.vehicle.yaw_rate_centideg_per_s == bgm1::kYawRateInvalidCentidegPerS && h.vehicle.speed_cm_per_s == 0);
   }
   {  // 明确 101 ms：yaw 与 speed 都无效
     MetaProvider mp;
     mp.set_vehicle(make_vehicle(10.f, 0.f, 0.25f, true, true, t_eof - 101'000'000ULL));
     bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(!h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+    CHECK(!h.vehicle.yaw_valid() && !h.vehicle.speed_valid());
   }
   {  // 消息比 t_eof 新也算新鲜
     MetaProvider mp;
@@ -1576,17 +1349,17 @@ static void test_meta_vehicle_device_motion() {
     MetaProvider mp;
     mp.set_vehicle(make_vehicle(10.f, 0.f, 0.25f, false, false, t_eof));
     bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(!h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+    CHECK(!h.vehicle.yaw_valid() && !h.vehicle.speed_valid());
   }
   {  // 分量 NaN：yaw NaN 只废 yaw；速度 NaN 只废 speed
     MetaProvider mp;
     mp.set_vehicle(make_vehicle(10.f, 0.f, std::nanf(""), true, true, t_eof));
     bgm1::FrameHeader h = fill_wire(mp, t_eof);
     CHECK(!h.vehicle.yaw_valid() && h.vehicle.yaw_rate_centideg_per_s == bgm1::kYawRateInvalidCentidegPerS);
-    CHECK(h.gnss.speed_valid());
+    CHECK(h.vehicle.speed_valid());
     mp.set_vehicle(make_vehicle(std::nanf(""), 0.f, 0.25f, true, true, t_eof));
     h = fill_wire(mp, t_eof);
-    CHECK(h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+    CHECK(h.vehicle.yaw_valid() && !h.vehicle.speed_valid());
   }
   {  // yaw ±32767 饱和（避开 INT16_MIN）
     MetaProvider mp;
@@ -1598,20 +1371,20 @@ static void test_meta_vehicle_device_motion() {
   {  // speed 65535 饱和；负速度已在上面的 reversing 用例覆盖
     MetaProvider mp;
     mp.set_vehicle(make_vehicle(1000.f, 0.f, 0.f, true, true, t_eof));
-    CHECK(fill_wire(mp, t_eof).gnss.speed_cm_per_s == 65535);
+    CHECK(fill_wire(mp, t_eof).vehicle.speed_cm_per_s == 65535);
   }
   {  // speed 用前向分量：横向 NaN 不废 speed，但算不出 standstill
     MetaProvider mp;
     mp.set_vehicle(make_vehicle(1.f, std::nanf(""), 0.f, true, true, t_eof));
     bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(h.gnss.speed_valid() && h.gnss.speed_cm_per_s == 100);
+    CHECK(h.vehicle.speed_valid() && h.vehicle.speed_cm_per_s == 100);
     CHECK(!h.vehicle.standstill());
   }
   {  // 无 deviceMotion：yaw/speed 都无效，整块 VEHICLE 缺省
     MetaProvider mp;
     bgm1::FrameHeader h = fill_wire(mp, t_eof);
-    CHECK(!h.vehicle.yaw_valid() && !h.gnss.speed_valid());
-    CHECK(h.vehicle.vehicle_state_flags == 0 && h.vehicle.bearing_accuracy_half_deg == 255);
+    CHECK(!h.vehicle.yaw_valid() && !h.vehicle.speed_valid());
+    CHECK(h.vehicle.vehicle_state_flags == 0);
   }
 }
 
@@ -1727,19 +1500,19 @@ static void test_device_motion_validity_flags() {
   MetaProvider mp;
   mp.set_vehicle(vehicle_sample_from_device_motion(rpy, vel, ang, f_inputs));
   bgm1::FrameHeader h = fill_wire(mp, t_eof);
-  CHECK(h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+  CHECK(h.vehicle.yaw_valid() && !h.vehicle.speed_valid());
 
   const DeviceMotionFlags f_posenet =
       make_dm_flags(true, true, true, false, CS::kCalibrated, t_eof);
   mp.set_vehicle(vehicle_sample_from_device_motion(rpy, vel, ang, f_posenet));
   h = fill_wire(mp, t_eof);
-  CHECK(h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+  CHECK(h.vehicle.yaw_valid() && !h.vehicle.speed_valid());
 
   const DeviceMotionFlags f_invalid =
       make_dm_flags(true, true, true, true, CS::kInvalid, t_eof);
   mp.set_vehicle(vehicle_sample_from_device_motion(rpy, vel, ang, f_invalid));
   h = fill_wire(mp, t_eof);
-  CHECK(!h.vehicle.yaw_valid() && !h.gnss.speed_valid());
+  CHECK(!h.vehicle.yaw_valid() && !h.vehicle.speed_valid());
 }
 
 // m-a：按真实因果链重写相位测试。
@@ -1804,7 +1577,7 @@ static PhaseResult run_phase(uint64_t M, uint64_t eps, uint64_t L, int anomaly,
       mp.set_vehicle(make_vehicle(10.f, 0.f, 0.1f, true, true, sample_t));
     }
     bgm1::FrameHeader h = fill_wire(mp, eof);
-    const bool ok = h.vehicle.yaw_valid() && h.gnss.speed_valid();
+    const bool ok = h.vehicle.yaw_valid() && h.vehicle.speed_valid();
     if (k >= 3) {
       if (!ok) {
         r.invalid++;
@@ -1864,7 +1637,6 @@ static void test_meta_vehicle_phase() {
 static void test_meta_fill_zero_alloc() {
   MetaProvider mp;
   const uint64_t t_eof = 10'000'000'000ULL;
-  mp.set_gnss(make_gnss(37.5, -122.25, 90.0, 12.5, 1.5, true, true, t_eof));
   mp.set_vehicle(make_vehicle(12.5f, 0.f, 0.25f, true, true, t_eof));
 
   // 计数器自检：一次 4 KiB 分配必须被记到，避免覆盖未生效导致空测
@@ -2289,7 +2061,7 @@ static bgm1::Reply nav_reply_fixture() {
   bgm1::Reply r;
   r.frame_idx = 4242;
   r.t_eof = 987654321ULL;
-  r.nav_ext.nav_health_flags = bgm1::kNavHealthGpsOk | bgm1::kNavHealthNavOk;
+  r.nav_ext.nav_health_flags = bgm1::kNavHealthPhoneLocationOk | bgm1::kNavHealthNavOk;
   r.nav_ext.nav_state = {2, 20, 255, 2, 350, 12000, 900, 40, 0x07, 254, 9000};
   r.nav_ext.road_attr = {80, 1, 60, 3, 150, 1000, 0x85, 3, 25};
   r.nav_ext.curve_ahead.point_count = 3;
@@ -2310,7 +2082,7 @@ static void test_nav_state_snapshot_present_flags() {
   r.nav_ext.present_flags = 0;
   NavStateSnapshot s = nav_state_snapshot_from_reply(r);
   CHECK(s.frame_index == 4242 && s.timestamp_eof_ns == 987654321ULL);
-  CHECK(s.gps_ok && !s.route_ok && s.nav_ok && !s.rerouting);
+  CHECK(s.phone_location_ok && !s.route_ok && s.nav_ok && !s.rerouting);
   CHECK(!s.has_nav_state && !s.has_road_attributes && !s.has_curve_ahead && !s.has_nav_debug);
 
   r.nav_ext.present_flags = bgm1::kNavPresentNavState;
@@ -2402,27 +2174,16 @@ static void test_nav_state_snapshot_ignores_curve_coordinates() {
 }
 
 // =====================================================================
-// MapTargetWriter：CURVE_AHEAD + 本机 GNSS → MapTargetVelocities（≤2 Hz；失效/删点/降速立即写）
+// MapTargetWriter：CURVE_AHEAD + 手机位置有效性 → MapTargetVelocities（≤2 Hz；失效/删点/降速立即写）
 // =====================================================================
-
-static GnssSample map_gnss(uint64_t now_ns, double latitude_deg = 37.422,
-                           double longitude_deg = -122.084) {
-  GnssSample g;
-  g.has_fix = true;
-  g.event_valid = true;
-  g.latitude_deg = latitude_deg;
-  g.longitude_deg = longitude_deg;
-  g.horizontal_accuracy_m = 5.0;
-  g.message_time_ns = now_ns - 100'000'000;  // 100 ms 前的 fix
-  return g;
-}
 
 static MapTargetInput map_input(uint64_t now_ns = 10'000'000'000ULL) {
   MapTargetInput in;
   in.link_connected = true;
   in.curve_present = true;
-  in.gnss_seen = true;
-  in.gnss = map_gnss(now_ns);
+  in.nav_state_present = true;
+  in.nav_state_age_ms = 200;
+  in.nav_health_flags = bgm1::kNavHealthPhoneLocationOk;
   in.now_ns = now_ns;
   in.last_reply_ns = now_ns - 50'000'000;  // 50 ms 前的 REPLY
   in.t_eof = now_ns - 50'000'000;          // REPLY 回显的帧时刻（N7 的基准）
@@ -2474,7 +2235,7 @@ static void test_map_target_eight_points_json() {
   const auto out = w.update(map_input());
   CHECK(out.has_value());
   if (!out) return;
-  // 与 SmartCruiseControlMap 单测同一格式：[{"latitude","longitude","velocity"(m/s)}…]；
+  // 与 SmartCruiseControlMap 单测共用带期限的沿路线距离 envelope；
   // velocity = target_speed_kph / 3.6
   const std::string expected = read_map_target_fixture();
   CHECK(!expected.empty());
@@ -2489,9 +2250,46 @@ static void test_map_target_count_zero_is_empty_list() {
   CHECK(out.has_value() && *out == "[]");
 }
 
+static void test_map_target_phone_deadline_envelope() {
+  MapTargetWriter writer;
+  auto in = map_input();
+  in.nav_state_age_ms = 1500;
+  in.curve.point_count = 1;
+  in.curve.points[0].distance_along_route_m = 120;
+  const auto out = writer.update(in);
+  CHECK(out && *out == "{\"sample_time_ns\":9850000000,\"valid_until_ns\":10450000000,\"points\":[{\"latitude\":37.4220000,\"longitude\":-122.0840000,\"distance_m\":120,\"velocity\":11.111}]}");
+  // 刷新 CURVE 不能延长同一手机采样的期限。
+  in.now_ns += 1'000'000'000ULL;
+  in.t_eof += 1'000'000'000ULL;
+  in.nav_state_age_ms += 1000;
+  const auto expired = writer.update(in);
+  CHECK(expired && *expired == "[]");
+}
+
+static void test_map_target_distance_refresh() {
+  MapTargetWriter writer;
+  auto in = map_input();
+  CHECK(writer.update(in).has_value());
+  in.now_ns += 500'000'000ULL;
+  in.t_eof += 500'000'000ULL;
+  in.curve.points[1].distance_along_route_m = 9;
+  const auto out = writer.update(in);
+  CHECK(out && out->find("\"distance_m\":9,") != std::string::npos);
+}
+
+static void test_map_target_invalid_refresh_cadence() {
+  MapTargetWriter writer;
+  auto in = map_input();
+  in.nav_health_flags = 0;
+  CHECK(writer.update(in) == std::optional<std::string>("[]"));
+  in.now_ns += 500'000'000ULL;
+  CHECK(!writer.update(in).has_value());
+  in.now_ns += 500'000'000ULL;
+  CHECK(writer.update(in) == std::optional<std::string>("[]"));
+}
+
 // 失效路径都必须在 100 ms 内（不等 500 ms 节拍）发出清空（下一 calib 拍写盘）：
-// present=0、断链、S4 合成过期（t_eof 基准）、无 fix、fix 过期、event_valid=0、
-// 精度不达标/未知、目标速度全 0
+// present=0、断链、t_eof 合成过期、手机位置无效、目标速度全 0
 static void expect_immediate_clear(void (*mutate)(MapTargetInput*, uint64_t)) {
   MapTargetWriter w;
   const uint64_t now = 10'000'000'000ULL;
@@ -2503,6 +2301,11 @@ static void expect_immediate_clear(void (*mutate)(MapTargetInput*, uint64_t)) {
 }
 
 static void test_map_target_invalid_paths_clear_immediately() {
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) {
+    in->curve.points[2].distance_along_route_m = 5;
+    // 排序被破坏：不能继续保留上次写出的目标。
+    in->curve.points[3].distance_along_route_m = 1;
+  });
   expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->curve_present = false; });
   expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->link_connected = false; });
   expect_immediate_clear([](MapTargetInput* in, uint64_t now) {
@@ -2512,15 +2315,13 @@ static void test_map_target_invalid_paths_clear_immediately() {
   expect_immediate_clear([](MapTargetInput* in, uint64_t now) {
     in->t_eof = now - 3'000'000'000ULL;  // 帧本身超过 2 s
   });
-  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->gnss.has_fix = false; });
-  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->gnss.event_valid = false; });
-  expect_immediate_clear([](MapTargetInput* in, uint64_t now) {
-    in->gnss.message_time_ns = now - 3'000'000'000ULL;  // fix 过期
-  });
-  expect_immediate_clear([](MapTargetInput* in, uint64_t now) {
-    in->gnss.horizontal_accuracy_m = 45.0;              // >40 m 立即清空（AU-3 迟滞；S7）
-    in->gnss.message_time_ns = now;                     // 新样本
-  });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->nav_state_present = false; });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->nav_health_flags = 0; });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->nav_state_age_ms = 2000; });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->nav_state_age_ms = 0xFFFF; });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->curve.age_ms = 0xFFFF; });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t now) { in->t_eof = now + 1; });
+  expect_immediate_clear([](MapTargetInput* in, uint64_t) { in->t_eof = 1; });
   expect_immediate_clear([](MapTargetInput* in, uint64_t) {
     in->curve.point_count = 2;                          // 目标速度 0 = 线上「无」
     in->curve.points[0].target_speed_kph = 0;
@@ -2535,7 +2336,6 @@ static void test_map_target_invalid_paths_clear_immediately() {
     MapTargetInput edge = map_input(t + 1'000'000'000ULL);
     edge.curve.age_ms = 500;
     edge.t_eof = edge.now_ns - 1'500'000'000ULL - (one_ns_older ? 1 : 0);  // 数据时刻 = now − 2 s (− 1 ns)
-    edge.gnss.message_time_ns = edge.now_ns - 100'000'000ULL;
     const auto edge_out = wb.update(edge);
     if (one_ns_older) {
       CHECK(edge_out.has_value() && *edge_out == "[]");
@@ -2741,8 +2541,6 @@ static void test_map_target_one_to_one_matching() {
 // AU-1：main.cc 的 reply 线程只调 NavLinkSession，宿主测试驱动同一个类（不再手抄 main 的接线）。
 static NavLinkTick link_tick(uint64_t now_ns) {
   NavLinkTick tick;
-  tick.gnss.seen = true;
-  tick.gnss.gnss = map_gnss(now_ns);
   tick.now_ns = now_ns;
   return tick;
 }
@@ -2750,8 +2548,8 @@ static NavLinkTick link_tick(uint64_t now_ns) {
 // 带沿路线 CURVE（fixture 的 curve_flags=0x05）的 REPLY；AU-4 要求 route_ok=1 才可用
 static bgm1::NavExt session_nav_ext() {
   bgm1::Reply r = nav_reply_fixture();
-  r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead;
-  r.nav_ext.nav_health_flags |= bgm1::kNavHealthRouteOk;
+  r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead | bgm1::kNavPresentNavState;
+  r.nav_ext.nav_health_flags |= bgm1::kNavHealthRouteOk | bgm1::kNavHealthPhoneLocationOk;
   return r.nav_ext;
 }
 
@@ -2813,7 +2611,7 @@ static void test_nav_link_session_live_reply_keeps_targets() {
   };
   CHECK(!session.on_epoch(1, counting_tick));
   CHECK(session.hello_seen());
-  // AF-3：epoch 没变时不取 GNSS 快照（reply 线程每轮循环都走这里，快照要加 MetaProvider 的锁）
+  // epoch 没变时不额外取时钟快照。
   CHECK(ticks_taken == 0);
   CHECK(session.on_epoch(2, counting_tick));
   CHECK(ticks_taken == 1);
@@ -2836,8 +2634,8 @@ static void test_nav_link_cache_reset_clears_old_curve() {
   NavLinkCache cache;
   MapTargetWriter w;
   bgm1::Reply r = nav_reply_fixture();
-  r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead;
-  r.nav_ext.nav_health_flags |= bgm1::kNavHealthRouteOk;
+  r.nav_ext.present_flags = bgm1::kNavPresentCurveAhead | bgm1::kNavPresentNavState;
+  r.nav_ext.nav_health_flags |= bgm1::kNavHealthRouteOk | bgm1::kNavHealthPhoneLocationOk;
   const uint64_t now = 10'000'000'000ULL;
   cache.on_reply(now, now - 50'000'000ULL, r.nav_ext);
 
@@ -2856,7 +2654,7 @@ static void test_nav_link_cache_reset_clears_old_curve() {
   CHECK(cache.nav_health_flags() == r.nav_ext.nav_health_flags);
 
   // fail()：cache.reset() + link=false 立即写 []
-  CHECK(cache.present_flags() == bgm1::kNavPresentCurveAhead && cache.curve().point_count > 0);
+  CHECK(cache.present_flags() == (bgm1::kNavPresentCurveAhead | bgm1::kNavPresentNavState) && cache.curve().point_count > 0);
   cache.reset();
   // AU-7：reset 必须真的清掉各字段（不能靠 t_eof=0 一个字段挡住新鲜度而掩盖其他字段残留）
   CHECK(cache.present_flags() == 0 && cache.curve().point_count == 0 && cache.t_eof() == 0 &&
@@ -2870,117 +2668,7 @@ static void test_nav_link_cache_reset_clears_old_curve() {
   CHECK(!out.has_value() || *out == "[]");
 }
 
-// AU-3：定位精度迟滞。不可用→可用要 ≤30 m；可用→不可用要 >40 m，或连续 3 条 >30 m；未知视同不达标。
-// 计数按 GNSS 样本（message_time_ns 变化）推进，20 Hz 拍重复看到同一条样本不累加。
-static GnssSample gate_sample(uint64_t message_ns, double accuracy_m) {
-  GnssSample g = map_gnss(message_ns + 100'000'000ULL);
-  g.message_time_ns = message_ns;
-  g.horizontal_accuracy_m = accuracy_m;
-  return g;
-}
-
-static void test_gps_accuracy_gate_hysteresis() {
-  uint64_t t = 10'000'000'000ULL;
-  auto feed = [&](GpsAccuracyGate* gate, double accuracy_m, int ticks = 2) {
-    // 一条 GNSS 样本被 reply 线程的 `ticks` 个拍看到
-    const GnssSample g = gate_sample(t, accuracy_m);
-    bool usable = false;
-    for (int i = 0; i < ticks; i++) usable = gate->usable(g, t + 10'000'000ULL + i * 50'000'000ULL);
-    t += 100'000'000ULL;
-    return usable;
-  };
-
-  {  // 29/31 m 交替：一直可用
-    GpsAccuracyGate gate;
-    CHECK(feed(&gate, 29.0));
-    for (int i = 0; i < 40; i++) CHECK(feed(&gate, i % 2 ? 29.0 : 31.0));
-  }
-  {  // 连续 3 条 31 m 清空；2 条不清；每条被看到 2 次也只算 1 条
-    GpsAccuracyGate gate;
-    CHECK(feed(&gate, 5.0));
-    CHECK(feed(&gate, 31.0));
-    CHECK(feed(&gate, 31.0));
-    CHECK(!feed(&gate, 31.0));
-    // 清空后 31 m 仍不可用；要回到 ≤30 m 才恢复
-    CHECK(!feed(&gate, 31.0));
-    CHECK(!feed(&gate, 35.0));
-    CHECK(feed(&gate, 30.0));  // 30 m 边界可用
-  }
-  {  // 中间夹一条 ≤30 m：连续计数清零
-    GpsAccuracyGate gate;
-    CHECK(feed(&gate, 5.0));
-    CHECK(feed(&gate, 31.0));
-    CHECK(feed(&gate, 31.0));
-    CHECK(feed(&gate, 30.0));
-    CHECK(feed(&gate, 31.0));
-    CHECK(feed(&gate, 31.0));
-    CHECK(!feed(&gate, 31.0));
-  }
-  {  // 一条 >40 m 立即清空（40 m 本身不算）
-    GpsAccuracyGate gate;
-    CHECK(feed(&gate, 5.0));
-    CHECK(feed(&gate, 40.0));
-    CHECK(!feed(&gate, 40.001, 1));
-    GpsAccuracyGate gate2;
-    CHECK(feed(&gate2, 5.0));
-    CHECK(!feed(&gate2, 45.0, 1));
-  }
-  {  // 未知精度：从不可用恢复不了；可用时按「不达标」计入连续 3 条，但不立即清空
-    GpsAccuracyGate gate;
-    CHECK(!feed(&gate, 0.0));
-    CHECK(!feed(&gate, NAN));
-    CHECK(!feed(&gate, -1.0));
-    CHECK(feed(&gate, 5.0));
-    CHECK(feed(&gate, 0.0));
-    CHECK(feed(&gate, NAN));
-    CHECK(!feed(&gate, 0.0));
-  }
-  {  // 起始 31 m 不可用；fix 丢失 / event_valid=0 / 过期立即不可用，并复位迟滞状态
-    GpsAccuracyGate gate;
-    CHECK(!feed(&gate, 31.0));
-    CHECK(feed(&gate, 29.0));
-    GnssSample no_fix = gate_sample(t, 5.0);
-    no_fix.has_fix = false;
-    CHECK(!gate.usable(no_fix, t + 10'000'000ULL));
-    t += 100'000'000ULL;
-    CHECK(!feed(&gate, 31.0));  // 复位后 31 m 不能直接恢复
-    CHECK(feed(&gate, 29.0));
-    // 样本过期（>1 s 没新样本）
-    const GnssSample g = gate_sample(t, 5.0);
-    CHECK(gate.usable(g, t + 500'000'000ULL));
-    CHECK(!gate.usable(g, t + 1'100'000'000ULL));
-  }
-}
-
 // AU-3 端到端：29/31 m 交替（每条 GNSS 换一次），目标不再被反复清空写回
-static void test_map_target_accuracy_flapping_keeps_targets() {
-  for (const int period : {1, 2, 5, 10}) {
-    MapTargetWriter w;
-    const uint64_t t0 = 10'000'000'000ULL;
-    int clears = 0;
-    int present_ticks = 0;
-    bool have_targets = false;
-    for (int k = 0; k < 200; k++) {
-      const uint64_t now = t0 + uint64_t(k) * 50'000'000ULL;
-      MapTargetInput in = map_input_spaced(now);
-      in.curve.point_count = 1;
-      const double accuracy_m = ((k / 2 / period) % 2) ? 31.0 : 29.0;
-      in.gnss = gate_sample(t0 + uint64_t(k / 2) * 100'000'000ULL, accuracy_m);
-      if (const auto out = w.update(in)) {
-        if (*out == "[]") clears++;
-        have_targets = *out != "[]";
-      }
-      if (have_targets) present_ticks++;
-    }
-    // period=10：每 1 s 在 31 m 上停留 10 条（≥3 条）→ 合理清空；period ≤2：只有 1–2 条，不得清空
-    if (period <= 2) {
-      CHECK(clears == 0);
-      CHECK(present_ticks >= 199);
-    } else {
-      CHECK(clears >= 1);
-    }
-  }
-}
 
 // AU-4：偏航重算 / 已离开路线时，车机不用 CURVE 点
 static void test_map_target_rerouting_and_route_ok() {
@@ -2993,7 +2681,7 @@ static void test_map_target_rerouting_and_route_ok() {
   });
   expect_immediate_clear([](MapTargetInput* in, uint64_t) {
     in->curve.curve_flags = 0x05;  // 沿路线 + 平滑
-    in->nav_health_flags = bgm1::kNavHealthGpsOk;
+    in->nav_health_flags = bgm1::kNavHealthPhoneLocationOk;
   });
 
   // 沿路线 + route_ok=1：照常写
@@ -3001,7 +2689,7 @@ static void test_map_target_rerouting_and_route_ok() {
     MapTargetWriter w;
     MapTargetInput in = map_input();
     in.curve.curve_flags = 0x01;
-    in.nav_health_flags = bgm1::kNavHealthRouteOk;
+    in.nav_health_flags = bgm1::kNavHealthRouteOk | bgm1::kNavHealthPhoneLocationOk;
     const auto out = w.update(in);
     CHECK(out.has_value() && json_point_count(*out) == 8);
   }
@@ -3010,81 +2698,10 @@ static void test_map_target_rerouting_and_route_ok() {
     MapTargetWriter w;
     MapTargetInput in = map_input();
     in.curve.curve_flags = 0x02;
-    in.nav_health_flags = 0;
+    in.nav_health_flags = bgm1::kNavHealthPhoneLocationOk;
     const auto out = w.update(in);
     CHECK(out.has_value() && json_point_count(*out) == 8);
   }
-}
-
-// S3/S7：位置按 GNSS 节拍生成；无 fix / fix 过期 / 精度未知或 >30 m / 坐标非法都不写
-static void test_last_gps_position_gate() {
-  const uint64_t now = 10'000'000'000ULL;
-  GnssSample g = map_gnss(now);
-  const auto ok = last_gps_position_json(g, now);
-  CHECK(ok.has_value() && *ok == "{\"latitude\":37.4220000,\"longitude\":-122.0840000}");
-
-  g.horizontal_accuracy_m = 30.0;  // 边界：30 m 可用
-  CHECK(last_gps_position_json(g, now).has_value());
-  g.horizontal_accuracy_m = 30.001;
-  CHECK(!last_gps_position_json(g, now).has_value());
-  g.horizontal_accuracy_m = 0.0;  // 未知哨兵
-  CHECK(!last_gps_position_json(g, now).has_value());
-  g.horizontal_accuracy_m = -1.0;
-  CHECK(!last_gps_position_json(g, now).has_value());
-  g.horizontal_accuracy_m = NAN;
-  CHECK(!last_gps_position_json(g, now).has_value());
-
-  g = map_gnss(now);
-  g.has_fix = false;
-  CHECK(!last_gps_position_json(g, now).has_value());
-  g = map_gnss(now);
-  g.event_valid = false;  // N6
-  CHECK(!last_gps_position_json(g, now).has_value());
-  g = map_gnss(now);
-  g.message_time_ns = now - 950'000'000ULL;  // N3：0.95 s 仍有效
-  CHECK(last_gps_position_json(g, now).has_value());
-  g.message_time_ns = now - 1'050'000'000ULL;  // N3：1.05 s 过期
-  CHECK(!last_gps_position_json(g, now).has_value());
-  g = map_gnss(now);
-  g.message_time_ns = now - 1'000'000'000ULL;  // AU-6：恰好 1 s 可用（within 是 <=）
-  CHECK(last_gps_position_json(g, now).has_value());
-  g.message_time_ns = now - 1'000'000'001ULL;  // AU-6：再早 1 ns 过期
-  CHECK(!last_gps_position_json(g, now).has_value());
-  g = map_gnss(now);
-  g.message_time_ns = now + 10'000'000ULL;  // R3：fix 比 now 晚 10 ms（未来）按无效处理
-  CHECK(!last_gps_position_json(g, now).has_value());
-  g = map_gnss(now);
-  g.message_time_ns = now - 2'000'000'001ULL;
-  CHECK(!last_gps_position_json(g, now).has_value());
-  g = map_gnss(now);
-  g.latitude_deg = 91.0;
-  CHECK(!last_gps_position_json(g, now).has_value());
-  g = map_gnss(now);
-  g.latitude_deg = 0.0;
-  g.longitude_deg = 0.0;
-  CHECK(!last_gps_position_json(g, now).has_value());
-}
-
-// P6 主场景：20 Hz × 10 s，车在动（位置每 50 ms 变化），GNSS 10 Hz 刷新。
-// 位置写 ≈100 次（10 Hz），弯道目标 ≤21 次（首次 + ≤2 Hz）。
-static void test_map_target_and_position_cadence() {
-  MapTargetWriter w;
-  uint64_t now = 1'000'000'000ULL;
-  int position_writes = 0;
-  int target_writes = 0;
-  for (int tick = 0; tick < 200; tick++, now += 50'000'000ULL) {
-    GnssSample g = map_gnss(now, 37.422 + tick * 1e-7, -122.084);  // 车在动
-    g.message_time_ns = now;  // 只在 GNSS 更新拍（10 Hz）调用
-    if (tick % 2 == 0 && last_gps_position_json(g, now)) position_writes++;
-
-    MapTargetInput in = map_input(now);
-    in.gnss = g;
-    in.gnss.message_time_ns = now - 100'000'000;
-    in.last_reply_ns = now - 50'000'000;
-    if (w.update(in)) target_writes++;
-  }
-  CHECK(position_writes == 100);  // 10 s × 10 Hz
-  CHECK(target_writes >= 1 && target_writes <= 21);  // 首次 + ≤2 Hz（10 s）
 }
 
 // ConnEpochTracker：drop 后 writer 线程已重连而 reply 线程还没看到断连的窗口
@@ -3097,7 +2714,7 @@ static void test_conn_epoch_tracker() {
 }
 
 // N10：点坐标每拍都变、点数不变，20 Hz × 10 s → 目标写 ≤21 次。
-// 位置节拍由 main.cc 的 gpsLocationExternal 回调保证（宿主跑不了 calib_thread），需上车验证。
+// 距离内容更新仍不得超过 2 Hz。
 static void test_map_target_moving_points_cadence() {
   MapTargetWriter w;
   uint64_t now = 1'000'000'000ULL;
@@ -3124,15 +2741,12 @@ static void test_map_target_reply_rate_cpu() {
   printf("MapTargetWriter: 200 calls in %.1f us (%.2f us/call)\n", us, us / 200.0);
 }
 
-// S1a：退出清理必须写 MapTargetVelocities=[] 并删 LastGPSPosition
+// 退出清理必须写 MapTargetVelocities=[]
 static void test_clear_map_targets_ops() {
   std::vector<std::pair<std::string, std::string>> puts;
-  std::vector<std::string> removes;
   clear_map_targets(MapParamsOps{
-      [&](const char* key, const std::string& value) { puts.emplace_back(key, value); },
-      [&](const char* key) { removes.emplace_back(key); }});
+      [&](const char* key, const std::string& value) { puts.emplace_back(key, value); }});
   CHECK(puts.size() == 1 && puts[0].first == "MapTargetVelocities" && puts[0].second == "[]");
-  CHECK(removes.size() == 1 && removes[0] == "LastGPSPosition");
 }
 
 // =====================================================================
@@ -3201,11 +2815,26 @@ static void test_msg_framer_rejects_v2_reply_header() {
   MsgFramer f;
   f.append(hdr, sizeof hdr);
   MsgFramer::Message m;
-  CHECK(f.next(&m) == MsgFramer::Result::kBadHeader);
+  CHECK(f.next(&m) == MsgFramer::Result::kBadVersion);
   CHECK(f.peer_version() == 2);
 }
 
+static void test_msg_framer_rejects_old_version_before_payload() {
+  for (const uint8_t type : {bgm1::kTypeHello, bgm1::kTypeReply, bgm1::kTypeErr}) {
+    uint8_t header[16] = {'B', 'G', 'M', '1', 3, type};
+    MsgFramer framer;
+    framer.append(header, sizeof header);
+    MsgFramer::Message message;
+    CHECK(framer.next(&message) == MsgFramer::Result::kBadVersion);
+  }
+}
+
 int main() {
+  test_map_target_invalid_refresh_cadence();
+  test_msg_framer_rejects_old_version_before_payload();
+  test_v4_frame_contract();
+  test_map_target_phone_deadline_envelope();
+  test_map_target_distance_refresh();
   test_nav_state_snapshot_present_flags();
   test_nav_state_snapshot_values();
   test_nav_state_snapshot_curve_flags();
@@ -3221,14 +2850,10 @@ int main() {
   test_map_target_one_to_one_matching();
   test_nav_link_cache_reset_clears_old_curve();
   test_conn_epoch_tracker();
-  test_gps_accuracy_gate_hysteresis();
-  test_map_target_accuracy_flapping_keeps_targets();
   test_map_target_rerouting_and_route_ok();
   test_nav_link_session_clear_paths();
   test_nav_link_session_live_reply_keeps_targets();
   test_nav_link_session_pending_is_last_decision();
-  test_last_gps_position_gate();
-  test_map_target_and_position_cadence();
   test_map_target_moving_points_cadence();
   test_map_target_reply_rate_cpu();
   test_clear_map_targets_ops();
@@ -3265,15 +2890,12 @@ int main() {
 
   test_frame_codec_roundtrip();
   test_reply_err_roundtrip();
-  test_v3_normalisation();
+  test_v4_normalisation();
   test_cross_end_golden();
 
   test_warp_golden();
   test_meta_provider();
   test_meta_provider_model_inputs();
-  test_meta_gnss_fix();
-  test_meta_gnss_no_fix_and_age();
-  test_meta_gnss_saturation();
   test_meta_vehicle_device_motion();
   test_device_motion_transform();
   test_yaw_sign_convention();

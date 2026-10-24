@@ -6,7 +6,7 @@
 //
 // 用法：append(read_some 的字节) → 循环 next()；kMessage 时 data()/size() 即整条消息，
 // 处理完 consume(size)。kBadHeader = 首部 type/len 不在协议内（含旧 v2 的 8280 B REPLY），
-// 调用方按现有口径断连重连。version 不在分帧处校验（留给 parse_*，保证 kBadVersion 语义）。
+// magic/版本先于 type/len 校验；kBadVersion 由前 16 B 返回，调用方保持错版状态并断连。
 
 #include <algorithm>
 #include <cstddef>
@@ -17,7 +17,7 @@
 
 class MsgFramer {
  public:
-  enum class Result { kNeedMore, kMessage, kBadHeader };
+  enum class Result { kNeedMore, kMessage, kBadHeader, kBadVersion };
   struct Message {
     uint8_t type = 0;
     size_t size = 0;  // 整条线上字节数
@@ -27,6 +27,8 @@ class MsgFramer {
 
   Result next(Message* out) const {
     if (buf_.size() < bgm1::kMsgHdrSize) return Result::kNeedMore;
+    if (bgm1::read_u32_le(buf_.data()) != bgm1::kMagic) return Result::kBadHeader;
+    if (buf_[4] != bgm1::kVersion) return Result::kBadVersion;
     const uint8_t type = buf_[5];
     const uint32_t len = bgm1::read_u32_le(buf_.data() + 12);
     size_t need = 0;

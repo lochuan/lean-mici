@@ -11,9 +11,8 @@
 //   desire[8] = modeld DesireHelper 电平（set_model_inputs 进）→ fill 转 pulse 边沿
 //     （MODEL_ABI §4.2：通道 0 恒 0、持续同 desire 只 pulse 一次）。
 //   action_t[2] = modeld chestnut 公式直通（13 号 / research/02 §4，权威在 modeld）。
-//   GNSS 16 B / VEHICLE 8 B = 协议 v3 §1.2.1/§1.2.2：set_gnss/set_vehicle 存原始单位，
-//     fill 按 t_eof 算 age_ms / has_fix / yaw_valid 并编码单位；线上规范形（无 fix 清位置类
-//     字段、valid=0 写 0、bearing_accuracy_half_deg 无 fix 255）归 frame_codec 的 pack。
+//   VEHICLE 8 B = 协议 v4：set_vehicle 存 deviceMotion 原始车体系单位，
+//     fill 按 t_eof 检查 100 ms 源新鲜度并编码速度/yaw；不缓存任何 GNSS。
 //
 // 纯逻辑（仅 std），宿主单测直接编译；fill 路径不堆分配。
 
@@ -35,19 +34,6 @@ void get_warp_matrix(const float rpy[3], const float intrinsics[9], bool bigmode
 // 与 16 号两路取流分辨率 1344×760 同源）
 extern const float kNarrowRoadIntrinsics[9];
 extern const float kWideRoadIntrinsics[9];
-
-// GNSS 原始样本（gpsLocationExternal，10 Hz）：单位同 cereal，未编码。
-// message_time_ns = 消息 logMonoTime；fill 用上次 fix 的 message_time_ns 与 t_eof 算 age_ms（饱和 4095）。
-struct GnssSample {
-  double latitude_deg = 0;            // WGS-84
-  double longitude_deg = 0;           // WGS-84
-  double bearing_deg = 0;             // 0.01° 线上编码；正北顺时针，fill 回绕到 [0, 360)
-  double horizontal_accuracy_m = 0;   // 水平精度 1σ（m）
-  double bearing_accuracy_deg = 0;    // 航向精度 1σ（°）
-  bool has_fix = false;
-  bool event_valid = true;      // cereal Event.valid（ubloxd 恒 true，仍按 B5 检查）
-  uint64_t message_time_ns = 0;
-};
 
 // extrinsicsCalibration.calStatus；只有 invalid 时禁用 yaw/speed，
 // uncalibrated / recalibrating 仍用当前 rpy（m-b）。
@@ -99,9 +85,7 @@ class MetaProvider {
   // extrinsicsCalibration.rpyCalib 更新时调用（任意线程）。
   void set_rpy(const float rpy[3]);
 
-  // gpsLocationExternal / deviceMotion 更新时调用（任意线程，只存最新一条）。
-  // set_gnss 只在 hasFix 时更新「上次 fix」；set_vehicle 存 deviceMotion 换算后的车体系样本。
-  void set_gnss(const GnssSample& s);
+  // deviceMotion 更新时调用（任意线程，只存最新一条车体系样本）。
   void set_vehicle(const VehicleSample& s);
 
   // modeld 上行元数据（04 号 C-2，modelDataV2SP）更新时调用（任意线程）：
@@ -112,17 +96,13 @@ class MetaProvider {
   // MODEL_ABI §4.3 清 previousDesire，持续中的 desire 在新序列首帧重出 pulse。
   void reset_desire_latch();
 
-  // 最近一条 gpsLocationExternal（has_fix 已按 event_valid / 坐标清洗）。false = 从未收到。
-  // 票 C 的 MapTargetWriter 取这份快照写 LastGPSPosition，不新增订阅。
-  bool latest_gnss(GnssSample* out) const;
-
   // 生成一帧的头元数据。t_eof = road 帧 timestamp_eof（ns）。
-  // 填 t_eof/desire/traffic_convention/action_t/warp_*/gnss/vehicle；flags/frame_idx/road_len/wide_len
-  // 归调用方。无样本时 gnss/vehicle 保持缺省（GNSS 全 0、yaw 无效、航向精度 255）。
+  // 填 t_eof/desire/traffic_convention/action_t/warp_*/vehicle；flags/frame_idx/road_len/wide_len
+  // 归调用方。无样本时 vehicle 保持缺省（速度零且无效、yaw 无效）。
   void fill(uint64_t t_eof, bgm1::FrameHeader* out) const;
 
   // 当前 warp 矩阵（wide=false → road/MED，true → wide/SBIG），与 fill 写进帧头的同一份。
-  // capture 线程据此在 C4 上 warp（协议 v3）。
+  // capture 线程据此在 C4 上 warp（协议 v4）。
   void warp(bool wide, float out[9]) const;
 
  private:
@@ -133,10 +113,6 @@ class MetaProvider {
   float action_t_[2] = {0.f, 0.f};
   uint8_t desire_class_ = 0;
   mutable uint8_t prev_desire_class_ = 0;  // pulse 边沿 latch：每次 fill() 采样
-  GnssSample gnss_;                        // 最近一条 gpsLocationExternal（has_fix 已按 event_valid/坐标清洗）
-  bool gnss_seen_ = false;
-  GnssSample last_fix_;                    // 上次有效 fix（位置/精度/时刻；B3）
-  bool have_fix_ = false;
   VehicleSample vehicle_;                  // 最近一条 deviceMotion（车体系）
   bool vehicle_seen_ = false;
 };
