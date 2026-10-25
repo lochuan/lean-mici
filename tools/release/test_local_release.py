@@ -272,6 +272,8 @@ args = sys.argv[1:]
 with open(os.environ['TRACE'], 'a') as stream:
   stream.write(json.dumps([name, *args]) + '\\n')
 if name == 'ssh':
+  if os.environ.get('FAIL_INSTALL') and 'pydeps.py install' in args[-1]:
+    sys.exit(1)
   if os.environ.get('FAIL_PREPARE') and 'local-release.py prepare' in args[-1]:
     sys.exit(1)
   if os.environ.get('FAIL_POSTBOOT') and 'test "$(git rev-parse HEAD)"' in args[-1]:
@@ -293,7 +295,7 @@ elif name == 'git':
 
 
 class PublishScriptTests(unittest.TestCase):
-  def run_publish(self, local=False, script_text=None, extra_env=None, pydeps_enabled=False):
+  def run_publish(self, local=False, script_text=None, extra_env=None):
     with tempfile.TemporaryDirectory(prefix='publish-release-test-', dir='/tmp') as temporary:
       root = Path(temporary)
       scripts = root / 'tools/release'
@@ -303,10 +305,6 @@ class PublishScriptTests(unittest.TestCase):
       (scripts / 'local_release.py').touch()
       payload = root / 'artifact'
       payload.mkdir()
-      if pydeps_enabled:
-        runtime = root / 'openpilot/common/pydeps.py'
-        runtime.parent.mkdir(parents=True)
-        runtime.touch()
       # Only external source transport is replaced here; its real Git behavior is tested above.
       (scripts / 'release_lib.py').write_text('''import os, sys
 import json
@@ -339,11 +337,13 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
         'FAIL_TRANSFER',
         'FAIL_PREPARE',
         'FAIL_POSTBOOT',
+        'FAIL_INSTALL',
         'SOURCE_OUTPUT',
         'WORKER_PHASE',
       )
       environment = {key: value for key, value in os.environ.items() if key not in fixture_environment_keys}
       environment['PYDEPS_ARTIFACT'] = str(payload)
+      environment['EXPECTED_SOURCE_SHA'] = 'a' * 40
       environment.update(PATH=str(binaries) + ':' + os.environ['PATH'], DEVICE='comma@test', TRACE=str(trace))
       environment.update(extra_env or {})
       args = ['bash', str(scripts / 'publish_release_from_device.sh')]
@@ -354,17 +354,34 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
       calls = [json.loads(line.replace(str(root), '$ROOT')) for line in trace.read_text().splitlines()] if trace.exists() else []
       return result, calls
 
-  def test_pydeps_public_release_rejected_before_any_external_write(self):
-    result, calls = self.run_publish(pydeps_enabled=True)
+  def test_public_release_requires_fixed_source_before_external_commands(self):
+    result, calls = self.run_publish(extra_env={'EXPECTED_SOURCE_SHA': ''})
     self.assertNotEqual(result.returncode, 0)
-    self.assertIn('公开 OTA', result.stderr)
+    self.assertIn('EXPECTED_SOURCE_SHA', result.stderr)
     self.assertEqual(calls, [])
 
-  def test_without_flag_keeps_exact_mainline_command_sequence(self):
+  def test_public_release_transports_and_installs_before_build_then_pushes_both_remotes(self):
     result, calls = self.run_publish()
     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-    expected = json.loads((HERE / 'testdata/mainline_publish_commands.json').read_text())
-    self.assertEqual(calls, expected)
+    sender = next(call for call in calls if call[:2] == ['source-sender', 'send-local-source'])
+    self.assertEqual(sender[-2:], ['--source-ref', 'refs/heads/lean-master'])
+    dependency_transfer = next(i for i, call in enumerate(calls) if call[:2] == ['source-sender', 'send-local-pydeps'])
+    install = next(i for i, call in enumerate(calls) if 'pydeps.py install' in call[-1])
+    build = next(i for i, call in enumerate(calls) if 'bash /tmp/device_release.sh' in call[-1])
+    fork = next(i for i, call in enumerate(calls) if call[:4] == ['git', 'push', '-f', 'fork'])
+    gitee = next(i for i, call in enumerate(calls) if call[:4] == ['git', 'push', '-f', 'gitee'])
+    self.assertLess(dependency_transfer, install)
+    self.assertLess(install, build)
+    self.assertLess(build, fork)
+    self.assertLess(fork, gitee)
+    self.assertIn('LOCAL_SOURCE_SHA=' + 'a' * 40, calls[build][-1])
+    self.assertIn('RELEASE_BRANCH=lean-release', calls[build][-1])
+
+  def test_public_install_failure_never_builds_pushes_or_consumes(self):
+    result, calls = self.run_publish(extra_env={'FAIL_INSTALL': '1'})
+    self.assertNotEqual(result.returncode, 0)
+    self.assertFalse(any('bash /tmp/device_release.sh' in call[-1] or 'systemctl' in call[-1] or 'reboot' in call[-1] for call in calls))
+    self.assertFalse(any(call[:2] == ['git', 'push'] for call in calls))
 
   def test_local_explicit_ref_reaches_sender_prepare_and_build(self):
     result, calls = self.run_publish(local=True, extra_env={'LOCAL_SOURCE_REF': 'refs/heads/lean-master'})
@@ -439,11 +456,8 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
         self.assertIn('setsid nohup /usr/local/venv/bin/python /data/build/.git/local-release.py rollback', result.stderr)
         self.assertFalse(any(call[0] == 'ssh' and call[-1] == 'sudo reboot' for call in calls))
 
-  def test_only_local_mode_runs_local_release_tests_and_prepares_before_build(self):
+  def test_local_mode_prepares_before_build(self):
     _, local = self.run_publish(local=True)
-    _, default = self.run_publish()
-    self.assertEqual(sum('tools/release/test_local_release_device.py' in call for call in local), 1)
-    self.assertFalse(any('tools/release/test_local_release_device.py' in call for call in default))
     prepare = next(i for i, call in enumerate(local) if 'local-release.py prepare' in call[-1])
     build = next(i for i, call in enumerate(local) if 'bash /tmp/device_release.sh' in call[-1])
     self.assertLess(prepare, build)

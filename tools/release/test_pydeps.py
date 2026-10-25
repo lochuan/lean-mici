@@ -19,13 +19,18 @@ PACKAGES = ['aiofiles', 'html5tagger', 'httptools', 'multidict', 'sanic', 'sanic
             'setuptools', 'tracerite', 'typing-extensions', 'ujson', 'uvloop', 'websockets']
 
 
-def fixture(root):
+def fixture(root, *, complete=False):
   archive = root / 'bundle.tar.gz'
   with tarfile.open(archive, 'w:gz') as stream:
-    data = b'# dependency fixture\n'
-    info = tarfile.TarInfo('site-packages/sanic/__init__.py')
-    info.size = len(data)
-    stream.addfile(info, io.BytesIO(data))
+    for name in PACKAGES if complete else ['sanic']:
+      module = name.replace('-', '_')
+      files = {f'{module}/__init__.py': b'# dependency fixture\n'}
+      if complete:
+        files[f'{module}-1.0.dist-info/METADATA'] = f'Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n'.encode()
+      for path, data in files.items():
+        info = tarfile.TarInfo('site-packages/' + path)
+        info.size = len(data)
+        stream.addfile(info, io.BytesIO(data))
   deps = {'archive_sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
           'compressed_bytes': archive.stat().st_size,
           'packages': [{'name': name, 'version': '1.0', 'wheel': name.replace('-', '_') + '-1.0-py3-none-any.whl',
@@ -57,16 +62,20 @@ class DependencyTests(unittest.TestCase):
     self.assertEqual(site.parent.name, self.manifest['pydeps']['id'])
     self.assertEqual((site.parent / 'COMPLETE').read_text(), site.parent.name)
 
-  def launcher_environment(self):
+  def launcher_environment(self, *, bundled=False):
     application = self.root / 'app'
     runtime = application / 'openpilot/common/pydeps.py'
     runtime.parent.mkdir(parents=True, exist_ok=True)
     runtime.write_bytes((Path(__file__).resolve().parents[2] / 'openpilot/common/pydeps.py').read_bytes())
     (application / 'RELEASE_MANIFEST.json').write_text(json.dumps(self.manifest))
+    if bundled:
+      archive_name = self.manifest['pydeps']['id'] + '.tar.gz'
+      (application / archive_name).write_bytes((self.payload / archive_name).read_bytes())
     launcher = (Path(__file__).resolve().parents[2] / 'launch_chffrplus.sh').read_text()
     function = launcher[launcher.index('function configure_pydeps'):launcher.index('function agnos_init')]
     function = function.replace('/usr/local/venv/bin/python', shlex.quote(sys.executable))
-    function = function.replace('"$DIR"); then', '"$DIR" --root ' + shlex.quote(str(self.deps)) + '); then')
+    for action in ('path', 'install'):
+      function = function.replace(action + ' "$DIR"', action + ' "$DIR" --root ' + shlex.quote(str(self.deps)))
     result = subprocess.run(['bash', '-c', function + '\nconfigure_pydeps; env'],
                             env={'PATH': os.environ['PATH'], 'DIR': str(application), 'BLOCK': 'athena',
                                  'PYTHONPATH': '/foreign', 'PYTHONHOME': '/foreign'}, text=True, capture_output=True, check=True)
@@ -83,6 +92,15 @@ class DependencyTests(unittest.TestCase):
     self.assertEqual(environment['BLOCK'], 'athena')
     self.assertEqual(environment['PYTHONPATH'], str(self.root / 'app') + ':' + str(dependency.resolve() / 'site-packages'))
     self.assertNotIn('PYTHONHOME', environment)
+
+  def test_launcher_installs_bundled_dependencies_on_clean_device_before_import(self):
+    self.manifest = fixture(self.payload, complete=True)
+    environment = self.launcher_environment(bundled=True)
+    self.assertEqual(environment['BLOCK'], 'athena')
+    site = self.deps / 'sets' / self.manifest['pydeps']['id'] / 'site-packages'
+    result = subprocess.check_output([sys.executable, '-c', 'import sanic; print(sanic.__file__)'], env=environment, text=True)
+    self.assertEqual(Path(result.strip()), site.resolve() / 'sanic/__init__.py')
+    self.assertEqual((site.parent / 'COMPLETE').read_text(), self.manifest['pydeps']['id'])
 
   def test_i5_failed_probe_and_interrupted_rename_clean_staging(self):
     def missing_package(*args, **kwargs):

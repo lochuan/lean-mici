@@ -63,6 +63,7 @@ def check_stage(stage: Path, source_sha: str | None = None) -> list[str]:
   problems = []
   try:
     manifest = pydeps.load_manifest(stage, source_sha=source_sha)
+    pydeps.verify_archive(stage, manifest)
     lock = stage / 'uv.lock'
     if pydeps.file_hash(lock) != manifest['uv_lock_sha256']:
       problems.append('release manifest lock hash mismatch')
@@ -147,11 +148,7 @@ def send_local_pydeps(source_repo: Path, device: str, source_sha: str, payload: 
   manifest = pydeps.load_manifest(payload, source_sha=source_sha)
   lock = subprocess.check_output(['git', '-C', str(source_repo), 'show', f'{source_sha}:uv.lock'])
   pydeps.require(pydeps.sha256(lock) == manifest['uv_lock_sha256'], 'dependency manifest source lock mismatch')
-  archive = payload / (manifest['pydeps']['id'] + '.tar.gz')
-  pydeps.require(
-    pydeps.file_hash(archive) == manifest['pydeps']['archive_sha256'] and archive.stat().st_size == manifest['pydeps']['compressed_bytes'],
-    'offline archive hash/size mismatch',
-  )
+  archive = pydeps.verify_archive(payload, manifest)
   destination = f'/data/build/.git/pydeps/{source_sha}'
   script = """
 set -eu

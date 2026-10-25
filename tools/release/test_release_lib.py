@@ -117,6 +117,17 @@ class TestCheckStage(unittest.TestCase):
       release_lib.stamp_tinygrad_pin(stage, source)
       self.assertTrue(any('manifest' in problem.lower() for problem in release_lib.check_stage(stage)))
 
+  def test_stage_requires_intact_bundled_dependency_archive(self):
+    for fault in ('missing', 'corrupt'):
+      with self.subTest(fault=fault), tempfile.TemporaryDirectory(dir='/tmp') as td:
+        stage = self._stamped_stage(td)
+        archive = next(stage.glob('*.tar.gz'))
+        if fault == 'missing':
+          archive.unlink()
+        else:
+          archive.write_bytes(b'corrupt')
+        self.assertTrue(release_lib.check_stage(stage), 'incomplete dependency transport must block publishing')
+
   def test_missing_pin_fails(self):
     with tempfile.TemporaryDirectory() as td:
       problems = release_lib.check_stage(Path(td))
@@ -142,7 +153,7 @@ class TestCheckStage(unittest.TestCase):
 
 
 class LocalStageAssemblyTests(unittest.TestCase):
-  def test_i6_stage_needs_only_bound_manifest_and_does_not_add_package_aliases(self):
+  def test_stage_contains_bound_manifest_and_archive_without_package_aliases(self):
     from tools.release.test_pydeps import fixture
     with tempfile.TemporaryDirectory(dir='/tmp') as temporary:
       root = Path(temporary)
@@ -166,6 +177,8 @@ class LocalStageAssemblyTests(unittest.TestCase):
       stage = root / 'stage'
       result = subprocess.run(['bash', '-c', script, 'test', str(source), str(stage), revision], capture_output=True, text=True)
       self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+      archive_name = manifest['pydeps']['id'] + '.tar.gz'
+      self.assertEqual((stage / archive_name).read_bytes(), (payload / archive_name).read_bytes())
       self.assertEqual(release_lib.check_stage(stage, revision), [])
       self.assertTrue(all(not (stage / name).exists() and not (stage / name).is_symlink() for name in ('msgq', 'opendbc', 'rednose', 'tinygrad')))
 

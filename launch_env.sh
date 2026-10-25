@@ -19,11 +19,11 @@ export QCOM_PRIORITY=12
 export DISABLE_DRIVER=1
 
 if [ -z "$AGNOS_VERSION" ]; then
-  export AGNOS_VERSION="19.6.29"
+  export AGNOS_VERSION="20.1"
 fi
 
 if [ -z "$AGNOS_ACCEPTED_VERSIONS" ]; then
-  export AGNOS_ACCEPTED_VERSIONS="$AGNOS_VERSION 20.1"
+  export AGNOS_ACCEPTED_VERSIONS="$AGNOS_VERSION 19.6.29 20.1"
 fi
 
 export STAGING_ROOT="/data/safe_staging"

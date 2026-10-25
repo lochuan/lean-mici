@@ -1,8 +1,9 @@
-# 本地源车机发版
+# 固定本地源车机发版
 
-入口沿用 `publish_release_from_device.sh` 和 `device_release.sh`。当前只支持
-`--local-source`，公开 lean-release 发布暂停；本地发布传输已批准的源码提交、固定
-子模块及离线 Sanic 产物，不推公共远端。
+入口沿用 `publish_release_from_device.sh` 和 `device_release.sh`。两种模式均传输明确的
+本地分支、已批准源码 SHA、固定子模块及离线 Sanic 产物。默认构建 `lean-release`，
+依次推 fork、镜像 Gitee，再由设备消费；`--local-source` 只消费 `nav-local-release`，
+不推公共远端。源码不从远端补取。
 
 ## 离线 Sanic 产物
 
@@ -29,23 +30,26 @@ typing-extensions、ujson、uvloop、websockets。校验 wheel SHA-256、METADAT
 保存事务和停 comma 之前离线安装：持锁、安全解包到同文件系统暂存目录，使用目标
 解释器核对全部 12 包的版本和导入来源，写 COMPLETE、fsync 后原子 rename 到
 `/data/pydeps/sets/<id>/site-packages`。失败清理本次暂存，现有集合不覆盖；无 `current`
-链接。完成文件 0444、目录 0555，发布后不应手动修改。stage 只附带 manifest 并核对
-源码 SHA/uv.lock 哈希，保留已有 tinygrad pin 和单文件大小检查。
+链接。完成文件 0444、目录 0555，发布后不应手动修改。stage 携带 manifest 和
+`<id>.tar.gz`，核对源码 SHA、uv.lock 哈希、依赖 ID、归档哈希/大小，保留已有
+tinygrad pin 和单文件大小检查。公共模式同样在构建前安装并探针验证构建设备上的集合。
 
 `launch_chffrplus.sh` 是唯一运行时 PYTHONPATH 入口：清除外来 PYTHONHOME/PYTHONPATH，
-关闭 user site，按 manifest ID 和 COMPLETE 选择路径，应用路径在前。启动不再重复
-全树哈希或导入探针。未安装/未完成时保留基础路径，通过既有 BLOCK 仅屏蔽 lanlinkd，
+关闭 user site，按 manifest ID 和 COMPLETE 选择路径，应用路径在前。已安装的完整集合
+直接选路径；干净设备首次启动从随包归档调用同一安装器，完成校验和导入探针后选路径。
+OTA 在设置 finalized 就绪标志前调用目标版本安装器，坏包不会获准切换。
+安装失败时保留基础路径，通过既有 BLOCK 仅屏蔽 lanlinkd，
 不改永久 LanLinkEnabled。安装时导入失败会在停服前拒绝发布。启动信任已安装集合，
 不保证发现发布后的人为改动或存储损坏；解释器/应用 native 不兼容仍可能影响 manager/UI。
 
-`AGNOS_VERSION` 仍为 19.6.29；boot 与后台更新均读取 `AGNOS_ACCEPTED_VERSIONS`，默认
-接受 19.6.29 和 20.1，避免把 20.1 误判为更新目标；其他版本沿用原更新行为。
+`AGNOS_VERSION` 默认为 20.1；boot 与后台更新均读取 `AGNOS_ACCEPTED_VERSIONS`，默认
+仍接受 19.6.29 和 20.1；其他版本沿用原更新行为。
 这只表达版本兼容，不代表已授权刷机或已通过真机验收。
 
 回滚 checkout 后由旧应用自己的 manifest 选依赖，无跨 OS 回滚矩阵或自动 GC。
 旧应用没有 pydeps 入口时仍依赖旧系统环境，不能把本流程当作跨系统恢复保证。
-先单独获准在 19.6.29 上验证 12 包来源及断网重启后的 manager/UI/LANLink；刷写 20.1
-属于后续独立任务。当前实现停在 ready-for-device-validation。
+宿主和容器检查不能代替真机 SCons、断网重启后的 manager/UI/LANLink 验收；
+AGNOS 刷写属于独立任务。
 
 ## 部署
 
@@ -58,14 +62,17 @@ LOCAL_SOURCE_REF=refs/heads/lean-master \
 EXPECTED_SOURCE_SHA="${APPROVED_SOURCE_SHA:?先指定批准的源码提交}" \
 PYDEPS_ARTIFACT=/tmp/sanic-artifact \
 DEVICE=comma@10.0.0.27 \
-bash tools/release/publish_release_from_device.sh --local-source --skip-smoke
+bash tools/release/publish_release_from_device.sh --skip-smoke
 ```
 
-`LOCAL_SOURCE_REF` 显式选择完整本地分支 ref，省略时仍为 `refs/heads/nav-test`。
+此命令会推 fork/Gitee 并消费。只做本地发版时追加 `--local-source`。
+`LOCAL_SOURCE_REF` 显式选择完整本地分支 ref，公开模式省略时为 `refs/heads/$SRC_BRANCH`
+（SRC_BRANCH 默认 lean-master）；本地模式省略时仍为 `refs/heads/nav-test`。
 仅接受 `refs/heads/` 下由英文字母、数字、下划线、点、斜杠、连字符组成且通过
 Git ref 校验的名称；不接受 tag、SHA 或修订表达式。`EXPECTED_SOURCE_SHA` 必须是
 批准的完整 40 位 SHA，并与该分支解析出的 commit 相同。HEAD、同名 tag 和未提交的
-工作树修改不作为业务源码。发布分支仍固定为 `nav-local-release`。
+工作树修改不作为业务源码。公开发布分支默认 `lean-release`；本地发布固定为
+`nav-local-release`。下面的 prepare、事务状态和回滚说明专指本地模式。
 
 prepare 要求当前 live HEAD 位于本地分支且跟踪树干净；记录当次旧 HEAD、完整分支
 ref 和 DisableUpdates 原值，在 `/data/openpilot` 创建

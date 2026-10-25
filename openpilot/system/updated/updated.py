@@ -5,6 +5,7 @@ import datetime
 import subprocess
 import shutil
 import signal
+import sys
 import fcntl
 import threading
 import urllib.request
@@ -185,6 +186,10 @@ def finalize_update() -> None:
 
   run(["git", "reset", "--hard"], FINALIZED)
   run(["git", "submodule", "foreach", "--recursive", "git", "reset", "--hard"], FINALIZED)
+
+  dependency_helper = Path(FINALIZED) / "openpilot/common/pydeps.py"
+  if dependency_helper.is_file():
+    run([sys.executable, "-I", "-B", str(dependency_helper), "install", FINALIZED], FINALIZED)
 
   set_consistent_flag(True)
   cloudlog.info("done finalizing overlay")

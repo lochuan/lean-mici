@@ -57,6 +57,14 @@ def dependency_path(application, root=ROOT):
   return dependency.resolve() / 'site-packages'
 
 
+def verify_archive(application, manifest):
+  deps = manifest['pydeps']
+  require(deps['id'] == dependency_id(deps), 'dependency identity mismatch')
+  archive = Path(application) / (deps['id'] + '.tar.gz')
+  require(archive.stat().st_size == deps['compressed_bytes'] and file_hash(archive) == deps['archive_sha256'], 'archive hash/size mismatch')
+  return archive
+
+
 def probe(site, packages, *, command=subprocess.run):
   script = '''
 import importlib, importlib.metadata, json, pathlib, sys
@@ -85,9 +93,7 @@ def _fsync(path):
 def install(application, root=ROOT, *, source_sha=None, command=subprocess.run):
   manifest = load_manifest(application, source_sha=source_sha)
   deps = manifest['pydeps']
-  archive = Path(application) / (deps['id'] + '.tar.gz')
-  require(deps['id'] == dependency_id(deps), 'dependency identity mismatch')
-  require(archive.stat().st_size == deps['compressed_bytes'] and file_hash(archive) == deps['archive_sha256'], 'archive hash/size mismatch')
+  archive = verify_archive(application, manifest)
   root = Path(root)
   root.mkdir(parents=True, exist_ok=True)
   with os.fdopen(os.open(root / '.install.lock', os.O_CREAT | os.O_RDWR, 0o600), 'w') as lock:

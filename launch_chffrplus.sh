@@ -9,7 +9,8 @@ function configure_pydeps {
   export PYTHONNOUSERSITE=1
   export PYTHONPATH="$DIR"
   local dependency_path
-  if dependency_path=$(/usr/local/venv/bin/python -I -B "$DIR/openpilot/common/pydeps.py" path "$DIR"); then
+  if dependency_path=$(/usr/local/venv/bin/python -I -B "$DIR/openpilot/common/pydeps.py" path "$DIR" 2>/dev/null) ||
+     dependency_path=$(/usr/local/venv/bin/python -I -B "$DIR/openpilot/common/pydeps.py" install "$DIR"); then
     export PYTHONPATH="$DIR:$dependency_path"
   else
     echo "pydeps: unavailable or incompatible; LANLink blocked for this run" >&2
