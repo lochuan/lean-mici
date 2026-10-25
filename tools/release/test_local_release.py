@@ -63,15 +63,57 @@ class LocalSourceTests(unittest.TestCase):
       return REAL_RUN(['bash', '-c', remote], **kwargs)
     return REAL_RUN(command, **kwargs)
 
-  def send(self):
+  def send(self, source_ref='refs/heads/nav-test'):
     self.assertTrue(callable(getattr(release_lib, 'send_local_source', None)), 'missing local source transfer')
     with patch.dict(os.environ, self.environment), patch.object(release_lib.subprocess, 'run', side_effect=self.receive_over_fake_ssh):
-      return release_lib.send_local_source(self.source, 'comma@test', self.revision)
+      return release_lib.send_local_source(self.source, 'comma@test', self.revision, source_ref)
+
+  def test_explicit_local_branch_selects_approved_commit_not_nav_test_or_tag(self):
+    git(self.source, 'branch', 'lean-master', self.revision)
+    git(self.source, 'update-ref', 'refs/heads/nav-test', 'HEAD~1')
+    git(self.source, 'tag', 'lean-master', self.revision + '^')
+    self.assertEqual(self.send('refs/heads/lean-master'), self.revision)
+    staged = self.build / '.git/local-source' / self.revision
+    self.assertEqual(git(staged, 'rev-parse', 'refs/heads/source'), self.revision)
+
+  def test_source_ref_rejects_tags_expressions_missing_branches_and_wrong_sha_before_write(self):
+    git(self.source, 'tag', 'approved', self.revision)
+    for source_ref in ('refs/tags/approved', self.revision, 'refs/heads/nav-test~0', 'refs/heads/missing', 'refs/heads/../nav-test'):
+      with self.subTest(source_ref=source_ref), self.assertRaises((ValueError, subprocess.CalledProcessError)):
+        self.send(source_ref)
+      self.assertFalse(self.build.exists())
+    git(self.source, 'branch', 'wrong', self.revision + '^')
+    with self.assertRaisesRegex(ValueError, 'EXPECTED_SOURCE_SHA'):
+      self.send('refs/heads/wrong')
+    self.assertFalse(self.build.exists())
 
   def checkout_source(self, revision):
     script, _ = (HERE / 'device_release.sh').read_text().split('# 构建期间停 comma：', 1)
     script += '\ntrap - EXIT ERR\nBUILD="$1"\nLOCAL_SOURCE_SHA="$2"\nSRC_BRANCH=nav-test\ncheckout_source\n'
     return REAL_RUN(['bash', '-c', script, 'device-test', str(self.build), revision], env=self.environment, capture_output=True, text=True)
+
+  def test_offline_bundle_transport_binds_source_lock_and_archive_before_device_write(self):
+    from tools.release.test_pydeps import fixture
+
+    (self.source / 'uv.lock').write_text('locked fixture')
+    git(self.source, 'add', 'uv.lock')
+    git(self.source, 'commit', '-qm', 'lock')
+    self.revision = git(self.source, 'rev-parse', 'HEAD')
+    payload = self.root / 'payload'
+    payload.mkdir()
+    manifest = fixture(payload)
+    manifest.update(source_commit=self.revision, uv_lock_sha256=release_lib.pydeps.sha256(b'locked fixture'))
+    (payload / 'RELEASE_MANIFEST.json').write_text(json.dumps(manifest))
+    with patch.object(release_lib.subprocess, 'run', side_effect=self.receive_over_fake_ssh):
+      release_lib.send_local_pydeps(self.source, 'comma@test', self.revision, payload)
+    received = self.build / '.git/pydeps' / self.revision
+    self.assertEqual(json.loads((received / 'RELEASE_MANIFEST.json').read_text()), manifest)
+    manifest['uv_lock_sha256'] = 'f' * 64
+    (payload / 'RELEASE_MANIFEST.json').write_text(json.dumps(manifest))
+    with patch.object(release_lib.subprocess, 'run', side_effect=self.receive_over_fake_ssh) as external:
+      with self.assertRaisesRegex(ValueError, 'lock'):
+        release_lib.send_local_pydeps(self.source, 'comma@test', self.revision, payload)
+      self.assertFalse(any(call.args[0][0] == 'ssh' for call in external.call_args_list))
 
   def test_uploads_exact_commits_from_uninitialized_submodule_cache(self):
     self.assertEqual(self.send(), self.revision)
@@ -251,7 +293,7 @@ elif name == 'git':
 
 
 class PublishScriptTests(unittest.TestCase):
-  def run_publish(self, local=False, script_text=None, extra_env=None):
+  def run_publish(self, local=False, script_text=None, extra_env=None, pydeps_enabled=False):
     with tempfile.TemporaryDirectory(prefix='publish-release-test-', dir='/tmp') as temporary:
       root = Path(temporary)
       scripts = root / 'tools/release'
@@ -259,8 +301,17 @@ class PublishScriptTests(unittest.TestCase):
       (scripts / 'publish_release_from_device.sh').write_text(script_text or (HERE / 'publish_release_from_device.sh').read_text())
       (scripts / 'device_release.sh').touch()
       (scripts / 'local_release.py').touch()
+      payload = root / 'artifact'
+      payload.mkdir()
+      if pydeps_enabled:
+        runtime = root / 'openpilot/common/pydeps.py'
+        runtime.parent.mkdir(parents=True)
+        runtime.touch()
       # Only external source transport is replaced here; its real Git behavior is tested above.
       (scripts / 'release_lib.py').write_text('''import os, sys
+import json
+with open(os.environ['TRACE'], 'a') as stream:
+  stream.write(json.dumps(['source-sender', *sys.argv[1:]]) + '\\n')
 print(os.environ.get('SOURCE_OUTPUT', 'a' * 40))
 if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
 ''')
@@ -277,10 +328,22 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
         (binaries / command).symlink_to(stub)
       trace = root / 'trace.jsonl'
       fixture_environment_keys = (
-        'SRC_BRANCH', 'RELEASE_BRANCH', 'ADB_SERIAL', 'EXPECTED_SOURCE_SHA', 'LOCAL_SOURCE_SHA',
-        'FAIL_FORK', 'FAIL_TRANSFER', 'FAIL_PREPARE', 'FAIL_POSTBOOT', 'SOURCE_OUTPUT', 'WORKER_PHASE',
+        'SRC_BRANCH',
+        'RELEASE_BRANCH',
+        'ADB_SERIAL',
+        'EXPECTED_SOURCE_SHA',
+        'LOCAL_SOURCE_SHA',
+        'LOCAL_SOURCE_REF',
+        'PYDEPS_ARTIFACT',
+        'FAIL_FORK',
+        'FAIL_TRANSFER',
+        'FAIL_PREPARE',
+        'FAIL_POSTBOOT',
+        'SOURCE_OUTPUT',
+        'WORKER_PHASE',
       )
       environment = {key: value for key, value in os.environ.items() if key not in fixture_environment_keys}
+      environment['PYDEPS_ARTIFACT'] = str(payload)
       environment.update(PATH=str(binaries) + ':' + os.environ['PATH'], DEVICE='comma@test', TRACE=str(trace))
       environment.update(extra_env or {})
       args = ['bash', str(scripts / 'publish_release_from_device.sh')]
@@ -291,11 +354,32 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
       calls = [json.loads(line.replace(str(root), '$ROOT')) for line in trace.read_text().splitlines()] if trace.exists() else []
       return result, calls
 
+  def test_pydeps_public_release_rejected_before_any_external_write(self):
+    result, calls = self.run_publish(pydeps_enabled=True)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn('公开 OTA', result.stderr)
+    self.assertEqual(calls, [])
+
   def test_without_flag_keeps_exact_mainline_command_sequence(self):
     result, calls = self.run_publish()
     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
     expected = json.loads((HERE / 'testdata/mainline_publish_commands.json').read_text())
     self.assertEqual(calls, expected)
+
+  def test_local_explicit_ref_reaches_sender_prepare_and_build(self):
+    result, calls = self.run_publish(local=True, extra_env={'LOCAL_SOURCE_REF': 'refs/heads/lean-master'})
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    sender = next(call for call in calls if call[0] == 'source-sender')
+    self.assertEqual(sender[-2:], ['--source-ref', 'refs/heads/lean-master'])
+    prepare = next(call[-1] for call in calls if 'local-release.py prepare' in call[-1])
+    self.assertIn('--source-ref refs/heads/lean-master', prepare)
+    launch = next(call[-1] for call in calls if 'bash /tmp/device_release.sh' in call[-1])
+    self.assertIn('SRC_BRANCH=lean-master RELEASE_BRANCH=nav-local-release', launch)
+
+  def test_local_unsafe_ref_is_rejected_before_external_commands(self):
+    result, calls = self.run_publish(local=True, extra_env={'LOCAL_SOURCE_REF': 'refs/heads/lean-master;touch /tmp/unwanted'})
+    self.assertNotEqual(result.returncode, 0)
+    self.assertEqual(calls, [])
 
   def test_fixture_isolates_real_deployment_environment_without_changing_parent(self):
     source = '3667aca3a59e9a9e61da0cfe073251d93fffd466'

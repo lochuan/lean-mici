@@ -1,10 +1,8 @@
 # system/lanlinkd/lanlinkd.py
 """LANLink daemon：局域网版 sunnylink（无云）。Sanic 装配层。
 
-为什么是 Sanic 而不是 aiohttp：aiohttp 曾由 AGNOS venv 提供，19.6 起被移除，
-于是 lanlinkd 在设备上直接 ModuleNotFoundError（CI 仍绿，因为 CI 的 venv 有）。
-Sanic 由 pyproject.toml 声明，随 AGNOS venv 一起安装（19.7.2 起），不再需要
-/data/pydeps 旁路。
+Sanic 由应用锁文件声明，发布时构建完整离线闭包；RELEASE_MANIFEST.json 绑定
+/data/pydeps/sets/<id>，由 launch_chffrplus.sh 统一验证与加载，不依赖系统自带 Sanic。
 
 为什么 single_process=True（见 main()）：Sanic 默认起多 worker 进程，而
 StatusCache 状态线程、WifiManager DBus 单例都是**进程内状态**。

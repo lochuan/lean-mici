@@ -168,7 +168,8 @@ assemble_stage() {
          tinygrad_repo/scripts tinygrad_repo/.github
   find openpilot/third_party \( -iname '*x86*' -o -iname '*darwin*' \) -exec rm -rf {} + 2>/dev/null || true
   python3 "$BUILD/tools/release/release_lib.py" stamp-tinygrad-pin "$STAGE" "$BUILD"
-  python3 "$BUILD/tools/release/release_lib.py" check-stage "$STAGE"
+  cp "$BUILD/.git/pydeps/$SRC_SHA/RELEASE_MANIFEST.json" "$STAGE/RELEASE_MANIFEST.json"
+  python3 "$BUILD/tools/release/release_lib.py" check-stage "$STAGE" --source-sha "$SRC_SHA"
   touch prebuilt
 }
 
@@ -187,6 +188,7 @@ built on: comma device"
 }
 
 # 构建期间停 comma：3.5G 内存扛不住 scons -j8 + 运行中的进程，pkl 编译还要抢 GPU
+[ -n "$LOCAL_SOURCE_SHA" ] || die "pydeps 过渡期只接受明确本地源及离线产物，拒绝公开 OTA"
 run_stage "停 comma" sudo systemctl stop comma
 run_stage "构建树 checkout $SRC_BRANCH（含子模块，clean -ffdx）" checkout_source
 run_stage "scons --minimal 全量构建" build

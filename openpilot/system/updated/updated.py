@@ -198,7 +198,9 @@ def handle_agnos_update() -> None:
                           echo -n $AGNOS_VERSION"], OVERLAY_MERGED).strip()
 
   cloudlog.info(f"AGNOS version check: {cur_version} vs {updated_version}")
-  if cur_version == updated_version:
+  accepted_versions = run(["bash", "-c", "unset AGNOS_VERSION AGNOS_ACCEPTED_VERSIONS; source launch_env.sh; echo $AGNOS_ACCEPTED_VERSIONS"],
+                          OVERLAY_MERGED).split()
+  if cur_version == updated_version or cur_version in accepted_versions:
     return
 
   # prevent an openpilot getting swapped in with a mismatched or partially downloaded agnos

@@ -4,6 +4,19 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 source "$DIR/launch_env.sh"
 
+function configure_pydeps {
+  unset PYTHONHOME PYTHONPATH
+  export PYTHONNOUSERSITE=1
+  export PYTHONPATH="$DIR"
+  local dependency_path
+  if dependency_path=$(/usr/local/venv/bin/python -I -B "$DIR/openpilot/common/pydeps.py" path "$DIR"); then
+    export PYTHONPATH="$DIR:$dependency_path"
+  else
+    echo "pydeps: unavailable or incompatible; LANLink blocked for this run" >&2
+    export BLOCK="${BLOCK:+$BLOCK,}lanlinkd"
+  fi
+}
+
 function agnos_init {
   # TODO: move this to agnos
   sudo rm -f /data/etc/NetworkManager/system-connections/*.nmmeta
@@ -89,7 +102,7 @@ function launch {
 
   # handle pythonpath
   ln -sfn $(pwd) /data/pythonpath
-  export PYTHONPATH="$PWD"
+  configure_pydeps
 
   # submodule package symlinks for PYTHONPATH imports on device.
   # on PC these come from editable installs via pyproject.toml / uv.

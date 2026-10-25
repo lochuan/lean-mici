@@ -7,7 +7,7 @@
 # （lean-release 再镜像到 gitee remote）/ 设备消费）→ 重启 → 上机验证。
 #
 # 用法: tools/release/publish_release_from_device.sh [--skip-tests] [--skip-smoke] [--local-source]
-#       --local-source：本地 nav-test → nav-local-release，必须指定 EXPECTED_SOURCE_SHA，不推 fork/gitee。
+#       --local-source：LOCAL_SOURCE_REF（默认 refs/heads/nav-test）→ nav-local-release，必须指定 EXPECTED_SOURCE_SHA，不推 fork/gitee。
 #       末尾默认跑台架冒烟 tools/bench/smoke_after_build.sh（jungle 点火回放，验证核心进程 onroad 稳定）；
 #       没接 jungle 时自动跳过，--skip-smoke 强制跳过。
 # 环境: DEVICE=comma@10.0.0.27 可覆盖
@@ -33,9 +33,13 @@ for arg in "$@"; do
   esac
 done
 if [ "$LOCAL_SOURCE" -eq 1 ]; then
-  SRC_BRANCH=nav-test
+  LOCAL_SOURCE_REF="${LOCAL_SOURCE_REF:-refs/heads/nav-test}"
+  [[ $LOCAL_SOURCE_REF =~ ^refs/heads/[A-Za-z0-9_][A-Za-z0-9_./-]*$ ]] || { echo "LOCAL_SOURCE_REF 必须为完整本地分支 ref" >&2; exit 1; }
+  SRC_BRANCH="${LOCAL_SOURCE_REF#refs/heads/}"
   RELEASE_BRANCH=nav-local-release
   [[ ${EXPECTED_SOURCE_SHA:-} =~ ^[0-9a-f]{40}$ ]] || { echo "必须传入 EXPECTED_SOURCE_SHA（40 位小写十六进制）" >&2; exit 1; }
+  git check-ref-format "$LOCAL_SOURCE_REF" || exit 1
+  [ -d "${PYDEPS_ARTIFACT:-}" ] || { echo "必须指定已验证离线产物目录 PYDEPS_ARTIFACT" >&2; exit 1; }
   LOCAL_WORKER=/data/build/.git/local-release.py
   LOCAL_PREPARE_STARTED=0
   local_failure() {
@@ -44,7 +48,7 @@ if [ "$LOCAL_SOURCE" -eq 1 ]; then
       echo "本地发版失败。" >&2
       if [ "$LOCAL_PREPARE_STARTED" -eq 1 ]; then
         echo "先查看设备状态和 /tmp/consume.log 或 /tmp/release.log；等任务结束后再回滚。" >&2
-        printf "回滚命令：ssh %q '(setsid nohup /usr/local/venv/bin/python /data/build/.git/local-release.py rollback > /tmp/rollback.log 2>&1 < /dev/null &)'\n" "$DEVICE" >&2
+        printf "确认 state 属于本次源版本后，回滚命令：ssh %q '(setsid nohup /usr/local/venv/bin/python /data/build/.git/local-release.py rollback %s > /tmp/rollback.log 2>&1 < /dev/null &)'\n" "$DEVICE" "$EXPECTED_SOURCE_SHA" >&2
       else
         echo "本次未调用 prepare，未进入参数设置/设备构建；检查上述错误后重试。" >&2
       fi
@@ -52,6 +56,12 @@ if [ "$LOCAL_SOURCE" -eq 1 ]; then
   }
   trap local_failure EXIT
   trap 'exit 1' HUP INT TERM
+fi
+
+# The public OTA path does not yet transport or protect manifest-bound sets.
+if [ "$LOCAL_SOURCE" -eq 0 ] && [ -f "$ROOT/openpilot/common/pydeps.py" ]; then
+  echo "pydeps 过渡发布仅支持 --local-source；公开 OTA 依赖运输尚未验收" >&2
+  exit 1
 fi
 
 echo "[-] Mac 侧单测（--skip-tests 跳过）"
@@ -66,16 +76,18 @@ if [ "$LOCAL_SOURCE" -eq 1 ]; then
     (cd "$ROOT" && uv run --extra testing --with pytest pytest -q \
       tools/release/test_local_release.py tools/release/test_local_release_device.py)
   fi
-  echo "[-] 从 Mac 传入本地 nav-test 与固定子模块（不访问公共远端）"
-  LOCAL_SOURCE_SHA=$(python3 "$DIR/release_lib.py" send-local-source "$ROOT" "$DEVICE" "$EXPECTED_SOURCE_SHA")
+  echo "[-] 从 Mac 传入本地 $LOCAL_SOURCE_REF 与固定子模块（不访问公共远端）"
+  LOCAL_SOURCE_SHA=$(python3 "$DIR/release_lib.py" send-local-source "$ROOT" "$DEVICE" "$EXPECTED_SOURCE_SHA" --source-ref "$LOCAL_SOURCE_REF")
   if ! [[ $LOCAL_SOURCE_SHA =~ ^[0-9a-f]{40}$ ]] || [ "$LOCAL_SOURCE_SHA" != "$EXPECTED_SOURCE_SHA" ]; then
     echo "本地源 stdout/SHA 校验失败" >&2
     exit 1
   fi
+  python3 "$DIR/release_lib.py" send-local-pydeps "$ROOT" "$DEVICE" "$LOCAL_SOURCE_SHA" "$PYDEPS_ARTIFACT"
   scp -q "$DIR/local_release.py" "$DEVICE:$LOCAL_WORKER"
+  scp -q "$ROOT/openpilot/common/pydeps.py" "$DEVICE:/data/build/.git/pydeps.py"
   LOCAL_PREPARE_STARTED=1
   # shellcheck disable=SC2029 # 固定设备路径，SHA 已严格校验；参数应在 Mac 展开。
-  ssh "$DEVICE" "/usr/local/venv/bin/python $LOCAL_WORKER prepare $LOCAL_SOURCE_SHA"
+  ssh "$DEVICE" "/usr/local/venv/bin/python $LOCAL_WORKER prepare $LOCAL_SOURCE_SHA --source-ref $LOCAL_SOURCE_REF"
 fi
 
 echo "[-] 推送设备侧发布脚本（构建树 /data/build 由它 checkout，release_lib.py 从构建树调用）"
@@ -165,6 +177,7 @@ print(\"[ok] params 键抽查\")
 '"
 
 if [ "$LOCAL_SOURCE" -eq 1 ]; then
+  ssh "$DEVICE" 'cd /data/openpilot && /usr/local/venv/bin/python -I -B openpilot/common/pydeps.py path /data/openpilot && pgrep -f "[l]anlinkd" >/dev/null && curl --fail --max-time 10 http://127.0.0.1:8088/api/status >/dev/null'
   # shellcheck disable=SC2029 # 仅预期 SHA 在 Mac 展开，HEAD 和参数值在设备读取。
   ssh "$DEVICE" "cd /data/openpilot && test \"\$(git rev-parse HEAD)\" = $RELEASE_SHA && git diff --quiet HEAD -- && test \"\$(cat /data/params/d/DisableUpdates)\" = 1"
 fi

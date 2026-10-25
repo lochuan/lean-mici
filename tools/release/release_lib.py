@@ -19,6 +19,9 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from openpilot.common import pydeps
+
 TINYGRAD_PIN_FILE = "TINYGRAD_PIN"
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -55,9 +58,16 @@ def read_stage_tinygrad_pin(stage: Path) -> str | None:
   return sha if _SHA_RE.match(sha) else None
 
 
-def check_stage(stage: Path) -> list[str]:
+def check_stage(stage: Path, source_sha: str | None = None) -> list[str]:
   """Publish gate on the stage tree; returns problems, empty = pass."""
   problems = []
+  try:
+    manifest = pydeps.load_manifest(stage, source_sha=source_sha)
+    lock = stage / 'uv.lock'
+    if pydeps.file_hash(lock) != manifest['uv_lock_sha256']:
+      problems.append('release manifest lock hash mismatch')
+  except (OSError, ValueError, KeyError, TypeError) as error:
+    problems.append(f'release manifest rejected: {error}')
   if read_stage_tinygrad_pin(stage) is None:
     problems.append("stage tree cannot resolve its tinygrad pin")
   for p in sorted(stage.rglob("*")):
@@ -66,16 +76,19 @@ def check_stage(stage: Path) -> list[str]:
   return problems
 
 
-def send_local_source(source_repo: Path, device: str, expected_source_sha: str) -> str:
-  """Stage exact local nav-test/gitlink commits under the device build repo, without public remotes."""
+def send_local_source(source_repo: Path, device: str, expected_source_sha: str, source_ref: str = 'refs/heads/nav-test') -> str:
+  """Stage an approved local branch and its gitlinks, without public remotes."""
   def git(*args: str) -> str:
     return subprocess.check_output(["git", "-C", str(source_repo), *args], text=True).strip()
 
   if not _SHA_RE.fullmatch(expected_source_sha):
     raise ValueError("EXPECTED_SOURCE_SHA must contain exactly 40 lowercase hex characters")
-  revision = git("rev-parse", "refs/heads/nav-test^{commit}")
+  if not re.fullmatch(r'refs/heads/[A-Za-z0-9_][A-Za-z0-9_./-]*', source_ref):
+    raise ValueError('source ref must be a fully qualified local branch')
+  git('check-ref-format', source_ref)
+  revision = git("rev-parse", source_ref + "^{commit}")
   if revision != expected_source_sha:
-    raise ValueError(f"EXPECTED_SOURCE_SHA mismatch: expected {expected_source_sha}, refs/heads/nav-test is {revision}")
+    raise ValueError(f"EXPECTED_SOURCE_SHA mismatch: expected {expected_source_sha}, {source_ref} is {revision}")
   common = Path(git("rev-parse", "--git-common-dir"))
   if not common.is_absolute():
     common = source_repo / common
@@ -130,6 +143,39 @@ index.write_text(json.dumps({'current': current, 'commits': commits, 'previous':
   return revision
 
 
+def send_local_pydeps(source_repo: Path, device: str, source_sha: str, payload: Path) -> None:
+  manifest = pydeps.load_manifest(payload, source_sha=source_sha)
+  lock = subprocess.check_output(['git', '-C', str(source_repo), 'show', f'{source_sha}:uv.lock'])
+  pydeps.require(pydeps.sha256(lock) == manifest['uv_lock_sha256'], 'dependency manifest source lock mismatch')
+  archive = payload / (manifest['pydeps']['id'] + '.tar.gz')
+  pydeps.require(
+    pydeps.file_hash(archive) == manifest['pydeps']['archive_sha256'] and archive.stat().st_size == manifest['pydeps']['compressed_bytes'],
+    'offline archive hash/size mismatch',
+  )
+  destination = f'/data/build/.git/pydeps/{source_sha}'
+  script = """
+set -eu
+mkdir -p /data/build/.git/pydeps
+incoming=$(mktemp -d /data/build/.git/pydeps/.incoming.XXXXXX)
+tar -xf - -C "$incoming"
+if [ -e "$1" ]; then
+  cmp "$incoming/RELEASE_MANIFEST.json" "$1/RELEASE_MANIFEST.json"
+  cmp "$incoming/$2" "$1/$2"
+  rm -r "$incoming"
+else
+  mv "$incoming" "$1"
+fi
+"""
+  with tempfile.TemporaryFile() as stream:
+    with tarfile.open(fileobj=stream, mode='w') as bundle:
+      bundle.add(payload / pydeps.MANIFEST, arcname=pydeps.MANIFEST)
+      bundle.add(archive, arcname=archive.name)
+    stream.seek(0)
+    subprocess.run(
+      ['ssh', device, shlex.join(['bash', '-c', script, 'pydeps-transfer', destination, archive.name])], stdin=stream, check=True, stdout=subprocess.DEVNULL
+    )
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   sub = parser.add_subparsers(dest="command", required=True)
@@ -138,14 +184,25 @@ def main() -> int:
   stamp.add_argument("source_repo")
   check = sub.add_parser("check-stage", help="publish gate: tinygrad pin resolvable, no oversized files")
   check.add_argument("stage")
-  local = sub.add_parser("send-local-source", help="stage local nav-test and pinned submodules over SSH")
+  check.add_argument("--source-sha")
+  local = sub.add_parser("send-local-source", help="stage an approved local branch and pinned submodules over SSH")
   local.add_argument("source_repo", type=Path)
   local.add_argument("device")
   local.add_argument("expected_source_sha")
+  local.add_argument("--source-ref", default='refs/heads/nav-test')
+  deps = sub.add_parser('send-local-pydeps', help='transfer a source-bound offline dependency artifact')
+  deps.add_argument('source_repo', type=Path)
+  deps.add_argument('device')
+  deps.add_argument('source_sha')
+  deps.add_argument('payload', type=Path)
   args = parser.parse_args()
 
+  if args.command == 'send-local-pydeps':
+    send_local_pydeps(args.source_repo, args.device, args.source_sha, args.payload)
+    return 0
+
   if args.command == "send-local-source":
-    print(send_local_source(args.source_repo, args.device, args.expected_source_sha))
+    print(send_local_source(args.source_repo, args.device, args.expected_source_sha, args.source_ref))
     return 0
 
   if args.command == "stamp-tinygrad-pin":
@@ -153,7 +210,7 @@ def main() -> int:
     print(f"[ok] tinygrad pin stamped: {sha[:7]}")
     return 0
 
-  problems = check_stage(Path(args.stage))
+  problems = check_stage(Path(args.stage), args.source_sha)
   for problem in problems:
     print(problem, file=sys.stderr)
   return 1 if problems else 0

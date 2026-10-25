@@ -2,6 +2,7 @@
 """Unit tests for tools/release/release_lib.py."""
 from __future__ import annotations
 
+import json
 import importlib.util
 import subprocess
 import sys
@@ -42,6 +43,15 @@ def _source_repo_with_tinygrad_gitlink(td: str) -> tuple[Path, str]:
   ):
     subprocess.run(cmd, cwd=source, check=True, capture_output=True)
   return source, tinygrad_sha
+
+
+def add_manifest(stage):
+  from tools.release.test_pydeps import fixture
+  fixture(stage)
+  (stage / 'uv.lock').write_text('locked fixture')
+  manifest = json.loads((stage / 'RELEASE_MANIFEST.json').read_text())
+  manifest['uv_lock_sha256'] = release_lib.pydeps.file_hash(stage / 'uv.lock')
+  (stage / 'RELEASE_MANIFEST.json').write_text(json.dumps(manifest))
 
 
 class TestTinygradPin(unittest.TestCase):
@@ -91,6 +101,7 @@ class TestCheckStage(unittest.TestCase):
     source, _ = _source_repo_with_tinygrad_gitlink(td)
     stage = Path(td) / "stage"
     release_lib.stamp_tinygrad_pin(stage, source)
+    add_manifest(stage)
     return stage
 
   def test_clean_stage_passes(self):
@@ -98,6 +109,13 @@ class TestCheckStage(unittest.TestCase):
       stage = self._stamped_stage(td)
       (stage / "small.bin").write_bytes(b"x" * 10)
       self.assertEqual(release_lib.check_stage(stage), [])
+
+  def test_stage_without_manifest_cannot_publish(self):
+    with tempfile.TemporaryDirectory() as td:
+      source, _ = _source_repo_with_tinygrad_gitlink(td)
+      stage = Path(td) / 'stage'
+      release_lib.stamp_tinygrad_pin(stage, source)
+      self.assertTrue(any('manifest' in problem.lower() for problem in release_lib.check_stage(stage)))
 
   def test_missing_pin_fails(self):
     with tempfile.TemporaryDirectory() as td:
@@ -108,7 +126,7 @@ class TestCheckStage(unittest.TestCase):
     with tempfile.TemporaryDirectory() as td:
       stage = self._stamped_stage(td)
       big = stage / "openpilot" / "big.pkl"
-      big.parent.mkdir()
+      big.parent.mkdir(exist_ok=True)
       with open(big, "wb") as f:
         f.truncate(release_lib.MAX_FILE_BYTES + 1)
       problems = release_lib.check_stage(stage)
@@ -121,6 +139,35 @@ class TestCheckStage(unittest.TestCase):
       with open(stage / "edge.bin", "wb") as f:
         f.truncate(release_lib.MAX_FILE_BYTES)
       self.assertEqual(release_lib.check_stage(stage), [])
+
+
+class LocalStageAssemblyTests(unittest.TestCase):
+  def test_i6_stage_needs_only_bound_manifest_and_does_not_add_package_aliases(self):
+    from tools.release.test_pydeps import fixture
+    with tempfile.TemporaryDirectory(dir='/tmp') as temporary:
+      root = Path(temporary)
+      source, _ = _source_repo_with_tinygrad_gitlink(temporary)
+      (source / 'uv.lock').write_text('locked fixture')
+      subprocess.run(['git', '-C', str(source), 'add', 'uv.lock'], check=True)
+      subprocess.run(['git', '-C', str(source), 'commit', '-qm', 'lock'], check=True)
+      revision = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
+      payload = source / '.git/pydeps' / revision
+      payload.mkdir(parents=True)
+      manifest = fixture(payload)
+      manifest.update(source_commit=revision, uv_lock_sha256=release_lib.pydeps.file_hash(source / 'uv.lock'))
+      (payload / 'RELEASE_MANIFEST.json').write_text(json.dumps(manifest))
+      import shutil
+      for relative in ('tools/release/release_lib.py', 'openpilot/common/pydeps.py'):
+        target = source / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPO_ROOT / relative, target)
+      script = (MODULE_PATH.parent / 'device_release.sh').read_text().split('# 构建期间停 comma：')[0]
+      script += '\ntrap - EXIT ERR\nBUILD="$1"; STAGE="$2"; SRC_SHA="$3"\nsudo() { "$@"; }\nassemble_stage\n'
+      stage = root / 'stage'
+      result = subprocess.run(['bash', '-c', script, 'test', str(source), str(stage), revision], capture_output=True, text=True)
+      self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+      self.assertEqual(release_lib.check_stage(stage, revision), [])
+      self.assertTrue(all(not (stage / name).exists() and not (stage / name).is_symlink() for name in ('msgq', 'opendbc', 'rednose', 'tinygrad')))
 
 
 class TestCli(unittest.TestCase):
@@ -136,6 +183,7 @@ class TestCli(unittest.TestCase):
       stamp = self._cli("stamp-tinygrad-pin", str(stage), str(source))
       self.assertEqual(stamp.returncode, 0, stamp.stderr)
       self.assertIn(tinygrad_sha[:7], stamp.stdout)
+      add_manifest(stage)
       check = self._cli("check-stage", str(stage))
       self.assertEqual(check.returncode, 0, check.stderr)
 
