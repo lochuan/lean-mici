@@ -1,4 +1,4 @@
-"""desire_helper 变道启动否决:BSM 盲区与 relc 路沿两路,仅拦启动,starting 之后不复查。"""
+"""变道启动时盲区阻止变道，路沿可由驾驶者同向扭矩覆盖。"""
 
 import pytest
 
@@ -31,13 +31,7 @@ def dh(tmp_path, monkeypatch):
   monkeypatch.setattr(ltd_mod, "Params", lambda: params)
 
   helper = DesireHelper()
-  # 哑元化 ALC/LaneTurn:构造本身已被 tmp Params 隔离,这里只去掉分支对
-  # 其内部状态机的依赖,让测试聚焦预算门。
-  helper.alc = _NS(update_params=lambda: None,
-                   update_lane_change=lambda blocked, brake: None,
-                   update_state=lambda: None,
-                   auto_lane_change_allowed=False,
-                   lane_change_set_timer=alc_mod.AutoLaneChangeMode.NUDGE)
+  # 保留真实变道控制器，以验证盲区和路沿对变道启动的影响。
   helper.lane_turn_controller = _NS(update_params=lambda: None,
                                     update_lane_turn=lambda **kwargs: None,
                                     get_turn_direction=lambda: TurnDirection.none)
@@ -58,11 +52,19 @@ class TestVeto:
     dh.update(_cs(torque=0.5), True, 0.0)
     assert dh.lane_change_state == LaneChangeState.laneChangeStarting
 
-  def test_any_single_veto_blocks(self, dh):
-    for cs_kwargs, dh_kwargs in (({"bsm_left": True}, {}), ({}, {"left_edge_detected": True})):
-      _to_pre(dh)
-      dh.update(_cs(torque=0.5, **cs_kwargs), True, 0.0, **dh_kwargs)
-      assert dh.lane_change_state == LaneChangeState.preLaneChange, (cs_kwargs, dh_kwargs)
+  @pytest.mark.parametrize("blindspot,edge,torque,expected", [
+    (True, False, 0.5, LaneChangeState.preLaneChange),
+    (False, True, 0.5, LaneChangeState.laneChangeStarting),
+    (False, True, 0.0, LaneChangeState.preLaneChange),
+  ])
+  def test_lane_change_obstacles(self, dh, blindspot, edge, torque, expected):
+    from openpilot.sunnypilot.selfdrive.controls.lib.auto_lane_change import AutoLaneChangeMode
+
+    _to_pre(dh)
+    dh.alc.lane_change_set_timer = AutoLaneChangeMode.NUDGELESS
+    for _ in range(5):
+      dh.update(_cs(torque=torque, bsm_left=blindspot), True, 0.0, left_edge_detected=edge)
+    assert dh.lane_change_state == expected
 
   def test_other_side_veto_does_not_block(self, dh):
     _to_pre(dh)
