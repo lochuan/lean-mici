@@ -20,6 +20,7 @@ from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.sunnypilot.lib.styles import style
 from openpilot.system.ui.sunnypilot.widgets.tree_dialog import TreeOptionDialog, TreeNode, TreeFolder
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.system.lanlinkd.vehicle_api import select_platform
 
 CAR_LIST_JSON_OUT = os.path.join(BASEDIR, "openpilot", "sunnypilot", "selfdrive", "car", "car_list.json")
 
@@ -84,8 +85,11 @@ class PlatformSelector(Button):
       self._show_platform_dialog()
 
   def _set_platform(self, platform_name):
-    if data := self._platforms.get(platform_name):
-      ui_state.params.put("CarPlatformBundle", {**data, "name": platform_name})
+    if platform_name in self._platforms:
+      code, error = select_platform(ui_state.params, platform_name, self._platforms)
+      if code != 204:
+        gui_app.push_widget(ConfirmDialog(error, tr("OK")))
+        return
       self.refresh()
       if self._on_platform_change:
         self._on_platform_change()

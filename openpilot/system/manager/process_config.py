@@ -72,6 +72,7 @@ procs = [
   NativeProcess("loggerd", "openpilot/system/loggerd", ["./loggerd"], logging),
   PythonProcess("logmessaged", "openpilot.system.logmessaged", always_run),
   PythonProcess("lanlinkd", "openpilot.system.lanlinkd.lanlinkd", lanlink_run),
+  PythonProcess("dbc_monitor", "openpilot.system.lanlinkd.dbc_monitor", always_run),
 
   NativeProcess("camerad", "openpilot/system/camerad", ["./camerad"], only_onroad),
   PythonProcess("proclogd", "openpilot.system.proclogd", only_onroad, enabled=platform.system() != "Darwin"),

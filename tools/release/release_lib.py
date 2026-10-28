@@ -17,6 +17,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -62,19 +64,68 @@ def check_stage(stage: Path, source_sha: str | None = None) -> list[str]:
   """Publish gate on the stage tree; returns problems, empty = pass."""
   problems = []
   try:
-    manifest = pydeps.load_manifest(stage, source_sha=source_sha)
+    stamped_sha = (stage / 'SOURCE_SHA').read_text().strip()
+    if not _SHA_RE.fullmatch(stamped_sha) or (source_sha is not None and stamped_sha != source_sha):
+      raise ValueError('SOURCE_SHA mismatch or invalid')
+    manifest = pydeps.load_manifest(stage, source_sha=stamped_sha)
     pydeps.verify_archive(stage, manifest)
     lock = stage / 'uv.lock'
     if pydeps.file_hash(lock) != manifest['uv_lock_sha256']:
       problems.append('release manifest lock hash mismatch')
   except (OSError, ValueError, KeyError, TypeError) as error:
-    problems.append(f'release manifest rejected: {error}')
+    problems.append(f'release manifest / SOURCE_SHA rejected: {error}')
   if read_stage_tinygrad_pin(stage) is None:
     problems.append("stage tree cannot resolve its tinygrad pin")
+  if (stage / 'opendbc_repo/opendbc/car/tests/dbc_adapter.py').exists():
+    problems.append('stage must not ship the test DBC adapter')
   for p in sorted(stage.rglob("*")):
     if p.is_file() and not p.is_symlink() and p.stat().st_size > MAX_FILE_BYTES:
       problems.append(f"file exceeds GitHub's size limit: {p.relative_to(stage)}")
   return problems
+
+
+def dbc_needs_build(download_base_url: str, source_sha: str) -> bool:
+  """Empty or source-mismatched R2 metadata requires a package; approved sources pin opendbc."""
+  if not _SHA_RE.fullmatch(source_sha):
+    raise ValueError('source SHA must contain exactly 40 lowercase hex characters')
+  if not download_base_url.startswith('https://'):
+    raise ValueError('DOWNLOAD_BASE_URL must use HTTPS')
+  url = download_base_url.rstrip('/') + '/dbc/sienna-patched-lta/latest.json'
+  try:
+    with urllib.request.urlopen(url, timeout=15) as response:
+      raw = response.read(16385)
+  except urllib.error.HTTPError as error:
+    if error.code == 404:
+      return True
+    raise ValueError('R2 DBC latest check failed') from None
+  except (urllib.error.URLError, TimeoutError, OSError):
+    raise ValueError('R2 DBC latest check failed') from None
+  if len(raw) > 16384:
+    raise ValueError('R2 DBC latest is too large')
+  try:
+    latest = json.loads(raw)
+  except (ValueError, TypeError, RecursionError):
+    return True
+  # A changed source SHA covers gitlink/DBC changes and is required by the runtime source gate.
+  if not isinstance(latest, dict) or latest.get('source_sha') != source_sha:
+    return True
+  identifier = latest.get('id')
+  if not isinstance(identifier, str) or not re.fullmatch(source_sha + '-[0-9a-f]{32}', identifier):
+    return True
+  base = download_base_url.rstrip('/') + '/dbc/'
+  paths = ('sienna-patched-lta/' + source_sha + '/latest.json',
+           identifier + '/manifest.json', identifier + '/package.enc')
+  for path in paths:
+    try:
+      with urllib.request.urlopen(urllib.request.Request(base + path, method='HEAD'), timeout=15):
+        pass
+    except urllib.error.HTTPError as error:
+      if error.code == 404:
+        return True
+      raise ValueError('R2 DBC artifact check failed') from None
+    except (urllib.error.URLError, TimeoutError, OSError):
+      raise ValueError('R2 DBC artifact check failed') from None
+  return False
 
 
 def send_local_source(source_repo: Path, device: str, expected_source_sha: str, source_ref: str = 'refs/heads/nav-test') -> str:
@@ -192,7 +243,14 @@ def main() -> int:
   deps.add_argument('device')
   deps.add_argument('source_sha')
   deps.add_argument('payload', type=Path)
+  dbc = sub.add_parser('dbc-needs-build', help='check whether R2 lacks the DBC manifest for this approved source')
+  dbc.add_argument('download_base_url')
+  dbc.add_argument('source_sha')
   args = parser.parse_args()
+
+  if args.command == 'dbc-needs-build':
+    print('1' if dbc_needs_build(args.download_base_url, args.source_sha) else '0')
+    return 0
 
   if args.command == 'send-local-pydeps':
     send_local_pydeps(args.source_repo, args.device, args.source_sha, args.payload)

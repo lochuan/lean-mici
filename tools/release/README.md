@@ -175,3 +175,7 @@ bash -n tools/release/device_release.sh tools/release/publish_release_from_devic
 测试以真实临时 Git 仓库验证指定分支/固定对象、首次和连续部署、陈旧状态拒绝、
 当次失败恢复和参数原值保留；服务、boot ID、重启和设备参数用替身。
 它们不能代替批准后的真机 SCons、消费、回滚、reboot 和导航验收。
+
+## Sienna 专用 DBC
+
+包格式、私有密钥分离、source 专用 R2 latest、SOURCE_SHA 门禁与回滚说明见 [DBC_PACKAGES.md](DBC_PACKAGES.md)。正式 `lean-master → lean-release` 按 R2 当前状态自动构建并上传 DBC；`--local-source` 不访问生产密钥服务或 R2。

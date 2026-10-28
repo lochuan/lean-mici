@@ -53,6 +53,7 @@ class LanlinkApp:
     self._settings_ui: dict | None = None
     self._wifi_manager = None
     self._wifi_lock = threading.Lock()
+    self._dbc_resources = None
     threading.Thread(target=self.cache.run, args=(self.exit_event,), name="lanlink_status", daemon=True).start()
     self.toyota = toyota_diag_api.create(self.params, self.cache.snapshot)
     threading.Thread(target=self.toyota.idle_watchdog, args=(self.exit_event,), name="lanlink_toyota_idle", daemon=True).start()
@@ -109,9 +110,32 @@ class LanlinkApp:
   async def vehicle_get(self, request: Request) -> HTTPResponse:
     return json_response(vehicle_api.vehicle_state(self.params))
 
+  def _get_dbc_resources(self):
+    from opendbc.can.dbc_asset import running_source_sha
+    if self._dbc_resources is None or self._dbc_resources.store.revision != running_source_sha():
+      from openpilot.system.lanlinkd.dbc_resources import create_resources
+      self._dbc_resources = create_resources(self.params)
+    return self._dbc_resources
+
+  async def dbc_status(self, request: Request) -> HTTPResponse:
+    try:
+      state = await asyncio.to_thread(self._get_dbc_resources().status)
+      return json_response(state)
+    except (OSError, ValueError, RuntimeError):
+      return json_response({'activated': False, 'ready': False, 'revoked': False, 'cleanup_pending': False,
+                            'can_activate': False, 'error': '运行树 SOURCE_SHA 或受保护存储不可用'})
+
+  async def dbc_activate(self, request: Request) -> HTTPResponse:
+    code = self._body(request).get('code')
+    try:
+      status, body = await asyncio.to_thread(self._get_dbc_resources().activate, code)
+      return json_response(body, status=status)
+    except (OSError, ValueError, RuntimeError):
+      return _json_error(503, 'DBC 激活暂不可用，请停车后重试')
+
   async def vehicle_select(self, request: Request) -> HTTPResponse:
     name = str(self._body(request).get("name", ""))
-    code, msg = vehicle_api.select_platform(self.params, name)
+    code, msg = await asyncio.to_thread(vehicle_api.select_platform, self.params, name)
     return empty(status=204) if code == 204 else _json_error(code, msg)
 
   # ---- bluetooth ----
@@ -321,6 +345,8 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("DELETE", "/api/params/<key:str>", "params_delete"),
   ("GET", "/api/vehicle", "vehicle_get"),
   ("POST", "/api/vehicle/select", "vehicle_select"),
+  ("GET", "/api/vehicle/sienna-lta", "dbc_status"),
+  ("POST", "/api/vehicle/sienna-lta/activate", "dbc_activate"),
   ("GET", "/api/bluetooth", "bluetooth_get"),
   ("POST", "/api/bluetooth/<operation:str>", "bluetooth_operation"),
   ("GET", "/api/wifi", "wifi_get"),

@@ -2,9 +2,9 @@
 #
 # publish_release_from_device.sh — 一键发布编排器（Mac 侧）。
 #
-# 流程：Mac 单测 → scp device_release.sh → 设备侧 nohup 构建（/data/build 干净构建树 +
-# scons 全量，未变部分走 /data/scons_cache）→ 轮询 → 中继三步（取 relstage / push fork
-# （lean-release 再镜像到 gitee remote）/ 设备消费）→ 重启 → 上机验证。
+# 流程：Mac 单测 → R2 DBC 检查 → scp device_release.sh → 设备侧 nohup 构建
+# （/data/build 干净构建树 + scons 全量，未变部分走 /data/scons_cache）→ 轮询 →
+# 按需导入/备份 DBC 密钥 → push fork/Gitee → 上传 R2 并清理旧版 → 设备消费 → 重启验证。
 #
 # 用法: tools/release/publish_release_from_device.sh [--skip-tests] [--skip-smoke] [--local-source]
 #       始终使用 LOCAL_SOURCE_REF + EXPECTED_SOURCE_SHA + PYDEPS_ARTIFACT 的固定本地输入。
@@ -15,6 +15,8 @@
 #       SRC_BRANCH / RELEASE_BRANCH 透传给设备侧 device_release.sh
 #       （缺省 lean-master / lean-release；如 SRC_BRANCH=big-uplink RELEASE_BRANCH=big-release）
 #       ADB_SERIAL=55873f9 走 adb 隧道（DEVICE=c4usb → localhost:2222）时设上，重启后自动重建转发
+#       正式 lean-release 的 DBC 检查需要 DOWNLOAD_BASE_URL；需要重建时还需要 R2 凭据、
+#       DEPLOY_SSH_ALIAS / DEPLOY_ROOT / AGE_RECIPIENT，TOYOCHIP_SERVER_ROOT 可覆盖相邻仓库路径。
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
@@ -22,6 +24,16 @@ ROOT="$(cd "$DIR/../.." && pwd)"
 DEVICE="${DEVICE:-comma@10.0.0.27}"
 SRC_BRANCH="${SRC_BRANCH:-lean-master}"
 RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
+TOYOCHIP_SERVER_ROOT="${TOYOCHIP_SERVER_ROOT:-$ROOT/../toyochip-server}"
+DBC_BUILD=0
+DBC_TEMP=""
+cleanup_dbc_temp() {
+  if [ -n "$DBC_TEMP" ]; then
+    rm -rf -- "$DBC_TEMP"
+    DBC_TEMP=""
+  fi
+}
+trap cleanup_dbc_temp EXIT
 SKIP_TESTS=0
 SKIP_SMOKE=0
 LOCAL_SOURCE=0
@@ -46,6 +58,25 @@ SRC_BRANCH="${LOCAL_SOURCE_REF#refs/heads/}"
 [ -d "${PYDEPS_ARTIFACT:-}" ] || { echo "必须指定已验证离线产物目录 PYDEPS_ARTIFACT" >&2; exit 1; }
 git check-ref-format "$LOCAL_SOURCE_REF" || exit 1
 git check-ref-format "refs/heads/$RELEASE_BRANCH" || exit 1
+if [ "$LOCAL_SOURCE" -eq 0 ] && [ "$SRC_BRANCH" = "lean-master" ] && [ "$RELEASE_BRANCH" = "lean-release" ]; then
+  [ -n "${DOWNLOAD_BASE_URL:-}" ] || { echo "必须设置 DOWNLOAD_BASE_URL 以检查 R2 DBC" >&2; exit 1; }
+  DBC_BUILD=$(python3 "$DIR/release_lib.py" dbc-needs-build "$DOWNLOAD_BASE_URL" "$EXPECTED_SOURCE_SHA")
+  [[ $DBC_BUILD =~ ^[01]$ ]] || { echo "DBC 更新检查返回无效结果" >&2; exit 1; }
+  if [ "$DBC_BUILD" = "0" ] && ssh "$DEVICE" "test -f /data/build/.git/dbc-release/$EXPECTED_SOURCE_SHA/public/manifest.json && test -f /data/build/.git/dbc-release/$EXPECTED_SOURCE_SHA/private/key.json"; then
+    DBC_BUILD=2
+  fi
+  if [ "$DBC_BUILD" != "0" ]; then
+    [ -n "${DEPLOY_SSH_ALIAS:-}" ] && [ -n "${DEPLOY_ROOT:-}" ] && [ -n "${AGE_RECIPIENT:-}" ] \
+      || { echo "DBC 更新需要 DEPLOY_SSH_ALIAS、DEPLOY_ROOT、AGE_RECIPIENT" >&2; exit 1; }
+    for helper in release/r2_release.py server/activation/map_key_backup.py server/activation/map_key_restore.py; do
+      [ -f "$TOYOCHIP_SERVER_ROOT/$helper" ] || { echo "缺少 toyochip 发布工具: $TOYOCHIP_SERVER_ROOT/$helper" >&2; exit 1; }
+    done
+    [ "$DBC_BUILD" = "1" ] && echo "[-] R2 为空或源提交/opendbc/DBC 已更新，将自动构建并发布 DBC"
+    [ "$DBC_BUILD" = "1" ] || echo "[-] 复用设备上未完成的 DBC 包，继续发布"
+  else
+    echo "[-] R2 已有当前源提交的 DBC，跳过重建"
+  fi
+fi
 if [ "$LOCAL_SOURCE" -eq 1 ]; then
   LOCAL_WORKER=/data/build/.git/local-release.py
   LOCAL_PREPARE_STARTED=0
@@ -93,7 +124,7 @@ echo "[-] 推送设备侧发布脚本（构建树 /data/build 由它 checkout，
 scp -q "$DIR/device_release.sh" "$DEVICE:/tmp/device_release.sh"
 
 echo "[-] 设备侧发布（nohup + 轮询；checkout 构建树 → scons 全量构建 → 剥离 → 打包）"
-ssh "$DEVICE" '(setsid nohup env SRC_BRANCH='"$SRC_BRANCH"' RELEASE_BRANCH='"$RELEASE_BRANCH"' LOCAL_SOURCE_SHA='"$LOCAL_SOURCE_SHA"' bash /tmp/device_release.sh > /tmp/release.log 2>&1 & echo $! > /tmp/release.pid)'
+ssh "$DEVICE" '(setsid nohup env SRC_BRANCH='"$SRC_BRANCH"' RELEASE_BRANCH='"$RELEASE_BRANCH"' LOCAL_SOURCE_SHA='"$LOCAL_SOURCE_SHA"' DBC_BUILD='"$DBC_BUILD"' bash /tmp/device_release.sh > /tmp/release.log 2>&1 & echo $! > /tmp/release.pid)'
 while ssh -o ConnectTimeout=10 "$DEVICE" 'kill -0 "$(cat /tmp/release.pid)" 2>/dev/null'; do
   sleep 20
 done
@@ -101,6 +132,23 @@ if ! ssh "$DEVICE" 'grep -q "扁平树 stage 就绪" /tmp/release.log'; then
   ssh "$DEVICE" 'tail -30 /tmp/release.log' >&2 || true
   echo "设备端发布失败（见上方日志）" >&2
   exit 1
+fi
+
+if [ "$DBC_BUILD" != "0" ]; then
+  echo "[-] 取回 DBC 公共包与独立私钥记录，导入并验证密钥备份"
+  DBC_TEMP=$(mktemp -d /tmp/lean-dbc-release.XXXXXX)
+  mkdir "$DBC_TEMP/public"
+  scp -q "$DEVICE:/data/build/.git/dbc-release/$LOCAL_SOURCE_SHA/public/manifest.json" \
+    "$DEVICE:/data/build/.git/dbc-release/$LOCAL_SOURCE_SHA/public/package.enc" "$DBC_TEMP/public/"
+  scp -q "$DEVICE:/data/build/.git/dbc-release/$LOCAL_SOURCE_SHA/private/key.json" "$DBC_TEMP/key.json"
+  printf -v remote_map_keys '%q' "$DEPLOY_ROOT/server/activation/map_keys.py"
+  ssh "$DEPLOY_SSH_ALIAS" "sudo -n python3 $remote_map_keys --store /var/lib/chipmunk-map-keys import" < "$DBC_TEMP/key.json"
+  backup_receipt=$(python3 "$TOYOCHIP_SERVER_ROOT/server/activation/map_key_backup.py" \
+    --ssh-target "$DEPLOY_SSH_ALIAS" --remote-cli "$DEPLOY_ROOT/server/activation/map_keys.py" --recipient "$AGE_RECIPIENT")
+  backup_archive=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["backup_file"])' <<< "$backup_receipt")
+  python3 "$TOYOCHIP_SERVER_ROOT/server/activation/map_key_restore.py" \
+    --archive "$backup_archive" --expected-record-stdin < "$DBC_TEMP/key.json"
+  echo "[-] DBC 密钥门通过，等待 release 推送后上传"
 fi
 
 if [ "$LOCAL_SOURCE" -eq 1 ]; then
@@ -144,6 +192,13 @@ if [ "$RELEASE_BRANCH" = "lean-release" ]; then
     GITEE_WARNING="没有 gitee remote，未镜像。先 git remote add gitee git@gitee.com:lochuan/toyo-pilot.git，再 git push -f gitee $RELEASE_SHA:refs/heads/$RELEASE_BRANCH"
   fi
   [ -z "$GITEE_WARNING" ] || echo "[!] $GITEE_WARNING" >&2
+fi
+if [ "$DBC_BUILD" != "0" ]; then
+  echo "[-] release 已推送，上传 DBC 到 R2 并清理旧版本"
+  python3 "$TOYOCHIP_SERVER_ROOT/release/r2_release.py" dbc "$DBC_TEMP/public"
+  ssh "$DEVICE" "rm -rf /data/build/.git/dbc-release/$LOCAL_SOURCE_SHA" \
+    || echo "[!] DBC 已发布，但设备临时私钥目录清理失败，请手动清理" >&2
+  cleanup_dbc_temp
 fi
 ssh "$DEVICE" "cd /data/openpilot && git fetch -4 -q origin $RELEASE_BRANCH && git checkout -q --force -B $RELEASE_BRANCH FETCH_HEAD"
 

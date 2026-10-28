@@ -15,6 +15,7 @@
 #   SRC_BRANCH     源分支，缺省 lean-master
 #   RELEASE_BRANCH 发布分支，缺省 lean-release
 # LOCAL_SOURCE_SHA 非空：仅从 Mac 已传入 /data/build/.git/local-source/<sha> 的本地 Git 源取对象。
+# DBC_BUILD=1：checkout 后构建加密 DBC；=2：复用此前未完成的包；产物在 .git 内，不进 stage。
 # 例: SRC_BRANCH=big-uplink RELEASE_BRANCH=big-release bash device_release.sh
 set -Eeuo pipefail   # -E：ERR trap 继承进阶段函数
 
@@ -24,6 +25,7 @@ REPO_URL=https://github.com/lochuan/lean-mici.git
 SRC_BRANCH="${SRC_BRANCH:-lean-master}"
 RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
 LOCAL_SOURCE_SHA="${LOCAL_SOURCE_SHA:-}"
+DBC_BUILD="${DBC_BUILD:-0}"
 # 默认 2GB 会按 mtime 淘汰掉 ~71M 的 driving pkl，下次发版白编 ~11 分钟
 SCONS_CACHE_LIMIT=8e9
 export PATH="/usr/local/venv/bin:$PATH"
@@ -129,6 +131,19 @@ checkout_source() {
   echo "[ok] 构建树 ≡ $SRC_BRANCH@${SRC_SHA:0:12}（含子模块）"
 }
 
+build_dbc() {
+  [ "$SRC_BRANCH" = "lean-master" ] && [ "$RELEASE_BRANCH" = "lean-release" ] \
+    || die "只有 lean-master → lean-release 自动构建生产 DBC"
+  git -C "$BUILD" branch -f lean-master "$SRC_SHA"
+  local artifact="$BUILD/.git/dbc-release/$SRC_SHA"
+  rm -rf "$artifact"
+  python3 "$BUILD/tools/release/dbc_package.py" \
+    --source-sha "$SRC_SHA" \
+    --output "$artifact/public" \
+    --private-key "$artifact/private/key.json"
+  echo "[ok] Sienna DBC 加密包与独立私钥记录已构建"
+}
+
 build() {
   wake_cpu_cores
   cd "$BUILD"
@@ -163,11 +178,17 @@ assemble_stage() {
     --exclude='*.onnx' \
     --exclude='*.onnx.data' \
     --exclude=node_modules
+  rm -f "$STAGE/opendbc_repo/opendbc/car/tests/dbc_adapter.py" \
+        "$STAGE/opendbc_repo/opendbc/car/tests/test_car_interfaces.py" \
+        "$STAGE/opendbc_repo/opendbc/car/toyota/tests/test_toyota.py" \
+        "$STAGE/opendbc_repo/opendbc/safety/tests/test_toyota.py" \
+        "$STAGE/openpilot/selfdrive/car/tests/test_car_interfaces.py"
   cd "$STAGE"
   rm -rf tinygrad_repo/examples tinygrad_repo/test tinygrad_repo/docs \
          tinygrad_repo/scripts tinygrad_repo/.github
   find openpilot/third_party \( -iname '*x86*' -o -iname '*darwin*' \) -exec rm -rf {} + 2>/dev/null || true
   python3 "$BUILD/tools/release/release_lib.py" stamp-tinygrad-pin "$STAGE" "$BUILD"
+  printf '%s\n' "$SRC_SHA" > "$STAGE/SOURCE_SHA"
   cp "$BUILD/.git/pydeps/$SRC_SHA/RELEASE_MANIFEST.json" "$BUILD/.git/pydeps/$SRC_SHA/"*.tar.gz "$STAGE/"
   python3 "$BUILD/tools/release/release_lib.py" check-stage "$STAGE" --source-sha "$SRC_SHA"
   touch prebuilt
@@ -189,8 +210,12 @@ built on: comma device"
 
 # 构建期间停 comma：3.5G 内存扛不住 scons -j8 + 运行中的进程，pkl 编译还要抢 GPU
 [[ $LOCAL_SOURCE_SHA =~ ^[0-9a-f]{40}$ ]] || die "必须使用已传入的固定本地源码与离线产物"
+[[ $DBC_BUILD =~ ^[012]$ ]] || die "DBC_BUILD 必须为 0、1 或 2（复用已有包）"
 run_stage "停 comma" sudo systemctl stop comma
 run_stage "构建树 checkout $SRC_BRANCH（含子模块，clean -ffdx）" checkout_source
+if [ "$DBC_BUILD" = "1" ]; then
+  run_stage "构建 Sienna 专用加密 DBC" build_dbc
+fi
 run_stage "scons --minimal 全量构建" build
 run_stage "组装扁平树 stage（剥离 + tinygrad pin + 发布门禁）" assemble_stage
 run_stage "组发布 commit" commit_release

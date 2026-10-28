@@ -278,12 +278,25 @@ if name == 'ssh':
     sys.exit(1)
   if os.environ.get('FAIL_POSTBOOT') and 'test "$(git rev-parse HEAD)"' in args[-1]:
     sys.exit(1)
+  if args[-1].startswith('test -f /data/build/.git/dbc-release/') and not os.environ.get('DBC_ARTIFACTS_PRESENT'):
+    sys.exit(1)
   if 'kill -0' in args[-1]:
     sys.exit(1)
   if args[-1].endswith('local-release.py status'):
     print(os.environ.get('WORKER_PHASE', 'rebooting'))
   elif 'rev-parse' in args[-1]:
     print('b' * 40)
+  if 'map_keys.py' in args[-1] and args[-1].endswith(' import'):
+    if not sys.stdin.buffer.read():
+      sys.exit(1)
+elif name == 'scp':
+  if any('dbc-release' in argument for argument in args):
+    destination = pathlib.Path(args[-1])
+    for argument in args[:-1]:
+      if 'dbc-release' not in argument:
+        continue
+      target = destination / pathlib.PurePosixPath(argument).name if destination.is_dir() else destination
+      target.write_bytes(b'test-only-dbc-artifact')
 elif name == 'git':
   if args[:3] == ['push', '-f', 'fork'] and os.environ.get('FAIL_FORK'):
     sys.exit(1)
@@ -310,6 +323,9 @@ class PublishScriptTests(unittest.TestCase):
 import json
 with open(os.environ['TRACE'], 'a') as stream:
   stream.write(json.dumps(['source-sender', *sys.argv[1:]]) + '\\n')
+if sys.argv[1] == 'dbc-needs-build':
+  print(os.environ.get('DBC_CHECK_RESULT', '0'))
+  sys.exit(0)
 print(os.environ.get('SOURCE_OUTPUT', 'a' * 40))
 if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
 ''')
@@ -324,6 +340,27 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
       stub.chmod(0o755)
       for command in ('ssh', 'scp', 'git', 'sleep', 'uv'):
         (binaries / command).symlink_to(stub)
+      toyochip = root / 'toyochip'
+      helper_stub = '''import json, os, pathlib, sys
+name = pathlib.Path(sys.argv[0]).name
+with open(os.environ['TRACE'], 'a') as stream:
+  stream.write(json.dumps(['dbc-tool', name, *sys.argv[1:]]) + '\\n')
+if name == 'map_key_backup.py':
+  print(json.dumps({'backup_file': str(pathlib.Path(os.environ['TRACE']).parent / 'backup.age')}))
+elif name == 'map_key_restore.py':
+  if not sys.stdin.buffer.read():
+    sys.exit(1)
+elif name == 'r2_release.py':
+  public = pathlib.Path(sys.argv[-1])
+  if not (public / 'manifest.json').is_file() or not (public / 'package.enc').is_file():
+    sys.exit(1)
+  if os.environ.get('FAIL_R2'):
+    sys.exit(1)
+'''
+      for relative in ('release/r2_release.py', 'server/activation/map_key_backup.py', 'server/activation/map_key_restore.py'):
+        helper = toyochip / relative
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        helper.write_text(helper_stub)
       trace = root / 'trace.jsonl'
       fixture_environment_keys = (
         'SRC_BRANCH',
@@ -340,11 +377,22 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
         'FAIL_INSTALL',
         'SOURCE_OUTPUT',
         'WORKER_PHASE',
+        'DBC_BUILD',
+        'DBC_CHECK_RESULT',
+        'DBC_ARTIFACTS_PRESENT',
+        'DOWNLOAD_BASE_URL',
+        'TOYOCHIP_SERVER_ROOT',
+        'DEPLOY_SSH_ALIAS',
+        'DEPLOY_ROOT',
+        'AGE_RECIPIENT',
+        'FAIL_R2',
       )
       environment = {key: value for key, value in os.environ.items() if key not in fixture_environment_keys}
       environment['PYDEPS_ARTIFACT'] = str(payload)
       environment['EXPECTED_SOURCE_SHA'] = 'a' * 40
-      environment.update(PATH=str(binaries) + ':' + os.environ['PATH'], DEVICE='comma@test', TRACE=str(trace))
+      environment.update(PATH=str(binaries) + ':' + os.environ['PATH'], DEVICE='comma@test', TRACE=str(trace),
+                         DOWNLOAD_BASE_URL='https://download.test', TOYOCHIP_SERVER_ROOT=str(toyochip),
+                         DEPLOY_SSH_ALIAS='deploy@test', DEPLOY_ROOT='/deploy', AGE_RECIPIENT='age1test')
       environment.update(extra_env or {})
       args = ['bash', str(scripts / 'publish_release_from_device.sh')]
       if local:
@@ -376,6 +424,42 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
     self.assertLess(fork, gitee)
     self.assertIn('LOCAL_SOURCE_SHA=' + 'a' * 40, calls[build][-1])
     self.assertIn('RELEASE_BRANCH=lean-release', calls[build][-1])
+    self.assertIn('DBC_BUILD=0', calls[build][-1])
+    self.assertFalse(any(call[0] == 'dbc-tool' for call in calls))
+
+  def test_public_dbc_update_prepares_key_before_push_and_uploads_after_push(self):
+    result, calls = self.run_publish(extra_env={'DBC_CHECK_RESULT': '1'})
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    build = next(i for i, call in enumerate(calls) if 'bash /tmp/device_release.sh' in call[-1])
+    self.assertIn('DBC_BUILD=1', calls[build][-1])
+    key_import = next(i for i, call in enumerate(calls) if call[0] == 'ssh' and 'map_keys.py' in call[-1])
+    backup = next(i for i, call in enumerate(calls) if call[:2] == ['dbc-tool', 'map_key_backup.py'])
+    restore = next(i for i, call in enumerate(calls) if call[:2] == ['dbc-tool', 'map_key_restore.py'])
+    upload = next(i for i, call in enumerate(calls) if call[:2] == ['dbc-tool', 'r2_release.py'])
+    fork = next(i for i, call in enumerate(calls) if call[:4] == ['git', 'push', '-f', 'fork'])
+    consume = next(i for i, call in enumerate(calls) if call[0] == 'ssh' and 'git checkout -q --force -B' in call[-1])
+    self.assertLess(build, key_import)
+    self.assertLess(key_import, backup)
+    self.assertLess(backup, restore)
+    self.assertLess(restore, fork)
+    self.assertLess(fork, upload)
+    self.assertLess(upload, consume)
+
+  def test_r2_upload_failure_after_push_never_deploys_release(self):
+    result, calls = self.run_publish(extra_env={'DBC_CHECK_RESULT': '1', 'FAIL_R2': '1'})
+    self.assertNotEqual(result.returncode, 0)
+    self.assertTrue(any(call[:4] == ['git', 'push', '-f', 'fork'] for call in calls))
+    self.assertFalse(any(call[0] == 'ssh' and 'git checkout -q --force -B' in call[-1] for call in calls))
+    self.assertFalse(any(call[0] == 'ssh' and 'reboot' in call[-1] for call in calls))
+
+  def test_r2_retry_reuses_unfinished_device_artifacts(self):
+    result, calls = self.run_publish(extra_env={'DBC_ARTIFACTS_PRESENT': '1'})
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    launch = next(call[-1] for call in calls if 'bash /tmp/device_release.sh' in call[-1])
+    self.assertIn('DBC_BUILD=2', launch)
+    upload = next(i for i, call in enumerate(calls) if call[:2] == ['dbc-tool', 'r2_release.py'])
+    fork = next(i for i, call in enumerate(calls) if call[:4] == ['git', 'push', '-f', 'fork'])
+    self.assertLess(fork, upload)
 
   def test_public_install_failure_never_builds_pushes_or_consumes(self):
     result, calls = self.run_publish(extra_env={'FAIL_INSTALL': '1'})

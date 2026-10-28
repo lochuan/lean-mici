@@ -28,6 +28,7 @@ BLOCKED_PARAMS = {
   "LanLinkEnabled",        # 防本 API 自锁（设备端或 SSH 改）
   "LanLinkParamsVersion",  # 本服务写计数
   "SecOCKey",              # 车辆安全密钥
+  "CarPlatformBundle",     # 车型只能经带激活门禁的车辆选择接口修改
   "SshEnabled",            # SSH 开关
 }
 

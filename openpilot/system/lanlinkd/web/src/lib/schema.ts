@@ -229,6 +229,17 @@ export interface VehicleState {
     wheelbase_m?: number;
   };
   choices: string[];
+  protected_choices?: string[];
+}
+
+export interface DBCActivationStatus {
+  activated: boolean;
+  ready: boolean;
+  revoked: boolean;
+  cleanup_pending: boolean;
+  can_activate: boolean;
+  issue?: string;
+  error?: string;
 }
 
 /** /api/bluetooth：BluetoothStatus 的序列化形（见 bluetooth_api.status_payload）。

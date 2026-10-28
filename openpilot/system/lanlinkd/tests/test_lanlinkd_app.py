@@ -11,6 +11,7 @@ import pytest
 
 from openpilot.common.params import UnknownKeyName
 from openpilot.system.lanlinkd import lanlinkd as mod
+from .test_dbc_activation import setup  # noqa: F401
 
 
 class FakeParams:
@@ -138,6 +139,23 @@ class TestOpenSurface:
     _, r = app.test_client.post("/api/bluetooth/power", json={"bad": ["payload"]}, headers={"Content-Type": "application/json"})
     assert r.status in (400, 409)
     assert r.status != 500
+
+
+class TestSiennaActivationRoutes:
+  def test_activation_status_uses_private_token_and_hardware_binding(self, app, setup, monkeypatch):  # noqa: F811
+    resources, remote, offroad = setup
+    app.ctx.state._dbc_resources = resources
+    from opendbc.can import dbc_asset
+    monkeypatch.setattr(dbc_asset, 'source_sha', lambda: 'a' * 40)
+    _, response = app.test_client.get('/api/vehicle/sienna-lta')
+    assert response.status == 200 and not response.json['ready']
+    _, response = app.test_client.post('/api/vehicle/sienna-lta/activate', json={'code': 'test-code'})
+    assert response.status == 200 and response.json['ready']
+    assert 'token' not in response.json and 'code' not in response.json
+    assert remote.bound == 'serial-123'
+    offroad[0] = False
+    _, response = app.test_client.post('/api/vehicle/sienna-lta/activate', json={'code': 'another-code'})
+    assert response.status == 409
 
 
 class TestParamsRoutes:

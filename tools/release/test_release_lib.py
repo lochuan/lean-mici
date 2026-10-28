@@ -52,6 +52,7 @@ def add_manifest(stage):
   manifest = json.loads((stage / 'RELEASE_MANIFEST.json').read_text())
   manifest['uv_lock_sha256'] = release_lib.pydeps.file_hash(stage / 'uv.lock')
   (stage / 'RELEASE_MANIFEST.json').write_text(json.dumps(manifest))
+  (stage / 'SOURCE_SHA').write_text(manifest['source_commit'] + '\n')
 
 
 class TestTinygradPin(unittest.TestCase):
@@ -110,6 +111,20 @@ class TestCheckStage(unittest.TestCase):
       (stage / "small.bin").write_bytes(b"x" * 10)
       self.assertEqual(release_lib.check_stage(stage), [])
 
+  def test_source_stamp_must_match_release_manifest(self):
+    with tempfile.TemporaryDirectory() as td:
+      stage = self._stamped_stage(td)
+      (stage / 'SOURCE_SHA').write_text('f' * 40 + '\n')
+      self.assertTrue(any('SOURCE_SHA' in problem for problem in release_lib.check_stage(stage)))
+
+  def test_stage_cannot_ship_test_plaintext_adapter(self):
+    with tempfile.TemporaryDirectory() as td:
+      stage = self._stamped_stage(td)
+      adapter = stage / 'opendbc_repo/opendbc/car/tests/dbc_adapter.py'
+      adapter.parent.mkdir(parents=True)
+      adapter.write_text('# test-only plaintext adapter\n')
+      self.assertTrue(any('test DBC adapter' in problem for problem in release_lib.check_stage(stage)))
+
   def test_stage_without_manifest_cannot_publish(self):
     with tempfile.TemporaryDirectory() as td:
       source, _ = _source_repo_with_tinygrad_gitlink(td)
@@ -159,6 +174,11 @@ class LocalStageAssemblyTests(unittest.TestCase):
       root = Path(temporary)
       source, _ = _source_repo_with_tinygrad_gitlink(temporary)
       (source / 'uv.lock').write_text('locked fixture')
+      adapter = source / 'opendbc_repo/opendbc/car/tests/dbc_adapter.py'
+      adapter.parent.mkdir(parents=True)
+      adapter.write_text('# test-only adapter\n')
+      helper = source / 'opendbc_repo/opendbc/car/tests/car_diff.py'
+      helper.write_bytes((REPO_ROOT / 'opendbc_repo/opendbc/car/tests/car_diff.py').read_bytes())
       subprocess.run(['git', '-C', str(source), 'add', 'uv.lock'], check=True)
       subprocess.run(['git', '-C', str(source), 'commit', '-qm', 'lock'], check=True)
       revision = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
@@ -177,10 +197,67 @@ class LocalStageAssemblyTests(unittest.TestCase):
       stage = root / 'stage'
       result = subprocess.run(['bash', '-c', script, 'test', str(source), str(stage), revision], capture_output=True, text=True)
       self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+      self.assertFalse((stage / 'opendbc_repo/opendbc/car/tests/dbc_adapter.py').exists())
+      self.assertEqual((stage / 'opendbc_repo/opendbc/car/tests/car_diff.py').read_bytes(), helper.read_bytes())
+      import ast
+      report = ast.parse((REPO_ROOT / 'openpilot/selfdrive/test/process_replay/diff_report.py').read_text())
+      imports = next(node for node in report.body if isinstance(node, ast.ImportFrom) and node.module == 'opendbc.car.tests.car_diff')
+      exports = {node.name for node in ast.parse((stage / 'opendbc_repo/opendbc/car/tests/car_diff.py').read_text()).body
+                 if isinstance(node, ast.FunctionDef)}
+      self.assertTrue({alias.name for alias in imports.names} <= exports)
+      self.assertEqual((stage / 'SOURCE_SHA').read_text().strip(), revision)
       archive_name = manifest['pydeps']['id'] + '.tar.gz'
       self.assertEqual((stage / archive_name).read_bytes(), (payload / archive_name).read_bytes())
       self.assertEqual(release_lib.check_stage(stage, revision), [])
       self.assertTrue(all(not (stage / name).exists() and not (stage / name).is_symlink() for name in ('msgq', 'opendbc', 'rednose', 'tinygrad')))
+
+
+class DBCUpdateCheckTests(unittest.TestCase):
+  def test_empty_or_source_mismatched_r2_requires_build(self):
+    source = 'a' * 40
+    for latest, expected in (
+        ({'source_sha': source, 'id': source + '-' + '12' * 16}, False),
+        ({'source_sha': 'b' * 40}, True),
+        ({}, True),
+    ):
+      with self.subTest(latest=latest):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(latest).encode()
+        with mock.patch.object(release_lib.urllib.request, 'urlopen', return_value=response):
+          self.assertEqual(release_lib.dbc_needs_build('https://download.test', source), expected)
+
+  def test_missing_latest_requires_build_but_service_failure_stops_release(self):
+    source = 'a' * 40
+    url = 'https://download.test/dbc/sienna-patched-lta/latest.json'
+    for status, expected in ((404, True), (503, None)):
+      with self.subTest(status=status):
+        error = release_lib.urllib.error.HTTPError(url, status, 'test', {}, None)
+        with mock.patch.object(release_lib.urllib.request, 'urlopen', side_effect=error):
+          if expected is None:
+            with self.assertRaisesRegex(ValueError, 'latest check failed'):
+              release_lib.dbc_needs_build('https://download.test', source)
+          else:
+            self.assertTrue(release_lib.dbc_needs_build('https://download.test', source))
+
+  def test_missing_package_requires_build_even_when_latest_matches(self):
+    source = 'a' * 40
+    response = mock.MagicMock()
+    response.__enter__.return_value.read.return_value = json.dumps(
+      {'source_sha': source, 'id': source + '-' + '12' * 16}).encode()
+
+    def check(request, timeout):
+      if isinstance(request, str):
+        return response
+      raise release_lib.urllib.error.HTTPError(request.full_url, 404, 'missing', {}, None)
+
+    with mock.patch.object(release_lib.urllib.request, 'urlopen', side_effect=check):
+      self.assertTrue(release_lib.dbc_needs_build('https://download.test', source))
+
+  def test_malformed_latest_is_rebuilt(self):
+    response = mock.MagicMock()
+    response.__enter__.return_value.read.return_value = b'not json'
+    with mock.patch.object(release_lib.urllib.request, 'urlopen', return_value=response):
+      self.assertTrue(release_lib.dbc_needs_build('https://download.test', 'a' * 40))
 
 
 class TestCli(unittest.TestCase):

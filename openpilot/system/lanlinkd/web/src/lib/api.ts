@@ -6,7 +6,7 @@
  *  - blocked param 返回 403 而非静默跳过（与上游不同，见 FRONTEND_SPEC.md §1）
  */
 import type {
-  BluetoothStatus, Capabilities, DiagnosticsReport, ParamValues, SettingsSchema,
+  BluetoothStatus, Capabilities, DBCActivationStatus, DiagnosticsReport, ParamValues, SettingsSchema,
   SoftwareStatus, StatusSnapshot, ToyotaBackup, ToyotaCatalog, ToyotaCustomizationScan, ToyotaDtcClearResult,
   ToyotaDtcScan, ToyotaLiveValue, ToyotaSession, ToyotaWriteResult, VehicleState, WifiStatus,
 } from "./schema";
@@ -60,6 +60,8 @@ export const api = {
   vehicle: () => request<VehicleState>("/api/vehicle"),
   // 空 name = 清除手动指定，回到自动识别
   selectVehicle: (name: string) => post<null>("/api/vehicle/select", { name }),
+  siennaActivation: () => request<DBCActivationStatus>("/api/vehicle/sienna-lta"),
+  activateSienna: (code: string) => post<DBCActivationStatus>("/api/vehicle/sienna-lta/activate", { code }),
 
   // ---- bluetooth ----
   // 503 时 body 是 params 推导的降级快照，request 会抛 ApiError（message 即 error 字段）

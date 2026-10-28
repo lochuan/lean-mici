@@ -20,6 +20,7 @@ CAR_LIST_PATH = os.path.join(
 
 BUNDLE_KEY = "CarPlatformBundle"
 CP_KEY = "CarParamsPersistent"
+PROTECTED_PLATFORM = 'TOYOTA_SIENNA_PATCHED_LTA'
 
 
 def _decode_car_params(raw) -> dict:
@@ -93,10 +94,11 @@ def vehicle_state(store, car_list: dict | None = None) -> dict:
     # 只发名字列表，不发整张表：72 条 × 完整字段没必要占带宽，
     # 选择时前端只需要 name。
     "choices": sorted(cars.keys()),
+    "protected_choices": [name for name, entry in cars.items() if entry.get('platform') == PROTECTED_PLATFORM],
   }
 
 
-def select_platform(store, name: str, car_list: dict | None = None) -> tuple[int, str]:
+def select_platform(store, name: str, car_list: dict | None = None, dbc_resources=None) -> tuple[int, str]:
   """按显示名写入 CarPlatformBundle。空名 = 清除，回到自动识别。"""
   cars = load_car_list() if car_list is None else car_list
 
@@ -107,6 +109,19 @@ def select_platform(store, name: str, car_list: dict | None = None) -> tuple[int
   entry = cars.get(name)
   if entry is None:
     return 404, "unknown vehicle"
+
+  if entry.get('platform') == PROTECTED_PLATFORM:
+    try:
+      if dbc_resources is None:
+        from openpilot.system.lanlinkd.dbc_resources import create_resources
+        dbc_resources = create_resources(store)
+      status = dbc_resources.status()
+      if status['cleanup_pending']:
+        return 409, 'Sienna Patched LTA 吊销清理未完成，请停车后重试'
+      if not status['ready']:
+        return 403, 'Sienna Patched LTA 未激活或未 provision，请先在车辆选项卡片激活'
+    except (OSError, ValueError, RuntimeError):
+      return 403, 'Sienna Patched LTA 受保护 DBC 不可用，请先激活'
 
   # 结构必须与 params_migration._migrate_car_platform_bundle 写入的一致，
   # 否则下次迁移会读不到 platform。
