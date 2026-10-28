@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from openpilot.common import pydeps
 
 TINYGRAD_PIN_FILE = "TINYGRAD_PIN"
+R2_USER_AGENT = 'chipmunk-activation/1'
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 # GitHub rejects files over 100 MB; stay under it with the same margin as upstream's build_stripped.sh.
@@ -92,7 +93,7 @@ def dbc_needs_build(download_base_url: str, source_sha: str) -> bool:
     raise ValueError('DOWNLOAD_BASE_URL must use HTTPS')
   url = download_base_url.rstrip('/') + '/dbc/sienna-patched-lta/latest.json'
   try:
-    with urllib.request.urlopen(url, timeout=15) as response:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': R2_USER_AGENT}), timeout=15) as response:
       raw = response.read(16385)
   except urllib.error.HTTPError as error:
     if error.code == 404:
@@ -117,7 +118,7 @@ def dbc_needs_build(download_base_url: str, source_sha: str) -> bool:
            identifier + '/manifest.json', identifier + '/package.enc')
   for path in paths:
     try:
-      with urllib.request.urlopen(urllib.request.Request(base + path, method='HEAD'), timeout=15):
+      with urllib.request.urlopen(urllib.request.Request(base + path, method='HEAD', headers={'User-Agent': R2_USER_AGENT}), timeout=15):
         pass
     except urllib.error.HTTPError as error:
       if error.code == 404:

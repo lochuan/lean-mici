@@ -253,6 +253,24 @@ class DBCUpdateCheckTests(unittest.TestCase):
     with mock.patch.object(release_lib.urllib.request, 'urlopen', side_effect=check):
       self.assertTrue(release_lib.dbc_needs_build('https://download.test', source))
 
+  def test_r2_checks_use_cloudflare_compatible_user_agent(self):
+    source = 'a' * 40
+    response = mock.MagicMock()
+    response.__enter__.return_value.read.return_value = json.dumps(
+      {'source_sha': source, 'id': source + '-' + '12' * 16}).encode()
+    requests = []
+
+    def record(request, timeout):
+      requests.append(request)
+      return response
+
+    with mock.patch.object(release_lib.urllib.request, 'urlopen', side_effect=record):
+      self.assertFalse(release_lib.dbc_needs_build('https://download.test', source))
+    self.assertEqual(len(requests), 4)
+    for request in requests:
+      self.assertIsInstance(request, release_lib.urllib.request.Request)
+      self.assertEqual(request.get_header('User-agent'), 'chipmunk-activation/1')
+
   def test_malformed_latest_is_rebuilt(self):
     response = mock.MagicMock()
     response.__enter__.return_value.read.return_value = b'not json'
