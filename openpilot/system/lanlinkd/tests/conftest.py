@@ -78,29 +78,3 @@ def _install_params_stub() -> None:
 
 if not _real_params_is_loadable():
   _install_params_stub()
-
-
-def _install_msgq_import_adapter():
-  """Allow HTTP tests to import messaging without native IPC; every actual IPC operation fails."""
-  try:
-    import msgq  # noqa: F401
-    return
-  except ImportError:
-    pass
-  module = types.ModuleType('msgq')
-
-  def no_ipc(*args, **kwargs):
-    raise RuntimeError('Native msgq unavailable in HTTP tests')
-
-  for name in ('fake_event_handle', 'drain_sock_raw',
-               'toggle_fake_events', 'set_fake_prefix', 'get_fake_prefix', 'delete_fake_prefix', 'wait_for_one_event'):
-    setattr(module, name, no_ipc)
-  for name in ('Poller', 'SubSocket', 'PubSocket', 'SocketEventHandle'):
-    setattr(module, name, type(name, (), {'__init__': no_ipc}))
-  module.Context = object
-  module.MultiplePublishersError = type('MultiplePublishersError', (Exception,), {})
-  module.IpcError = type('IpcError', (Exception,), {})
-  sys.modules['msgq'] = module
-
-
-_install_msgq_import_adapter()

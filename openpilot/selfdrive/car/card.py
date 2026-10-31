@@ -18,8 +18,6 @@ from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import ObdCallback
 from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
-from opendbc.can import dbc_asset
-from opendbc.can.dbc import DBC
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper
 from openpilot.selfdrive.car.helpers import convert_carControlSP, convert_to_capnp
@@ -111,24 +109,10 @@ class Car:
       fixed_fingerprint = (self.params.get("CarPlatformBundle") or {}).get("platform", None)
       init_params_list_sp = sunnypilot_interfaces.initialize_params(self.params)
 
-      warned = False
-      while True:
-        try:
-          if (fixed_fingerprint or os.environ.get('FINGERPRINT')) == dbc_asset.PLATFORM:
-            for name in dbc_asset.SOURCES:
-              DBC(name)
-          self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, cached_params,
-                            fixed_fingerprint, init_params_list_sp, is_release_sp)
-          sunnypilot_interfaces.setup_interfaces(self.CI, self.params)
-          self.RI = interfaces[self.CI.CP.carFingerprint].RadarInterface(self.CI.CP, self.CI.CP_SP)
-          break
-        except PermissionError:
-          if (fixed_fingerprint or os.environ.get('FINGERPRINT')) != dbc_asset.PLATFORM:
-            raise
-          if not warned:
-            cloudlog.warning('Sienna Patched LTA DBC unavailable; waiting without enabling vehicle control')
-            warned = True
-          time.sleep(1)
+      self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, cached_params,
+                        fixed_fingerprint, init_params_list_sp, is_release_sp)
+      sunnypilot_interfaces.setup_interfaces(self.CI, self.params)
+      self.RI = interfaces[self.CI.CP.carFingerprint].RadarInterface(self.CI.CP, self.CI.CP_SP)
       self.CP = self.CI.CP
       self.CP_SP = self.CI.CP_SP
 

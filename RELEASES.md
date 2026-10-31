@@ -1,11 +1,3 @@
-Unreleased (2026-10-28)
-=======================
-* Sienna Patched LTA 使用按源码版本绑定的加密 DBC 包；LanLink 车辆页提供硬件序列号绑定激活及就绪状态。
-* 同一激活码可各绑一台 Chipmunk OS 手机与一台 lean-release 车机；车机以 headunit 角色独立绑定和轮换令牌，admin 分别展示两类设备标识。
-* 独立后台监控授权吊销：仅可信 HTTPS 410 JSON revoked 进入持久化清理流程，行驶中延后至停车清理。
-* 发布树携带并校验 SOURCE_SHA，支持 source 专用 R2 latest 与旧版本回滚。普通 Sienna 和其他 Toyota 不需要激活。
-* 正式 lean-release 在 R2 为空、包缺失或源提交变化时自动构建、导入密钥并上传 DBC；R2 只保留最新包，同源重复发布跳过。
-
 Version 0.11.2 (2026-08-12)
 =======================
 * New driving model

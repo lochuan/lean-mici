@@ -761,7 +761,6 @@ dependencies = [
     { name = "pycapnp" },
     { name = "pycryptodome" },
     { name = "tqdm" },
-    { name = "zstandard" },
 ]
 
 [package.metadata]
@@ -781,7 +780,7 @@ requires-dist = [
     { name = "tree-sitter-c", marker = "extra == 'testing'" },
     { name = "ty", marker = "extra == 'testing'" },
     { name = "unittest-parallel", marker = "extra == 'testing'" },
-    { name = "zstandard" },
+    { name = "zstandard", marker = "extra == 'testing'" },
 ]
 provides-extras = ["testing", "examples"]
 

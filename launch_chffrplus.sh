@@ -4,20 +4,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 source "$DIR/launch_env.sh"
 
-function configure_pydeps {
-  unset PYTHONHOME PYTHONPATH
-  export PYTHONNOUSERSITE=1
-  export PYTHONPATH="$DIR"
-  local dependency_path
-  if dependency_path=$(/usr/local/venv/bin/python -I -B "$DIR/openpilot/common/pydeps.py" path "$DIR" 2>/dev/null) ||
-     dependency_path=$(/usr/local/venv/bin/python -I -B "$DIR/openpilot/common/pydeps.py" install "$DIR"); then
-    export PYTHONPATH="$DIR:$dependency_path"
-  else
-    echo "pydeps: unavailable or incompatible; LANLink blocked for this run" >&2
-    export BLOCK="${BLOCK:+$BLOCK,}lanlinkd"
-  fi
-}
-
 function agnos_init {
   # TODO: move this to agnos
   sudo rm -f /data/etc/NetworkManager/system-connections/*.nmmeta
@@ -103,7 +89,7 @@ function launch {
 
   # handle pythonpath
   ln -sfn $(pwd) /data/pythonpath
-  configure_pydeps
+  export PYTHONPATH="$PWD"
 
   # submodule package symlinks for PYTHONPATH imports on device.
   # on PC these come from editable installs via pyproject.toml / uv.
@@ -121,11 +107,26 @@ function launch {
   tmux capture-pane -pq -S-1000 > /tmp/launch_log
 
   # start manager
-  # Source checkouts build once on first boot and earn the prebuilt marker;
-  # releases published by tools/release/device_release.sh ship it.
-  # If the build fails, no marker is written and the next boot retries.
+  # The prebuilt marker is earned at runtime, never shipped in git:
+  #   fresh install / first boot after an update -> build once (few minutes),
+  #   then the marker makes every later boot skip the build entirely.
+  #   Factory reset wipes /data, so fresh installs always rebuild safely.
+  #   If the build fails, no marker is written and the next boot retries.
+  #
+  # EXCEPTION: a release published by the device flow carries its artifacts
+  # (release/prebuilt/arm64, validated by release_lib at publish time).
+  # Overlay them onto their runtime paths and skip the build entirely —
+  # updates land without compiling.
+  if [ -f "$DIR/release/prebuilt/arm64/MANIFEST" ]; then
+    for top in openpilot msgq_repo rednose_repo; do
+      if [ -d "$DIR/release/prebuilt/arm64/$top" ]; then
+        cp -R "$DIR/release/prebuilt/arm64/$top/." "$DIR/$top/"
+      fi
+    done
+    echo "release ships prebuilt artifacts, overlay applied"
+  fi
   cd openpilot/system/manager
-  if [ ! -f $DIR/prebuilt ]; then
+  if [ ! -f $DIR/prebuilt ] && [ ! -f "$DIR/release/prebuilt/arm64/MANIFEST" ]; then
     ./build.py && touch $DIR/prebuilt
   fi
   ./manager.py

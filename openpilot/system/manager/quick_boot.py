@@ -31,7 +31,7 @@ QUICK_BOOT_NATIVE_ARTIFACTS = (
 )
 
 # Cross-built artifacts contain Path::comma_home() ("$HOME/.comma/...").
-# Device-built ones never do.
+# Device-built ones never do. Mirrors PC_PATH_MARKER in tools/release/release_lib.py.
 PC_PATH_MARKER = b"/.comma"
 
 

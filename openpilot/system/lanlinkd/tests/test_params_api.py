@@ -63,14 +63,6 @@ def store():
     types={"IsMetric": BOOL, "GithubSshKeys": STRING, "LanLinkParamsVersion": INT})
 
 
-def test_vehicle_bundle_write_cannot_bypass_selection_gate():
-  previous = {'platform': 'TOYOTA_SIENNA_PATCHED'}
-  params = FakeStore(initial={'CarPlatformBundle': previous}, types={'CarPlatformBundle': JSON})
-  code, _ = write_param(params, 'CarPlatformBundle', json.dumps({'platform': 'TOYOTA_SIENNA_PATCHED_LTA'}))
-  assert code == 403
-  assert params.get('CarPlatformBundle') == previous
-
-
 class TestTypeName:
   def test_names(self):
     assert type_name(BOOL) == "BOOL"

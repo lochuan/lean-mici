@@ -6,47 +6,20 @@
  * 我们是直连设备，所以能把指纹推导出的能力（VIN/转向方式/纵向控制）一并列出——
  * 这些在排查"为什么某个开关是灰的"时很有用。
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { Car, Check, Loader2, Search, X } from "lucide-vue-next";
 import Button from "./ui/Button.vue";
 import Badge from "./ui/Badge.vue";
-import SiennaActivationCard from "./SiennaActivationCard.vue";
 import { api } from "@/lib/api";
 import { toast } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import type { DBCActivationStatus, VehicleState } from "@/lib/schema";
+import type { VehicleState } from "@/lib/schema";
 
 const state = ref<VehicleState | null>(null);
 const loading = ref(true);
 const picking = ref(false);
 const saving = ref(false);
 const query = ref("");
-const activation = ref<DBCActivationStatus | null>(null);
-const activating = ref(false);
-const activationError = ref("");
-
-async function loadActivation(): Promise<void> {
-  try {
-    activation.value = await api.siennaActivation();
-    activationError.value = "";
-  } catch {
-    activation.value = null;
-    activationError.value = "无法读取授权状态，请稍后重试";
-  }
-}
-
-async function activate(code: string): Promise<void> {
-  activating.value = true;
-  activationError.value = "";
-  try {
-    activation.value = await api.activateSienna(code);
-    toast("Sienna Patched LTA 已激活", "ok");
-  } catch (error) {
-    activationError.value = error instanceof Error ? error.message : "激活失败，请重试";
-  } finally {
-    activating.value = false;
-  }
-}
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -59,13 +32,7 @@ async function load(): Promise<void> {
   }
 }
 
-let activationTimer: ReturnType<typeof setInterval> | undefined;
-onMounted(() => {
-  void load();
-  void loadActivation();
-  activationTimer = setInterval(() => { if (!activating.value) void loadActivation(); }, 5000);
-});
-onUnmounted(() => clearInterval(activationTimer));
+onMounted(load);
 
 const title = computed(() => {
   const s = state.value;
@@ -170,8 +137,6 @@ async function choose(name: string): Promise<void> {
           </div>
         </div>
 
-        <SiennaActivationCard :status="activation" :busy="activating" :error="activationError" :platform="state.platform" @activate="activate" />
-
         <!-- 车型选择：72 条列表，必须能搜 -->
         <div v-if="picking" class="border-t border-sl-border p-4">
           <div class="relative mb-3">
@@ -200,7 +165,7 @@ async function choose(name: string): Promise<void> {
             <li v-for="name in results" :key="name">
               <button
                 type="button"
-                :disabled="saving || ((state.protected_choices ?? []).includes(name) && !activation?.ready)"
+                :disabled="saving"
                 :class="cn(
                   'flex h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[13px] transition-colors',
                   name === state.name ? 'text-sl-accent' : 'text-sl-text-2',

@@ -4,7 +4,6 @@ import json
 from opendbc.car import Bus
 from opendbc.car.fingerprints import MIGRATION
 from opendbc.car.values import PLATFORMS
-from opendbc.can.dbc_asset import SOURCES
 
 
 def generate_dbc_dict() -> dict[str, str]:
@@ -23,9 +22,6 @@ def generate_dbc_dict() -> dict[str, str]:
   for m in MIGRATION:
     if MIGRATION[m] in dbc_map:
       dbc_map[m] = dbc_map[MIGRATION[m]]
-
-  # Cabana is a development tool: explicitly map protected platform names to their shared source DBCs.
-  dbc_map = {platform: SOURCES.get(name, name) for platform, name in dbc_map.items()}
 
   return dbc_map
 

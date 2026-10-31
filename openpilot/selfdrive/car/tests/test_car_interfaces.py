@@ -1,6 +1,4 @@
 import os
-import pytest
-from opendbc.car.tests.dbc_adapter import sienna_dbc_adapter  # noqa: F401
 
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.common.parameterized import parameterized
@@ -24,7 +22,6 @@ from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
 
 MAX_EXAMPLES = int(os.environ.get('MAX_EXAMPLES', '60'))
-pytestmark = pytest.mark.usefixtures('sienna_dbc_adapter')
 ALL_ECUS = tuple(sorted({ecu for ecus in FW_VERSIONS.values() for ecu in ecus} |
                         {ecu for config in FW_QUERY_CONFIGS.values() for ecu in config.extra_ecus}))
 ALL_REQUESTS = tuple(sorted({tuple(request.request) for config in FW_QUERY_CONFIGS.values() for request in config.requests}))

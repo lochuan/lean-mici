@@ -7,7 +7,7 @@ import openpilot.cereal.messaging as messaging
 from openpilot.cereal import log
 from opendbc.car.structs import car
 from openpilot.common.params import Params
-from openpilot.common.realtime import config_realtime_process, DT_MDL, LOCATIOND_FAMILY_CORES
+from openpilot.common.realtime import config_realtime_process, DT_MDL
 from openpilot.selfdrive.locationd.models.car_kf import CarKalman, ObservationKind, States
 from openpilot.selfdrive.locationd.models.constants import GENERATED_DIR
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
@@ -243,7 +243,7 @@ def retrieve_initial_vehicle_params(params: Params, CP: car.CarParams, replay: b
 
 
 def main():
-  config_realtime_process(LOCATIOND_FAMILY_CORES, 5)
+  config_realtime_process([0, 1, 2, 3], 5)
 
   DEBUG = bool(int(os.getenv("DEBUG", "0")))
   REPLAY = bool(int(os.getenv("REPLAY", "0")))

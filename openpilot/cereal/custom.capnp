@@ -467,18 +467,22 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   bigActionT @3 :List(Float32);  # [lat, long] 秒，chestnut 公式（research/02 §4）
   desireClass @4 :UInt8;         # DH.desire 电平（log.Desire 索引），bigmodeld 生成 pulse 边沿
   bigLatencyMs @5 :Float32;      # C-3：REPLY 到达 − timestamp_eof（ms），0 = 本帧没等到
-  cameraToModelMs @6 :Float32;   # 传感器读出完（timestamp_eof）→ modeld 收帧（ms），仅遥测
+  cameraToModelMs @6 :Float32;   # 帧出图（timestamp_eof）→ modeld 收帧（ms），ADR-0001 的 L_n，喂 L̂
+  # 已删除（曾为 HUD 的变道拦截原因）：占位保序号，不能留空号，勿复用
+  retired7 @7 :Void;
+  retired8 @8 :Void;
+  retired9 @9 :Void;
   # 截止后才到的 REPLY：自上一帧发布以来的个数，及其中最近一个的往返（ms）；随后发布的一帧上报一次，
   # 0 = 没有迟到。warmup 头几帧不等 REPLY，不计。
-  bigLateReplyMs @7 :Float32;
-  bigLateReplyCount @8 :UInt16;
+  bigLateReplyMs @10 :Float32;
+  bigLateReplyCount @11 :UInt16;
   # C4 本机分段：自上一帧发布以来最新收到的那个 REPLY（按时或迟到都算），没有 = 全 0
-  bigStages @9 :BigStageTimes;
-  bigSource @10 :BigSource;     # 本帧用没用上大模型，没用上的原因
-  bigDeadlineMs @11 :Float32;   # 本帧等 REPLY 的截止（相对 timestamp_eof，ms），0 = 没等
+  bigStages @12 :BigStageTimes;
+  bigSource @13 :BigSource;     # 本帧用没用上大模型，没用上的原因
+  bigDeadlineMs @14 :Float32;   # 本帧等 REPLY 的截止（相对 timestamp_eof，ms），0 = 没等
 
   # 以 road timestamp_eof 为零点沿关键路径首尾相接：capture..replyWait 之和 = bigmodeld 收到 REPLY − eof，
-  # phoneTotalMs 是 REPLY 带回的手机 recv+prep+htp。
+  # 再加 handoff = modeld 收到 − eof（即 bigLatencyMs）。phoneTotalMs 是 REPLY 带回的手机 recv+prep+htp。
   struct BigStageTimes {
     captureMs @0 :Float32;    # eof → VisionIPC 收到
     warpMs @1 :Float32;
@@ -486,7 +490,8 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
     encodeMs @3 :Float32;     # 提交 → 两路都出包
     sendMs @4 :Float32;       # 出包 → FRAME 写完 socket（含排队）
     replyWaitMs @5 :Float32;  # 写完 → bigmodeld 收到 REPLY（网络 + 手机）
-    phoneTotalMs @6 :Float32;
+    handoffMs @6 :Float32;    # bigmodeld 收到 → modeld 收到（msgq）
+    phoneTotalMs @7 :Float32;
   }
 
   enum BigSource {
@@ -507,105 +512,17 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
 }
 
 struct BigModelReply @0xcb9fd56c7057593a {
-  # 04 号：BGM1 REPLY → modeld 转交（字段取自 REPLY 线布局，见 bigmodeld/frame_codec.h）
-  tEof @0 :UInt64;
-  flags @1 :UInt16;            # bit0 = 手机新建序列，bit1 = t-4 用了零图
-  outputs @2 :List(Float32);   # outputs[0:2066)
-  stages @3 :ModelDataV2SP.BigStageTimes;  # bigmodeld 填 capture..replyWait、phoneTotal
+  # 04 号：BGM1 REPLY → modeld 转交（字段与 REPLY 线布局一一对应，见 bigmodeld/frame_codec.h）
+  frameIdx @0 :UInt32;
+  tEof @1 :UInt64;
+  flags @2 :UInt16;
+  outputs @3 :List(Float32);   # outputs[0:2066)
+  telemetry @4 :List(UInt32);  # recv/prep/htp/total µs
+  stages @5 :ModelDataV2SP.BigStageTimes;  # bigmodeld 填 capture..replyWait、phoneTotal；handoff 由 modeld 填
+  receivedNs @6 :UInt64;                   # bigmodeld 收到 REPLY 的 nanos_since_boot（modeld 算 handoff）
 }
 
-struct NavStateSP @0xc2243c65e0340384 {
-  # 导航状态（BGM1 REPLY 的 NavExt 8304 → 车机）：每条 REPLY 一条，20 Hz，记 rlog。
-  # 单位口径：定点字段换算成 SI 浮点（名字里的单位即存的值）；整数编码字段保留线上原值
-  # （无效哨兵原样保留，如 distanceToManeuverM 的 0xFFFFFFFF）；浮点字段用 NaN 表示线上
-  # 0xFFFF 无效（0 是有效值，不能拿 0 表示缺失）。CURVE 点不含经纬度（决策 17）。
-  frameIndex @0 :UInt32;
-  timestampEofNs @1 :UInt64;
-
-  phoneLocationOk @2 :Bool; # nav_health_flags bit0；手机精确位置有效
-  routeOk @3 :Bool;        # bit1
-  navOk @4 :Bool;          # bit2
-  rerouting @5 :Bool;      # bit3
-
-  hasNavState @6 :Bool;         # present_flags bit0（位 0 ⇒ 对应子结构全 0）
-  hasRoadAttributes @7 :Bool;   # bit1
-  hasCurveAhead @8 :Bool;       # bit2
-  hasNavDebug @9 :Bool;         # bit3
-
-  navState @10 :NavState;
-  roadAttributes @11 :RoadAttributes;
-  curveAhead @12 :CurveAhead;
-  navDebug @13 :NavDebug;
-
-  struct NavState {
-    status @0 :Status;
-    maneuverType @1 :UInt8;           # Valhalla 0–45；255 无效
-    nextManeuverType @2 :UInt8;
-    roundaboutExitIndex @3 :UInt8;
-    distanceToManeuverM @4 :UInt32;   # 0xFFFFFFFF 无效
-    routeRemainingM @5 :UInt32;       # 0xFFFFFFFF 无效
-    routeRemainingSeconds @6 :UInt32; # 0xFFFFFFFF 无效
-    ageMs @7 :UInt16;                 # 0xFFFE 饱和；0xFFFF 未知/无效
-    navMapFed @8 :Bool;               # nav_input_flags bit0
-    navigationFed @9 :Bool;           # bit1
-    onRoute @10 :Bool;                # bit2
-    offRouteDistanceM @11 :UInt8;     # 255 无效
-    # 线上 0.01°；NaN = 0xFFFF 无效。没有 hasNavState 时默认 0，消费者必须先看 has*。
-    headingDeg @12 :Float32;
-
-    enum Status {
-      notRunning @0;
-      idle @1;
-      navigating @2;
-      rerouting @3;
-      positionLost @4;
-      arrived @5;
-      mapMissing @6;
-      fault @7;
-    }
-  }
-
-  struct RoadAttributes {
-    speedLimitKph @0 :UInt8;              # 0 无数据；254 无限速
-    speedLimitSource @1 :UInt8;           # 0 无 · 1 OSM 显式 · 2 隐含/默认 · 3 其他
-    speedLimitAheadKph @2 :UInt8;         # 0 无数据
-    speedLimitAheadDistanceM @3 :UInt16;  # 0xFFFF 无效
-    roadClass @4 :UInt8;                  # 255 无效
-    ramp @5 :Bool;                        # road_edge_flags bit0
-    tunnel @6 :Bool;                      # bit1
-    bridge @7 :Bool;                      # bit2
-    roundabout @8 :Bool;                  # bit3
-    toll @9 :Bool;                        # bit4
-    oneway @10 :Bool;                     # bit5
-    laneCount @11 :UInt8;                 # 0 未知
-    matchDistanceM @12 :Float32;          # 线上 0.1 m；NaN = 0xFFFF 未匹配
-    matchTrusted @13 :Bool;               # bit7
-    ageMs @14 :UInt16;                    # 0xFFFE 饱和；0xFFFF 未知/无效
-  }
-
-  struct CurveAhead {
-    pointCount @0 :UInt8;                 # 0–8；与 points 长度一致
-    maxLateralAccelerationMPerS2 @1 :Float32;  # 线上 0.1 m/s²，换算成 m/s²
-    horizonDistanceM @2 :UInt16;          # 采样覆盖的前方距离 m
-    ageMs @3 :UInt16;                     # 0xFFFE 饱和；0xFFFF 未知/无效
-    points @4 :List(CurvePoint);          # 不含经纬度（决策 17）
-    alongRoute @5 :Bool;                  # curve_flags bit0：点沿路线取
-    roadLookahead @6 :Bool;               # bit1：沿当前道路前扫（无路线）
-    smoothed @7 :Bool;                    # bit2：曲率已平滑
-
-    struct CurvePoint {
-      distanceAlongRouteM @0 :UInt16;     # 0xFFFF 无效
-      targetSpeedKph @1 :UInt8;           # 0 无
-      curvaturePerM @2 :Float32;          # 线上 1e-4 /m，换算成 1/m；0 = 直线
-    }
-  }
-
-  struct NavDebug {
-    renderDurationUs @0 :UInt16;          # 0xFFFF 无效（饱和 65534）
-    mapMatchDurationUs @1 :UInt16;        # 0xFFFF 无效
-    routeComputeDurationMs @2 :UInt16;    # 0xFFFF 无效
-    navCpuUsagePercent @3 :UInt8;         # 254 饱和，255 无效
-  }
+struct CustomReserved11 @0xc2243c65e0340384 {
 }
 
 struct CustomReserved12 @0x9ccdc8676701b412 {

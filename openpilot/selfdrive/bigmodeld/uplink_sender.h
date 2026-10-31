@@ -75,7 +75,6 @@ struct UplinkSenderConfig {
   uint64_t stall_ms = 200;         // 假死阈值
   int connect_timeout_ms = 1000;   // 每次重连超时
   int max_connect_failures = 3;    // 连续失败升级「连接丢失」
-  int poll_ms = 2;                 // 未连接的重连间隔 / socket 写阻塞的重试间隔（这两种状态无事件可等）
 };
 
 class UplinkSender {
@@ -99,13 +98,11 @@ class UplinkSender {
   // 发送循环单步（发送线程）；返回本次是否有进展（无进展时调用方可以小睡）。
   bool step();
 
-  // step() 无进展时发送线程在此等：有 submit_* / notify_disconnect 即返回 true，否则超时 false。
-  // 超时按状态定、以 max_wait_ms 封顶（调用方的退出检查周期）：空闲只等事件；在途帧只等 wide
-  // 时等到假死判定点；未连接 / socket 写阻塞按 poll_ms 重试。
-  // ponytail: 写阻塞仍是 poll_ms 轮询（只在网络卡住时出现）；要事件化需给 UplinkSocket 加带 fd 的 wait_writable。
-  bool wait_for_work(int max_wait_ms);
+  // step() 无进展时发送线程在此等：有 submit_* 即返回 true，否则 timeout_ms 后 false
+  //（超时兜底 socket 写阻塞/假死计时这类无提交的推进）。
+  bool wait_for_work(int timeout_ms);
 
-  // 读侧发现断连/EOF/ERR（REPLY 接收线程）→ 走重连路径（唤醒发送线程立即重连）。
+  // 读侧发现断连/EOF/ERR（REPLY 接收线程）→ 走重连路径。
   void notify_disconnect();
 
   // 码流断档（编码输出缺帧/段长超限，编码回调线程）→ 序列头门重新关门：
@@ -179,21 +176,17 @@ class UplinkSender {
 //   blip        网络闪断后已恢复（重连后 instance_id 相同）
 //   restart     服务端重启后已恢复（重连后 instance_id 变了）
 //   lost        连接丢失（连败升级 kLinkLost，仍在重试）
-//   version_mismatch  HELLO 的 ver 与本端 kVersion 不符（锁步升级，不做兼容）。
-//                    一直保持到下一次 on_hello 成功；connecting/lost 不覆盖。
 // 纯逻辑 + 内部互斥（reply 线程喂 on_hello、发送事件线程喂其余）。
 class LinkStateTracker {
  public:
   void on_connecting();               // 断连/重连中
   void on_hello(uint64_t instance_id);  // HELLO 到达：按 instance_id 对比判 blip/restart
   void on_lost();                     // kLinkLost
-  void on_version_mismatch();         // HELLO parse_hello → kBadVersion
   std::string value() const;
 
  private:
   mutable std::mutex mtx_;
   uint64_t last_instance_ = 0;
   bool have_instance_ = false;
-  bool version_mismatch_ = false;
   const char* state_ = "connecting";
 };

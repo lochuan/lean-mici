@@ -17,7 +17,7 @@ import openpilot.cereal.messaging as messaging
 from openpilot.common.hardware import HARDWARE
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
-from openpilot.common.realtime import config_realtime_process, LOCATIOND_FAMILY_CORES
+from openpilot.common.realtime import config_realtime_process
 from openpilot.common.transformations.orientation import rot_from_euler, euler_from_rot
 from openpilot.common.swaglog import cloudlog
 
@@ -260,7 +260,7 @@ class Calibrator:
 
 
 def main() -> NoReturn:
-  config_realtime_process(LOCATIOND_FAMILY_CORES, 5)
+  config_realtime_process([0, 1, 2, 3], 5)
 
   pm = messaging.PubMaster(['extrinsicsCalibration'])
   sm = messaging.SubMaster(['cameraOdometry', 'carState'], poll='cameraOdometry')

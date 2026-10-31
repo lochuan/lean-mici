@@ -5,13 +5,11 @@ aiohttp 时代这一层零测试——框架迁移最容易改错的恰恰是路
 覆盖：路径参数、错误语义、静态文件穿越防护。
 """
 import os
-import types
 
 import pytest
 
 from openpilot.common.params import UnknownKeyName
 from openpilot.system.lanlinkd import lanlinkd as mod
-from .test_dbc_activation import setup  # noqa: F401
 
 
 class FakeParams:
@@ -27,9 +25,7 @@ class FakeParams:
             # LanlinkApp.__init__ 读这三个组版本信息；设备上它们都存在
             "Version": "STRING", "GitBranch": "STRING", "GitCommit": "STRING",
             # bluetooth 降级快照从 params 推导；设备上它们都存在
-            "BluetoothEnabled": "BOOL", "BluetoothAudioAddress": "STRING",
-            # 丰田诊断会话读写这两个
-            "IsOffroad": "BOOL", "LanLinkDiagMode": "BOOL"}
+            "BluetoothEnabled": "BOOL", "BluetoothAudioAddress": "STRING"}
 
   class _Type:
     def __init__(self, name: str):
@@ -52,9 +48,6 @@ class FakeParams:
 
   def put(self, key, value, **k):
     self._v[key.decode() if isinstance(key, bytes) else key] = value
-
-  def put_bool(self, key, value, **k):
-    self.put(key, bool(value))
 
   def remove(self, key):
     self._v.pop(key.decode() if isinstance(key, bytes) else key, None)
@@ -120,7 +113,7 @@ class TestOpenSurface:
   @pytest.mark.parametrize("path", [
     "/api/params", "/api/params/_all", "/api/params/TestToggle", "/api/models",
     "/api/status", "/api/capabilities", "/api/settings_ui", "/api/logs",
-    "/api/vehicle", "/api/bluetooth", "/api/diagnostics",
+    "/api/vehicle", "/api/bluetooth",
   ])
   def test_read_endpoints_need_no_token(self, app, path):
     _, r = app.test_client.get(path)
@@ -139,23 +132,6 @@ class TestOpenSurface:
     _, r = app.test_client.post("/api/bluetooth/power", json={"bad": ["payload"]}, headers={"Content-Type": "application/json"})
     assert r.status in (400, 409)
     assert r.status != 500
-
-
-class TestSiennaActivationRoutes:
-  def test_activation_status_uses_private_token_and_hardware_binding(self, app, setup, monkeypatch):  # noqa: F811
-    resources, remote, offroad = setup
-    app.ctx.state._dbc_resources = resources
-    from opendbc.can import dbc_asset
-    monkeypatch.setattr(dbc_asset, 'source_sha', lambda: 'a' * 40)
-    _, response = app.test_client.get('/api/vehicle/sienna-lta')
-    assert response.status == 200 and not response.json['ready']
-    _, response = app.test_client.post('/api/vehicle/sienna-lta/activate', json={'code': 'test-code'})
-    assert response.status == 200 and response.json['ready']
-    assert 'token' not in response.json and 'code' not in response.json
-    assert remote.bound == 'serial-123'
-    offroad[0] = False
-    _, response = app.test_client.post('/api/vehicle/sienna-lta/activate', json={'code': 'another-code'})
-    assert response.status == 409
 
 
 class TestParamsRoutes:
@@ -257,15 +233,6 @@ class TestBootstrapRoute:
     assert r.json["paramsVersion"] == st.json["paramsVersion"]
 
 
-class TestDiagnosticsRoute:
-  def test_returns_cache_report(self, app, monkeypatch):
-    report = {"drive": {"started": False, "seconds": 0}, "camera": None}
-    monkeypatch.setattr(mod.StatusCache, "diagnostics", lambda self: report)
-    _, r = app.test_client.get("/api/diagnostics")
-    assert r.status == 200
-    assert r.json == report
-
-
 class TestStaticRoutes:
   def test_index_is_served(self, app):
     _, r = app.test_client.get("/")
@@ -326,12 +293,7 @@ class TestServerConfig:
     # 起服务拉起 _lanlink._tcp 发布；退出一起结束（广播消失，App 不连死服务）
     monkeypatch.setattr(mod, "Params", lambda: FakeParams({"LanLinkEnabled": True, "Version": "0.9.8"}))
 
-    closed = []
-
     class FakeApp:
-      # main() 退出时要 close()：退出丰田诊断模式，把 panda 还给 pandad
-      ctx = types.SimpleNamespace(state=types.SimpleNamespace(close=lambda: closed.append(True)))
-
       def run(self, **kwargs):
         pass
 
@@ -342,4 +304,3 @@ class TestServerConfig:
     mod.main()
     assert len(started) == 1, "启动时没有拉起 mDNS 发布"
     assert stopped == ["PROC"], "退出时没有结束 mDNS 发布"
-    assert closed == [True], "退出时没有收尾（诊断模式不退出，pandad 起不来）"

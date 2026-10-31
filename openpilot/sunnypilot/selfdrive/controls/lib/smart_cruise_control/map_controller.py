@@ -1,14 +1,13 @@
 import json
 import math
 import platform
-import time
 
 from openpilot.cereal import custom
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.car.cruise import V_CRUISE_UNSET
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
-from openpilot.common.swaglog import cloudlog
+from openpilot.sunnypilot.navd.helpers import coordinate_from_param, Coordinate
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control import MIN_V
 
 MapState = VisionState = custom.LongitudinalPlanSP.SmartCruiseControl.MapState
@@ -16,6 +15,9 @@ MapState = VisionState = custom.LongitudinalPlanSP.SmartCruiseControl.MapState
 ACTIVE_STATES = (MapState.turning, )
 ENABLED_STATES = (MapState.enabled, MapState.overriding, *ACTIVE_STATES)
 
+R = 6373000.0  # approximate radius of earth in meters
+TO_RADIANS = math.pi / 180
+TO_DEGREES = 180 / math.pi
 TARGET_JERK = -0.6  # m/s^3 There's some jounce limits that are not consistent so we're fudging this some
 TARGET_ACCEL = -1.2  # m/s^2 should match up with the long planner limit
 TARGET_OFFSET = 1.0  # seconds - This controls how soon before the curve you reach the target velocity. It also helps
@@ -24,6 +26,19 @@ TARGET_OFFSET = 1.0  # seconds - This controls how soon before the curve you rea
                      # done to keep the distance calculations consistent but results in the offset actually being less
                      # time than specified depending on how much of a speed differential there is between v_ego and the
                      # target velocity.
+
+
+def velocities_from_param(param: str, params: Params):
+  if params is None:
+    params = Params()
+
+  json_str = params.get(param)
+  if json_str is None:
+    return None
+
+  velocities = json.loads(json_str)
+
+  return velocities
 
 
 def calculate_accel(t, target_jerk, a_ego):
@@ -38,6 +53,15 @@ def calculate_distance(t, target_jerk, a_ego, v_ego):
   return t * v_ego + a_ego/2 * (t ** 2) + target_jerk/6 * (t ** 3)
 
 
+# points should be in radians
+# output is meters
+def distance_to_point(ax, ay, bx, by):
+  a = math.sin((bx-ax)/2)*math.sin((bx-ax)/2) + math.cos(ax) * math.cos(bx)*math.sin((by-ay)/2)*math.sin((by-ay)/2)
+  c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+
+  return R * c  # in meters
+
+
 class SmartCruiseControlMap:
   v_target: float = 0
   a_target: float = 0.
@@ -46,7 +70,7 @@ class SmartCruiseControlMap:
   output_v_target: float = V_CRUISE_UNSET
   output_a_target: float = 0.
 
-  def __init__(self, *, clock=None):
+  def __init__(self):
     self.params = Params()
     self.mem_params = Params("/dev/shm/params") if platform.system() != "Darwin" else self.params
     self.enabled = self.params.get_bool("SmartCruiseControlMap")
@@ -59,15 +83,9 @@ class SmartCruiseControlMap:
     self.target_lat = 0.0
     self.target_lon = 0.0
     self.frame = -1
-    self.clock = clock or (time.monotonic_ns if platform.system() == "Darwin" else
-                           lambda: time.clock_gettime_ns(time.CLOCK_BOOTTIME))
-    self.last_bad_log_ns = 0
-    self.target_velocities = []
-    self.snapshot = None
-    self.sample_time_ns = 0
-    self.travelled_m = 0.0
-    self.last_update_ns = None
-    self.motion_valid = True
+
+    self.last_position = coordinate_from_param("LastGPSPosition", self.mem_params) or Coordinate(0.0, 0.0)
+    self.target_velocities = velocities_from_param("MapTargetVelocities", self.mem_params) or []
 
   def get_v_target_from_control(self) -> float:
     if self.is_active:
@@ -82,78 +100,34 @@ class SmartCruiseControlMap:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.enabled = self.params.get_bool("SmartCruiseControlMap")
 
-  def clear_targets(self):
-    self.snapshot = None
-    self.target_velocities = []
-    self.v_target = 0.0
-    self.target_lat = self.target_lon = 0.0
-
-  def read_targets(self, now_ns):
-    raw = self.mem_params.get("MapTargetVelocities")
-    if raw is None:
-      return None
-    try:
-      snapshot = json.loads(raw)
-      if snapshot == []:
-        return None
-      if not isinstance(snapshot, dict):
-        raise ValueError("expected distance envelope")
-      sample_ns, valid_until_ns = snapshot["sample_time_ns"], snapshot["valid_until_ns"]
-      if (type(sample_ns) is not int or type(valid_until_ns) is not int or
-          not 0 < sample_ns <= now_ns <= valid_until_ns <= sample_ns + 2_000_000_000):
-        raise ValueError("invalid or expired sample times")
-      points = snapshot["points"]
-      if not isinstance(points, list) or not 1 <= len(points) <= 8:
-        raise ValueError("invalid point count")
-      previous_distance = 0
-      for point in points:
-        if not isinstance(point, dict):
-          raise ValueError("invalid point")
-        lat, lon, distance, velocity = (point[key] for key in ("latitude", "longitude", "distance_m", "velocity"))
-        if not all(type(value) in (int, float) and math.isfinite(value) for value in (lat, lon, distance, velocity)):
-          raise ValueError("non-finite point")
-        if (not -90 <= lat <= 90 or not -180 <= lon <= 180 or (lat == 0 and lon == 0) or
-            not previous_distance <= distance <= 600 or velocity <= 0):
-          raise ValueError("invalid coordinates, distance or velocity")
-        previous_distance = distance
-      return snapshot
-    except (ValueError, TypeError, KeyError, OverflowError, RecursionError) as error:
-      if now_ns - self.last_bad_log_ns >= 5_000_000_000 or self.last_bad_log_ns == 0:
-        cloudlog.warning("SCC-map rejected targets: %s", error)
-        self.last_bad_log_ns = now_ns
-      return None
-
   def update_calculations(self) -> None:
-    now_ns = self.clock()
-    previous_ns = self.last_update_ns
-    self.last_update_ns = now_ns
-    if (not self.motion_valid or not math.isfinite(self.v_ego) or self.v_ego < 0 or
-        not math.isfinite(self.a_ego) or (previous_ns is not None and now_ns < previous_ns)):
-      self.clear_targets()
+    self.last_position = coordinate_from_param("LastGPSPosition", self.mem_params) or Coordinate(0.0, 0.0)
+    lat = self.last_position.latitude
+    lon = self.last_position.longitude
+
+    self.target_velocities = velocities_from_param("MapTargetVelocities", self.mem_params) or []
+
+    if self.last_position is None or self.target_velocities is None:
       return
-    snapshot = self.read_targets(now_ns)
-    if snapshot is None:
-      self.clear_targets()
-      return
-    sample_ns = snapshot["sample_time_ns"]
-    if sample_ns < self.sample_time_ns or (sample_ns == self.sample_time_ns and
-        (self.snapshot is None or snapshot["points"] != self.snapshot["points"])):
-      self.clear_targets()
-      return
-    if sample_ns > self.sample_time_ns:
-      self.sample_time_ns = sample_ns
-      self.travelled_m = self.v_ego * ((now_ns - sample_ns) / 1e9)
-    else:
-      # 重复快照只能缩短期限；不能重新扣传输延迟或重置已行驶距离。
-      snapshot["valid_until_ns"] = min(snapshot["valid_until_ns"], self.snapshot["valid_until_ns"])
-      if now_ns > snapshot["valid_until_ns"]:
-        self.clear_targets()
-        return
-      self.travelled_m += self.v_ego * ((now_ns - previous_ns) / 1e9)
-    self.snapshot = snapshot
-    self.target_velocities = snapshot["points"]
-    forward_points = self.target_velocities
-    forward_distances = [max(0.0, point["distance_m"] - self.travelled_m) for point in forward_points]
+
+    min_dist = 1000
+    min_idx = 0
+    distances = []
+
+    # find our location in the path
+    for i in range(len(self.target_velocities)):
+      target_velocity = self.target_velocities[i]
+      tlat = target_velocity["latitude"]
+      tlon = target_velocity["longitude"]
+      d = distance_to_point(lat * TO_RADIANS, lon * TO_RADIANS, tlat * TO_RADIANS, tlon * TO_RADIANS)
+      distances.append(d)
+      if d < min_dist:
+        min_dist = d
+        min_idx = i
+
+    # only look at values from our current position forward
+    forward_points = self.target_velocities[min_idx:]
+    forward_distances = distances[min_idx:]
 
     # find velocities that we are within the distance we need to adjust for
     valid_velocities = []
@@ -269,8 +243,7 @@ class SmartCruiseControlMap:
 
     return enabled, active
 
-  def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise, *, motion_valid: bool = True) -> None:
-    self.motion_valid = motion_valid
+  def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise) -> None:
     self.long_enabled = long_enabled
     self.long_override = long_override
     self.v_ego = v_ego
