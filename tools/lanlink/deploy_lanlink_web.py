@@ -36,7 +36,7 @@ DEFAULT_HOST = "comma@10.0.0.27"
 REMOTE_ROOT = "/data/openpilot"
 REMOTE_STATIC = f"{REMOTE_ROOT}/openpilot/system/lanlinkd/static"
 
-# 设备沿用系统解释器；Sanic 闭包由应用 release manifest 绑定 /data/pydeps，launcher 统一加载
+# 设备上的 python 与依赖（sanic 等随 AGNOS venv，19.7.2 起不再需要 /data/pydeps）
 REMOTE_PY = "/usr/local/venv/bin/python"
 REMOTE_PYPATH = f"{REMOTE_ROOT}"
 

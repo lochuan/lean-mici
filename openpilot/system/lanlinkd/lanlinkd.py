@@ -1,8 +1,10 @@
 # system/lanlinkd/lanlinkd.py
 """LANLink daemon：局域网版 sunnylink（无云）。Sanic 装配层。
 
-Sanic 由应用锁文件声明，发布时构建完整离线闭包；RELEASE_MANIFEST.json 绑定
-/data/pydeps/sets/<id>，由 launch_chffrplus.sh 统一验证与加载，不依赖系统自带 Sanic。
+为什么是 Sanic 而不是 aiohttp：aiohttp 曾由 AGNOS venv 提供，19.6 起被移除，
+于是 lanlinkd 在设备上直接 ModuleNotFoundError（CI 仍绿，因为 CI 的 venv 有）。
+Sanic 由 pyproject.toml 声明，随 AGNOS venv 一起安装（19.7.2 起），不再需要
+/data/pydeps 旁路。
 
 为什么 single_process=True（见 main()）：Sanic 默认起多 worker 进程，而
 StatusCache 状态线程、WifiManager DBus 单例都是**进程内状态**。
@@ -32,7 +34,6 @@ from openpilot.system.lanlinkd import settings as settings_mod
 from openpilot.system.lanlinkd import vehicle_api
 from openpilot.system.lanlinkd import wifi_api
 from openpilot.system.lanlinkd import software_api
-from openpilot.system.lanlinkd import toyota_diag_api
 from openpilot.system.lanlinkd.statusd import StatusCache
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -54,13 +55,6 @@ class LanlinkApp:
     self._wifi_manager = None
     self._wifi_lock = threading.Lock()
     threading.Thread(target=self.cache.run, args=(self.exit_event,), name="lanlink_status", daemon=True).start()
-    self.toyota = toyota_diag_api.create(self.params, self.cache.snapshot)
-    threading.Thread(target=self.toyota.idle_watchdog, args=(self.exit_event,), name="lanlink_toyota_idle", daemon=True).start()
-
-  def close(self) -> None:
-    """进程退出前调用：停后台线程，并退出丰田诊断模式把 panda 还给 pandad（守护线程等不到）。"""
-    self.exit_event.set()
-    self.toyota.session.exit()
 
   # ---- helpers ----
   @staticmethod
@@ -216,53 +210,11 @@ class LanlinkApp:
       return _json_error(code, payload)
     return json_response(payload, status=code)
 
-  # ---- toyota 诊断 ----
-  # 全部是阻塞 IO（等 pandad 退出、等 ECU 应答，扫描可达几十秒），一律进线程池
-  async def _toyota(self, method: str, *args) -> HTTPResponse:
-    code, body = await asyncio.to_thread(getattr(self.toyota, method), *args)
-    return empty(status=204) if body is None else json_response(body, status=code)
-
-  async def toyota_session_get(self, request: Request) -> HTTPResponse:
-    return await self._toyota("session_get")
-
-  async def toyota_session_enter(self, request: Request) -> HTTPResponse:
-    return await self._toyota("session_enter")
-
-  async def toyota_session_exit(self, request: Request) -> HTTPResponse:
-    return await self._toyota("session_exit")
-
-  async def toyota_catalog(self, request: Request) -> HTTPResponse:
-    return await self._toyota("catalog_get")
-
-  async def toyota_customizations_scan(self, request: Request) -> HTTPResponse:
-    return await self._toyota("customizations_scan", self._body(request))
-
-  async def toyota_customization_write(self, request: Request, key: str) -> HTTPResponse:
-    return await self._toyota("customization_write", key, self._body(request))
-
-  async def toyota_backups(self, request: Request) -> HTTPResponse:
-    return await self._toyota("backups_list")
-
-  async def toyota_backup_restore(self, request: Request, backup_id: str) -> HTTPResponse:
-    return await self._toyota("backup_restore", backup_id)
-
-  async def toyota_dtc_scan(self, request: Request) -> HTTPResponse:
-    return await self._toyota("dtc_scan", self._body(request))
-
-  async def toyota_dtc_clear(self, request: Request) -> HTTPResponse:
-    return await self._toyota("dtc_clear", self._body(request))
-
-  async def toyota_live_read(self, request: Request) -> HTTPResponse:
-    return await self._toyota("live_read", self._body(request))
-
   # ---- status / capabilities / settings / logs ----
   async def status(self, request: Request) -> HTTPResponse:
     snap = self.cache.snapshot()
     snap["paramsVersion"] = params_api.to_str(self.params.get(params_api.VERSION_KEY))
     return json_response(snap)
-
-  async def diagnostics(self, request: Request) -> HTTPResponse:
-    return json_response(self.cache.diagnostics())
 
   async def bootstrap(self, request: Request) -> HTTPResponse:
     # 进「车机」页一次拿全三份数据：各字段与原接口同形（App 一次请求渲染首屏）
@@ -328,19 +280,7 @@ ROUTES: tuple[tuple[str, str, str], ...] = (
   ("POST", "/api/wifi/<operation:str>", "wifi_operation"),
   ("GET", "/api/software", "software_get"),
   ("POST", "/api/software/<action:str>", "software_action"),
-  ("GET", "/api/toyota/session", "toyota_session_get"),
-  ("GET", "/api/toyota/catalog", "toyota_catalog"),
-  ("POST", "/api/toyota/session/enter", "toyota_session_enter"),
-  ("POST", "/api/toyota/session/exit", "toyota_session_exit"),
-  ("POST", "/api/toyota/customizations/scan", "toyota_customizations_scan"),
-  ("POST", "/api/toyota/customizations/<key:str>/write", "toyota_customization_write"),
-  ("GET", "/api/toyota/backups", "toyota_backups"),
-  ("POST", "/api/toyota/backups/<backup_id:str>/restore", "toyota_backup_restore"),
-  ("POST", "/api/toyota/dtc/scan", "toyota_dtc_scan"),
-  ("POST", "/api/toyota/dtc/clear", "toyota_dtc_clear"),
-  ("POST", "/api/toyota/live/read", "toyota_live_read"),
   ("GET", "/api/status", "status"),
-  ("GET", "/api/diagnostics", "diagnostics"),
   ("GET", "/api/bootstrap", "bootstrap"),
   ("GET", "/api/capabilities", "capabilities"),
   ("GET", "/api/settings_ui", "settings_ui"),
@@ -380,16 +320,12 @@ def main() -> None:
   # 设备名 = hostname（AGNOS 上是 comma-<serial>）；TXT 带版本和设备名。
   device_name = socket.gethostname()
   mdns_proc = mdns.start(device_name, params_api.to_str(params.get("Version")) or "", device_name)
-  app = None
   try:
     # single_process=True 是必须的，不是调优：cache 状态线程 / WifiManager 单例
     # 是进程内状态，多 worker 会各起一套互相打架。详见模块 docstring。
-    app = create_app()
-    app.run(host="0.0.0.0", port=8088, single_process=True, motd=False)
+    create_app().run(host="0.0.0.0", port=8088, single_process=True, motd=False)
   finally:
     mdns.stop(mdns_proc)
-    if app is not None:
-      app.ctx.state.close()
 
 
 if __name__ == "__main__":

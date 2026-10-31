@@ -11,11 +11,7 @@
 // 线程与锁序（全文件统一，防死锁）：
 //   取帧×2（state_mtx：配对/状态机/索引 + 编码缓冲池）、编码器 dequeue×2（输出回调：
 //   meta 缓存 → sender.submit_*）、writer（sender.step）、REPLY reader（read_some →
-//   msg_framer → parse → msgq + navStateSP + /dev/shm/params）、
-//   标定/输入元数据（SubMaster → MetaProvider.set_rpy/set_model_inputs）。
-//   标定线程另订阅 deviceMotion(20 Hz)；msgq 每条消息对每个订阅线程
-//   发 SIGUSR2（与是否 poll 无关），因此线程每秒会多约 20 次信号唤醒，但 SubMaster 只 poll 原有
-//   节拍源，用户态循环不会多跑。
+//   parse → msgq）、标定/输入元数据（SubMaster → MetaProvider.set_rpy/set_model_inputs）。
 //   锁序：sender.mtx > state_mtx > {ev_mtx, meta 缓存, buf 池, 分段计时}（叶子锁，绝不反向嵌套）。
 //   sender 事件回调在其锁内触发 ⇒ 回调只记账 + 推事件队列（ev_mtx），状态机转移与
 //   request_keyframe 在下一次组帧前由 drain_events_locked() 按序执行（事件仍落在
@@ -35,10 +31,8 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
-#include <map>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -57,8 +51,6 @@
 #include "frame_scheduler.h"
 #include "frame_stages.h"
 #include "meta_cache.h"
-#include "msg_framer.h"
-#include "nav_outputs.h"
 #include "pair_matcher.h"
 #include "server_locator.h"
 #include "uplink_sender.h"
@@ -81,47 +73,17 @@ const size_t kEncUvOffset = kEncStride * VENUS_Y_SCANLINES(COLOR_FMT_NV12, chipm
 const size_t kEncBufSize = VENUS_BUFFER_SIZE(COLOR_FMT_NV12, chipmunk::kModelW, chipmunk::kModelH);
 constexpr int kEncPoolDepth = 6;   // 每路编码缓冲池（1 配对槽 + ≤5 在编码器在途）
 constexpr int kSchedFifoPrio = 53;
-// 下列 RTT/取帧/REPLY 数值测于 os04c10 读出常量修正前（timestamp_eof 早 ~21.5 ms）：以 eof 为零点的量相对真实 eof 各减 ~21.5 ms。
 // writer/reply 线程：core 3 有 pandad（FIFO 54，常驻 ~36%）抢占 → 编码完到 send 等 1～8 ms；
 // core 2 只有 RT 5 的 locationd 系（台架 A/B/A：RTT p90 62.4→56.2 ms）。EINVAL（离线核）容忍
 const std::vector<int> kCpuAffinity = {2};
-// capture 线程做 warp（查找表 ~0.3 ms/路，标定变化那帧建表 ~1 ms），FIFO 50。
-// core 4/5 上有 FIFO 53 的 controlsd/card/ui，capture 排队使取帧 p50 比 camerad 出帧晚 ~7 ms。
-// core 7 有 modeld（FIFO 54，每帧跑 ~9.6 ms）：road 在此每帧排队 ~4.3 ms，取帧 p50 30.1 ms（modeld 24.4 ms）。
-// core 6 有 camerad（TS）：wide 的短突发抢占它，让 road 帧对所有订阅者晚 ~0.7 ms；road 也放这里则 modeld 晚 ~1 ms。
-// road→core 2（RT 5 的 locationd 系 + 本进程 writer/reply，帧到达时都被抢占或错开）、wide→core 6，
-// 台架 jungle 实测：取帧 p50 30.1→24.5 ms，大模型 REPLY p50 54.6→49.6 ms / p99 61.2→53.9 ms，
-// modeld 收帧不变，locationd inputsOK 无异常。wide 也放 core 2 只再快 ~0.7 ms，却让 FIFO 50 线程
-// 更多压在 locationd 所在核（eagled 曾因高优先级拖慢 sensord 致 locationdTemporaryError），不取。
+// capture 线程做 warp（查找表 ~0.3 ms/路，标定变化那帧建表 ~1 ms）：两路分到两颗 isolcpus 大核并行。
+// core 4/5 上有 FIFO 53 的 controlsd/card/ui，capture 排队使取帧 p50 比 camerad 出帧晚 ~7 ms；
+// core 7 原属 modeld（lean 下闲置），core 6 与 camerad（TS，~5%）同核，FIFO 50 的短突发可抢占它
+// （台架 road→7、wide→6：RTT p50 63.7→57.9 ms，取帧 29.5→23.0 ms）
 constexpr int kCaptureFifoPrio = 50;
-const std::vector<int> kCaptureCore[2] = {{2}, {6}};
-// writer/reply 空闲时只等事件，此值只是 do_exit 检查周期（同取帧 vipc.recv 的 100 ms）
-constexpr int kIdleWaitMs = 100;
+const std::vector<int> kCaptureCore[2] = {{7}, {6}};
 
 enum StreamId { kRoad = 0, kWide = 1 };
-
-// 每路线程标识：取帧线程日志名 / 编码器名（V4LEncoder 据此把 dequeue 线程命名为 "dq-" + 编码器名，
-// v4l_encoder.cc:74）
-struct StreamThreadNames {
-  const char* capture;
-  const char* encoder;
-};
-constexpr StreamThreadNames kThreadNames[2] = {{"bgm_road", "bgmRoad"}, {"bgm_wide", "bgmWide"}};
-
-// NAV_STATE.nav_status（线上 0–7）→ capnp enum；线上越界按 fault（协议只定义 0–7）
-cereal::NavStateSP::NavState::Status nav_status_from_wire(uint8_t status) {
-  using Status = cereal::NavStateSP::NavState::Status;
-  switch (status) {
-    case 0: return Status::NOT_RUNNING;
-    case 1: return Status::IDLE;
-    case 2: return Status::NAVIGATING;
-    case 3: return Status::REROUTING;
-    case 4: return Status::POSITION_LOST;
-    case 5: return Status::ARRIVED;
-    case 6: return Status::MAP_MISSING;
-    default: return Status::FAULT;
-  }
-}
 
 void setup_realtime(const char* who, int prio = kSchedFifoPrio, const std::vector<int>& cores = kCpuAffinity) {
   if (util::set_realtime_priority(prio) != 0) {
@@ -223,8 +185,7 @@ class TcpSocket : public UplinkSocket {
   }
 
   // 可读即返回（REPLY 到达即醒，不睡满轮询周期）；poll 在锁外，免得挡住发送线程。
-  // 发送线程断连走 close_locked 的 shutdown，会让在等的 poll 立即返回（POLLHUP），调用方随后
-  // 重查连接状态；只有「取 fd 后、进 poll 前」被关且编号被复用这一极窄窗口会睡满 timeout_ms。
+  // 期间 fd 被并发关闭只会让 poll 提前返回，调用方随后 read_some 自会报错重连。
   void wait_readable(int timeout_ms) {
     int fd;
     {
@@ -239,8 +200,6 @@ class TcpSocket : public UplinkSocket {
  private:
   void close_locked() {
     if (fd_ >= 0) {
-      // 单 close 唤不醒别的线程里在等这个 fd 的 poll（poll 持有文件引用）；shutdown 才会
-      ::shutdown(fd_, SHUT_RDWR);
       ::close(fd_);
       fd_ = -1;
     }
@@ -321,7 +280,7 @@ class Bigmodeld {
 
   // ===== 取帧/配对线程（×2）=====
   void capture_thread(StreamId sid) {
-    setup_realtime(kThreadNames[sid].capture, kCaptureFifoPrio, kCaptureCore[sid]);
+    setup_realtime(sid == kRoad ? "bgm_road" : "bgm_wide", kCaptureFifoPrio, kCaptureCore[sid]);
 
     VisionStreamType type = sid == kRoad ? VISION_STREAM_NARROW_ROAD : VISION_STREAM_WIDE_ROAD;
     VisionIpcClient vipc("camerad", type, false);
@@ -365,43 +324,27 @@ class Bigmodeld {
   void writer_thread() {
     setup_realtime("bgm_writer");
     while (!do_exit) {
-      if (!sender_->step()) sender_->wait_for_work(kIdleWaitMs);
+      if (!sender_->step()) sender_->wait_for_work(2);
     }
   }
 
   // ===== REPLY 接收线程（(e)）=====
   void reply_thread() {
     setup_realtime("bgm_reply");
-    MsgFramer framer;
+    std::vector<uint8_t> buf;
 
-    // 坏流/EOF/ERR 统一收尾：记断连 + 走重连路径 + 清半包缓冲（16 号 code-review：Duplicated Code）。
-    // peer_ver 只在头部可信时传入（>=0）；EOF / 首条非 HELLO 没有可信版本。
-    auto fail = [&](const char* why, int peer_ver = -1) {
-      if (peer_ver >= 0) {
-        LOGE("bigmodeld: REPLY 流异常（%s），断连重连 got_ver=%d want_ver=%u", why, peer_ver,
-             unsigned(bgm1::kVersion));
-      } else {
-        LOGE("bigmodeld: REPLY 流异常（%s），断连重连", why);
-      }
+    // 坏流/EOF/ERR 统一收尾：记断连 + 走重连路径 + 清半包缓冲（16 号 code-review：Duplicated Code）
+    auto fail = [&](const char* why) {
+      LOGE("bigmodeld: REPLY 流异常（%s），断连重连", why);
       sender_->notify_disconnect();
+      hello_seen_ = false;
       link_mark_connecting();
-      framer.clear();
-      // S2：断连即丢弃 NavExt 摘要；旧弯道点不得继续驱动纵向（MapTargetVelocities → []）
-      link_session_.on_disconnect(nav_link_tick());
-      publish_map_targets();
+      buf.clear();
     };
 
     while (!do_exit) {
-      // R1：连接代号变化 = drop 后 writer 线程已重连（reply 线程可能还没看到 !connected）。
-      // session 复位 hello 标志 / NavExt 摘要并清弯道目标；半包缓冲在这里清。
-      if (link_session_.on_epoch(u32(sender_->conn_epoch()), [&] { return nav_link_tick(); })) {
-        framer.clear();
-        publish_map_targets();
-      }
       if (!sender_->connected()) {
-        // 未连接/启动即清空：不留下上一趟或本趟崩溃前的弯道点
-        link_session_.on_idle(false, nav_link_tick());
-        publish_map_targets();
+        hello_seen_ = false;
         util::sleep_for(50);
         continue;
       }
@@ -413,80 +356,67 @@ class Bigmodeld {
         continue;
       }
       if (n == 0) {
-        sock_.wait_readable(kIdleWaitMs);
-        // 无新 REPLY：手机位置 / CURVE 过期时清掉旧弯道点（writer 只在需要时写）
-        link_session_.on_idle(sender_->connected(), nav_link_tick());
-        publish_map_targets();
+        sock_.wait_readable(2);
         continue;
       }
-      framer.append(tmp, n);
+      buf.insert(buf.end(), tmp, tmp + n);
 
       // MsgHdr 分流：HELLO/REPLY/ERR 定长整条解析，坏流即断连重来
-      while (true) {
-        MsgFramer::Message framed;
-        const MsgFramer::Result fr = framer.next(&framed);
-        if (fr == MsgFramer::Result::kNeedMore) break;
-        const uint8_t got_ver = framer.peer_version();
-        const uint8_t* data = framer.data();
-        const size_t need = framed.size;
-        if (fr == MsgFramer::Result::kBadVersion) {
-          link_mark_version_mismatch();
-          fail("协议版本不符", got_ver);
+      while (buf.size() >= bgm1::kMsgHdrSize) {
+        const uint8_t type = buf[5];
+        const uint32_t len = bgm1::read_u32_le(buf.data() + 12);
+        size_t need = 0;
+        if (type == bgm1::kTypeHello && len == bgm1::kHelloPayloadSize) {
+          need = bgm1::kHelloWireSize;
+        } else if (type == bgm1::kTypeReply && len == bgm1::kReplyPayloadSize) {
+          need = bgm1::kReplyWireSize;
+        } else if (type == bgm1::kTypeErr && len == bgm1::kErrPayloadSize) {
+          need = bgm1::kErrWireSize;
+        } else {
+          LOGE("bigmodeld: REPLY 流协议错 type=0x%02x len=%u", type, len);
+          fail("协议头非法");
           break;
         }
-        if (fr == MsgFramer::Result::kBadHeader) {
-          const uint32_t len = bgm1::read_u32_le(data + 12);
-          LOGE("bigmodeld: REPLY 流协议错 type=0x%02x len=%u got_ver=%u want_ver=%u", framed.type, len,
-               unsigned(got_ver), unsigned(bgm1::kVersion));
-          fail("协议头非法", got_ver);
-          break;
-        }
+        if (buf.size() < need) break;
 
-        if (framed.type == bgm1::kTypeHello) {
+        if (type == bgm1::kTypeHello) {
           // 06 号：HELLO 必须是连接首条消息且每连接仅一条（ver/instance_id/max_frame）
           bgm1::Hello h;
-          bgm1::Err pe = link_session_.hello_seen() ? bgm1::Err::kBadType : bgm1::parse_hello(data, need, &h);
+          bgm1::Err pe = hello_seen_ ? bgm1::Err::kBadType : bgm1::parse_hello(buf.data(), need, &h);
           if (pe != bgm1::Err::kOk) {
-            if (pe == bgm1::Err::kBadVersion) {
-              // N12：先置 version_mismatch，再 fail()（connecting 被 sticky 状态挡住，
-              // UI 不闪；fail() 自带唯一一条带 got/want 的日志）
-              link_mark_version_mismatch();
-              fail("HELLO 版本不符（协议版本不符）", got_ver);
-            } else {
-              LOGE("bigmodeld: HELLO 解析失败 err=%d got_ver=%u want_ver=%u", int(pe),
-                   unsigned(got_ver), unsigned(bgm1::kVersion));
-              fail("HELLO 非法/重复", got_ver);
-            }
+            LOGE("bigmodeld: HELLO 解析失败 err=%d", int(pe));
+            fail("HELLO 非法/重复");
             break;
           }
-          link_session_.on_hello_ok();
+          hello_seen_ = true;
           max_segment_.store(h.max_frame, std::memory_order_relaxed);  // 段长上限以 HELLO 为准（spec）
           link_.on_hello(h.instance_id);
           link_state_write();
           LOGW("bigmodeld: HELLO instance_id=0x%llx max_frame=%u（%s）",
                (unsigned long long)h.instance_id, h.max_frame, link_.value().c_str());
-        } else if (!link_session_.hello_seen()) {
+        } else if (!hello_seen_) {
           fail("首条消息不是 HELLO");
           break;
-        } else if (framed.type == bgm1::kTypeReply) {
+        } else if (type == bgm1::kTypeReply) {
           const uint64_t reply_ns = nanos_since_boot();
           bgm1::Reply r;
-          const bgm1::Err re = bgm1::parse_reply(data, need, &r);
-          if (re != bgm1::Err::kOk) {
-            LOGE("bigmodeld: REPLY 解析失败 err=%d got_ver=%u want_ver=%u", int(re), unsigned(got_ver),
-                 unsigned(bgm1::kVersion));
-            fail("REPLY 解析失败", got_ver);
+          if (bgm1::parse_reply(buf.data(), need, &r) != bgm1::Err::kOk) {
+            fail("REPLY 解析失败");
             break;
           }
-          // 04 号 C：REPLY 经 msgq 转交 modeld（outputs[0:2066) 与 flags 原样镜像，
+          // 04 号 C：REPLY 经 msgq 转交 modeld（outputs[0:2066) 与遥测原样镜像，
           // 逐帧都发——App 侧解码跳帧的全零 outputs 也发，落回小模型由 modeld 判）
           MessageBuilder msg;
           auto evt = msg.initEvent();
           auto br = evt.initBigModelReply();
+          br.setFrameIdx(r.frame_idx);
           br.setTEof(r.t_eof);
           br.setFlags(r.flags);
           auto outs = br.initOutputs(bgm1::kReplyOutputsCount);
           for (size_t i = 0; i < bgm1::kReplyOutputsCount; i++) outs.set(i, r.outputs[i]);
+          auto tel = br.initTelemetry(bgm1::kReplyTelemetryCount);
+          for (size_t i = 0; i < bgm1::kReplyTelemetryCount; i++) tel.set(i, r.telemetry[i]);
+          br.setReceivedNs(reply_ns);
           auto st = br.initStages();
           st.setPhoneTotalMs(r.telemetry[3] / 1e3f);
           StageMs s;
@@ -499,76 +429,33 @@ class Bigmodeld {
             st.setReplyWaitMs(s.reply_wait);
           }
           pm_.send("bigModelReply", msg);
-          // P1：回包给 modeld 之后再做 navStateSP 与 map 目标（回包路径不做多余的事）
-          publish_nav_state(r);
-          // R3：决策时刻取 REPLY 处理完之后（nav_link_tick），而非 parse 前的 reply_ns
-          link_session_.on_reply(reply_ns, r.t_eof, r.nav_ext, nav_link_tick());
-          publish_map_targets();
         } else {
           bgm1::ErrMsg e;
-          const bgm1::Err ee = bgm1::parse_err(data, need, &e);
-          if (ee == bgm1::Err::kOk) {
+          if (bgm1::parse_err(buf.data(), need, &e) == bgm1::Err::kOk) {
             LOGE("bigmodeld: 服务端 ERR code=%u detail=%u frame_idx=%u", e.code, e.detail, e.frame_idx);
-          } else {  // 版本真不一致时对端 ERR 的 ver 也不同，会落在这里
-            LOGE("bigmodeld: 服务端 ERR 解析失败 err=%d got_ver=%u want_ver=%u", int(ee), unsigned(got_ver),
-                 unsigned(bgm1::kVersion));
           }
           sender_->notify_disconnect();
+          hello_seen_ = false;
           link_mark_connecting();
-          framer.clear();
-          link_session_.on_disconnect(nav_link_tick());
-          publish_map_targets();
+          buf.clear();
           break;
         }
-        framer.consume(need);
+        buf.erase(buf.begin(), buf.begin() + need);
       }
     }
-    // AU-5：退出循环不留旧弯道点；calib 线程退出前还会再写一次
-    link_session_.on_disconnect(nav_link_tick());
-    publish_map_targets();
   }
 
   // ===== 标定/输入元数据线程：extrinsicsCalibration.rpyCalib + modelDataV2SP → 帧头 =====
-  // deviceMotion(20 Hz) 只在消息更新时取最新一条，不进 poll：
-  // SubMaster 只 poll 原有 4 Hz + 20 Hz 节拍源，用户态循环不会因它们多跑。注意 msgq 的每条
-  // 消息都会对每个订阅线程发 SIGUSR2（msgq_msg_send 末尾的 thread_signal），所以线程每秒仍会
-  // 被这一路额外信号唤醒约 20 次；这是 msgq 语义，不是 poll 集合能避免的。
-  // SubMaster 的 socket 是 conflate=true（socketmaster.cc:53）；update() 在 poll 返回后对未 poll
-  // 的服务做非阻塞 receive(true)，拿到各自最新一条，队列不积压。
   void calib_thread() {
-    SubMaster sm({"extrinsicsCalibration", "modelDataV2SP", "deviceMotion"},
-                 {"extrinsicsCalibration", "modelDataV2SP"});
-    // 车体系换算用的 rpyCalib：与 MetaProvider.set_rpy 同一份（最近一条 extrinsics）。
-    float rpy[3] = {0.f, 0.f, 0.f};
-    // m-b：只有 calStatus==invalid 禁用 yaw/speed；uncalibrated/recalibrating 照常用当前 rpy。
-    ExtrinsicsCalibStatus calib_status = ExtrinsicsCalibStatus::kUncalibrated;
-
+    SubMaster sm({"extrinsicsCalibration", "modelDataV2SP"});
     while (!do_exit) {
       sm.update(1000);
-      // P2：mem Params 的文件 I/O 全在非实时 calib 线程；本线程本来就被 20 Hz 节拍源唤醒
-      write_pending_map_targets();
       if (sm.updated("extrinsicsCalibration")) {
         auto c = sm["extrinsicsCalibration"].getExtrinsicsCalibration();
-        auto calib_rpy = c.getRpyCalib();
-        if (calib_rpy.size() == 3) {
-          rpy[0] = calib_rpy[0];
-          rpy[1] = calib_rpy[1];
-          rpy[2] = calib_rpy[2];
-          meta_.set_rpy(rpy);
-        }
-        switch (c.getCalStatus()) {
-          case cereal::ExtrinsicsCalibration::Status::CALIBRATED:
-            calib_status = ExtrinsicsCalibStatus::kCalibrated;
-            break;
-          case cereal::ExtrinsicsCalibration::Status::INVALID:
-            calib_status = ExtrinsicsCalibStatus::kInvalid;
-            break;
-          case cereal::ExtrinsicsCalibration::Status::RECALIBRATING:
-            calib_status = ExtrinsicsCalibStatus::kRecalibrating;
-            break;
-          default:
-            calib_status = ExtrinsicsCalibStatus::kUncalibrated;
-            break;
+        auto rpy = c.getRpyCalib();
+        if (rpy.size() == 3) {
+          float r[3] = {rpy[0], rpy[1], rpy[2]};
+          meta_.set_rpy(r);
         }
       }
       // 04 号 C-2：modeld 权威元数据（电平采样，迟到 ≤2 帧按 04 号口径接受）
@@ -580,33 +467,7 @@ class Bigmodeld {
           meta_.set_model_inputs(a, sp.getDesireClass());
         }
       }
-      // v4 VEHICLE（协议 §1.2.2）：deviceMotion 20 Hz，经 rpyCalib 转到车体系。
-      // 消息 → 车体系样本的换算在纯函数里（可单测）；只在消息更新时调 set_vehicle（m6）。
-      if (sm.updated("deviceMotion")) {
-        auto dm = sm["deviceMotion"].getDeviceMotion();
-        auto vel = dm.getVelocityDevice();
-        auto ang = dm.getAngularVelocityDevice();
-        const float v[3] = {vel.getX(), vel.getY(), vel.getZ()};
-        const float w[3] = {ang.getX(), ang.getY(), ang.getZ()};
-        DeviceMotionFlags f;
-        f.event_valid = sm["deviceMotion"].getValid();
-        f.sensors_ok = dm.getSensorsOK();
-        f.inputs_ok = dm.getInputsOK();
-        f.posenet_ok = dm.getPosenetOK();
-        f.calib_status = calib_status;
-        f.message_time_ns = sm["deviceMotion"].getLogMonoTime();
-        meta_.set_vehicle(vehicle_sample_from_device_motion(rpy, v, w, f));
-      }
     }
-    // AU-5：退出前把 reply 线程最后交付的清空写出（所有线程 join 后 main 还会阻塞清一次）
-    write_pending_map_targets();
-  }
-
-  // 退出清理（main 在所有线程 join 之后调用）：阻塞写，确保旧弯道点不留给下次进程（S1a）
-  void cleanup_map_params() {
-    // 所有线程已 join，无并发读者/写者
-    clear_map_targets(MapParamsOps{
-        [this](const char* key, const std::string& value) { mem_params_.put(key, value); }});
   }
 
  private:
@@ -624,7 +485,7 @@ class Bigmodeld {
     ctx_[sid].pool.init(kEncBufSize, chipmunk::kModelW, chipmunk::kModelH, kEncStride, kEncUvOffset);
 
     EncoderInfo info{};
-    info.publish_name = kThreadNames[sid].encoder;  // 仅日志标识（不建 PubMaster）
+    info.publish_name = sid == kRoad ? "bgmRoad" : "bgmWide";  // 仅日志标识（不建 PubMaster）
     info.fps = kFps;
     int bitrate = bitrate_;
     info.get_settings = [bitrate](int) {
@@ -770,132 +631,6 @@ class Bigmodeld {
     link_state_write();
   }
 
-  // HELLO 的 ver 与本端 kVersion 不符（锁步升级）：写在 fail() 之后，避免被 connecting 覆盖
-  void link_mark_version_mismatch() {
-    link_.on_version_mismatch();
-    link_state_write();
-  }
-
-  // REPLY → navStateSP（20 Hz，rlog / UI）。CURVE 只镜像点距离 / 目标速度 / 曲率，不含经纬度。
-  void publish_nav_state(const bgm1::Reply& r) {
-    const NavStateSnapshot s = nav_state_snapshot_from_reply(r);
-    MessageBuilder msg;
-    auto evt = msg.initEvent();
-    auto ns = evt.initNavStateSP();
-    ns.setFrameIndex(s.frame_index);
-    ns.setTimestampEofNs(s.timestamp_eof_ns);
-    ns.setPhoneLocationOk(s.phone_location_ok);
-    ns.setRouteOk(s.route_ok);
-    ns.setNavOk(s.nav_ok);
-    ns.setRerouting(s.rerouting);
-    ns.setHasNavState(s.has_nav_state);
-    ns.setHasRoadAttributes(s.has_road_attributes);
-    ns.setHasCurveAhead(s.has_curve_ahead);
-    ns.setHasNavDebug(s.has_nav_debug);
-
-    if (s.has_nav_state) {
-      auto nav = ns.initNavState();
-      nav.setStatus(nav_status_from_wire(s.nav_state.status));
-      nav.setManeuverType(s.nav_state.maneuver_type);
-      nav.setNextManeuverType(s.nav_state.next_maneuver_type);
-      nav.setRoundaboutExitIndex(s.nav_state.roundabout_exit_index);
-      nav.setDistanceToManeuverM(s.nav_state.distance_to_maneuver_m);
-      nav.setRouteRemainingM(s.nav_state.route_remaining_m);
-      nav.setRouteRemainingSeconds(s.nav_state.route_remaining_seconds);
-      nav.setAgeMs(s.nav_state.age_ms);
-      nav.setNavMapFed(s.nav_state.nav_map_fed);
-      nav.setNavigationFed(s.nav_state.navigation_fed);
-      nav.setOnRoute(s.nav_state.on_route);
-      nav.setOffRouteDistanceM(s.nav_state.off_route_distance_m);
-      nav.setHeadingDeg(s.nav_state.heading_deg);
-    }
-    if (s.has_road_attributes) {
-      auto road = ns.initRoadAttributes();
-      road.setSpeedLimitKph(s.road_attributes.speed_limit_kph);
-      road.setSpeedLimitSource(s.road_attributes.speed_limit_source);
-      road.setSpeedLimitAheadKph(s.road_attributes.speed_limit_ahead_kph);
-      road.setSpeedLimitAheadDistanceM(s.road_attributes.speed_limit_ahead_distance_m);
-      road.setRoadClass(s.road_attributes.road_class);
-      road.setRamp(s.road_attributes.ramp);
-      road.setTunnel(s.road_attributes.tunnel);
-      road.setBridge(s.road_attributes.bridge);
-      road.setRoundabout(s.road_attributes.roundabout);
-      road.setToll(s.road_attributes.toll);
-      road.setOneway(s.road_attributes.oneway);
-      road.setLaneCount(s.road_attributes.lane_count);
-      road.setMatchDistanceM(s.road_attributes.match_distance_m);
-      road.setMatchTrusted(s.road_attributes.match_trusted);
-      road.setAgeMs(s.road_attributes.age_ms);
-    }
-    if (s.has_curve_ahead) {
-      auto curve = ns.initCurveAhead();
-      const uint8_t max_points = uint8_t(bgm1::kCurveMaxPoints);
-      const uint8_t count = s.curve_ahead.point_count > max_points ? max_points
-                                                                   : s.curve_ahead.point_count;
-      curve.setPointCount(count);
-      curve.setMaxLateralAccelerationMPerS2(s.curve_ahead.max_lateral_acceleration_m_per_s2);
-      curve.setHorizonDistanceM(s.curve_ahead.horizon_distance_m);
-      curve.setAgeMs(s.curve_ahead.age_ms);
-      curve.setAlongRoute(s.curve_ahead.along_route);
-      curve.setRoadLookahead(s.curve_ahead.road_lookahead);
-      curve.setSmoothed(s.curve_ahead.smoothed);
-      auto points = curve.initPoints(count);
-      for (uint8_t i = 0; i < count; i++) {
-        auto p = points[i];
-        p.setDistanceAlongRouteM(s.curve_ahead.points[i].distance_along_route_m);
-        p.setTargetSpeedKph(s.curve_ahead.points[i].target_speed_kph);
-        p.setCurvaturePerM(s.curve_ahead.points[i].curvature_per_m);
-      }
-    }
-    if (s.has_nav_debug) {
-      auto debug = ns.initNavDebug();
-      debug.setRenderDurationUs(s.nav_debug.render_duration_us);
-      debug.setMapMatchDurationUs(s.nav_debug.map_match_duration_us);
-      debug.setRouteComputeDurationMs(s.nav_debug.route_compute_duration_ms);
-      debug.setNavCpuUsagePercent(s.nav_debug.nav_cpu_usage_percent);
-    }
-    pm_.send("navStateSP", msg);
-  }
-
-  NavLinkTick nav_link_tick() {
-    return NavLinkTick{nanos_since_boot()};
-  }
-
-  // 手机 CURVE 沿路线距离 + 手机采样期限 → 弯道目标。
-  // 决策与序列化在 NavLinkSession / MapTargetWriter（纯逻辑、宿主单测）；reply 线程只把结果放进
-  // 本次写入槽，真正的 Params 文件 I/O 由非实时线程 calib_thread 做（P2）。
-  // 锁内只 swap 指针（AU-9）：旧值留在局部变量，出锁后释放，实时线程不在锁内分配/释放堆。
-  void publish_map_targets() {
-    std::optional<std::string> json = link_session_.take_pending();
-    if (!json) return;
-    {
-      std::lock_guard<std::mutex> lk(map_params_mtx_);
-      pending_map_target_velocities_.swap(json);
-    }
-  }
-
-  // calib_thread（非实时）每拍取走待写的弯道目标；没有待写就什么都不做。
-  void write_pending_map_targets() {
-    std::optional<std::string> pending;
-    {
-      std::lock_guard<std::mutex> lk(map_params_mtx_);
-      pending.swap(pending_map_target_velocities_);
-    }
-    if (pending) write_mem_param("MapTargetVelocities", *pending);
-  }
-
-  // 阻塞 put 只在非实时线程（calib_thread）或所有线程 join 之后的退出路径调用；
-  // Params::put 自身线程安全，且这里没有并发写者，故不持锁做 I/O（避免 reply 线程等锁）。
-  // AU-9：put 失败要留痕（SCC-map 读不到新目标）；按 key 限流 1 Hz，1 s 刷新会自愈。
-  void write_mem_param(const char* key, const std::string& value) {
-    if (mem_params_.put(key, value) == 0) return;  // Params::put 成功返回 0
-    const uint64_t now_ns = nanos_since_boot();
-    uint64_t& last_log_ns = mem_param_error_log_ns_[key];
-    if (now_ns - last_log_ns < 1'000'000'000ULL) return;
-    last_log_ns = now_ns;
-    LOGE("bigmodeld: 写 mem Params %s 失败", key);
-  }
-
   // ---- sender 事件（sender.mtx 锁内回调：只记账 + 推队列 + 日志，不取 state_mtx）----
   void on_uplink_event(const UplinkEventInfo& e) {
     switch (e.ev) {
@@ -1038,20 +773,12 @@ class Bigmodeld {
   MetaProvider meta_;
   TcpSocket sock_;
   std::unique_ptr<UplinkSender> sender_;
-  // 04 号 C：REPLY 经 msgq 转交 modeld；票 C：NavExt 镜像给 UI / rlog
-  PubMaster pm_{{"bigModelReply", "navStateSP"}};
+  PubMaster pm_{{"bigModelReply"}};  // 04 号 C：REPLY 经 msgq 转交 modeld
   FrameStageLog stages_;  // C4 本机分段计时（随 REPLY 上报）
-
-  // 票 C：最近一条 REPLY 的 NavExt 摘要（reply 线程独占）；断连路径必须 reset()
-  NavLinkSession link_session_;  // AU-1：epoch 跟踪 + NavExt 摘要 + 弯道目标 writer + HELLO 标志
-  // reply 线程交付、calib_thread 写出的弯道目标（map_params_mtx_ 保护）
-  std::optional<std::string> pending_map_target_velocities_;
-  Params mem_params_{"/dev/shm/params"};  // SCC-map 读的 mem Params（与 Python Params 同一路径）
-  std::mutex map_params_mtx_;             // 只保护 pending_map_target_velocities_（不包 I/O）
-  std::map<std::string, uint64_t> mem_param_error_log_ns_;  // write_mem_param 失败日志限流（calib 线程独占）
 
   // 06 号：链路状态（HELLO instance_id 对比 → blip/restart）→ Param "BigmodelLinkState"（07 号读）
   LinkStateTracker link_;
+  bool hello_seen_ = false;       // 本连接已收 HELLO（reply 线程独占）
   std::atomic<uint32_t> max_segment_{bgm1::kDefaultMaxSegment};  // 段长上限（HELLO 一到即更新）
   std::mutex link_param_mtx_;     // 串行化 Param 写（putNonBlocking 的 future 非线程安全）
 
@@ -1142,8 +869,6 @@ int main(int argc, char* argv[]) {
   }
 
   Bigmodeld bg(loc.get(), bitrate);
-  // N4：起任何线程之前由主线程同步清一次（崩溃/SIGKILL 重启后不留上一趟的弯道点与位置）。
-  bg.cleanup_map_params();
   std::vector<std::thread> ts;
   ts.emplace_back(&Bigmodeld::capture_thread, &bg, kRoad);
   ts.emplace_back(&Bigmodeld::capture_thread, &bg, kWide);
@@ -1151,9 +876,6 @@ int main(int argc, char* argv[]) {
   ts.emplace_back(&Bigmodeld::reply_thread, &bg);
   ts.emplace_back(&Bigmodeld::calib_thread, &bg);
   for (auto& t : ts) t.join();
-
-  // 退出清理：阻塞写（S1a）。所有线程已停，I/O 不再影响回包/实时线程。
-  bg.cleanup_map_params();
 
   LOGW("bigmodeld: exit");
   return 0;

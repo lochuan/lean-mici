@@ -11,10 +11,8 @@
 //   desire[8] = modeld DesireHelper 电平（set_model_inputs 进）→ fill 转 pulse 边沿
 //     （MODEL_ABI §4.2：通道 0 恒 0、持续同 desire 只 pulse 一次）。
 //   action_t[2] = modeld chestnut 公式直通（13 号 / research/02 §4，权威在 modeld）。
-//   VEHICLE 8 B = 协议 v4：set_vehicle 存 deviceMotion 原始车体系单位，
-//     fill 按 t_eof 检查 100 ms 源新鲜度并编码速度/yaw；不缓存任何 GNSS。
 //
-// 纯逻辑（仅 std），宿主单测直接编译；fill 路径不堆分配。
+// 纯逻辑（仅 std），宿主单测直接编译。
 
 #include <cstdint>
 #include <mutex>
@@ -35,48 +33,6 @@ void get_warp_matrix(const float rpy[3], const float intrinsics[9], bool bigmode
 extern const float kNarrowRoadIntrinsics[9];
 extern const float kWideRoadIntrinsics[9];
 
-// extrinsicsCalibration.calStatus；只有 invalid 时禁用 yaw/speed，
-// uncalibrated / recalibrating 仍用当前 rpy（m-b）。
-enum class ExtrinsicsCalibStatus : uint8_t {
-  kUncalibrated = 0,
-  kCalibrated = 1,
-  kInvalid = 2,
-  kRecalibrating = 3,
-};
-
-// deviceMotion → 车体系样本（helpers.py PoseCalibrator）：
-//   device_from_calib = rot_from_euler(rpyCalib)
-//   calib_from_device = device_from_calib^T
-//   v_body = calib_from_device · velocityDevice
-//   w_body = calib_from_device · angularVelocityDevice
-// yaw_source_ok  = event_valid ∧ sensorsOK ∧ calStatus != invalid ∧ w_body.z 有限
-// speed_source_ok = event_valid ∧ sensorsOK ∧ inputsOK ∧ posenetOK ∧ calStatus != invalid ∧ v_body.x 有限
-struct VehicleSample {
-  float forward_speed_m_per_s = 0;     // 车体系 x（带符号）
-  float lateral_speed_m_per_s = 0;     // 车体系 y
-  float yaw_rate_rad_per_s = 0;        // 车体系 z，右转（顺时针）为正，与 bearing 同向
-  bool reversing = false;              // forward_speed < −0.3 m/s
-  bool standstill = false;             // hypot(forward_speed, lateral_speed) < 0.1 m/s
-  bool yaw_source_ok = false;
-  bool speed_source_ok = false;
-  uint64_t message_time_ns = 0;
-};
-
-// deviceMotion 消息的判据快照（I1 / m-b）
-struct DeviceMotionFlags {
-  bool event_valid = false;        // cereal Event.valid
-  bool sensors_ok = false;         // deviceMotion.sensorsOK
-  bool inputs_ok = false;          // deviceMotion.inputsOK
-  bool posenet_ok = false;         // deviceMotion.posenetOK
-  ExtrinsicsCalibStatus calib_status = ExtrinsicsCalibStatus::kUncalibrated;
-  uint64_t message_time_ns = 0;
-};
-
-VehicleSample vehicle_sample_from_device_motion(const float rpy[3],
-                                                const float velocity_device[3],
-                                                const float angular_velocity_device[3],
-                                                const DeviceMotionFlags& flags);
-
 // 帧头元数据提供者：rpyCalib 由标定线程喂（extrinsicsCalibration），fill() 由取帧线程调。
 class MetaProvider {
  public:
@@ -84,9 +40,6 @@ class MetaProvider {
 
   // extrinsicsCalibration.rpyCalib 更新时调用（任意线程）。
   void set_rpy(const float rpy[3]);
-
-  // deviceMotion 更新时调用（任意线程，只存最新一条车体系样本）。
-  void set_vehicle(const VehicleSample& s);
 
   // modeld 上行元数据（04 号 C-2，modelDataV2SP）更新时调用（任意线程）：
   // action_t = chestnut 公式（research/02 §4），desire_class = DH.desire 电平。
@@ -97,15 +50,16 @@ class MetaProvider {
   void reset_desire_latch();
 
   // 生成一帧的头元数据。t_eof = road 帧 timestamp_eof（ns）。
-  // 填 t_eof/desire/traffic_convention/action_t/warp_*/vehicle；flags/frame_idx/road_len/wide_len
-  // 归调用方。无样本时 vehicle 保持缺省（速度零且无效、yaw 无效）。
+  // 只填 t_eof/desire/traffic_convention/action_t/warp_*；flags/frame_idx/road_len/wide_len 归调用方。
   void fill(uint64_t t_eof, bgm1::FrameHeader* out) const;
 
   // 当前 warp 矩阵（wide=false → road/MED，true → wide/SBIG），与 fill 写进帧头的同一份。
-  // capture 线程据此在 C4 上 warp（协议 v4）。
+  // capture 线程据此在 C4 上 warp（协议 v2）。
   void warp(bool wide, float out[9]) const;
 
  private:
+  void recompute_locked();
+
   mutable std::mutex mtx_;
   float rpy_[3] = {0.f, 0.f, 0.f};
   float warp_road_[9] = {0};
@@ -113,6 +67,4 @@ class MetaProvider {
   float action_t_[2] = {0.f, 0.f};
   uint8_t desire_class_ = 0;
   mutable uint8_t prev_desire_class_ = 0;  // pulse 边沿 latch：每次 fill() 采样
-  VehicleSample vehicle_;                  // 最近一条 deviceMotion（车体系）
-  bool vehicle_seen_ = false;
 };

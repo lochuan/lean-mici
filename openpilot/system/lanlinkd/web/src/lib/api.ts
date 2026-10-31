@@ -6,9 +6,8 @@
  *  - blocked param 返回 403 而非静默跳过（与上游不同，见 FRONTEND_SPEC.md §1）
  */
 import type {
-  BluetoothStatus, Capabilities, DiagnosticsReport, ParamValues, SettingsSchema,
-  SoftwareStatus, StatusSnapshot, ToyotaBackup, ToyotaCatalog, ToyotaCustomizationScan, ToyotaDtcClearResult,
-  ToyotaDtcScan, ToyotaLiveValue, ToyotaSession, ToyotaWriteResult, VehicleState, WifiStatus,
+  BluetoothStatus, Capabilities, ParamValues, SettingsSchema,
+  SoftwareStatus, StatusSnapshot, VehicleState, WifiStatus,
 } from "./schema";
 
 export class ApiError extends Error {
@@ -45,8 +44,6 @@ export const api = {
   capabilities: () => request<Capabilities>("/api/capabilities"),
   allParams: () => request<ParamValues>("/api/params/_all"),
   status: () => request<StatusSnapshot>("/api/status"),
-  // 诊断页单独轮询，不并入 /api/status
-  diagnostics: () => request<DiagnosticsReport>("/api/diagnostics"),
 
   // ---- 单 key 写 ----
   putParam: (key: string, value: string) =>
@@ -79,23 +76,6 @@ export const api = {
   software: () => request<SoftwareStatus>("/api/software"),
   softwareOp: (action: string) =>
     post<null>(`/api/software/${encodeURIComponent(action)}`),
-
-  // ---- toyota 诊断（非诊断模式下除 session、catalog、backups 外一律 409 {"error": "请先进入诊断模式"}）----
-  toyotaSession: () => request<ToyotaSession>("/api/toyota/session"),
-  toyotaEnter: () => post<ToyotaSession>("/api/toyota/session/enter"),
-  toyotaExit: () => post<null>("/api/toyota/session/exit"),
-  toyotaCatalog: () => request<ToyotaCatalog>("/api/toyota/catalog"),
-  // 扫描由前端按目录 ECU 列表逐个调用
-  toyotaScanCustomizations: (ecu: string) => post<ToyotaCustomizationScan>("/api/toyota/customizations/scan", { ecu }),
-  toyotaWrite: (key: string, value: number, before: string) =>
-    post<ToyotaWriteResult>(`/api/toyota/customizations/${encodeURIComponent(key)}/write`, { value, before }),
-  toyotaBackups: () => request<{ backups: ToyotaBackup[] }>("/api/toyota/backups"),
-  toyotaRestore: (id: string) =>
-    post<ToyotaWriteResult>(`/api/toyota/backups/${encodeURIComponent(id)}/restore`),
-  toyotaScanDtc: (ecu: string) => post<ToyotaDtcScan>("/api/toyota/dtc/scan", { ecu }),
-  toyotaClearDtc: (ecus: string[]) =>
-    post<{ results: ToyotaDtcClearResult[] }>("/api/toyota/dtc/clear", { ecus }),
-  toyotaReadLive: (keys: string[]) => post<{ values: ToyotaLiveValue[] }>("/api/toyota/live/read", { keys }),
 
   // ---- logs ----
   logs: () => request<unknown>("/api/logs"),

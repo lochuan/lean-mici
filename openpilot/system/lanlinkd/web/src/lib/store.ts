@@ -19,8 +19,7 @@ import type {
   StatusSnapshot,
 } from "./schema";
 
-type ToastAction = { label: string; run: () => void };
-type Toast = { id: number; text: string; kind: "ok" | "warn" | "error"; action?: ToastAction };
+type Toast = { id: number; text: string; kind: "ok" | "warn" | "error" };
 
 const state = reactive({
   ready: false,
@@ -42,21 +41,13 @@ export const store = state;
 export const stateRO = readonly(state);
 
 let toastSeq = 0;
-/** 带动作按钮的提示停留更久，给用户留出点「撤销」的时间；点击后立即收起 */
-export function toast(text: string, kind: Toast["kind"] = "ok", action?: ToastAction): void {
+export function toast(text: string, kind: Toast["kind"] = "ok"): void {
   const id = ++toastSeq;
-  state.toasts.push({ id, text, kind, action });
-  setTimeout(() => dismissToast(id), action ? 9000 : kind === "error" ? 6000 : 3000);
-}
-
-export function dismissToast(id: number): void {
-  const i = state.toasts.findIndex((t) => t.id === id);
-  if (i >= 0) state.toasts.splice(i, 1);
-}
-
-/** 切换页面时清掉上一页留下的提示（尤其是已经失效的「撤销」） */
-export function clearToasts(): void {
-  state.toasts.splice(0);
+  state.toasts.push({ id, text, kind });
+  setTimeout(() => {
+    const i = state.toasts.findIndex((t) => t.id === id);
+    if (i >= 0) state.toasts.splice(i, 1);
+  }, kind === "error" ? 6000 : 3000);
 }
 
 /** 面板列表，按 schema 的 order 排序；Maps 不在本地 schema 内（按需求排除） */
