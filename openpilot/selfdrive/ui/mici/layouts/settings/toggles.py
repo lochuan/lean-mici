@@ -6,6 +6,7 @@ from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.button import BigParamControl, BigMultiParamToggle, BigToggle, GreyBigButton
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationCircleButton
 from openpilot.system.ui.lib.application import gui_app
+from openpilot.system.ui.lib.multilang import tr
 from openpilot.selfdrive.ui.layouts.settings.common import restart_needed_callback
 from openpilot.selfdrive.ui.ui_state import ui_state
 
@@ -23,8 +24,8 @@ class ExperimentalModeConfirmPage(NavScroller):
     self._scroller.add_widgets([
       GreyBigButton("enabling\nexperimental mode", "scroll to continue",
                     gui_app.texture("icons_mici/setup/warning.png", 64, 64)),
-      GreyBigButton("", "openpilot defaults to normal driving."),
-      GreyBigButton("", "Experimental mode enables alpha-level features that are not ready for normal driving."),
+      GreyBigButton("", tr("Normal driving is enabled by default.")),
+      GreyBigButton("", tr("Experimental mode enables alpha-level features that are not ready for normal driving.")),
       GreyBigButton("End-to-End Longitudinal Control"),
       GreyBigButton("", "Let the driving model control the gas and brakes."),
       GreyBigButton("", "openpilot will drive as it thinks a human would, including stopping for red lights and stop signs."),

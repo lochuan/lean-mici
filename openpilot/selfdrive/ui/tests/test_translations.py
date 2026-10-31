@@ -6,7 +6,8 @@ from pathlib import Path
 
 from openpilot.common.parameterized import parameterized
 from openpilot.common.test import OpenpilotTestCase
-from openpilot.selfdrive.ui.translations.potools import parse_po
+from openpilot.selfdrive.ui.translations.potools import extract_strings, parse_po
+from openpilot.common.basedir import BASEDIR
 from openpilot.system.ui.lib.multilang import LANGUAGES_FILE, TRANSLATIONS_DIR
 
 PERCENT_PLACEHOLDER_RE = re.compile(r"%(?:n|\d+)")
@@ -48,6 +49,27 @@ def load_po_text(po_path: Path) -> str:
 
 
 class TestTranslations(OpenpilotTestCase):
+  def test_experimental_mode_strings_are_extracted(self):
+    paths = ['openpilot/selfdrive/ui/widgets/exp_mode_button.py', 'openpilot/selfdrive/ui/layouts/settings/toggles.py',
+             'openpilot/selfdrive/ui/mici/layouts/settings/toggles.py']
+    extracted = {entry.msgid for entry in extract_strings(paths, BASEDIR)}
+    _, entries = parse_po(PO_DIR / 'app.pot')
+    template = {entry.msgid for entry in entries}
+    required = {"EXPERIMENTAL MODE OFF", "Normal driving is enabled by default.",
+                "Experimental mode enables alpha-level features that are not ready for normal driving."}
+    assert required <= extracted
+    assert required <= template
+    assert "CHILL MODE ON" not in template
+
+  @parameterized.expand(sorted(PO_DIR.glob("app_*.po")), ids=lambda p: p.name)
+  def test_experimental_mode_strings_are_translated(self, po_path: Path):
+    _, entries = parse_po(po_path)
+    translations = {entry.msgid: entry.msgstr for entry in entries}
+    for text in ("EXPERIMENTAL MODE OFF", "Normal driving is enabled by default.",
+                 "Experimental mode enables alpha-level features that are not ready for normal driving."):
+      assert translations.get(text), f"{po_path.name}: missing translation for {text!r}"
+    assert "CHILL MODE ON" not in translations
+
   @parameterized.expand(sorted(TRANSLATION_LANGUAGES.values()))
   def test_translation_file_exists(self, language_code: str):
     po_path = PO_DIR / f"app_{language_code}.po"

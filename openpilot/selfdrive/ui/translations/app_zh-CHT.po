@@ -222,6 +222,10 @@ msgid "ETH"
 msgstr "ETH"
 
 #: openpilot/selfdrive/ui/widgets/exp_mode_button.py
+msgid "EXPERIMENTAL MODE OFF"
+msgstr "實驗模式已關閉"
+
+#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
 msgid "EXPERIMENTAL MODE ON"
 msgstr "實驗模式已開啟"
 
@@ -293,6 +297,11 @@ msgstr "錯誤"
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Experimental Mode"
 msgstr "實驗模式"
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+#: openpilot/selfdrive/ui/mici/layouts/settings/toggles.py
+msgid "Experimental mode enables alpha-level features that are not ready for normal driving."
+msgstr "實驗模式啟用尚未適用於一般駕駛的早期測試功能。"
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Experimental mode is currently unavailable on this car since the car's stock ACC is used for longitudinal control."
@@ -393,6 +402,11 @@ msgstr "找不到使用者 '{}' 的 SSH 金鑰"
 #: openpilot/selfdrive/ui/widgets/offroad_alerts.py
 msgid "No release notes available."
 msgstr "無可用發行說明。"
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+#: openpilot/selfdrive/ui/mici/layouts/settings/toggles.py
+msgid "Normal driving is enabled by default."
+msgstr "預設啟用一般駕駛。"
 
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "OFFLINE"

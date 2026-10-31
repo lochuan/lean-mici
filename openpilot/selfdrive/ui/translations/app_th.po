@@ -222,6 +222,10 @@ msgid "ETH"
 msgstr "ผลประโยชน์ทับซ้อน"
 
 #: openpilot/selfdrive/ui/widgets/exp_mode_button.py
+msgid "EXPERIMENTAL MODE OFF"
+msgstr "ปิดโหมดทดลอง"
+
+#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
 msgid "EXPERIMENTAL MODE ON"
 msgstr "โหมดทดลองเปิดอยู่"
 
@@ -293,6 +297,11 @@ msgstr "ข้อผิดพลาด"
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Experimental Mode"
 msgstr "โหมดทดลอง"
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+#: openpilot/selfdrive/ui/mici/layouts/settings/toggles.py
+msgid "Experimental mode enables alpha-level features that are not ready for normal driving."
+msgstr "โหมดทดลองเปิดใช้คุณสมบัติระดับอัลฟาที่ยังไม่พร้อมสำหรับการขับขี่ปกติ"
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Experimental mode is currently unavailable on this car since the car's stock ACC is used for longitudinal control."
@@ -393,6 +402,11 @@ msgstr "ไม่พบคีย์ SSH สำหรับผู้ใช้ '{}
 #: openpilot/selfdrive/ui/widgets/offroad_alerts.py
 msgid "No release notes available."
 msgstr "ไม่มีบันทึกประจำรุ่น"
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+#: openpilot/selfdrive/ui/mici/layouts/settings/toggles.py
+msgid "Normal driving is enabled by default."
+msgstr "เปิดใช้การขับขี่ปกติเป็นค่าเริ่มต้น"
 
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "OFFLINE"

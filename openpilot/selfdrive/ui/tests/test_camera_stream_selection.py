@@ -1,13 +1,16 @@
+import importlib
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
-from openpilot.selfdrive.ui.onroad import augmented_road_view as tizi
-from openpilot.selfdrive.ui.mici.onroad import augmented_road_view as mici
 
-
-@pytest.mark.parametrize('module', [tizi, mici])
+@pytest.fixture(params=['onroad', 'mici.onroad'], ids=['tizi', 'mici'])
+def module(request, monkeypatch):
+  monkeypatch.setenv('SCALE', '1')
+  import pyray
+  monkeypatch.setattr(pyray, 'init_window', Mock(side_effect=AssertionError('unexpected graphics initialization')))
+  return importlib.import_module(f'openpilot.selfdrive.ui.{request.param}.augmented_road_view')
 @pytest.mark.parametrize('long_control,wide_available,speed,initial,expected', [
   (True, True, 0, 'narrow', 'wide'),
   (False, True, 0, 'wide', 'narrow'),

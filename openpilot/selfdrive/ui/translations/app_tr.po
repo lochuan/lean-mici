@@ -222,6 +222,10 @@ msgid "ETH"
 msgstr "ETH"
 
 #: openpilot/selfdrive/ui/widgets/exp_mode_button.py
+msgid "EXPERIMENTAL MODE OFF"
+msgstr "DENEYSEL MOD KAPALI"
+
+#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
 msgid "EXPERIMENTAL MODE ON"
 msgstr "DENEYSEL MOD AÇIK"
 
@@ -293,6 +297,11 @@ msgstr "Hata"
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Experimental Mode"
 msgstr "Deneysel Mod"
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+#: openpilot/selfdrive/ui/mici/layouts/settings/toggles.py
+msgid "Experimental mode enables alpha-level features that are not ready for normal driving."
+msgstr "Deneysel mod, normal sürüş için henüz hazır olmayan alfa düzeyindeki özellikleri etkinleştirir."
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Experimental mode is currently unavailable on this car since the car's stock ACC is used for longitudinal control."
@@ -393,6 +402,11 @@ msgstr "'{}' kullanıcısı için SSH anahtarı bulunamadı"
 #: openpilot/selfdrive/ui/widgets/offroad_alerts.py
 msgid "No release notes available."
 msgstr "Sürüm notu mevcut değil."
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+#: openpilot/selfdrive/ui/mici/layouts/settings/toggles.py
+msgid "Normal driving is enabled by default."
+msgstr "Normal sürüş varsayılan olarak etkindir."
 
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "OFFLINE"

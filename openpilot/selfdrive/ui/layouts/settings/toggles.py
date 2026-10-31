@@ -138,16 +138,18 @@ class TogglesLayout(Widget):
   def _update_toggles(self):
     ui_state.update_params()
 
-    e2e_description = tr(
-      "sunnypilot defaults to normal driving. Experimental mode enables alpha-level features that are not ready for normal driving. " +
-      "Experimental features are listed below:<br>" +
-      "<h4>End-to-End Longitudinal Control</h4><br>" +
-      "Let the driving model control the gas and brakes. sunnypilot will drive as it thinks a human would, including stopping for red lights and stop signs. " +
-      "Since the driving model decides the speed to drive, the set speed will only act as an upper bound. This is an alpha quality feature; " +
-      "mistakes should be expected.<br>" +
-      "<h4>New Driving Visualization</h4><br>" +
-      "The driving visualization will transition to the road-facing wide-angle camera at low speeds to better show some turns. " +
-      "The Experimental mode logo will also be shown in the top right corner."
+    e2e_description = (
+      tr("Normal driving is enabled by default.") + " " +
+      tr("Experimental mode enables alpha-level features that are not ready for normal driving.") + " " +
+      tr("Experimental features are listed below:<br>" +
+         "<h4>End-to-End Longitudinal Control</h4><br>" +
+         "Let the driving model control the gas and brakes. sunnypilot will drive as it thinks a human would, " +
+         "including stopping for red lights and stop signs. " +
+         "Since the driving model decides the speed to drive, the set speed will only act as an upper bound. This is an alpha quality feature; " +
+         "mistakes should be expected.<br>" +
+         "<h4>New Driving Visualization</h4><br>" +
+         "The driving visualization will transition to the road-facing wide-angle camera at low speeds to better show some turns. " +
+         "The Experimental mode logo will also be shown in the top right corner.")
     )
 
     if ui_state.CP is not None:
