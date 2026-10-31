@@ -59,6 +59,7 @@ pkg_names = ['acados', 'capnproto', 'eigen', 'ffmpeg', 'json11', 'ncurses', 'zer
 pkgs = [importlib.import_module(name) for name in pkg_names]
 acados = pkgs[pkg_names.index('acados')]
 ffmpeg = pkgs[pkg_names.index('ffmpeg')]
+capnproto = pkgs[pkg_names.index('capnproto')]
 # Shared package ships .so/.dylib; older device venvs still have static .a only.
 # Keep static link deps (x264/z/va/drm) when the installed package is static so
 # COMMA_HARDWARE CI works without upgrading the device venv yet.
@@ -120,7 +121,8 @@ def _libflags(target, source, env, for_signature):
 
 env = Environment(
   ENV={
-    "PATH": os.environ['PATH'],
+    # capnpc for cereal gen: the venv package ships it, but not on PATH on every platform
+    "PATH": os.pathsep.join([capnproto.BIN_DIR, os.environ['PATH']]),
     "PYTHONPATH": os.pathsep.join(submodule_python_paths),
     "ACADOS_SOURCE_DIR": acados.DIR,
     "ACADOS_PYTHON_INTERFACE_PATH": acados.TEMPLATE_DIR,
@@ -236,7 +238,7 @@ Export('env', 'arch', 'acados', 'release', 'ffmpeg_libs')
 # Setup cache dir
 default_cache_dir = '/data/scons_cache' if arch == "comma_arm64" else '/tmp/scons_cache'
 cache_dir = ARGUMENTS.get('cache_dir', default_cache_dir)
-cache_size_limit = 4e9 if "CI" in os.environ else 2e9
+cache_size_limit = float(ARGUMENTS.get('cache_size_limit', 4e9 if "CI" in os.environ else 2e9))
 CacheDir(cache_dir)
 Clean(["."], cache_dir)
 

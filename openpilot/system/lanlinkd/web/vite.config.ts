@@ -35,6 +35,8 @@ export default defineConfig({
   server: {
     // 开发时把 API 代理到真设备，这样本机就能对着真实 params 调 UI
     proxy: {
+      // 丰田诊断可改接回放预览服务（tools/lanlink/toyota_replay_server.py），不连车也能走通页面
+      ...(process.env.LANLINK_TOYOTA_REPLAY ? { "/api/toyota": { target: process.env.LANLINK_TOYOTA_REPLAY } } : {}),
       "/api": {
         target: process.env.LANLINK_DEVICE || "http://10.0.0.27:8088",
         changeOrigin: true,

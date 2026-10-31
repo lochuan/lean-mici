@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decimalsOf, nextValue, quantize } from "../src/lib/numeric";
-import { formatSliderValue, resolveUnit } from "../src/lib/utils";
+import { formatSliderValue, optionMatches, resolveUnit } from "../src/lib/utils";
 
 describe("quantize", () => {
   it("kills float drift on fractional steps", () => {
@@ -84,5 +84,19 @@ describe("resolveUnit", () => {
 
   it("is blank when absent", () => {
     expect(resolveUnit(undefined, true)).toBe("");
+  });
+});
+
+describe("optionMatches", () => {
+  it("matches numeric options against the device's stored string", () => {
+    // TorqueControlTune：schema 里是 1.0 / 0.0，设备上存 "1.0" / "0.0"
+    expect(optionMatches(1.0, "1.0")).toBe(true);
+    expect(optionMatches(0.0, "0.0")).toBe(true);
+    expect(optionMatches(1.0, "0.0")).toBe(false);
+  });
+  it("keeps the empty default distinct from 0", () => {
+    expect(optionMatches("", "")).toBe(true);
+    expect(optionMatches("", "0.0")).toBe(false);
+    expect(optionMatches(0.0, "")).toBe(false);
   });
 });

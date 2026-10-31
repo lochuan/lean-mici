@@ -14,6 +14,7 @@ from openpilot.common.params import Params, ParamKeyFlag
 from openpilot.common.text_window import TextWindow
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.system.manager.helpers import unblock_stdout, save_bootlog
+from openpilot.system.manager.map_params import clear_map_params, open_mem_params, remove_map_targets_if_writer_gone
 from openpilot.system.manager.quick_boot import native_artifacts_unfit_for_quick_boot
 from openpilot.system.manager.process import ensure_running
 from openpilot.system.manager.process_config import managed_processes
@@ -118,6 +119,7 @@ def manager_thread() -> None:
   cloudlog.info({"environ": os.environ})
 
   params = Params()
+  mem_params = open_mem_params()  # SCC-map 的 /dev/shm/params（Darwin 为 None）
 
   ignore: list[str] = []
   if os.getenv("NOBOARD") is not None:
@@ -140,8 +142,11 @@ def manager_thread() -> None:
 
     if started and not started_prev:
       params.clear_all(ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
+      clear_map_params(mem_params, ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
     elif not started and started_prev:
       params.clear_all(ParamKeyFlag.CLEAR_ON_OFFROAD_TRANSITION)
+      # 下路清理只是兜底：真正的保证是「上路切换时清 + bigmodeld 退出时阻塞清」（S1）。
+      clear_map_params(mem_params, ParamKeyFlag.CLEAR_ON_OFFROAD_TRANSITION)
 
     ignition = any(ps.ignitionLine or ps.ignitionCan for ps in sm['pandaStates'] if ps.pandaType != log.PandaState.PandaType.unknown)
     if ignition and not ignition_prev:
@@ -155,6 +160,12 @@ def manager_thread() -> None:
     ignition_prev = ignition
 
     ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
+
+    # 弯道目标的唯一写入者 bigmodeld 不在运行（关开关 / 崩溃待重启 / 退出卡住）：清掉它留下的目标与位置
+    bigmodeld = managed_processes["bigmodeld"]
+    remove_map_targets_if_writer_gone(
+      mem_params, started,
+      writer_running=bigmodeld.proc is not None and bigmodeld.proc.is_alive() and not bigmodeld.shutting_down)
 
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)

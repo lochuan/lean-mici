@@ -118,3 +118,14 @@ class ControlsExt:
   def run_ext(self, sm: messaging.SubMaster, pm: messaging.PubMaster) -> None:
     CC_SP = self.state_control_ext(sm)
     self.publish_ext(CC_SP, sm, pm)
+
+    # Speed-dependent torque: hand per-bin learned values to the lateral controller,
+    # which interpolates latAccelFactor/friction by vEgo each frame
+    if self.CP.lateralTuning.which() == 'torque' and sm.updated['lateralTorqueParameters']:
+      tp = sm['lateralTorqueParameters']
+      extension = getattr(self.LaC, 'extension', None)
+      if extension is not None:
+        if sm.all_checks(['lateralTorqueParameters']) and tp.useParams:
+          extension.update_speed_dep_torque(tp)
+        else:
+          extension._speed_dep_active = False

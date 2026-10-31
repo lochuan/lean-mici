@@ -316,6 +316,10 @@ class HardwareComma(HardwareBase):
     for n in camera_irqs:
       affine_irq(6, n)
 
+    # encoders：AGNOS 19.6.29 起 venus 回调由内核放在 CPU6（msm_vidc.venus_work_cpu=6，Chipmunk OS 100 号），
+    # 中断同核少一次跨核唤醒；CPU6 offroad 会下线，所以和相机中断一样每次上线后重绑
+    affine_irq(6, "msm_vidc")
+
   def get_gpu_usage_percent(self):
     try:
       with open('/sys/class/kgsl/kgsl-3d0/gpubusy') as f:
@@ -341,7 +345,6 @@ class HardwareComma(HardwareBase):
     sudo_write("f", "/proc/irq/default_smp_affinity")
 
     # move these off the default core
-    affine_irq(1, "msm_vidc")  # encoders
     affine_irq(1, "i2c_geni")  # sensors
 
     # *** GPU config ***

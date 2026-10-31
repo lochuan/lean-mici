@@ -66,7 +66,6 @@ PROCS = {
   "openpilot.system.loggerd.deleter": 1.0,
   "openpilot.system.qcomgpsd.qcomgpsd": 1.0,
   "openpilot.common.hardware.comma.modem": 10.0,
-  "openpilot.sunnypilot.system.statsd": 1.0,
 }
 
 TIMINGS = {
@@ -173,6 +172,11 @@ class TestOnroad(OpenpilotTestCase):
 
       # skip gps services for now
       if s in ('ubloxGnss', 'ubloxRaw', 'gnssMeasurements', 'gpsLocation', 'gpsLocationExternal', 'qcomGnss'):
+        continue
+
+      # bigmodeld 只在手机连接并回 REPLY 时发（条件发布：无手机/无导航就没有消息）。
+      # 与其他条件服务一样，不能按标称 20 Hz 断言数量。
+      if s == 'navStateSP':
         continue
 
       duration = TEST_DURATION - 5.0  # subtract some selfdrived initializing time

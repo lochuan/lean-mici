@@ -1,6 +1,6 @@
 #pragma once
 
-// C4 本机分段计时：以 road 的 timestamp_eof 为零点，沿关键路径逐段首尾相接
+// C4 本机分段计时：以 road 的 timestamp_eof（camerad 推算的传感器读出完时刻）为零点，沿关键路径逐段首尾相接
 //   取帧(eof→VisionIPC 收到) → warp → 配对等待(等另一路) → 硬编(提交→两路都出包)
 //   → 发送(出包→FRAME 写完) → 等 REPLY(写完→REPLY 收到)
 // 六段之和 = REPLY 收到 − eof。时钟统一 nanos_since_boot（与 timestamp_eof 同源）。

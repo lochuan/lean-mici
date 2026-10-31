@@ -21,8 +21,9 @@ from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
-from openpilot.selfdrive.modeld.big_model import (SourceBlender, BigReplyLatch, LatencyEstimator,
-                                                  nanos_since_boot, select_frame)
+from openpilot.selfdrive.modeld.camera_offset_helper import CameraOffsetHelper
+from openpilot.selfdrive.modeld.big_model import (SourceBlender, BigReplyLatch, FrameDelayEstimator,
+                                                  ms_since_eof, nanos_since_boot, select_frame)
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, nv12_copy_size, MODELD_INPUTS
 from openpilot.selfdrive.modeld.fill_model_msg import (fill_model_msg, fill_driving_model_data, fill_pose_msg,
                                                        PublishState, get_curvature_from_output)
@@ -38,13 +39,11 @@ SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
 LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
-# 04 号 C-2：大模型 action_t 用 chestnut 公式（bundle overrides 实测 lat=.1/long=.3，
-# research/02 §4），独立于上面的小模型口径（票面「小模型公式不变」）
-BIG_LAT_SMOOTH_SECONDS = 0.1
-BIG_LONG_SMOOTH_SECONDS = 0.3
-# 04 号 C-3：大模型 REPLY 截止 = timestamp_eof + L̂ + 48ms（ADR-0001），L̂ 滑动中位 [15,35] 初值 22
-BIG_REPLY_GRACE_MS = 48.
-BIG_WARMUP_FRAMES = 4  # modeld 重启后头 4 帧按超时帧（票面）
+# 04 号 C-3：大模型 REPLY 截止 = timestamp_eof + 60 ms。
+# 上游 chestnut 同步阻塞、隐含预算一帧 50 ms（frame_delay = DT_MDL），超了掉帧→modeldLagging；
+# 我们逐帧有小模型兜底，放宽 10 ms。C4 台架 REPLY ≈ eof + 28 ms（p50）/ 32 ms（p99）。
+BIG_REPLY_DEADLINE_MS = 60.
+BIG_WARMUP_FRAMES = 5  # modeld 重启 / 手机新建序列后头 5 帧（0.25 s）按小模型帧
 MIN_LAT_CONTROL_SPEED = 0.3
 
 
@@ -63,11 +62,6 @@ def _pkl_exists(path):
   cannot start"). Seen on-device with 77 manifest stubs and zero chunks in
   /data/media/0/models, which is a recoverable state -- the built-in pkl was
   right there.
-
-  NOTE: this duplicates a little of common/file_chunker rather than living
-  there, because openpilot/common is in release_lib's NATIVE_INPUT_PATHS and
-  touching it invalidates every prebuilt artifact, forcing a full on-device
-  rebuild. modeld.py is not a native input.
   """
   if os.path.isfile(path):
     return True
@@ -141,7 +135,6 @@ class ModelState:
 
   def get_action_from_model(self, model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                             lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
-    lat_smooth_seconds = self.LAT_SMOOTH_SECONDS
     if 'action' not in model_output:
       plan = model_output['plan'][0]
       desired_accel = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
@@ -152,11 +145,10 @@ class ModelState:
     else:
       desired_accel = model_output['action'][0,1]
       desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
-      lat_smooth_seconds = BIG_LAT_SMOOTH_SECONDS  # 与 big_lat_action_t 里假设的平滑同值
     stop = should_stop(v_ego, desired_accel)
     desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, self.LONG_SMOOTH_SECONDS)
     if v_ego > MIN_LAT_CONTROL_SPEED:
-      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, lat_smooth_seconds)
+      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, self.LAT_SMOOTH_SECONDS)
     else:
       desired_curvature = prev_action.desiredCurvature
 
@@ -255,8 +247,8 @@ def main(demo=False):
   sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "carControl", "lateralDelay"])
   # 04 号 C-3：bigModelReply 独立订阅——latch 读线程收帧即盖到达时刻，主循环不碰 sm 的 updated 语义
   sm_big = SubMaster(["bigModelReply"])
-  latch = BigReplyLatch(sm_big)
-  latency = LatencyEstimator()  # L̂：喂 modeld 收帧时刻 − timestamp_eof（ADR-0001），不喂 REPLY 往返
+  latch = BigReplyLatch(sm_big, warmup_replies=BIG_WARMUP_FRAMES)
+  frame_delay_estimator = FrameDelayEstimator()  # 大模型链路的 frame_delay：timestamp_eof → 发布 的实测滑动中位
   blender = SourceBlender()
 
   publish_state = PublishState()
@@ -278,6 +270,7 @@ def main(demo=False):
   buf_main, buf_extra = None, None
   meta_main = FrameMeta()
   meta_extra = FrameMeta()
+  camera_offset_helper = CameraOffsetHelper()
 
   if demo:
     CP = get_demo_car_params()
@@ -304,8 +297,7 @@ def main(demo=False):
     if buf_main is None:
       cloudlog.debug("vipc_client_main no frame")
       continue
-    camera_to_model_ms = (nanos_since_boot() - meta_main.timestamp_eof) / 1e6  # L_n（ADR-0001），进遥测 cameraToModelMs
-    latency.update(camera_to_model_ms)
+    camera_to_model_ms = ms_since_eof(meta_main.timestamp_eof)  # 收帧延迟，仅进遥测 cameraToModelMs
 
     if use_extra_client:
       # Keep receiving extra frames until frame id matches main camera
@@ -343,6 +335,10 @@ def main(demo=False):
       has_wide_camera = use_extra_client or main_wide_camera
       extra_intrinsics = dc.wide_road.intrinsics if has_wide_camera else dc.narrow_road.intrinsics
       model_transform_extra = get_warp_matrix(device_from_calib_euler, extra_intrinsics, True).astype(np.float32)
+      camera_offset_helper.set_offset(params.get("CameraOffset", return_default=True))
+      model_transform_main, model_transform_extra = camera_offset_helper.update(model_transform_main, model_transform_extra,
+                                                                                 main_intrinsics, extra_intrinsics,
+                                                                                 sm["extrinsicsCalibration"])
       extrinsics_calibration_seen = True
 
     traffic_convention = np.zeros(2)
@@ -364,14 +360,11 @@ def main(demo=False):
 
     bufs = {name: buf_extra if 'big' in name else buf_main for name in model.vision_input_names}
     transforms = {name: model_transform_extra if 'big' in name else model_transform_main for name in model.vision_input_names}
-    frame_delay = DT_MDL # compensate for time passed since the frame was captured: current_time - timestamp_eof is 50ms on average
+    # 大模型开着：按 eof→发布的实测滑动中位（等 REPLY 使发布更晚）；关着：同上游常量 DT_MDL（"50ms on average"）
+    frame_delay = frame_delay_estimator.value / 1e3 if bigmodel_enabled else DT_MDL
     action_delay = DT_MDL / 2 # middle of the interval between model output (current state) and next frame (expected state)
     lat_action_t = lat_delay + frame_delay + action_delay
     long_action_t = long_delay + frame_delay + action_delay
-    # 04 号 C-3：大路 action_t = chestnut 公式（lat 走 get_lat_delay，受 LagdToggle 控制），
-    # 与 mdv2sp.bigActionT 同一口径；小模型公式不变（票面不变量）
-    big_lat_action_t = model.lat_delay + BIG_LAT_SMOOTH_SECONDS + frame_delay + action_delay
-    big_long_action_t = CP.longitudinalActuatorDelay + BIG_LONG_SMOOTH_SECONDS + frame_delay + action_delay
     inputs: dict[str, np.ndarray] = {
       'desire_pulse': vec_desire,
       'traffic_convention': traffic_convention,
@@ -392,11 +385,11 @@ def main(demo=False):
 
       frame = select_frame(
         model_output, latch=latch, enabled=bigmodel_enabled, run_count=run_count,
-        timestamp_eof=meta_main.timestamp_eof, latency_ms=latency.value, grace_ms=BIG_REPLY_GRACE_MS,
+        timestamp_eof=meta_main.timestamp_eof, deadline_after_eof_ms=BIG_REPLY_DEADLINE_MS,
         warmup_frames=BIG_WARMUP_FRAMES, current_time_ns=nanos_since_boot, blender=blender,
         action_for=lambda output, lat_t, long_t, prev_action=prev_action, v_ego=v_ego:
           model.get_action_from_model(output, prev_action, lat_t, long_t, v_ego),
-        small_action_t=(lat_action_t, long_action_t), big_action_t=(big_lat_action_t, big_long_action_t))
+        action_t=(lat_action_t, long_action_t))
       blended, big_out, eof_to_reply_ms = frame.model_output, frame.big_output, frame.eof_to_reply_ms
       if SEND_RAW_PRED and 'raw_pred' not in blended:
         blended = {**blended, 'raw_pred': model_output['raw_pred']}  # raw_pred 恒为小模型调试输出
@@ -423,9 +416,9 @@ def main(demo=False):
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
       # 04 号 C-2：大模型输入元数据上行（bigmodeld 帧头 desire/action_t 的来源）。
-      # action_t = chestnut 公式（lat 走 get_lat_delay，受 LagdToggle 控制；13 号/research/02 §4）；
+      # action_t 与小模型同值（和上游 chestnut 一致）；
       # desireClass = DH.desire 电平，pulse 边沿由 bigmodeld 生成（msgq 电平采样不怕迟到漏沿）
-      mdv2sp_send.modelDataV2SP.bigActionT = [big_lat_action_t, big_long_action_t]
+      mdv2sp_send.modelDataV2SP.bigActionT = [lat_action_t, long_action_t]
       mdv2sp_send.modelDataV2SP.desireClass = DH.desire
       mdv2sp_send.modelDataV2SP.bigLatencyMs = eof_to_reply_ms
       mdv2sp_send.modelDataV2SP.bigLateReplyCount, mdv2sp_send.modelDataV2SP.bigLateReplyMs = latch.take_late_replies()
@@ -442,6 +435,8 @@ def main(demo=False):
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)
       pm.send('modelDataV2SP', mdv2sp_send)
+      if frame.deadline_ms > 0:  # 只喂等过 REPLY 的帧：warmup/断链/关闭时发布早，不代表大模型链路
+        frame_delay_estimator.update(ms_since_eof(meta_main.timestamp_eof))
     last_vipc_frame_id = meta_main.frame_id
 
 if __name__ == "__main__":

@@ -155,11 +155,46 @@ export interface P50P90 {
 export interface ModelTiming {
   window: number;
   stagesMs: Record<
-    "capture" | "warp" | "pairWait" | "encode" | "send" | "replyWait" | "network" | "handoff" | "total",
+    "capture" | "warp" | "pairWait" | "encode" | "send" | "replyWait" | "network" | "total",
     P50P90
   > | null;
   sources: Record<"off" | "big" | "warmup" | "linkDown" | "timeout" | "late" | "zeroOutput", number>;
   deadlineMs: number | null;
+}
+
+/** 单个速度档（m/s）的自整定结果；calPerc 为该档学习进度（旧缓存无此字段时为 null） */
+export interface TorqueBin {
+  center: number;
+  lo: number;
+  hi: number;
+  latAccelFactor: number;
+  friction: number;
+  valid: boolean;
+  calPerc: number | null;
+}
+
+/** torqued 的 lateralTorqueParameters（实时消息或 LiveTorqueParameters 落盘缓存） */
+export interface TorqueLearned {
+  valid: boolean;
+  useParams: boolean;
+  latAccelFactor: number;
+  friction: number;
+  latAccelOffset: number;
+  latAccelFactorRaw: number;
+  frictionRaw: number;
+  calPerc: number;
+  totalPoints: number;
+  decay: number;
+  resets: number;
+  bins: TorqueBin[];
+}
+
+/** 横向扭矩自整定卡片（status_snapshot.build_torque_status） */
+export interface TorqueStatus {
+  source: "live" | "cache" | "none";
+  learned: TorqueLearned | null;
+  offline: { lateralControl: string; latAccelFactor: number | null; friction: number | null };
+  toggles: { EnforceTorqueControl: boolean; LiveTorqueParamsToggle: boolean; SpeedDependentTorqueToggle: boolean };
 }
 
 export interface StatusSnapshot {
@@ -168,6 +203,7 @@ export interface StatusSnapshot {
   system?: { version?: string; branch?: string; commit?: string; ignition?: boolean };
   device?: DeviceStatus;
   model?: ModelStatus;
+  torque?: TorqueStatus;
   capabilities?: Capabilities;
 }
 
@@ -283,3 +319,150 @@ export interface SoftwareStatus {
   availableBranches: string[];
   offroad: boolean;
 }
+
+/** /api/diagnostics：诊断页（相机安装、跑偏、画龙、转向能力）。
+ *  行驶统计只算本次行驶（started 由假变真时清零，停车后保留）。 */
+export interface DiagnosticsReport {
+  drive: { started: boolean; seconds: number };   // seconds = 本次行驶已过秒数（未行驶过为 0）
+  camera: CameraDiag | null;                       // 从未标定过（无缓存也无实时）为 null
+  drift: DriftDiag;
+  weave: WeaveDiag;
+  steering: SteeringDiag;
+  bsm: BsmDiag;
+}
+export interface CameraDiag {
+  source: "live" | "cache";
+  calStatus: "uncalibrated" | "calibrated" | "invalid" | "recalibrating";
+  calPerc: number;                 // 0–100
+  pitchDeg: number;                // >0 设备朝下
+  yawDeg: number;                  // >0 设备朝左
+  limits: { pitchUpDeg: number; pitchDownDeg: number; yawDeg: number };  // 均为正数
+  cameraOffsetM: number;           // 当前 CameraOffset，>0 = 设备在中线左侧
+}
+export interface DriftDiag {
+  seconds: number;                 // 有效直道样本秒数
+  carOffsetM: number | null;       // 平均，>0 车偏右；无样本 null
+  planOffsetM: number | null;      // 平均，>0 规划偏右
+  angleOffsetDeg: number | null;   // paramsd angleOffsetAverageDeg（实时或缓存）
+  angleOffsetValid: boolean | null;
+  accurateAngle: "ready" | "pending" | "unknown" | "n/a";  // Toyota 高精度转角；非 Toyota 为 n/a；本次没收到 carState 为 unknown
+  latAccelOffset: number | null;   // m/s²，torqued 学到的偏置
+  torqueCalPerc: number | null;    // torqued 学习进度 0–100；<100 时偏置还不可信
+}
+export interface WeaveDiag {
+  seconds: number;                 // 直道样本秒数（与 drift 同口径）
+  windows: number;                 // 已评估的 10 s 窗口数
+  weaveWindows: number;            // 其中判为画龙的窗口数
+  medianP2pM: number | null;       // 各窗口峰峰值中位数
+  medianPeriodS: number | null;    // 各窗口周期中位数（无法估计周期的窗口不计）
+  trace: (number | null)[];        // 最近 30 s，4 Hz，共 120 点，米，>0 偏右；null = 不满足采样条件
+  lateralDelayS: number | null;    // lagd 学到的横向延迟
+  factoryDelayS: number | null;    // CarParams.steerActuatorDelay
+}
+export interface SteeringDiag {
+  control: "torque" | "angle" | "";
+  activeSeconds: number;           // 横向控制激活且车速 > 5 m/s 的秒数
+  curveSeconds: number;            // 其中弯道秒数
+  saturatedCurveSeconds: number;   // 弯道且饱和的秒数
+  usage: number[] | null;          // torque 控制：|output| 五档 [0,.2) [.2,.4) [.4,.6) [.6,.8) [.8,1] 的秒数；angle 为 null
+  epsTempFaults: number;
+  epsPermanent: boolean;
+  maxLatAccel: number | null;      // 激活时达到的最大 |curvature·v²|，m/s²
+}
+export interface BsmDiag {
+  available: boolean | null;       // CarParams.enableBsm；从没识别过车型为 null
+  leftEvents: number;              // 本次行驶左侧盲区触发次数（上升沿）
+  rightEvents: number;
+  leftOccupied: boolean;           // 最近一帧盲区是否有车；停车后是上次行驶最后一帧
+  rightOccupied: boolean;
+  watchSeconds: number;            // 本次行驶车速 ≥ 16 km/h 的秒数（BSM 只在此车速以上工作）
+}
+
+// ---- TechStream 丰田诊断（/api/toyota/*，后端见 toyota_diag_api.py）----
+
+export interface ToyotaSession {
+  state: "idle" | "entering" | "active";
+  error?: string;                  // 上次进入失败的原因（失败后 state 回到 idle）
+  idleTimeoutS: number;
+  lastActivity?: number;           // 设备 unix 秒
+  idleRemainingS?: number;         // 设备算好的空闲自动退出剩余秒数，active 后才有
+}
+/** 目录（GET /api/toyota/catalog）：只适配 Sienna 4 代，后端从 sienna_catalog.json 发出 */
+export interface ToyotaEcu {
+  id: string;                      // "750/40"（网关子地址）或 "7B0"
+  tx: string;
+  sub: string | null;
+  name: string;
+  protocol: "uds" | "toyota_can";
+}
+export interface ToyotaCategory { id: string; name: string; icon: string }  // icon = lucide 图标名（kebab-case）
+export interface ToyotaOption { value: number; label: string }
+export interface ToyotaSetting {
+  key: string;
+  category: string;
+  name: string;
+  ecu: string;                     // ToyotaEcu.id
+  did: string | null;              // UDS 用 did，Toyota CAN 用 localId（十六进制字符串）
+  localId: string | null;
+  byteIndex: number;
+  mask: string;
+  requiresBitSupportCheck: boolean;
+  options: ToyotaOption[];         // 数值型为空
+  numeric: { min: number; max: number } | null;
+  popular: boolean;
+}
+export interface ToyotaLiveItem {
+  key: string;
+  name: string;
+  unit: string;
+  options: ToyotaOption[] | null;
+  needsEngineRunning: boolean;
+}
+export interface ToyotaLiveTool { id: string; name: string; icon: string; keys: string[] }
+export interface ToyotaBatteryBlock { voltageKey: string; resistanceKey: string; modules: number }
+export interface ToyotaCatalog {
+  ecus: ToyotaEcu[];
+  categories: ToyotaCategory[];
+  settings: ToyotaSetting[];
+  liveTools: ToyotaLiveTool[];
+  live: ToyotaLiveItem[];
+  battery: { ecu: string; blocks: ToyotaBatteryBlock[] };
+}
+
+/** 逐 ECU 扫描的结果状态：无应答 / ISO-TP 应答异常 / 正常 */
+export type ToyotaScanStatus = "offline" | "malformed" | "ok";
+export interface ToyotaCustomizationScan {
+  ecu: string;
+  status: ToyotaScanStatus;
+  items: { key: string; value: number; raw: string }[];  // raw = 整段 payload（CAN 型为展开后的数据）hex
+  supported?: number;              // 明细：支持数 / 读到数
+  read?: number;
+  readError?: string;
+}
+export interface ToyotaWriteResult {
+  key: string; value: number; verified: boolean; backupId: string; before: string; after: string;
+}
+export interface ToyotaBackup {
+  id: string;
+  time: number;                    // 设备 unix 秒
+  key: string;
+  name: string;
+  ecu: string;
+  before: { value: number; label: string };
+  after?: { value: number; label: string };
+  restored?: boolean;
+}
+export interface ToyotaDtc {
+  code: string;                    // "U0131-87"
+  status: number | null;           // UDS 状态字节；Toyota CAN 的码没有状态
+  text: string;                    // 后端按目录拼好的中文说明，查不到为空
+}
+export interface ToyotaDtcScan {
+  ecu: string;
+  status: ToyotaScanStatus;
+  protocol: string;
+  dtcs: ToyotaDtc[];
+  readError?: string;              // ECU 拒绝读码（如 "NRC 11"）时，dtcs 为空
+}
+export interface ToyotaDtcClearResult { ecu: string; ok: boolean; error?: string }
+export interface ToyotaLiveValue { key: string; value: number | null; text: string; error?: string }

@@ -3,7 +3,7 @@ import os
 from openpilot.common.basedir import BASEDIR
 
 # Flat-tree fallback: published release trees strip tinygrad_repo/.git, so the
-# release process stamps the build tree's revision here (device_release.sh).
+# release process stamps the gitlink revision here (tools/release/device_release.sh).
 TINYGRAD_PIN_FILE = "TINYGRAD_PIN"
 
 

@@ -352,6 +352,22 @@
          ]
         },
         {
+         "key": "SpeedDependentTorqueToggle",
+         "widget": "toggle",
+         "title": "按车速分段自整定 (Beta)",
+         "description": "在不同车速档分别学习横向加速度系数和摩擦，行驶中按车速插值使用。改善低速和高速转向手感的一致性；每个速度档需要积累足够数据后才生效，未学好的档沿用全局自整定值。",
+         "enablement": [
+          {
+           "type": "offroad_only"
+          },
+          {
+           "type": "param",
+           "key": "LiveTorqueParamsToggle",
+           "equals": true
+          }
+         ]
+        },
+        {
          "key": "CustomTorqueParams",
          "widget": "toggle",
          "title": "启用自定义整定",
@@ -491,11 +507,11 @@
         },
         {
          "value": 0,
-         "label": "轻拨"
+         "label": "轻推"
         },
         {
          "value": 1,
-         "label": "免拨"
+         "label": "免推"
         },
         {
          "value": 2,
@@ -523,7 +539,7 @@
       {
        "key": "AutoLaneChangeBsmDelay",
        "widget": "toggle",
-       "title": "自动变道：盲区延迟",
+       "title": "BSM盲区延迟变道",
        "enablement": [
         {
          "type": "capability",
@@ -1728,10 +1744,26 @@
    "sections": []
   },
   {
+   "id": "diagnostics",
+   "label": "诊断",
+   "icon": "diagnostics",
+   "order": 9,
+   "description": "相机安装、跑偏、画龙、转向能力、盲区监测一页看懂",
+   "sections": []
+  },
+  {
+   "id": "toyota",
+   "label": "TechStream",
+   "icon": "toyota",
+   "order": 10,
+   "description": "丰田车辆诊断与定制：进入诊断模式后读写定制项、读清故障码、查看实时数据",
+   "sections": []
+  },
+  {
    "id": "software",
    "label": "软件",
    "icon": "software",
-   "order": 9,
+   "order": 11,
    "sections": [
     {
      "id": "updates",
@@ -1760,7 +1792,7 @@
    "id": "vehicle",
    "label": "车辆",
    "icon": "vehicle",
-   "order": 10,
+   "order": 12,
    "sections": [
     {
      "title": "车辆",
@@ -1772,7 +1804,7 @@
    "id": "developer",
    "label": "开发者",
    "icon": "developer",
-   "order": 11,
+   "order": 13,
    "sections": [
     {
      "id": "connectivity",
