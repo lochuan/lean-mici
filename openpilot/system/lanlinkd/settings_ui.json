@@ -647,26 +647,6 @@
        ]
       },
       {
-       "key": "DynamicExperimentalControl",
-       "widget": "toggle",
-       "title": "动态实验控制",
-       "description": "由模型决定何时使用 sunnypilot ACC 或端到端纵向控制。",
-       "visibility": [
-        {
-         "type": "capability",
-         "field": "has_longitudinal_control",
-         "equals": true
-        }
-       ],
-       "enablement": [
-        {
-         "type": "capability",
-         "field": "has_longitudinal_control",
-         "equals": true
-        }
-       ]
-      },
-      {
        "key": "DisengageOnAccelerator",
        "widget": "toggle",
        "title": "踩油门时退出纵向控制",

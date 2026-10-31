@@ -16,8 +16,7 @@ class ExperimentalModeButton(Widget):
     self.params = Params()
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
 
-    self.chill_pixmap = gui_app.texture("icons/couch.png", self.img_width, self.img_width)
-    self.experimental_pixmap = gui_app.texture("icons/experimental_grey.png", self.img_width, self.img_width)
+    self.icon = gui_app.texture("icons/chffr_wheel.png", self.img_width, self.img_width)
 
   def show_event(self):
     super().show_event()
@@ -48,7 +47,7 @@ class ExperimentalModeButton(Widget):
     rl.draw_line_ex(rl.Vector2(line_x, rect.y), rl.Vector2(line_x, rect.y + rect.height), 3, separator_color)
 
     # Draw text label (left aligned)
-    text = tr("EXPERIMENTAL MODE ON") if self.experimental_mode else tr("CHILL MODE ON")
+    text = tr("EXPERIMENTAL MODE ON") if self.experimental_mode else tr("EXPERIMENTAL MODE OFF")
     text_x = rect.x + self.horizontal_padding
     text_y = rect.y + rect.height / 2 - 45 * FONT_SCALE // 2  # Center vertically
 
@@ -60,6 +59,6 @@ class ExperimentalModeButton(Widget):
     icon_rect = rl.Rectangle(icon_x, icon_y, self.img_width, self.img_width)
 
     # Draw current mode icon
-    current_icon = self.experimental_pixmap if self.experimental_mode else self.chill_pixmap
+    current_icon = self.icon
     source_rect = rl.Rectangle(0, 0, current_icon.width, current_icon.height)
     rl.draw_texture_pro(current_icon, source_rect, icon_rect, rl.Vector2(0, 0), 0, rl.WHITE)

@@ -1,5 +1,4 @@
 import datetime
-import math
 import time
 
 from openpilot.cereal import log
@@ -140,7 +139,7 @@ class MiciHomeLayout(Widget):
 
     self._version_text = self._get_version_text()
 
-    self._experimental_icon = IconWidget("icons_mici/experimental_mode.png", (48, 48))
+    self._experimental_icon = IconWidget("icons_mici/wheel.png", (48, 48))
     self._usb_icon = IconWidget("icons_mici/usb.png", (62, 40))
     # 07 号：NPU 图标二色（绿=已连上 / 橙=其余），两张同尺寸同槽位（NPU.png 灰图仅 settings 入口用）
     self._npu_icon_green = IconWidget("icons_mici/NPU_GREEN.png", (54, 40))

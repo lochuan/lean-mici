@@ -52,7 +52,7 @@ class TogglesLayout(Widget):
       "ExperimentalMode": (
         lambda: tr("Experimental Mode"),
         "",
-        "experimental_white.png",
+        "chffr_wheel.png",
         False,
       ),
       "DisengageOnAccelerator": (
@@ -192,7 +192,7 @@ class TogglesLayout(Widget):
     self._scroller.render(rect)
 
   def _update_experimental_mode_icon(self):
-    icon = "experimental.png" if self._toggles["ExperimentalMode"].action_item.get_state() else "experimental_white.png"
+    icon = "chffr_wheel.png"
     self._toggles["ExperimentalMode"].set_icon(icon)
 
   def _handle_experimental_mode_toggle(self, state: bool):

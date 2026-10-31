@@ -11,6 +11,18 @@ from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPl
 from openpilot.selfdrive.controls.radard import _LEAD_ACCEL_TAU
 
 
+class PlantSubMaster(dict):
+  def __init__(self, services):
+    super().__init__(services)
+    self.valid = dict.fromkeys(services, True)
+    self.updated = dict.fromkeys(services, True)
+    self.recv_frame = dict.fromkeys(services, 1)
+    self.logMonoTime = dict.fromkeys(services, 0)
+
+  def all_checks(self, service_list=None):
+    return True
+
+
 class Plant:
   messaging_initialized = False
 
@@ -48,11 +60,11 @@ class Plant:
     time.sleep(0.1)
     self.sm = messaging.SubMaster(['longitudinalPlan'])
 
-    from opendbc.car.honda.values import CAR
-    from opendbc.car.honda.interface import CarInterface
+    from opendbc.car.toyota.values import CAR
+    from opendbc.car.toyota.interface import CarInterface
 
-    CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
-    CP_SP = CarInterface.get_non_essential_params_sp(CP, CAR.HONDA_CIVIC)
+    CP = CarInterface.get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
+    CP_SP = CarInterface.get_non_essential_params_sp(CP, CAR.TOYOTA_COROLLA_TSS2)
     self.planner = LongitudinalPlanner(CP, CP_SP, init_v=self.speed)
 
   @property
@@ -132,7 +144,7 @@ class Plant:
     car_control.carControl.orientationNED = [0., float(pitch), 0.]
 
     # ******** get controlsState messages for plotting ***
-    sm = {'radarState': radar.radarState,
+    sm = PlantSubMaster({'radarState': radar.radarState,
           'carState': car_state.carState,
           'carControl': car_control.carControl,
           'controlsState': control.controlsState,
@@ -141,7 +153,8 @@ class Plant:
           'modelV2': model.modelV2,
           'carStateSP': car_state_sp.carStateSP,
           'liveMapDataSP': live_map_data_sp.liveMapDataSP,
-          'gpsLocation': gps_data.gpsLocation}
+          'gpsLocation': gps_data.gpsLocation,
+          'gpsLocationExternal': gps_data.gpsLocation})
     self.planner.update(sm)
     self.acceleration = self.planner.output_a_target
     if self.planner.output_should_stop:

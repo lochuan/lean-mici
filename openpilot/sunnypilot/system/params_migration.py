@@ -5,6 +5,7 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 import json
+from pathlib import Path
 
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot.selfdrive.car.sync_sunnylink_params import CAR_LIST_JSON_OUT
@@ -86,6 +87,10 @@ def _migrate_tesla_mads_screen_button(_params):
 
 
 def run_migration(_params):
+  if not _params.get_bool("DynamicExperimentalControlMigrated"):
+    Path(_params.get_param_path("DynamicExperimentalControl")).unlink(missing_ok=True)
+    _params.put_bool("DynamicExperimentalControlMigrated", True, block=True)
+
   # migrate OnroadScreenOffBrightness
   if _params.get("OnroadScreenOffBrightnessMigrated") != ONROAD_BRIGHTNESS_MIGRATION_VERSION:
     try:
