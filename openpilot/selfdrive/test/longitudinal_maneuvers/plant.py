@@ -60,11 +60,11 @@ class Plant:
     time.sleep(0.1)
     self.sm = messaging.SubMaster(['longitudinalPlan'])
 
-    from opendbc.car.toyota.values import CAR
-    from opendbc.car.toyota.interface import CarInterface
+    from opendbc.car.honda.values import CAR
+    from opendbc.car.honda.interface import CarInterface
 
-    CP = CarInterface.get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
-    CP_SP = CarInterface.get_non_essential_params_sp(CP, CAR.TOYOTA_COROLLA_TSS2)
+    CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+    CP_SP = CarInterface.get_non_essential_params_sp(CP, CAR.HONDA_CIVIC)
     self.planner = LongitudinalPlanner(CP, CP_SP, init_v=self.speed)
 
   @property

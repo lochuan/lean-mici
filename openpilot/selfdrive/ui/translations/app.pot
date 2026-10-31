@@ -226,10 +226,6 @@ msgstr ""
 msgid "EXPERIMENTAL MODE ON"
 msgstr ""
 
-#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
-msgid "CHILL MODE ON"
-msgstr ""
-
 #: openpilot/selfdrive/ui/widgets/prime.py
 msgid "Upgrade Now"
 msgstr ""

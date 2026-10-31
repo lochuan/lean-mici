@@ -139,7 +139,7 @@ class TogglesLayout(Widget):
     ui_state.update_params()
 
     e2e_description = tr(
-      "sunnypilot defaults to driving in chill mode. Experimental mode enables alpha-level features that aren't ready for chill mode. " +
+      "sunnypilot defaults to normal driving. Experimental mode enables alpha-level features that are not ready for normal driving. " +
       "Experimental features are listed below:<br>" +
       "<h4>End-to-End Longitudinal Control</h4><br>" +
       "Let the driving model control the gas and brakes. sunnypilot will drive as it thinks a human would, including stopping for red lights and stop signs. " +

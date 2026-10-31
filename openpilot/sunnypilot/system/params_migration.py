@@ -87,9 +87,10 @@ def _migrate_tesla_mads_screen_button(_params):
 
 
 def run_migration(_params):
-  if not _params.get_bool("DynamicExperimentalControlMigrated"):
+  try:
     Path(_params.get_param_path("DynamicExperimentalControl")).unlink(missing_ok=True)
-    _params.put_bool("DynamicExperimentalControlMigrated", True, block=True)
+  except Exception as e:
+    cloudlog.exception(f"Error removing DynamicExperimentalControl: {e}")
 
   # migrate OnroadScreenOffBrightness
   if _params.get("OnroadScreenOffBrightnessMigrated") != ONROAD_BRIGHTNESS_MIGRATION_VERSION:

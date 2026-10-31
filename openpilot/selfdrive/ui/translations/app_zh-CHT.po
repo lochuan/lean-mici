@@ -113,10 +113,6 @@ msgstr "變更"
 msgid "CHECK"
 msgstr "檢查"
 
-#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
-msgid "CHILL MODE ON"
-msgstr "安穩模式已開啟"
-
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 #: system/ui/widgets/network.py
 msgid "CONNECT"

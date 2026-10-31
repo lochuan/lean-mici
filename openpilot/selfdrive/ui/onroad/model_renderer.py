@@ -129,7 +129,7 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
 
     # Draw elements
     self._draw_lane_lines()
-    self._draw_path(sm)
+    self._draw_path()
 
     if render_lead_indicator and radar_state:
       self._draw_lead_indicator()
@@ -289,8 +289,8 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
       color = rl.Color(255, 0, 0, int(alpha * 255))
       draw_polygon(self._rect, road_edge.projected_points, color)
 
-  def _draw_path(self, sm):
-    """Draw path with dynamic coloring based on mode and throttle state."""
+  def _draw_path(self):
+    """Draw the planned path."""
     if not self._path.projected_points.size:
       return
 

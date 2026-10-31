@@ -10,7 +10,7 @@ from openpilot.cereal import custom, messaging
 from opendbc.car import structs
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.common.params import Params
-from openpilot.sunnypilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanSource as LocalPlanSource
+from openpilot.sunnypilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanSource as LocalPlanSource, LongitudinalPlannerSP
 from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner, LongitudinalPlanSource
 
 V_EGO = 20.0
@@ -78,6 +78,28 @@ class TestPlannerGate(OpenpilotTestCase):
       with patch.object(Params, 'get_bool', return_value=not experimental_mode):
         planner.update(build_sm(experimental_mode))
       assert (planner.mpc.source == LongitudinalPlanSource.e2e) == experimental_mode
+
+  def test_mpc_state_uses_measured_ego_for_stock_longitudinal(self):
+    for openpilot_long in (False, True):
+      planner = build_planner()
+      planner.CP.openpilotLongitudinalControl = openpilot_long
+      planner.v_desired_filter.x = 10.0
+      planner.output_a_target = 0.2
+      sm = build_sm()
+      state = sm['carState'].as_builder()
+      state.aEgo = 0.7
+      sm['carState'] = state.as_reader()
+      sm['controlsState'].longControlState = 'pid'
+      with patch.object(planner.mpc, 'set_cur_state', wraps=planner.mpc.set_cur_state) as set_state, \
+           patch.object(LongitudinalPlannerSP, 'update_targets', return_value=(30.0, 0.2)):
+        planner.update(sm)
+      speed, accel = set_state.call_args.args
+      if openpilot_long:
+        assert speed != V_EGO
+        assert accel == 0.2
+      else:
+        assert speed == V_EGO
+        assert abs(accel - 0.7) < 1e-6
 
   def test_local_targets_arbitrate_with_e2e(self):
     for source in (LocalPlanSource.sccVision, LocalPlanSource.sccMap, LocalPlanSource.speedLimitAssist):

@@ -113,10 +113,6 @@ msgstr "ЗМІНИТИ"
 msgid "CHECK"
 msgstr "ПЕРЕВІРИТИ"
 
-#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
-msgid "CHILL MODE ON"
-msgstr "СПОКІЙНИЙ РЕЖИМ"
-
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 #: system/ui/widgets/network.py
 msgid "CONNECT"

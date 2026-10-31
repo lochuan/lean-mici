@@ -4,7 +4,8 @@ import numpy as np
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.common.parameterized import parameterized_class
 from openpilot.cereal import log
-from openpilot.selfdrive.car.cruise import VCruiseHelper, V_CRUISE_MIN, V_CRUISE_MAX, V_CRUISE_INITIAL, IMPERIAL_INCREMENT
+from openpilot.selfdrive.car.cruise import (VCruiseHelper, V_CRUISE_MIN, V_CRUISE_MAX, V_CRUISE_INITIAL,
+                                           V_CRUISE_INITIAL_EXPERIMENTAL_MODE, IMPERIAL_INCREMENT)
 from openpilot.cereal import custom
 from opendbc.car.structs import car
 from openpilot.common.constants import CV
@@ -47,12 +48,11 @@ class TestCruiseSpeed(OpenpilotTestCase):
 
 def test_pcm_cruise_initialization_is_owned_by_car():
   cp = car.CarParams(pcmCruise=True)
-  for pcm_cruise_speed in (False, True):
-    helper = VCruiseHelper(cp, custom.CarParamsSP(pcmCruiseSpeed=pcm_cruise_speed))
-    before = helper.v_cruise_kph
-    for experimental_mode in (False, True):
-      helper.initialize_v_cruise(car.CarState(vEgo=10.0), experimental_mode)
-      assert helper.v_cruise_kph == before
+  helper = VCruiseHelper(cp, custom.CarParamsSP())
+  before = helper.v_cruise_kph
+  for experimental_mode in (False, True):
+    helper.initialize_v_cruise(car.CarState(vEgo=10.0), experimental_mode)
+    assert helper.v_cruise_kph == before
 
 
 # TODO: test pcmCruise and pcmCruiseSpeed
@@ -158,6 +158,6 @@ class TestVCruiseHelper(OpenpilotTestCase):
         self.reset_cruise_speed_state()
         assert not self.v_cruise_helper.v_cruise_initialized
         self.enable(float(v_ego), experimental_mode)
-        initial = 105 if experimental_mode else V_CRUISE_INITIAL
+        initial = V_CRUISE_INITIAL_EXPERIMENTAL_MODE if experimental_mode else V_CRUISE_INITIAL
         assert self.v_cruise_helper.v_cruise_kph == round(np.clip(v_ego * CV.MS_TO_KPH, initial, V_CRUISE_MAX))
         assert self.v_cruise_helper.v_cruise_initialized

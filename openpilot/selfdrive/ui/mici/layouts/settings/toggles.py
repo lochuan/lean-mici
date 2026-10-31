@@ -23,8 +23,8 @@ class ExperimentalModeConfirmPage(NavScroller):
     self._scroller.add_widgets([
       GreyBigButton("enabling\nexperimental mode", "scroll to continue",
                     gui_app.texture("icons_mici/setup/warning.png", 64, 64)),
-      GreyBigButton("", "openpilot defaults to driving in chill mode."),
-      GreyBigButton("", "Experimental mode enables alpha-level features that aren't ready for chill mode."),
+      GreyBigButton("", "openpilot defaults to normal driving."),
+      GreyBigButton("", "Experimental mode enables alpha-level features that are not ready for normal driving."),
       GreyBigButton("End-to-End Longitudinal Control"),
       GreyBigButton("", "Let the driving model control the gas and brakes."),
       GreyBigButton("", "openpilot will drive as it thinks a human would, including stopping for red lights and stop signs."),

@@ -149,7 +149,7 @@ class ModelRenderer(Widget, ModelRendererSP):
     # Draw elements (hide when disengaged)
     if ui_state.status != UIStatus.DISENGAGED:
       self._draw_lane_lines()
-      self._draw_path(sm)
+      self._draw_path()
 
     # if render_lead_indicator and radar_state:
     #   self._draw_lead_indicator()
@@ -338,8 +338,8 @@ class ModelRenderer(Widget, ModelRendererSP):
       color = self._get_ll_color(float(1.0 - self._road_edge_stds[i]), float(self._lane_line_probs[i + 1]) < 0.25, i == 0)
       draw_polygon(self._rect, road_edge.projected_points + offset, color)
 
-  def _draw_path(self, sm):
-    """Draw path with dynamic coloring based on mode and throttle state."""
+  def _draw_path(self):
+    """Draw the planned path."""
     if not self._path.projected_points.size:
       return
 
