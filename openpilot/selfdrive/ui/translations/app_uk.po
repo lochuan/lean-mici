@@ -113,10 +113,6 @@ msgstr "ЗМІНИТИ"
 msgid "CHECK"
 msgstr "ПЕРЕВІРИТИ"
 
-#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
-msgid "CHILL MODE ON"
-msgstr "СПОКІЙНИЙ РЕЖИМ"
-
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 #: system/ui/widgets/network.py
 msgid "CONNECT"
@@ -226,6 +222,10 @@ msgid "ETH"
 msgstr "ETH"
 
 #: openpilot/selfdrive/ui/widgets/exp_mode_button.py
+msgid "EXPERIMENTAL MODE OFF"
+msgstr "ЕКСПЕРИМЕНТАЛЬНИЙ РЕЖИМ ВИМКНЕНО"
+
+#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
 msgid "EXPERIMENTAL MODE ON"
 msgstr "ЕКСПЕРИМЕНТ. РЕЖИМ"
 
@@ -297,6 +297,11 @@ msgstr "Помилка"
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Experimental Mode"
 msgstr "Експериментальний режим"
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+#: openpilot/selfdrive/ui/mici/layouts/settings/toggles.py
+msgid "Experimental mode enables alpha-level features that are not ready for normal driving."
+msgstr "Експериментальний режим вмикає функції альфа-рівня, які ще не готові для звичайного водіння."
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Experimental mode is currently unavailable on this car since the car's stock ACC is used for longitudinal control."
@@ -397,6 +402,11 @@ msgstr "Користувач '{}' не має ключів на GitHub"
 #: openpilot/selfdrive/ui/widgets/offroad_alerts.py
 msgid "No release notes available."
 msgstr "Інформація про випуск відсутня."
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+#: openpilot/selfdrive/ui/mici/layouts/settings/toggles.py
+msgid "Normal driving is enabled by default."
+msgstr "За замовчуванням увімкнено звичайний режим водіння."
 
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "OFFLINE"

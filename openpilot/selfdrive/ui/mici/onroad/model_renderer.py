@@ -26,11 +26,7 @@ THROTTLE_COLORS = [
   rl.Color(114, 255, 92, 0),     # HSLF(112/360, 1.0, 0.68, 0.0)
 ]
 
-NO_THROTTLE_COLORS = [
-  rl.Color(242, 242, 242, 102), # HSLF(148/360, 0.0, 0.95, 0.4)
-  rl.Color(242, 242, 242, 89),  # HSLF(112/360, 0.0, 0.95, 0.35)
-  rl.Color(242, 242, 242, 0),   # HSLF(112/360, 0.0, 0.95, 0.0)
-]
+
 
 LANE_LINE_COLORS = {
   UIStatus.DISENGAGED: rl.Color(200, 200, 200, 255),
@@ -58,9 +54,6 @@ class ModelRenderer(Widget, ModelRendererSP):
     Widget.__init__(self)
     ModelRendererSP.__init__(self)
     self._longitudinal_control = False
-    self._experimental_mode = False
-    self._blend_filter = FirstOrderFilter(1.0, 0.25, 1 / gui_app.target_fps)
-    self._prev_allow_throttle = True
     self._lane_line_probs = np.zeros(4, dtype=np.float32)
     self._road_edge_stds = np.zeros(2, dtype=np.float32)
     self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
@@ -124,9 +117,6 @@ class ModelRenderer(Widget, ModelRendererSP):
       rect.x - CLIP_MARGIN, rect.y - CLIP_MARGIN, rect.width + 2 * CLIP_MARGIN, rect.height + 2 * CLIP_MARGIN
     )
 
-    # Update state
-    self._experimental_mode = sm['selfdriveState'].experimentalMode
-
     extrinsics_calibration = sm['extrinsicsCalibration']
     self._path_offset_z = extrinsics_calibration.height[0] if extrinsics_calibration.height else HEIGHT_INIT[0]
 
@@ -159,7 +149,7 @@ class ModelRenderer(Widget, ModelRendererSP):
     # Draw elements (hide when disengaged)
     if ui_state.status != UIStatus.DISENGAGED:
       self._draw_lane_lines()
-      self._draw_path(sm)
+      self._draw_path()
 
     # if render_lead_indicator and radar_state:
     #   self._draw_lead_indicator()
@@ -231,12 +221,7 @@ class ModelRenderer(Widget, ModelRendererSP):
     self._acceleration_x_filter.update(soon_acceleration)
     self._acceleration_x_filter2.update(soon_acceleration)
 
-    # make path width wider/thinner when initially braking/accelerating
-    if self._experimental_mode and False:
-      high_pass_acceleration = self._acceleration_x_filter.x - self._acceleration_x_filter2.x
-      y_off = np.interp(high_pass_acceleration, [-1, 0, 1], [0.9 * 2, 0.9, 0.9 / 2])
-    else:
-      y_off = 0.9
+    y_off = 0.9
 
     max_idx = self._get_path_length_idx(path_x_array, max_distance)
     self._path.projected_points = self._map_line_to_polygon(
@@ -247,7 +232,7 @@ class ModelRenderer(Widget, ModelRendererSP):
 
   def _update_experimental_gradient(self):
     """Pre-calculate experimental mode gradient colors"""
-    if not self._experimental_mode:
+    if not self._longitudinal_control:
       return
 
     path_pts = self._path.projected_points + np.array([self._rect.x, self._rect.y], dtype=np.float32)
@@ -353,43 +338,23 @@ class ModelRenderer(Widget, ModelRendererSP):
       color = self._get_ll_color(float(1.0 - self._road_edge_stds[i]), float(self._lane_line_probs[i + 1]) < 0.25, i == 0)
       draw_polygon(self._rect, road_edge.projected_points + offset, color)
 
-  def _draw_path(self, sm):
-    """Draw path with dynamic coloring based on mode and throttle state."""
+  def _draw_path(self):
+    """Draw the planned path."""
     if not self._path.projected_points.size:
       return
-
-    allow_throttle = sm['longitudinalPlan'].allowThrottle or not self._longitudinal_control
-    self._blend_filter.update(int(allow_throttle))
 
     if ui_state.rainbow_path:
       self.rainbow_path.draw_rainbow_path(self._rect, self._path)
       return
 
     path_pts = self._path.projected_points + np.array([self._rect.x, self._rect.y], dtype=np.float32)
-
-    if self._experimental_mode:
-      # Draw with acceleration coloring
-      if ui_state.status == UIStatus.DISENGAGED:
-        draw_polygon(self._rect, path_pts, rl.Color(0, 0, 0, 90))
-      elif len(self._exp_gradient.colors) > 1:
-        draw_polygon(self._rect, path_pts, gradient=self._exp_gradient)
-      else:
-        draw_polygon(self._rect, path_pts, rl.Color(255, 255, 255, 30))
+    if ui_state.status == UIStatus.DISENGAGED:
+      draw_polygon(self._rect, path_pts, rl.Color(0, 0, 0, 90))
+    elif self._longitudinal_control and len(self._exp_gradient.colors) > 1:
+      draw_polygon(self._rect, path_pts, gradient=self._exp_gradient)
     else:
-      # Blend throttle/no throttle colors based on transition
-      blend_factor = round(self._blend_filter.x * 100) / 100
-      blended_colors = self._blend_colors(NO_THROTTLE_COLORS, THROTTLE_COLORS, blend_factor)
-      gradient = Gradient(
-        start=(0.0, 1.0),  # Bottom of path
-        end=(0.0, 0.0),  # Top of path
-        colors=blended_colors,
-        stops=[0.0, 0.5, 1.0],
-      )
-
-      if ui_state.status == UIStatus.DISENGAGED:
-        draw_polygon(self._rect, path_pts, rl.Color(0, 0, 0, 90))
-      else:
-        draw_polygon(self._rect, path_pts, gradient=gradient)
+      gradient = Gradient(start=(0.0, 1.0), end=(0.0, 0.0), colors=THROTTLE_COLORS, stops=[0.0, 0.5, 1.0])
+      draw_polygon(self._rect, path_pts, gradient=gradient)
 
   def _draw_lead_indicator(self):
     # Draw lead vehicles if available
@@ -509,18 +474,3 @@ class ModelRenderer(Widget, ModelRendererSP):
       int(rgb[2] * 255),
       int(a * 255)
     )
-
-  @staticmethod
-  def _blend_colors(begin_colors, end_colors, t):
-    if t >= 1.0:
-      return end_colors
-    if t <= 0.0:
-      return begin_colors
-
-    inv_t = 1.0 - t
-    return [rl.Color(
-      int(inv_t * start.r + t * end.r),
-      int(inv_t * start.g + t * end.g),
-      int(inv_t * start.b + t * end.b),
-      int(inv_t * start.a + t * end.a)
-    ) for start, end in zip(begin_colors, end_colors, strict=True)]

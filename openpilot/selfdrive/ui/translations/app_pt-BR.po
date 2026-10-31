@@ -113,10 +113,6 @@ msgstr "ALTERAR"
 msgid "CHECK"
 msgstr "VERIFICAR"
 
-#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
-msgid "CHILL MODE ON"
-msgstr "MODO CHILL ATIVO"
-
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 #: system/ui/widgets/network.py
 msgid "CONNECT"
@@ -226,6 +222,10 @@ msgid "ETH"
 msgstr "ETH"
 
 #: openpilot/selfdrive/ui/widgets/exp_mode_button.py
+msgid "EXPERIMENTAL MODE OFF"
+msgstr "MODO EXPERIMENTAL DESATIVADO"
+
+#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
 msgid "EXPERIMENTAL MODE ON"
 msgstr "MODO EXPERIMENTAL ATIVO"
 
@@ -297,6 +297,11 @@ msgstr "Erro"
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Experimental Mode"
 msgstr "Modo Experimental"
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+#: openpilot/selfdrive/ui/mici/layouts/settings/toggles.py
+msgid "Experimental mode enables alpha-level features that are not ready for normal driving."
+msgstr "O modo experimental ativa recursos alfa que ainda não estão prontos para a condução normal."
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Experimental mode is currently unavailable on this car since the car's stock ACC is used for longitudinal control."
@@ -397,6 +402,11 @@ msgstr "Nenhuma chave SSH encontrada para o usuário '{}'"
 #: openpilot/selfdrive/ui/widgets/offroad_alerts.py
 msgid "No release notes available."
 msgstr "Sem notas de versão disponíveis."
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+#: openpilot/selfdrive/ui/mici/layouts/settings/toggles.py
+msgid "Normal driving is enabled by default."
+msgstr "A condução normal é ativada por padrão."
 
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "OFFLINE"

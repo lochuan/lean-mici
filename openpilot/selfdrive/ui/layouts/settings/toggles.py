@@ -52,7 +52,7 @@ class TogglesLayout(Widget):
       "ExperimentalMode": (
         lambda: tr("Experimental Mode"),
         "",
-        "experimental_white.png",
+        "chffr_wheel.png",
         False,
       ),
       "DisengageOnAccelerator": (
@@ -138,16 +138,18 @@ class TogglesLayout(Widget):
   def _update_toggles(self):
     ui_state.update_params()
 
-    e2e_description = tr(
-      "sunnypilot defaults to driving in chill mode. Experimental mode enables alpha-level features that aren't ready for chill mode. " +
-      "Experimental features are listed below:<br>" +
-      "<h4>End-to-End Longitudinal Control</h4><br>" +
-      "Let the driving model control the gas and brakes. sunnypilot will drive as it thinks a human would, including stopping for red lights and stop signs. " +
-      "Since the driving model decides the speed to drive, the set speed will only act as an upper bound. This is an alpha quality feature; " +
-      "mistakes should be expected.<br>" +
-      "<h4>New Driving Visualization</h4><br>" +
-      "The driving visualization will transition to the road-facing wide-angle camera at low speeds to better show some turns. " +
-      "The Experimental mode logo will also be shown in the top right corner."
+    e2e_description = (
+      tr("Normal driving is enabled by default.") + " " +
+      tr("Experimental mode enables alpha-level features that are not ready for normal driving.") + " " +
+      tr("Experimental features are listed below:<br>" +
+         "<h4>End-to-End Longitudinal Control</h4><br>" +
+         "Let the driving model control the gas and brakes. sunnypilot will drive as it thinks a human would, " +
+         "including stopping for red lights and stop signs. " +
+         "Since the driving model decides the speed to drive, the set speed will only act as an upper bound. This is an alpha quality feature; " +
+         "mistakes should be expected.<br>" +
+         "<h4>New Driving Visualization</h4><br>" +
+         "The driving visualization will transition to the road-facing wide-angle camera at low speeds to better show some turns. " +
+         "The Experimental mode logo will also be shown in the top right corner.")
     )
 
     if ui_state.CP is not None:
@@ -192,7 +194,7 @@ class TogglesLayout(Widget):
     self._scroller.render(rect)
 
   def _update_experimental_mode_icon(self):
-    icon = "experimental.png" if self._toggles["ExperimentalMode"].action_item.get_state() else "experimental_white.png"
+    icon = "chffr_wheel.png"
     self._toggles["ExperimentalMode"].set_icon(icon)
 
   def _handle_experimental_mode_toggle(self, state: bool):
