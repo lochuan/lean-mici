@@ -1,4 +1,4 @@
-# big_model 纯逻辑单测（04 号 C+D）：outputs[0:2066) 解析、L̂ 估计、交叉淡入、bigModelReply schema。
+# big_model 纯逻辑单测（04 号 C+D）：outputs[0:2066) 解析、frame_delay 估计、交叉淡入、bigModelReply schema。
 # 跑法：pytest openpilot/selfdrive/modeld/tests/test_big_model.py
 import threading
 import time
@@ -6,13 +6,13 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from openpilot.selfdrive.modeld.big_model import (BIG_OUTPUT_SLICES, parse_big_outputs, LatencyEstimator,
+from openpilot.selfdrive.modeld.big_model import (BIG_OUTPUT_SLICES, parse_big_outputs, FrameDelayEstimator,
                                                   SourceBlender, BigReplyLatch, nanos_since_boot, select_frame)
 
 
 def test_nanos_since_boot_matches_timestamp_eof_clock():
-  # timestamp_eof = 内核 SOF_BOOT_TS（get_monotonic_boottime64 = CLOCK_BOOTTIME），
-  # 与它相减/比较的"现在"必须同一时钟，否则挂起累计量会混进 L_n 和截止
+  # timestamp_eof = 内核 SOF 时间戳（get_monotonic_boottime64 = CLOCK_BOOTTIME）+ 传感器读出时间，
+  # 与它相减/比较的"现在"必须同一时钟，否则挂起累计量会混进收帧延迟和截止
   clock = getattr(time, 'CLOCK_BOOTTIME', time.CLOCK_MONOTONIC)  # macOS 无 BOOTTIME（同 common/timing.h）
   a = time.clock_gettime_ns(clock)
   now = nanos_since_boot()
@@ -25,14 +25,11 @@ def test_big_model_reply_schema():
   import openpilot.cereal.messaging as messaging
   msg = messaging.new_message('bigModelReply')
   b = msg.bigModelReply
-  b.frameIdx = 7
   b.tEof = 123456789
   b.flags = 3
   b.outputs = [0.5] * 2066
-  b.telemetry = [1, 2, 3, 4]
-  assert b.frameIdx == 7 and b.tEof == 123456789 and b.flags == 3
+  assert b.tEof == 123456789 and b.flags == 3
   assert len(b.outputs) == 2066 and b.outputs[2065] == 0.5
-  assert list(b.telemetry) == [1, 2, 3, 4]
 
 
 def test_model_data_v2sp_meta_schema():
@@ -41,8 +38,8 @@ def test_model_data_v2sp_meta_schema():
   sp = messaging.new_message('modelDataV2SP').modelDataV2SP
   sp.bigActionT = [0.125, 0.45]
   sp.desireClass = 3
-  sp.bigLatencyMs = 33.5  # C-3：REPLY 到达 − timestamp_eof（0 = 本帧没等到）；≠ L̂ 的 L_n
-  sp.cameraToModelMs = 22.5  # L_n = 收帧时刻 − timestamp_eof（ms），喂 L̂
+  sp.bigLatencyMs = 33.5  # C-3：REPLY 到达 − timestamp_eof（0 = 本帧没等到）；≠ cameraToModelMs
+  sp.cameraToModelMs = 22.5  # 收帧时刻 − timestamp_eof（ms），仅遥测
   np.testing.assert_allclose(list(sp.bigActionT), [0.125, 0.45], rtol=1e-6)  # f32 往返
   assert sp.desireClass == 3
   assert sp.bigLatencyMs == 33.5
@@ -80,13 +77,14 @@ def test_parse_big_outputs():
   np.testing.assert_allclose(outs['meta'], 0.5)                # sigmoid(0)
 
 
-def test_latency_estimator():
-  est = LatencyEstimator()
-  assert est.value == 22.                 # 初值
-  assert est.update(50.) == 35.           # 中位 50 → 限幅上
-  est2 = LatencyEstimator()
-  assert est2.update(1.) == 15.           # 中位 1 → 限幅下
-  est3 = LatencyEstimator()
+def test_frame_delay_estimator():
+  # eof→发布的滑动中位（ms）：初值一帧 50 ms（上游 frame_delay = DT_MDL 的常量假设），限幅 [10, 100]
+  est = FrameDelayEstimator()
+  assert est.value == 50.                 # 初值
+  assert est.update(150.) == 100.         # 中位 150 → 限幅上
+  est2 = FrameDelayEstimator()
+  assert est2.update(1.) == 10.           # 中位 1 → 限幅下
+  est3 = FrameDelayEstimator()
   for v in (20., 21., 22.):
     got = est3.update(v)
   assert got == 21.                       # 滑动中位
@@ -158,7 +156,6 @@ def test_big_reply_latch_reader_thread_consumes_real_capnp_reply():
   msg.bigModelReply.tEof = 123
   msg.bigModelReply.outputs = [0.5] * 2070
   msg.bigModelReply.stages.phoneTotalMs = 24.
-  msg.bigModelReply.receivedNs = 1
   reader = messaging.log_from_bytes(msg.to_bytes()).bigModelReply
   latch = BigReplyLatch(_OneReplySM(reader))
   deadline = time.monotonic() + 2.
@@ -173,13 +170,13 @@ def test_big_reply_latch_reader_thread_consumes_real_capnp_reply():
 def test_big_reply_latch():
   # C-3：读线程收帧即盖真实到达时刻（不被 model.run() 遮挡）、按 tEof 匹配、
   # 已到且按时零等待取、超时/迟到兜底、迟到 Condition 唤醒、链路存活门。
-  # REPLY 往返只进 bigLatencyMs 遥测，不进 L̂（L̂ = modeld 收帧延迟，ADR-0001）
+  # REPLY 往返只进 bigLatencyMs 遥测，不参与截止计算（截止 = timestamp_eof + 固定宽限）
   latch = BigReplyLatch(_FakeSM())
   raw = np.arange(2066, dtype=np.float32)
   t_eof = nanos_since_boot() - 30_000_000
 
   assert not latch.link_alive()                       # 从未见过 REPLY → 门关（只捡不等）
-  assert not hasattr(latch, 'latency')                # latch 不持有 L̂
+  assert not hasattr(latch, 'latency')                # latch 不持有延迟估计
 
   latch._on_reply(t_eof, raw, t_eof + 25_000_000)     # 到达 = eof+25 ms
   assert latch.link_alive()
@@ -246,16 +243,15 @@ def test_big_reply_latch_wait_for_reports_reason():
 
 
 def test_big_reply_latch_take_stages():
-  # 最新收到的 REPLY 的 C4 分段（按时/迟到都报），modeld 补 handoff = 收到 − bigmodeld 收到；每个只报一次
+  # 最新收到的 REPLY 的 C4 分段（按时/迟到都报）；每个只报一次
   latch = BigReplyLatch(_FakeSM())
   raw = np.ones(2066, dtype=np.float32)
   assert latch.take_stages() is None
   t_eof = nanos_since_boot() - 200_000_000
   stages = {'captureMs': 20., 'warpMs': .3, 'pairWaitMs': 1., 'encodeMs': 2., 'sendMs': .5,
             'replyWaitMs': 30., 'phoneTotalMs': 24.}
-  latch._on_reply(t_eof, raw, t_eof + 56_000_000, stages=stages, received_ns=t_eof + 54_000_000)
-  got = latch.take_stages()
-  assert got == {**stages, 'handoffMs': 2.}
+  latch._on_reply(t_eof, raw, t_eof + 56_000_000, stages=stages)
+  assert latch.take_stages() == stages
   assert latch.take_stages() is None
 
 
@@ -287,8 +283,8 @@ def test_select_frame_obeys_warmup_enable_and_link_gates():
   def select(enabled, run_count):
     return select_frame(
       small, latch=latch, enabled=enabled, run_count=run_count, timestamp_eof=1_000_000_000,
-      latency_ms=22., grace_ms=48., warmup_frames=4, current_time_ns=lambda: 9_000_000_000, blender=blender,
-      action_for=action_for, small_action_t=(0.1, 0.2), big_action_t=(0.3, 0.4),
+      deadline_after_eof_ms=70., warmup_frames=4, current_time_ns=lambda: 9_000_000_000, blender=blender,
+      action_for=action_for, action_t=(0.1, 0.2),
       parse_outputs=lambda raw: {"plan": np.array([raw[0]], dtype=np.float32)})
 
   first = select(enabled=True, run_count=4)
@@ -307,7 +303,7 @@ def test_select_frame_obeys_warmup_enable_and_link_gates():
   assert (selected.source, selected.deadline_ms) == ('big', 70.)
   assert selected.desired_curvature == 1.5 and selected.desired_acceleration == -1.5
   assert selected.should_stop is True  # weight=.5 selects the big-model stop bit
-  assert action_calls[-2][1:] == (0.1, 0.2) and action_calls[-1][1:] == (0.3, 0.4)
+  assert action_calls[-2][1:] == (0.1, 0.2) and action_calls[-1][1:] == (0.1, 0.2)  # 大小模型同一 action_t
 
   for reason in ('timeout', 'late'):
     latch.result = (None, 0., reason)
@@ -323,11 +319,11 @@ def test_select_frame_obeys_warmup_enable_and_link_gates():
 def test_select_frame_rejects_zero_reply():
   latch = _FakeReplySelector(alive=True, result=(np.zeros(2066, dtype=np.float32), 12., 'big'))
   small = {"plan": np.array([1.], dtype=np.float32)}
-  frame = select_frame(small, latch=latch, enabled=True, run_count=5, timestamp_eof=1, latency_ms=22.,
-                       grace_ms=48., warmup_frames=4, current_time_ns=lambda: 10, blender=SourceBlender(),
+  frame = select_frame(small, latch=latch, enabled=True, run_count=5, timestamp_eof=1, deadline_after_eof_ms=70.,
+                       warmup_frames=4, current_time_ns=lambda: 10, blender=SourceBlender(),
                        action_for=lambda *_: SimpleNamespace(desiredCurvature=0., desiredAcceleration=0.,
                                                             shouldStop=False),
-                       small_action_t=(0., 0.), big_action_t=(0., 0.),
+                       action_t=(0., 0.),
                        parse_outputs=lambda raw: {"plan": raw})
   assert frame.big_output is None and frame.eof_to_reply_ms == 12.
   assert frame.model_output is small
@@ -336,39 +332,61 @@ def test_select_frame_rejects_zero_reply():
 
 def test_modeld_c3_wiring_source():
   """modeld 主循环需 QCOM GPU 无法宿主构造，锁票面不变量
-  （头 4 帧超时帧、全零兜底、modelV2.big、L_n 遥测）。接线一起改的话本测试会提醒更新。"""
+  （预热帧、全零兜底、modelV2.big、cameraToModelMs 遥测）。接线一起改的话本测试会提醒更新。"""
   import inspect
   from openpilot.selfdrive.modeld import modeld
   src = inspect.getsource(modeld.main)
-  assert "BIG_WARMUP_FRAMES" in src, "modeld 重启后头 4 帧按超时帧（04 号票）"
+  assert "BIG_WARMUP_FRAMES" in src, "modeld 重启后头若干帧按超时帧（04 号票）"
   assert "select_frame(" in src, "逐帧 REPLY 策略必须通过宿主可测的决策 seam"
   assert "modelV2.big = big_out is not None" in src
   assert "bigLatencyMs" in src, "REPLY 往返每帧进遥测（04 号票）"
   assert "bigLateReplyCount, mdv2sp_send.modelDataV2SP.bigLateReplyMs = latch.take_late_replies()" in src, \
     "迟到 REPLY 个数与往返也进遥测"
-  # ADR-0001：L̂ 只喂 modeld 收帧时刻 − timestamp_eof（cameraToModelMs），截止用它；
-  # REPLY 往返不得进 L̂，每帧 L_n 进遥测
-  assert "camera_to_model_ms = (nanos_since_boot() - meta_main.timestamp_eof) / 1e6" in src
+  # 截止 = timestamp_eof + 固定 60 ms（上游 chestnut 隐含预算一帧 50 ms，有小模型兜底故放宽 10 ms）
+  assert modeld.BIG_REPLY_DEADLINE_MS == 60.
+  assert "deadline_after_eof_ms=BIG_REPLY_DEADLINE_MS" in src
+  assert "camera_to_model_ms = ms_since_eof(meta_main.timestamp_eof)" in src
+  # frame_delay：大模型开着按 eof→发布实测滑动中位，关着同上游常量；只用等过 REPLY 的帧喂样本
+  assert "frame_delay = frame_delay_estimator.value / 1e3 if bigmodel_enabled else DT_MDL" in src
+  assert "if frame.deadline_ms > 0:" in src
+  assert "frame_delay_estimator.update(ms_since_eof(meta_main.timestamp_eof))" in src
   # 与 timestamp_eof 比较的"现在"全走 BOOTTIME（modeld 主循环 + latch）
   assert "monotonic_ns" not in src
   assert "monotonic_ns" not in inspect.getsource(BigReplyLatch)
-  assert "latency.update(camera_to_model_ms)" in src
   assert "cameraToModelMs = camera_to_model_ms" in src
   assert "bigSource = frame.source" in src and "bigDeadlineMs = frame.deadline_ms" in src
+  assert "BigReplyLatch(sm_big, warmup_replies=BIG_WARMUP_FRAMES)" in src, "手机新建序列后同样回落小模型"
   assert "latch.take_stages()" in src, "C4 分段随最新 REPLY 进 rlog"
   assert "latch.latency" not in src
 
 
-def test_big_action_curvature_smoothed_with_big_lat_smooth_seconds():
-  # action_t 里已按 BIG_LAT_SMOOTH_SECONDS 假设了平滑，输出侧必须真的平滑，否则低速 action/v² 的噪声原样进扭矩控制器
+def test_big_action_curvature_uses_lat_smooth_seconds():
+  # 大小模型共用 LAT_SMOOTH_SECONDS（与上游 chestnut 一致），不再有大模型专用的平滑
   from openpilot.cereal import log
   from openpilot.selfdrive.controls.lib.drive_helpers import smooth_value
-  from openpilot.selfdrive.modeld.modeld import ModelState, BIG_LAT_SMOOTH_SECONDS
-  state = SimpleNamespace(LAT_SMOOTH_SECONDS=0., LONG_SMOOTH_SECONDS=0.3)
+  from openpilot.selfdrive.modeld.modeld import ModelState
+  state = SimpleNamespace(LAT_SMOOTH_SECONDS=0.2, LONG_SMOOTH_SECONDS=0.3)
   prev = log.ModelDataV2.Action(desiredCurvature=0.0, desiredAcceleration=0.)
-  out = {'action': np.array([[0.1, 0.]])}
   v_ego = 5.
-  action = ModelState.get_action_from_model(state, out, prev, 0.3, 0.3, v_ego)
-  raw = 0.1 / v_ego ** 2
-  assert action.desiredCurvature == np.float32(smooth_value(raw, 0.0, BIG_LAT_SMOOTH_SECONDS))
-  assert 0 < action.desiredCurvature < raw
+  action = ModelState.get_action_from_model(state, {'action': np.array([[0.1, 0.]])}, prev, 0.3, 0.3, v_ego)
+  assert action.desiredCurvature == np.float32(smooth_value(0.1 / v_ego ** 2, 0.0, 0.2))
+
+
+def test_big_reply_latch_skips_replies_after_phone_sequence_reset():
+  from openpilot.selfdrive.modeld.big_model import REPLY_FLAG_SEQ_RESET, REPLY_FLAG_ZERO_PAIR
+  latch = BigReplyLatch(_FakeSM(), warmup_replies=3)
+  raw = np.ones(2066, dtype=np.float32)
+  t0 = nanos_since_boot() - 1_000_000_000
+
+  def reply(i, flags=0):
+    t_eof = t0 + i * 50_000_000
+    latch._on_reply(t_eof, raw, t_eof + 25_000_000, flags=flags)
+    return latch.wait_for(t_eof, t_eof + 70_000_000)
+
+  assert reply(0)[2] == 'big'                                    # 没见过 SEQ_RESET（modeld 重启，手机流不断）：不额外回落
+  assert reply(1, REPLY_FLAG_SEQ_RESET | REPLY_FLAG_ZERO_PAIR) == (None, 25., 'warmup')
+  assert [reply(i)[2] for i in (2, 3, 4)] == ['warmup', 'warmup', 'big']   # 新序列后头 3 个 REPLY
+  assert reply(5, REPLY_FLAG_ZERO_PAIR)[2] == 'warmup'            # 单独的 ZERO_PAIR（手机解码跳帧）也不用
+  assert reply(6)[2] == 'big'
+  assert reply(7, REPLY_FLAG_SEQ_RESET)[2] == 'warmup'            # 断链恢复再开新序列，重新计数
+  assert [reply(i)[2] for i in (8, 9, 10)] == ['warmup', 'warmup', 'big']

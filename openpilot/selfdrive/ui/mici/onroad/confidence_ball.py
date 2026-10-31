@@ -23,12 +23,17 @@ def draw_circle_gradient(center_x: float, center_y: float, radius: int,
                20, rl.BLACK)
 
 
+def ball_center(rect: rl.Rectangle) -> rl.Vector2:
+  """The ball is fixed at the middle of the right side panel."""
+  return rl.Vector2(rect.x + rect.width - SIDE_PANEL_WIDTH / 2, rect.y + rect.height / 2)
+
+
 class ConfidenceBall(Widget, ConfidenceBallSP):
   def __init__(self, demo: bool = False):
     Widget.__init__(self)
     ConfidenceBallSP.__init__(self)
     self._demo = demo
-    self._confidence_filter = FirstOrderFilter(-0.5, 0.5, 1 / gui_app.target_fps)
+    self._confidence_filter = FirstOrderFilter(-0.5, 0.5, 1 / gui_app.target_fps, initialized=False)
 
   def update_filter(self, value: float):
     self._confidence_filter.update(value)
@@ -37,50 +42,34 @@ class ConfidenceBall(Widget, ConfidenceBallSP):
     if self._demo:
       return
 
-    # animate status dot in from bottom
+    # disengaged ball is always dark gray, so its confidence is unused; the next update snaps to the live value (no red/yellow sweep)
     if ui_state.status == UIStatus.DISENGAGED:
-      self._confidence_filter.update(-0.5)
+      self._confidence_filter.initialized = False
     elif ui_state.status in (UIStatus.LAT_ONLY, UIStatus.LONG_ONLY):
       self._confidence_filter.update(1 - max(self.get_animate_status_probs() or [1]))
     else:
       self._confidence_filter.update((1 - max(ui_state.sm['modelV2'].meta.disengagePredictions.brakeDisengageProbs or [1])) *
                                                         (1 - max(ui_state.sm['modelV2'].meta.disengagePredictions.steerOverrideProbs or [1])))
 
-  def _render(self, _):
-    content_rect = rl.Rectangle(
-      self.rect.x + self.rect.width - SIDE_PANEL_WIDTH,
-      self.rect.y,
-      SIDE_PANEL_WIDTH,
-      self.rect.height,
-    )
-
-    status_dot_radius = 24
-    dot_height = (1 - self._confidence_filter.x) * (content_rect.height - 2 * status_dot_radius) + status_dot_radius
-    dot_height = self._rect.y + dot_height
-
+  def _dot_colors(self) -> tuple[rl.Color, rl.Color]:
     # confidence zones
     if ui_state.status == UIStatus.ENGAGED or self._demo:
       if self._confidence_filter.x > 0.5:
-        top_dot_color = rl.Color(0, 255, 204, 255)
-        bottom_dot_color = rl.Color(0, 255, 38, 255)
-      elif self._confidence_filter.x > 0.2:
-        top_dot_color = rl.Color(255, 200, 0, 255)
-        bottom_dot_color = rl.Color(255, 115, 0, 255)
-      else:
-        top_dot_color = rl.Color(255, 0, 21, 255)
-        bottom_dot_color = rl.Color(255, 0, 89, 255)
+        return rl.Color(0, 255, 204, 255), rl.Color(0, 255, 38, 255)
+      if self._confidence_filter.x > 0.2:
+        return rl.Color(255, 200, 0, 255), rl.Color(255, 115, 0, 255)
+      return rl.Color(255, 0, 21, 255), rl.Color(255, 0, 89, 255)
 
-    elif ui_state.status in (UIStatus.LAT_ONLY, UIStatus.LONG_ONLY):
-      top_dot_color = bottom_dot_color = self.get_lat_long_dot_color()
+    if ui_state.status in (UIStatus.LAT_ONLY, UIStatus.LONG_ONLY):
+      color = self.get_lat_long_dot_color()
+      return color, color
 
-    elif ui_state.status == UIStatus.OVERRIDE:
-      top_dot_color = rl.Color(255, 255, 255, 255)
-      bottom_dot_color = rl.Color(82, 82, 82, 255)
+    if ui_state.status == UIStatus.OVERRIDE:
+      return rl.Color(255, 255, 255, 255), rl.Color(82, 82, 82, 255)
 
-    else:
-      top_dot_color = rl.Color(50, 50, 50, 255)
-      bottom_dot_color = rl.Color(13, 13, 13, 255)
+    return rl.Color(50, 50, 50, 255), rl.Color(13, 13, 13, 255)
 
-    draw_circle_gradient(content_rect.x + content_rect.width - status_dot_radius,
-                         dot_height, status_dot_radius,
-                         top_dot_color, bottom_dot_color)
+  def _render(self, _):
+    center = ball_center(self.rect)
+    top_dot_color, bottom_dot_color = self._dot_colors()
+    draw_circle_gradient(center.x, center.y, 24, top_dot_color, bottom_dot_color)

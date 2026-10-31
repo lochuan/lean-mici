@@ -14,6 +14,9 @@ from openpilot.common.swaglog import cloudlog
 
 from openpilot.sunnypilot.selfdrive.pandad.rivian_long_flasher import flash_rivian_long
 
+# 复位后 panda 约 0.2 s 才能被枚举到；给足余量，panda 真不在时最多多等这么久
+PANDA_BOOT_TIMEOUT_S = 2
+
 
 def get_expected_signature() -> bytes:
   fn = os.path.join(FW_PATH, McuType.H7.config.app_fn)
@@ -106,6 +109,8 @@ def main() -> None:
       cloudlog.event("pandad.flash_and_connect", count=count)
       if (count % 2) == 0:
         HARDWARE.reset_internal_panda()
+        # 复位后立刻枚举会得到空列表，下一轮就 recover 进 DFU、每次启动都重刷固件（约 20 s）：等它起来再枚举
+        Panda.wait_for_panda(None, PANDA_BOOT_TIMEOUT_S)
       else:
         HARDWARE.recover_internal_panda()
       count += 1
@@ -117,7 +122,7 @@ def main() -> None:
         time.sleep(1)
 
       panda_serials = Panda.list()
-      if len(panda_serials):
+      if len(panda_serials) and not do_exit:
         # custom flasher for xnor's Rivian Longitudinal Upgrade Kit
         flash_rivian_long(panda_serials)
         # find the internal supported panda (e.g. skip external Black Panda)
@@ -127,9 +132,14 @@ def main() -> None:
         cloudlog.info(f"{len(panda_serials)} panda found, connecting - {panda_serials}")
         flash_panda(panda_serials[0])
 
+      # 刷写期间收到退出信号（如 LANLink 诊断模式让出 panda）：不再启动 ./pandad。
+      # 否则 manager 5 s 后 SIGKILL 本进程，./pandad 成为孤儿一直占着 panda
+      if len(panda_serials) and not do_exit:
         # run real pandad
         os.environ['MANAGER_DAEMON'] = 'pandad'
         process = subprocess.Popen(["./pandad"], cwd=os.path.join(BASEDIR, "openpilot/selfdrive/pandad"))
+        if do_exit:  # 信号正好落在上面的判断和 Popen 之间，signal_handler 没赶上转发
+          process.send_signal(signal.SIGINT)
         process.wait()
     # TODO: wrap all panda exceptions in a base panda exception
     except (usb1.USBErrorNoDevice, usb1.USBErrorPipe):

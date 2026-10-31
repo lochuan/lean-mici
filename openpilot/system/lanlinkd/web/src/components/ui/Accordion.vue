@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** 手风琴（shadcn-vue Accordion 形态）：子设置原地展开，不遮挡页面。
  *
- * items 定义触发器行；每项内容经 #item 具名插槽分发。
+ * items 定义触发器行；每项内容经默认插槽分发（插槽参数 { item }）。
  * 前置条件不满足的项置灰 + Lock + title 说明（与原抽屉入口行为一致）。
  */
 import {

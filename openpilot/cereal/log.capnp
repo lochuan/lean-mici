@@ -2324,6 +2324,14 @@ struct LateralTorqueParameters @0xe61690eb0b091692 {
   version @11 :Int32;
   useParams @12 :Bool;
   calPerc @13 :Int8;
+
+  # Speed-dependent parameters
+  speedBinCenters @14 :List(Float32);
+  speedBinLatAccelFactors @15 :List(Float32);
+  speedBinFrictions @16 :List(Float32);
+  speedBinValid @17 :List(Bool);
+  speedBinPoints @18 :List(List(List(Float32)));  # per-bin point buckets for cache
+  speedBinCalPerc @19 :List(Int8);
 }
 
 struct LateralDelay @0x98dfdb22c44df8d4 {
@@ -2643,7 +2651,7 @@ struct Event {
     liveMapDataSP @115 :Custom.LiveMapDataSP;
     modelDataV2SP @116 :Custom.ModelDataV2SP;
     bigModelReply @136 :Custom.BigModelReply;
-    customReserved11 @137 :Custom.CustomReserved11;
+    navStateSP @137 :Custom.NavStateSP;  # BGM1 NavExt 镜像（20 Hz，记 rlog；不含经纬度）
     customReserved12 @138 :Custom.CustomReserved12;
     customReserved13 @139 :Custom.CustomReserved13;
     customReserved14 @140 :Custom.CustomReserved14;

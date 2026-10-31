@@ -1,5 +1,6 @@
 #include "uplink_sender.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace {
@@ -114,10 +115,10 @@ void UplinkSender::submit_wide(ConnEpoch conn_epoch, FrameIdx frame_idx, const u
 
   OutFrame* f = find_or_create_locked(frame_idx);
   if (f == nullptr || f->has_wide) return;
-  f->chunk2.resize(sizeof(uint32_t) + wide_len + bgm1::kMacSize);
+  f->chunk2.resize(sizeof(uint32_t) + wide_len + bgm1::kTailReservedSize);
   put_u32_le(f->chunk2.data(), (uint32_t)wide_len);
   std::memcpy(f->chunk2.data() + sizeof(uint32_t), wide, wide_len);
-  std::memset(f->chunk2.data() + sizeof(uint32_t) + wide_len, 0, bgm1::kMacSize);
+  std::memset(f->chunk2.data() + sizeof(uint32_t) + wide_len, 0, bgm1::kTailReservedSize);
   f->has_wide = true;
   f->wide_idr_actual = wide_actual_idr;
   resolve_head_gate_locked();
@@ -125,8 +126,22 @@ void UplinkSender::submit_wide(ConnEpoch conn_epoch, FrameIdx frame_idx, const u
   work_cv_.notify_one();
 }
 
-bool UplinkSender::wait_for_work(int timeout_ms) {
+bool UplinkSender::wait_for_work(int max_wait_ms) {
   std::unique_lock<std::mutex> lk(mtx_);
+  int timeout_ms = max_wait_ms;
+  if (!connected_) {
+    timeout_ms = std::min(timeout_ms, cfg_.poll_ms);
+  } else if (has_inflight_) {
+    const bool waiting_wide_only = inflight_.chunk1_done && !inflight_.has_wide;
+    if (waiting_wide_only) {
+      // submit_wide 唤醒；迟迟不到则在假死判定点醒来交给 step()
+      const uint64_t idle = now_() - last_progress_ms_;
+      const int left = idle >= cfg_.stall_ms ? 0 : int(cfg_.stall_ms - idle);
+      timeout_ms = std::min(timeout_ms, std::max(left, 1));
+    } else {
+      timeout_ms = std::min(timeout_ms, cfg_.poll_ms);
+    }
+  }
   const bool woke = work_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms), [this] { return work_pending_; });
   work_pending_ = false;
   return woke;
@@ -247,6 +262,8 @@ bool UplinkSender::step() {
 void UplinkSender::notify_disconnect() {
   std::lock_guard<std::mutex> lk(mtx_);
   if (connected_) drop_connection_locked();
+  work_pending_ = true;
+  work_cv_.notify_one();
 }
 
 void UplinkSender::notify_stream_gap() {
@@ -270,11 +287,12 @@ ConnEpoch UplinkSender::conn_epoch() const {
 
 void LinkStateTracker::on_connecting() {
   std::lock_guard<std::mutex> lk(mtx_);
-  state_ = "connecting";
+  if (!version_mismatch_) state_ = "connecting";
 }
 
 void LinkStateTracker::on_hello(uint64_t instance_id) {
   std::lock_guard<std::mutex> lk(mtx_);
+  version_mismatch_ = false;  // 新 HELLO 版本已对：解除
   if (have_instance_) state_ = (instance_id == last_instance_) ? "blip" : "restart";
   else state_ = "connected";
   last_instance_ = instance_id;
@@ -283,7 +301,13 @@ void LinkStateTracker::on_hello(uint64_t instance_id) {
 
 void LinkStateTracker::on_lost() {
   std::lock_guard<std::mutex> lk(mtx_);
-  state_ = "lost";
+  if (!version_mismatch_) state_ = "lost";
+}
+
+void LinkStateTracker::on_version_mismatch() {
+  std::lock_guard<std::mutex> lk(mtx_);
+  version_mismatch_ = true;
+  state_ = "version_mismatch";
 }
 
 std::string LinkStateTracker::value() const {

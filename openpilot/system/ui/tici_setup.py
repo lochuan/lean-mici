@@ -18,6 +18,7 @@ from openpilot.system.ui.widgets import DialogResult, Widget
 from openpilot.system.ui.widgets.button import Button, ButtonStyle, ButtonRadio
 from openpilot.system.ui.widgets.keyboard import Keyboard
 from openpilot.system.ui.widgets.label import Label
+from openpilot.system.ui.lib.wifi_manager import ConnectStatus
 from openpilot.system.ui.widgets.network import WifiManagerUI, WifiManager
 
 NetworkType = log.DeviceState.NetworkType
@@ -30,7 +31,8 @@ BODY_FONT_SIZE = 80
 BUTTON_HEIGHT = 160
 BUTTON_SPACING = 50
 
-OPENPILOT_URL = "https://openpilot.comma.ai"
+# 默认安装：自建分发服务（装 lochuan/lean-mici @ lean-release-c3x），见 all-in-one/installer/README.md。
+TOYOPILOT_INSTALLER_URL = "https://tp.diaperastiko.top/c3x"
 USER_AGENT = f"AGNOSSetup-{HARDWARE.get_os_version()}"
 
 INSTALLER_DESTINATION_PATH = "/tmp/installer"
@@ -61,7 +63,8 @@ class Setup(Widget):
     self.download_url = ""
     self.download_progress = 0
     self.download_thread = None
-    self.wifi_ui = WifiManagerUI(WifiManager())
+    self._wifi_manager = WifiManager()
+    self.wifi_ui = WifiManagerUI(self._wifi_manager)
     self.keyboard = Keyboard()
     self.selected_radio = None
     self.warning = gui_app.texture("icons/warning.png", 150, 150)
@@ -79,7 +82,7 @@ class Setup(Widget):
     self._getting_started_body_label = Label("Before we get on the road, let's finish installation and cover some details.",
                                              BODY_FONT_SIZE, text_alignment=TextAlignment.LEFT, text_padding=20)
 
-    self._software_selection_openpilot_button = ButtonRadio("openpilot", self.checkmark, font_size=BODY_FONT_SIZE, text_padding=80)
+    self._software_selection_openpilot_button = ButtonRadio("ToyoPilot", self.checkmark, font_size=BODY_FONT_SIZE, text_padding=80)
     self._software_selection_custom_software_button = ButtonRadio("Custom Software", self.checkmark, font_size=BODY_FONT_SIZE, text_padding=80)
     self._software_selection_continue_button = Button("Continue", self._software_selection_continue_button_callback,
                                                       button_style=ButtonStyle.PRIMARY)
@@ -185,7 +188,7 @@ class Setup(Widget):
   def _network_setup_continue_button_callback(self):
     self.stop_network_check_thread.set()
     if self._software_selection_openpilot_button.selected:
-      self.download(OPENPILOT_URL)
+      self.download(TOYOPILOT_INSTALLER_URL)
     else:
       self.state = SetupState.CUSTOM_SOFTWARE
 
@@ -213,15 +216,19 @@ class Setup(Widget):
   def check_network_connectivity(self):
     while not self.stop_network_check_thread.is_set():
       if self.state == SetupState.NETWORK_SETUP:
+        # 同 mici_setup.NetworkConnectivityMonitor：有默认路由就算联网，不发请求探测外网
         try:
-          urllib.request.urlopen(OPENPILOT_URL, timeout=2.0)
-          self.network_connected.set()
-          if HARDWARE.get_network_type() == NetworkType.wifi:
-            self.wifi_connected.set()
-          else:
-            self.wifi_connected.clear()
+          network_type = HARDWARE.get_network_type()
         except Exception:
+          network_type = NetworkType.none
+        if network_type == NetworkType.none:
           self.network_connected.clear()
+        else:
+          self.network_connected.set()
+        if network_type == NetworkType.wifi:
+          self.wifi_connected.set()
+        else:
+          self.wifi_connected.clear()
       time.sleep(1.0)
 
   def start_network_check(self):
@@ -249,9 +256,11 @@ class Setup(Widget):
     self._network_setup_back_button.render(rl.Rectangle(rect.x + MARGIN, button_y, button_width, BUTTON_HEIGHT))
 
     # Check network connectivity status
-    continue_enabled = self.network_connected.is_set()
+    # Wi-Fi 已连上也放行（同 mici_setup.NetworkSetupPageBase._has_internet）
+    wifi_connected = self.wifi_connected.is_set() or self._wifi_manager.wifi_state.status == ConnectStatus.CONNECTED
+    continue_enabled = self.network_connected.is_set() or wifi_connected
     self._network_setup_continue_button.set_enabled(continue_enabled)
-    continue_text = ("Continue" if self.wifi_connected.is_set() else "Continue without Wi-Fi") if continue_enabled else "Waiting for internet"
+    continue_text = ("Continue" if wifi_connected else "Continue without Wi-Fi") if continue_enabled else "Waiting for internet"
     self._network_setup_continue_button.set_text(continue_text)
     self._network_setup_continue_button.render(rl.Rectangle(rect.x + MARGIN + button_width + BUTTON_SPACING, button_y, button_width, BUTTON_HEIGHT))
 

@@ -5,6 +5,7 @@ import datetime
 import subprocess
 import shutil
 import signal
+import sys
 import fcntl
 import threading
 import urllib.request
@@ -24,7 +25,7 @@ LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
 STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
 
 # 连通性探测：国内直连地址（快、HTTP 免疫时钟错误导致的 TLS 失败）。
-# 只用于 has_internet 判定；更新本体仍走 git fetch（github）。
+# 只用于 has_internet 判定；更新本体仍走 git fetch origin（GitHub 或 Gitee，取决于安装入口 /c4 还是 /c4cn）。
 CONNECTIVITY_CHECK_URL = "http://wifi.vivo.com.cn/generate_204"
 
 OVERLAY_UPPER = os.path.join(STAGING_ROOT, "upper")
@@ -186,6 +187,10 @@ def finalize_update() -> None:
   run(["git", "reset", "--hard"], FINALIZED)
   run(["git", "submodule", "foreach", "--recursive", "git", "reset", "--hard"], FINALIZED)
 
+  dependency_helper = Path(FINALIZED) / "openpilot/common/pydeps.py"
+  if dependency_helper.is_file():
+    run([sys.executable, "-I", "-B", str(dependency_helper), "install", FINALIZED], FINALIZED)
+
   set_consistent_flag(True)
   cloudlog.info("done finalizing overlay")
 
@@ -198,7 +203,9 @@ def handle_agnos_update() -> None:
                           echo -n $AGNOS_VERSION"], OVERLAY_MERGED).strip()
 
   cloudlog.info(f"AGNOS version check: {cur_version} vs {updated_version}")
-  if cur_version == updated_version:
+  accepted_versions = run(["bash", "-c", "unset AGNOS_VERSION AGNOS_ACCEPTED_VERSIONS; source launch_env.sh; echo $AGNOS_ACCEPTED_VERSIONS"],
+                          OVERLAY_MERGED).split()
+  if cur_version == updated_version or cur_version in accepted_versions:
     return
 
   # prevent an openpilot getting swapped in with a mismatched or partially downloaded agnos

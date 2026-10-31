@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import os
 import re
-import ssl
 import threading
 import time
 import urllib.request
@@ -16,8 +15,6 @@ from openpilot.common.filter_simple import BounceFilter
 from openpilot.common.hardware import HARDWARE, COMMA_HARDWARE
 from openpilot.common.realtime import config_realtime_process, set_core_affinity
 from openpilot.common.swaglog import cloudlog
-from openpilot.common.time_helpers import system_time_valid
-from openpilot.common.utils import run_cmd
 from openpilot.system.ui.lib.application import gui_app, FontWeight, TextAlignment, TextAlignmentVertical
 from openpilot.system.ui.lib.wifi_manager import WifiManager, ConnectStatus
 from openpilot.system.ui.widgets import Widget
@@ -32,10 +29,9 @@ from openpilot.selfdrive.ui.mici.widgets.button import BigButton, GreyBigButton
 
 NetworkType = log.DeviceState.NetworkType
 
-OPENPILOT_URL = "https://openpilot.comma.ai"
-# 连通性探测：国内直连地址（HTTP 免疫时钟错误导致的 TLS 失败，204 响应快）。
-# 不可用于下载——setup 下载 openpilot 本体仍走 OPENPILOT_URL。
-CONNECTIVITY_CHECK_URL = "http://wifi.vivo.com.cn/generate_204"
+# 默认安装：自建分发服务按路径发打好补丁的 installer（装 lochuan/lean-mici @ lean-release），
+# 安装目标在服务端改，不用重建 AGNOS。见 all-in-one/installer/README.md。
+TOYOPILOT_INSTALLER_URL = "https://tp.diaperastiko.top/c4"
 USER_AGENT = f"AGNOSSetup-{HARDWARE.get_os_version()}"
 INSTALLER_DESTINATION_PATH = "/tmp/installer"
 INSTALLER_URL_PATH = "/tmp/installer_url"
@@ -48,7 +44,6 @@ class NetworkConnectivityMonitor:
     self.recheck_event = threading.Event()
     self._should_check = should_check or (lambda: True)
     self._stop_event = threading.Event()
-    self._last_timesyncd_restart = 0.0
     self._thread: threading.Thread | None = None
 
   def start(self):
@@ -74,27 +69,19 @@ class NetworkConnectivityMonitor:
   def _run(self):
     while not self._stop_event.is_set():
       if self._should_check():
+        # 不发请求探测外网，有默认路由就算联网：国产安卓热点上探测会长时间失败（iPhone 热点正常，原因未查明）。
+        # 真没外网时下载那一步失败，失败页可以重试
+        self.recheck_event.clear()
         try:
-          request = urllib.request.Request(CONNECTIVITY_CHECK_URL, method="HEAD")
-          urllib.request.urlopen(request, timeout=2.0)
-
-          # Discard stale result if invalidated during request
-          if self.recheck_event.is_set():
-            self.recheck_event.clear()
-            continue
-
-          self.network_connected.set()
-          if HARDWARE.get_network_type() == NetworkType.wifi:
-            self.wifi_connected.set()
-        except urllib.error.URLError as e:
-          if (isinstance(e.reason, ssl.SSLCertVerificationError) and
-              not system_time_valid() and
-              time.monotonic() - self._last_timesyncd_restart > 5):
-            self._last_timesyncd_restart = time.monotonic()
-            run_cmd(["sudo", "systemctl", "restart", "systemd-timesyncd"])
-          self.reset()
+          network_type = HARDWARE.get_network_type()
         except Exception:
+          network_type = NetworkType.none
+        if network_type == NetworkType.none:
           self.reset()
+        else:
+          self.network_connected.set()
+          if network_type == NetworkType.wifi:
+            self.wifi_connected.set()
       else:
         self.reset()
 
@@ -132,7 +119,7 @@ class SoftwareSelectionPage(NavWidget):
                use_custom_software_callback: Callable):
     super().__init__()
 
-    self._openpilot_slider = self._child(LargerSlider("slide to install\nopenpilot", use_openpilot_callback))
+    self._openpilot_slider = self._child(LargerSlider("slide to install\nToyoPilot", use_openpilot_callback))
     self._openpilot_slider.set_enabled(lambda: self.enabled and not self.is_dismissing)
     self._custom_software_slider = self._child(LargerSlider("slide to install\ncustom software", use_custom_software_callback, green=False, shimmer_offset=0.4))
     self._custom_software_slider.set_enabled(lambda: self.enabled and not self.is_dismissing)
@@ -324,7 +311,7 @@ class NetworkSetupPageBase(Scroller):
 
     self._waiting_button = BigPillButton("connect to\ncontinue", disabled_background=True)
     self._waiting_button.set_click_callback(on_waiting_click)
-    self._continue_button = BigPillButton("install openpilot", green=True)
+    self._continue_button = BigPillButton("install ToyoPilot", green=True)
     self._continue_button.set_click_callback(lambda: continue_callback(self._custom_software))
 
     self._scroller.add_widgets([
@@ -355,7 +342,9 @@ class NetworkSetupPageBase(Scroller):
     if network_changing:
       self._network_monitor.invalidate()
 
-    has_internet = (self._network_monitor.network_connected.is_set() and
+    # Wi-Fi 已连上也放行：只拿到 IPv6 时 NetworkManager 也算连上，而默认路由只看 IPv4，不能因此卡在等待
+    wifi_connected = self._wifi_manager.wifi_state.status == ConnectStatus.CONNECTED
+    has_internet = ((self._network_monitor.network_connected.is_set() or wifi_connected) and
                     not network_changing and
                     not self._network_monitor.recheck_event.is_set())
     return has_internet
@@ -406,7 +395,7 @@ class NetworkSetupPageBase(Scroller):
 
   def set_custom_software(self, custom_software: bool):
     self._custom_software = custom_software
-    self._continue_button.set_text("install openpilot" if not custom_software else "choose software")
+    self._continue_button.set_text("install ToyoPilot" if not custom_software else "choose software")
     self._continue_button.set_green(not custom_software)
 
   def _update_state(self):
@@ -487,7 +476,7 @@ class Setup(Widget):
 
   def _network_setup_continue_callback(self, custom_software: bool):
     if not custom_software:
-      self._download(OPENPILOT_URL)
+      self._download(TOYOPILOT_INSTALLER_URL)
     else:
       def handle_keyboard_result(text):
         url = text.strip()

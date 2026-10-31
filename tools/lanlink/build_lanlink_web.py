@@ -6,7 +6,7 @@
 `web/src/` 却忘记 `npm run build`，release 照常打包，设备上跑的还是旧界面——
 没有任何报错，只是行为对不上代码。
 
-做法与 tools/release/release_lib.py 的 native_hash 一致：把所有前端输入的
+做法：把所有前端输入的
 git tree 条目哈希成一个指纹，构建时写进 static/.build-hash。检查时重算并
 比对，不一致就报错。
 
