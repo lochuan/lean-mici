@@ -4,7 +4,6 @@ import pyray as rl
 from openpilot.cereal import messaging
 from opendbc.car.structs import car
 from dataclasses import dataclass, field
-from openpilot.common.model_geometry import VehicleFrameLine, geometry_to_vehicle_frame, read_camera_to_front, vehicle_to_camera_frame
 from openpilot.common.params import Params
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -51,8 +50,6 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
     self._path_offset_z = HEIGHT_INIT[0]
     self._counter = -1
     self._camera_offset = ui_state.params.get("CameraOffset", return_default=True)
-    self._camera_to_front = read_camera_to_front(ui_state.params)  # 安装偏移唯一读点（票 #6），每帧重读
-    self._raw_points_ctf: float | None = None  # raw_points 构建时用的安装偏移，变了须重建（见 _render）
     # Initialize ModelPoints objects
     self._path = ModelPoints()
     self._lane_lines = [ModelPoints() for _ in range(4)]
@@ -99,7 +96,6 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
     if self._counter % 60 == 0:
       self._camera_offset = ui_state.params.get("CameraOffset", return_default=True)
     self._counter += 1
-    self._camera_to_front = read_camera_to_front(ui_state.params)  # 每帧重读，保存即下一帧生效
 
     if sm.updated['carParams']:
       self._longitudinal_control = sm['carParams'].openpilotLongitudinalControl
@@ -109,13 +105,10 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
     lead_one = radar_state.leadOne if radar_state else None
     render_lead_indicator = self._longitudinal_control and radar_state is not None
 
-    # Update model data when needed。安装偏移变了也要同帧重建 raw_points：raw_points
-    # 是按构建时的 ctf 换算的车体系，换算口每帧用当前值逆变换，两边不同帧会让车道
-    # 像素瞬时错位一个 Δctf。
+    # Update model data when needed
     model_updated = sm.updated['modelV2']
-    ctf_changed = self._camera_to_front != self._raw_points_ctf
-    if model_updated or ctf_changed or sm.updated['radarState'] or self._transform_dirty:
-      if model_updated or ctf_changed:
+    if model_updated or sm.updated['radarState'] or self._transform_dirty:
+      if model_updated:
         self._update_raw_points(model)
 
       path_x_array = self._path.raw_points[:, 0]
@@ -137,26 +130,18 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
       self.chevron_metrics.draw_lead_status(sm, radar_state, self._rect, self._lead_vehicles)
 
   def _update_raw_points(self, model):
-    """Update raw 3D points from model data (车体系，几何解释权在 model_geometry)"""
-    geom = geometry_to_vehicle_frame(model, camera_to_front=self._camera_to_front)
-    self._raw_points_ctf = self._camera_to_front
+    """Update raw 3D points from model data"""
+    self._path.raw_points = np.array([model.position.x, np.array(model.position.y) + self._camera_offset, model.position.z], dtype=np.float32).T
 
-    self._path.raw_points = self._to_point_array(geom.path)
-    for i, lane_line in enumerate(geom.lane_lines):
-      self._lane_lines[i].raw_points = self._to_point_array(lane_line)
-    for i, road_edge in enumerate(geom.road_edges):
-      self._road_edges[i].raw_points = self._to_point_array(road_edge)
+    for i, lane_line in enumerate(model.laneLines):
+      self._lane_lines[i].raw_points = np.array([lane_line.x, np.array(lane_line.y) + self._camera_offset, lane_line.z], dtype=np.float32).T
+
+    for i, road_edge in enumerate(model.roadEdges):
+      self._road_edges[i].raw_points = np.array([road_edge.x, np.array(road_edge.y) + self._camera_offset, road_edge.z], dtype=np.float32).T
 
     self._lane_line_probs = np.array(model.laneLineProbs, dtype=np.float32)
     self._road_edge_stds = np.array(model.roadEdgeStds, dtype=np.float32)
     self._acceleration_x = np.array(model.acceleration.x, dtype=np.float32)
-
-  @staticmethod
-  def _to_point_array(line: VehicleFrameLine | None) -> np.ndarray:
-    """VehicleFrameLine → (N, 3) 车体系点阵；缺线/空线为空阵"""
-    if line is None or len(line.x) == 0:
-      return np.empty((0, 3), dtype=np.float32)
-    return np.array([line.x, line.y, line.z], dtype=np.float32).T
 
   def _update_leads(self, radar_state, path_x_array):
     """Update positions of lead vehicles"""
@@ -170,14 +155,12 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
 
         # Get z-coordinate from path at the lead vehicle position
         z = self._path.raw_points[idx, 2] if idx < len(self._path.raw_points) else 0.0
-        # dRel/yRel 与 raw_points 同为车体系（yRel 左正），换算口负责翻 y 与补偏移
-        point = self._map_to_screen(d_rel, y_rel, z + self._path_offset_z)
+        point = self._map_to_screen(d_rel, -y_rel + self._camera_offset, z + self._path_offset_z)
         if point:
           self._lead_vehicles[i] = self._update_lead_vehicle(d_rel, v_rel, point, self._rect)
 
   def _update_model(self, lead, path_x_array):
     """Update model visualization data based on model message"""
-    # 收尾/截断距离：车体系（与 raw_points、dRel 同帧）；换算口把插值坐标换到相机系
     max_distance = np.clip(path_x_array[-1], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE)
     max_idx = self._get_path_length_idx(self._lane_lines[0].raw_points[:, 0], max_distance)
 
@@ -324,10 +307,8 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
     return indices[-1] if indices.size > 0 else 0
 
   def _map_to_screen(self, in_x, in_y, in_z):
-    """Project a point in vehicle space to screen space"""
-    # 换算口（票 #5）：车体系 → 相机系（补回相机平移），CameraOffset 加在 y（右正）
-    cam_x, cam_y, cam_z = vehicle_to_camera_frame(in_x, in_y, in_z, self._camera_to_front)
-    input_pt = np.array([cam_x, cam_y + self._camera_offset, cam_z])
+    """Project a point in car space to screen space"""
+    input_pt = np.array([in_x, in_y, in_z])
     pt = self._car_space_transform @ input_pt
 
     if abs(pt[2]) < 1e-6:
@@ -342,19 +323,10 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
     return (x, y)
 
   def _map_line_to_polygon(self, line: np.ndarray, y_off: float, z_off: float, max_idx: int, max_distance: float, allow_invert: bool = True) -> np.ndarray:
-    """Convert 3D line (车体系) to 2D polygon for rendering.
-
-    换算口（票 #5）：进透视矩阵前统一车体系 → 相机系（补回相机平移），
-    CameraOffset 加在 y（右正）；max_distance 为车体系收尾距离，插值收尾时
-    同口径 +camera_to_front。此后全程相机系，与切换前像素一致。
-    """
+    """Convert 3D line to 2D polygon for rendering."""
     if line.shape[0] == 0:
       return np.empty((0, 2), dtype=np.float32)
 
-    # 换算口：车体系 → 相机系（与 _map_to_screen 仅有的两处换算点）
-    cam_x, cam_y, cam_z = vehicle_to_camera_frame(line[:, 0], line[:, 1], line[:, 2], self._camera_to_front)
-    line = np.stack((cam_x, cam_y + self._camera_offset, cam_z), axis=1).astype(np.float32)
-    max_distance += self._camera_to_front
 
     # Slice points and filter non-negative x-coordinates
     points = line[:max_idx + 1]
