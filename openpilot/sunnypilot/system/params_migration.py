@@ -46,6 +46,13 @@ def _migrate_car_platform_bundle(_params):
   old_platform = bundle.get("platform")
   if not old_platform:
     return
+  if old_platform == "TOYOTA_SIENNA_PATCHED" and bundle.get("name") == "Toyota Sienna 2021-26 PATCHED":
+    with open(CAR_LIST_JSON_OUT) as f:
+      car_list = json.load(f)
+    name = "Toyota Sienna 2021-27 PATCHED"
+    if name in car_list:
+      _params.put("CarPlatformBundle", {**car_list[name], "name": name}, block=True)
+    return
 
   from opendbc.car.fingerprints import MIGRATION  # lazy: avoids heavy import at module level
   if old_platform not in MIGRATION:

@@ -26,3 +26,13 @@ def test_dec_cleanup_failure_does_not_stop_later_migrations(tmp_path):
     run_migration(params)
     later.assert_called_once_with(params)
     assert params.get('OnroadScreenOffBrightnessMigrated') is not None
+
+
+def test_patched_sienna_selection_is_renamed_without_changing_platform(tmp_path):
+  params = Params(str(tmp_path))
+  params.put('CarPlatformBundle', {'platform': 'TOYOTA_SIENNA_PATCHED', 'name': 'Toyota Sienna 2021-26 PATCHED'}, block=True)
+  run_migration(params)
+  bundle = params.get('CarPlatformBundle')
+  assert bundle['platform'] == 'TOYOTA_SIENNA_PATCHED'
+  assert bundle['name'] == 'Toyota Sienna 2021-27 PATCHED'
+  assert '2027' in bundle['year']
