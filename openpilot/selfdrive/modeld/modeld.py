@@ -22,6 +22,7 @@ from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.camera_offset_helper import CameraOffsetHelper
+from openpilot.selfdrive.modeld.blendful import Blendful
 from openpilot.selfdrive.modeld.big_model import (SourceBlender, BigReplyLatch, FrameDelayEstimator,
                                                   ms_since_eof, nanos_since_boot, select_frame)
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, nv12_copy_size, MODELD_INPUTS
@@ -98,6 +99,21 @@ class FrameMeta:
       self.frame_id, self.timestamp_sof, self.timestamp_eof = vipc.frame_id, vipc.timestamp_sof, vipc.timestamp_eof
 
 
+def raw_action_from_output(model_output: dict[str, np.ndarray], lat_action_t: float, long_action_t: float,
+                           v_ego: float) -> tuple[float, float]:
+  if 'action' not in model_output:
+    plan = model_output['plan'][0]
+    desired_accel = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
+                                        plan[:,Plan.ACCELERATION][:,0],
+                                        ModelConstants.T_IDXS,
+                                        action_t=long_action_t)
+    desired_curvature = get_curvature_from_output(model_output, plan, v_ego, lat_action_t, False)
+  else:
+    desired_accel = model_output['action'][0,1]
+    desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
+  return desired_accel, desired_curvature
+
+
 class ModelState:
   prev_desire: np.ndarray  # for tracking the rising edge of the pulse
 
@@ -134,17 +150,10 @@ class ModelState:
     self.run_model = jits['run_model'][(cam_w, cam_h)]
 
   def get_action_from_model(self, model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
-                            lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
-    if 'action' not in model_output:
-      plan = model_output['plan'][0]
-      desired_accel = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
-                                          plan[:,Plan.ACCELERATION][:,0],
-                                          ModelConstants.T_IDXS,
-                                          action_t=long_action_t)
-      desired_curvature = get_curvature_from_output(model_output, plan, v_ego, lat_action_t, False)
-    else:
-      desired_accel = model_output['action'][0,1]
-      desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
+                            lat_action_t: float, long_action_t: float, v_ego: float,
+                            curvature_offset: float = 0.0) -> log.ModelDataV2.Action:
+    desired_accel, desired_curvature = raw_action_from_output(model_output, lat_action_t, long_action_t, v_ego)
+    desired_curvature += curvature_offset
     stop = should_stop(v_ego, desired_accel)
     desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, self.LONG_SMOOTH_SECONDS)
     if v_ego > MIN_LAT_CONTROL_SPEED:
@@ -284,6 +293,8 @@ def main(demo=False):
   prev_action = log.ModelDataV2.Action()
 
   DH = DesireHelper()
+  blendful = Blendful()
+  blendful_enabled = False
   RELC = RoadEdgeLaneChangeController()
 
   while True:
@@ -336,6 +347,7 @@ def main(demo=False):
       extra_intrinsics = dc.wide_road.intrinsics if has_wide_camera else dc.narrow_road.intrinsics
       model_transform_extra = get_warp_matrix(device_from_calib_euler, extra_intrinsics, True).astype(np.float32)
       camera_offset_helper.set_offset(params.get("CameraOffset", return_default=True))
+      blendful_enabled = params.get_bool("Blendful")
       model_transform_main, model_transform_extra = camera_offset_helper.update(model_transform_main, model_transform_extra,
                                                                                  main_intrinsics, extra_intrinsics,
                                                                                  sm["extrinsicsCalibration"])
@@ -383,12 +395,16 @@ def main(demo=False):
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
 
+      blendful_active = desire == log.Desire.none and DH.lane_change_state == log.LaneChangeState.off
       frame = select_frame(
         model_output, latch=latch, enabled=bigmodel_enabled, run_count=run_count,
         timestamp_eof=meta_main.timestamp_eof, deadline_after_eof_ms=BIG_REPLY_DEADLINE_MS,
         warmup_frames=BIG_WARMUP_FRAMES, current_time_ns=nanos_since_boot, blender=blender,
-        action_for=lambda output, lat_t, long_t, prev_action=prev_action, v_ego=v_ego:
-          model.get_action_from_model(output, prev_action, lat_t, long_t, v_ego),
+        action_for=lambda output, lat_t, long_t, offset, prev_action=prev_action, v_ego=v_ego:
+          model.get_action_from_model(output, prev_action, lat_t, long_t, v_ego, offset),
+        curvature_offset_for=lambda output, v_ego=v_ego: blendful.update(
+          output, v_ego, blendful_active, raw_action_from_output(output, lat_action_t, long_action_t, v_ego)[1],
+          enabled=blendful_enabled),
         action_t=(lat_action_t, long_action_t))
       blended, big_out, eof_to_reply_ms = frame.model_output, frame.big_output, frame.eof_to_reply_ms
       if SEND_RAW_PRED and 'raw_pred' not in blended:
@@ -425,6 +441,13 @@ def main(demo=False):
       mdv2sp_send.modelDataV2SP.cameraToModelMs = camera_to_model_ms
       mdv2sp_send.modelDataV2SP.bigSource = frame.source
       mdv2sp_send.modelDataV2SP.bigDeadlineMs = frame.deadline_ms
+      mdv2sp_send.modelDataV2SP.blendfulCurvature = blendful.curvature
+      mdv2sp_send.modelDataV2SP.blendfulTrust = float(blendful.trust)
+      mdv2sp_send.modelDataV2SP.modelCurvature = float(blendful.model_curvature)
+      mdv2sp_send.modelDataV2SP.blendfulGoingAround = bool(blendful.going_around)
+      mdv2sp_send.modelDataV2SP.blendfulLeftProb = blendful.l_prob
+      mdv2sp_send.modelDataV2SP.blendfulRightProb = blendful.r_prob
+      mdv2sp_send.modelDataV2SP.blendfulLaneWidth = float(blendful.lane_width.x)
       if (stages := latch.take_stages()) is not None:
         for k, v in stages.items():
           setattr(mdv2sp_send.modelDataV2SP.bigStages, k, v)

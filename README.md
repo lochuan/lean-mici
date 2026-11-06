@@ -10,6 +10,8 @@ Join the official sunnypilot community forum to stay up to date with all the lat
 ## Documentation
 https://docs.sunnypilot.ai/ is your one stop shop for everything from features to installation to FAQ about the sunnypilot
 
+Blendful is an Alpha lane-centering correction available under lanlink's model behavior settings. It is disabled by default; this port has not been validated in a vehicle.
+
 ## 🚘 Running on a dedicated device in a car
 First, check out this list of items you'll need to [get started](https://community.sunnypilot.ai/t/getting-started-using-sunnypilot-in-your-supported-car/251).
 
