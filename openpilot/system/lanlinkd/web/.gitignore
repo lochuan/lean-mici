@@ -1,0 +1,14 @@
+# 源码安装的依赖：一律不进 git，也不上设备。
+# 设备上没有 Node，运行时只需要 ../static 里的构建产物。
+# 依赖只以 package.json + package-lock.json 的形式留作"说明"，
+# 需要改前端时在开发机 `npm ci` 重建即可。
+node_modules/
+
+# 构建中间产物
+.vite/
+*.tsbuildinfo
+vite.config.ts.timestamp-*
+
+# 本机覆盖（例如指向自己的设备 IP）
+.env
+.env.local
