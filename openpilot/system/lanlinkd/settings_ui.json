@@ -680,6 +680,19 @@
        ]
       },
       {
+       "key": "AccelBoostSP",
+       "widget": "toggle",
+       "title": "加速增强 (Alpha)",
+       "description": "在 openpilot 纵向的加速基础上叠加少量助推：激进模式更强、放松模式更弱；弯道和减速、停车时自动减弱，不超过设定速度，跟车优先。",
+       "enablement": [
+        {
+         "type": "capability",
+         "field": "has_longitudinal_control",
+         "equals": true
+        }
+       ]
+      },
+      {
        "key": "IntelligentCruiseButtonManagement",
        "widget": "toggle",
        "title": "智能巡航按键管理 (ICBM) (Alpha)",
@@ -2086,6 +2099,28 @@
      "widget": "toggle",
      "needs_onroad_cycle": true,
      "title": "走走停停增强 (Alpha)",
+     "enablement": [
+      {
+       "type": "not_engaged"
+      },
+      {
+       "type": "capability",
+       "field": "has_longitudinal_control",
+       "equals": true
+      },
+      {
+       "type": "param",
+       "key": "ToyotaEnforceStockLongitudinal",
+       "equals": false
+      }
+     ]
+    },
+    {
+     "key": "ToyotaTSS2Smooth",
+     "widget": "toggle",
+     "needs_onroad_cycle": true,
+     "title": "TSS2 平顺纵向 (Alpha)",
+     "description": "TSS2 车型使用随车速变化的积分增益曲线，跟车更平顺。仅在 openpilot 纵向下生效。",
      "enablement": [
       {
        "type": "not_engaged"
