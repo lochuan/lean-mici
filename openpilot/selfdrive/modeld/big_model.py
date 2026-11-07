@@ -220,11 +220,10 @@ def select_frame(small_output: dict[str, np.ndarray], *, latch, enabled: bool, r
                  timestamp_eof: int, deadline_after_eof_ms: float, warmup_frames: int,
                  current_time_ns: Callable[[], int],
                  blender: SourceBlender, action_for: Callable, action_t: tuple[float, float],
-                 curvature_offset_for: Callable[[dict[str, np.ndarray]], float],
                  parse_outputs: Callable[[np.ndarray], dict[str, np.ndarray]] = parse_big_outputs) -> FrameSelection:
   """Choose, blend, and derive this frame's action through one host-testable seam.
 
-  ``latch``, ``action_for``, and ``curvature_offset_for`` are runtime adapters; the policy needs no
+  ``latch`` and ``action_for`` are the runtime adapters; the policy needs no
   msgq, Cap'n Proto, model runner, or GPU to test.
   """
   raw: np.ndarray | None = None
@@ -246,11 +245,10 @@ def select_frame(small_output: dict[str, np.ndarray], *, latch, enabled: bool, r
 
   big_output = parse_outputs(raw) if raw is not None else None
   model_output = blender.step(small_output, big_output)
-  offset = curvature_offset_for(model_output)
-  small_action = action_for(small_output, *action_t, offset)
+  small_action = action_for(small_output, *action_t)
   big_leg = big_output if big_output is not None else blender.big_last
   if big_leg is not None and blender.w > 0.0:
-    big_action = action_for(big_leg, *action_t, offset)
+    big_action = action_for(big_leg, *action_t)
     weight = blender.w
     curvature = (1. - weight) * small_action.desiredCurvature + weight * big_action.desiredCurvature
     acceleration = (1. - weight) * small_action.desiredAcceleration + weight * big_action.desiredAcceleration

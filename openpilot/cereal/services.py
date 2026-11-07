@@ -91,7 +91,7 @@ _services: dict[str, tuple] = {
   "carControlSP": (True, 100., 10),
   "carStateSP": (True, 100., 10),
   "liveMapDataSP": (True, 1., 1),
-  "modelDataV2SP": (True, 20., 10, QueueSize.BIG),
+  "modelDataV2SP": (True, 20., None, QueueSize.BIG),
   "bigModelReply": (False, 0., None, QueueSize.BIG),  # 04 号：App REPLY 转交 modeld，不记录 rlog
   "navStateSP": (True, 20., 10),  # BGM1 NavExt 镜像（rlog / UI；不含经纬度）
   "liveLocationKalman": (True, 20.),

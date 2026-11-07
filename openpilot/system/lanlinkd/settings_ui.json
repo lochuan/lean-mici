@@ -561,12 +561,6 @@
      "title": "模型行为",
      "items": [
       {
-       "key": "Blendful",
-       "widget": "toggle",
-       "title": "Blendful 车道居中修正 (Alpha)",
-       "description": "在模型自身转向上叠加轻微的车道居中修正，车道线越清晰修正越强；绕行障碍时让出。Alpha 功能，上游未在内置模型上验证。"
-      },
-      {
        "key": "LaneTurnDesire",
        "widget": "toggle",
        "title": "使用转向意愿"

@@ -275,7 +275,7 @@ def test_select_frame_obeys_warmup_enable_and_link_gates():
   blender = SourceBlender(fade_frames=2)
   action_calls = []
 
-  def action_for(output, lat_t, long_t, offset):
+  def action_for(output, lat_t, long_t):
     action_calls.append((output, lat_t, long_t))
     value = float(output["plan"][0])
     return SimpleNamespace(desiredCurvature=value, desiredAcceleration=-value, shouldStop=value < 1.5)
@@ -284,7 +284,7 @@ def test_select_frame_obeys_warmup_enable_and_link_gates():
     return select_frame(
       small, latch=latch, enabled=enabled, run_count=run_count, timestamp_eof=1_000_000_000,
       deadline_after_eof_ms=70., warmup_frames=4, current_time_ns=lambda: 9_000_000_000, blender=blender,
-      action_for=action_for, action_t=(0.1, 0.2), curvature_offset_for=lambda _: 0.0,
+      action_for=action_for, action_t=(0.1, 0.2),
       parse_outputs=lambda raw: {"plan": np.array([raw[0]], dtype=np.float32)})
 
   first = select(enabled=True, run_count=4)
@@ -324,33 +324,10 @@ def test_select_frame_rejects_zero_reply():
                        action_for=lambda *_: SimpleNamespace(desiredCurvature=0., desiredAcceleration=0.,
                                                             shouldStop=False),
                        action_t=(0., 0.),
-                       curvature_offset_for=lambda _: 0.0,
                        parse_outputs=lambda raw: {"plan": raw})
   assert frame.big_output is None and frame.eof_to_reply_ms == 12.
   assert frame.model_output is small
   assert frame.source == 'zeroOutput'
-
-
-def test_select_frame_applies_one_curvature_offset_to_both_legs():
-  small = {'plan': np.array([0.])}
-  big = {'plan': np.array([1.])}
-  blender = SourceBlender()
-  blender.step(small, big)
-  latch = _FakeReplySelector(alive=True, result=(np.ones(1), 1., 'big'))
-  calls = []
-
-  def offset_for(output):
-    calls.append(output)
-    return 0.02
-
-  frame = select_frame(small, latch=latch, enabled=True, run_count=2, timestamp_eof=1,
-                       deadline_after_eof_ms=70., warmup_frames=0, current_time_ns=lambda: 1,
-                       blender=blender, action_t=(0., 0.), curvature_offset_for=offset_for,
-                       action_for=lambda output, lat, long, offset: SimpleNamespace(
-                         desiredCurvature=offset, desiredAcceleration=0., shouldStop=False),
-                       parse_outputs=lambda raw: big)
-  assert frame.desired_curvature == 0.02
-  assert len(calls) == 1 and calls[0] is frame.model_output
 
 
 def test_modeld_c3_wiring_source():
