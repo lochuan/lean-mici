@@ -42,9 +42,9 @@ OTA 在设置 finalized 就绪标志前调用目标版本安装器，坏包不�
 不改永久 LanLinkEnabled。安装时导入失败会在停服前拒绝发布。启动信任已安装集合，
 不保证发现发布后的人为改动或存储损坏；解释器/应用 native 不兼容仍可能影响 manager/UI。
 
-`AGNOS_VERSION` 默认为 20.1；boot 与后台更新均读取 `AGNOS_ACCEPTED_VERSIONS`，默认
-仍接受 19.6.29 和 20.1；其他版本沿用原更新行为。
-这只表达版本兼容，不代表已授权刷机或已通过真机验收。
+`AGNOS_VERSION` 默认为 20.3；boot 与后台更新均读取 `AGNOS_ACCEPTED_VERSIONS`，默认
+接受 20.3 并保留 19.6.29 兼容；20.1 沿用既有路径升级到 20.3，其他版本沿用原更新行为。
+boot/system 使用已发布到 R2 的 [20.3 清单](https://dl.diaperastiko.top/agnos/20.3/agnos.json)。
 
 回滚 checkout 后由旧应用自己的 manifest 选依赖，无跨 OS 回滚矩阵或自动 GC。
 旧应用没有 pydeps 入口时仍依赖旧系统环境，不能把本流程当作跨系统恢复保证。
