@@ -12,12 +12,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class AgnosCompatibilityTests(unittest.TestCase):
+  def target_version(self):
+    return subprocess.check_output(['bash', '-c', 'unset AGNOS_VERSION AGNOS_ACCEPTED_VERSIONS; source "$1"; echo -n "$AGNOS_VERSION"',
+                                    'test', str(ROOT / 'launch_env.sh')], text=True)
+
   def test_i3_boot_accepts_both_current_and_transition_system(self):
     versions = subprocess.check_output(['bash', '-c', 'unset AGNOS_VERSION AGNOS_ACCEPTED_VERSIONS; source "$1"; echo "$AGNOS_ACCEPTED_VERSIONS"',
                                         'test', str(ROOT / 'launch_env.sh')], text=True).split()
-    self.assertIn('19.6.29', versions)
-    self.assertIn('20.3', versions)
-    self.assertNotIn('20.1', versions)
+    self.assertEqual(versions, [self.target_version(), '19.6.29'])
 
   def background_actions(self, version, directory=ROOT):
     path = ROOT / 'openpilot/system/updated/updated.py'
@@ -34,8 +36,8 @@ class AgnosCompatibilityTests(unittest.TestCase):
     return actions
 
   def test_i3_background_accepts_the_same_versions_and_keeps_other_update_behavior(self):
+    self.assertEqual(self.background_actions(self.target_version()), [])
     self.assertEqual(self.background_actions('19.6.29'), [])
-    self.assertEqual(self.background_actions('20.3'), [])
     self.assertEqual(self.background_actions('20.1'), [False, 'flash'])
     self.assertEqual(self.background_actions('18.0'), [False, 'flash'])
 
