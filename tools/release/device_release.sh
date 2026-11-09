@@ -13,7 +13,7 @@
 #
 # 分支参数（环境变量，缺省 = 主线发版）:
 #   SRC_BRANCH     源分支，缺省 lean-master
-#   RELEASE_BRANCH 发布分支，缺省 lean-release
+#   RELEASE_BRANCH 发布分支，缺省 c4-release
 # LOCAL_SOURCE_SHA 非空：仅从 Mac 已传入 /data/build/.git/local-source/<sha> 的本地 Git 源取对象。
 # 例: SRC_BRANCH=big-uplink RELEASE_BRANCH=big-release bash device_release.sh
 set -Eeuo pipefail   # -E：ERR trap 继承进阶段函数
@@ -22,7 +22,7 @@ BUILD=/data/build
 STAGE=/data/relstage
 REPO_URL=https://github.com/lochuan/lean-mici.git
 SRC_BRANCH="${SRC_BRANCH:-lean-master}"
-RELEASE_BRANCH="${RELEASE_BRANCH:-lean-release}"
+RELEASE_BRANCH="${RELEASE_BRANCH:-c4-release}"
 LOCAL_SOURCE_SHA="${LOCAL_SOURCE_SHA:-}"
 # 默认 2GB 会按 mtime 淘汰掉 ~71M 的 driving pkl，下次发版白编 ~11 分钟
 SCONS_CACHE_LIMIT=8e9

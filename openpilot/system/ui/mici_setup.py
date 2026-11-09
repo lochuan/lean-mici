@@ -29,7 +29,7 @@ from openpilot.selfdrive.ui.mici.widgets.button import BigButton, GreyBigButton
 
 NetworkType = log.DeviceState.NetworkType
 
-# 默认安装：自建分发服务按路径发打好补丁的 installer（装 lochuan/lean-mici @ lean-release），
+# 默认安装：自建分发服务按路径发打好补丁的 installer（装 GitCode lochuan/toyopilot-c4 @ c4-release），
 # 安装目标在服务端改，不用重建 AGNOS。见 all-in-one/installer/README.md。
 TOYOPILOT_INSTALLER_URL = "https://tp.diaperastiko.top/c4"
 USER_AGENT = f"AGNOSSetup-{HARDWARE.get_os_version()}"

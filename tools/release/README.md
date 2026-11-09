@@ -1,8 +1,8 @@
 # 固定本地源车机发版
 
 入口沿用 `publish_release_from_device.sh` 和 `device_release.sh`。两种模式均传输明确的
-本地分支、已批准源码 SHA、固定子模块及离线 Sanic 产物。默认构建 `lean-release`，
-依次推 fork、镜像 Gitee，再由设备消费；`--local-source` 只消费 `nav-local-release`，
+本地分支、已批准源码 SHA、固定子模块及离线 Sanic 产物。默认构建 `c4-release`，
+推 GitCode（lochuan/toyopilot-c4）c4-release，再由设备从 GitCode 消费；`--local-source` 只消费 `nav-local-release`，
 不推公共远端。源码不从远端补取。
 
 ## 离线 Sanic 产物
@@ -65,19 +65,19 @@ DEVICE=comma@10.0.0.27 \
 bash tools/release/publish_release_from_device.sh --skip-smoke
 ```
 
-此命令会推 fork/Gitee 并消费。只做本地发版时追加 `--local-source`。
+此命令会推 GitCode 并由设备从 GitCode 消费。只做本地发版时追加 `--local-source`。
 `LOCAL_SOURCE_REF` 显式选择完整本地分支 ref，公开模式省略时为 `refs/heads/$SRC_BRANCH`
 （SRC_BRANCH 默认 lean-master）；本地模式省略时仍为 `refs/heads/nav-test`。
 仅接受 `refs/heads/` 下由英文字母、数字、下划线、点、斜杠、连字符组成且通过
 Git ref 校验的名称；不接受 tag、SHA 或修订表达式。`EXPECTED_SOURCE_SHA` 必须是
 批准的完整 40 位 SHA，并与该分支解析出的 commit 相同。HEAD、同名 tag 和未提交的
-工作树修改不作为业务源码。公开发布分支默认 `lean-release`；本地发布固定为
+工作树修改不作为业务源码。公开发布分支默认 `c4-release`；本地发布固定为
 `nav-local-release`。下面的 prepare、事务状态和回滚说明专指本地模式。
 
 prepare 要求当前 live HEAD 位于本地分支且跟踪树干净；记录当次旧 HEAD、完整分支
 ref 和 DisableUpdates 原值，在 `/data/openpilot` 创建
 `refs/local-release/rollback/<旧HEAD>` 保留旧对象。后续切换即使覆盖同名
-`nav-local-release`，回滚仍恢复这次记录的旧 HEAD/分支。不会移动 `lean-release`，
+`nav-local-release`，回滚仍恢复这次记录的旧 HEAD/分支。不会移动 `c4-release`，
 不会清理历史回滚 ref；没有固定的回滚 SHA 或参数值。
 
 源码传输在停服前；完整构建仍用原 SCons 流程。建议维护窗口 30–60 分钟，

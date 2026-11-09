@@ -285,12 +285,10 @@ if name == 'ssh':
   elif 'rev-parse' in args[-1]:
     print('b' * 40)
 elif name == 'git':
-  if args[:3] == ['push', '-f', 'fork'] and os.environ.get('FAIL_FORK'):
+  if args[:3] == ['push', '-f', 'gitcode'] and os.environ.get('FAIL_GITCODE'):
     sys.exit(1)
   if args[:1] == ['rev-parse']:
     print('b' * 40)
-  elif args[:3] == ['remote', 'get-url', 'gitee']:
-    print('git@gitee.test:release.git')
 '''
 
 
@@ -333,7 +331,7 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
         'LOCAL_SOURCE_SHA',
         'LOCAL_SOURCE_REF',
         'PYDEPS_ARTIFACT',
-        'FAIL_FORK',
+        'FAIL_GITCODE',
         'FAIL_TRANSFER',
         'FAIL_PREPARE',
         'FAIL_POSTBOOT',
@@ -360,7 +358,7 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
     self.assertIn('EXPECTED_SOURCE_SHA', result.stderr)
     self.assertEqual(calls, [])
 
-  def test_public_release_transports_and_installs_before_build_then_pushes_both_remotes(self):
+  def test_public_release_transports_and_installs_before_build_then_pushes_gitcode(self):
     result, calls = self.run_publish()
     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
     sender = next(call for call in calls if call[:2] == ['source-sender', 'send-local-source'])
@@ -368,14 +366,18 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
     dependency_transfer = next(i for i, call in enumerate(calls) if call[:2] == ['source-sender', 'send-local-pydeps'])
     install = next(i for i, call in enumerate(calls) if 'pydeps.py install' in call[-1])
     build = next(i for i, call in enumerate(calls) if 'bash /tmp/device_release.sh' in call[-1])
-    fork = next(i for i, call in enumerate(calls) if call[:4] == ['git', 'push', '-f', 'fork'])
-    gitee = next(i for i, call in enumerate(calls) if call[:4] == ['git', 'push', '-f', 'gitee'])
+    gitcode = next(i for i, call in enumerate(calls) if call[:4] == ['git', 'push', '-f', 'gitcode'])
+    set_url = next(i for i, call in enumerate(calls) if call[0] == 'ssh' and 'git remote set-url origin https://gitcode.com/lochuan/toyopilot-c4.git' in call[-1])
+    fetch = next(i for i, call in enumerate(calls) if call[0] == 'ssh' and 'git fetch -4 -q origin c4-release' in call[-1])
     self.assertLess(dependency_transfer, install)
     self.assertLess(install, build)
-    self.assertLess(build, fork)
-    self.assertLess(fork, gitee)
+    self.assertLess(build, gitcode)
+    self.assertLess(gitcode, set_url)
+    self.assertLess(set_url, fetch)
+    self.assertIn('test "$(git rev-parse FETCH_HEAD)" = ' + 'b' * 40, calls[fetch][-1])
+    self.assertFalse(any(call[:4] in (['git', 'push', '-f', 'fork'], ['git', 'push', '-f', 'gitee']) for call in calls))
     self.assertIn('LOCAL_SOURCE_SHA=' + 'a' * 40, calls[build][-1])
-    self.assertIn('RELEASE_BRANCH=lean-release', calls[build][-1])
+    self.assertIn('RELEASE_BRANCH=c4-release', calls[build][-1])
 
   def test_public_install_failure_never_builds_pushes_or_consumes(self):
     result, calls = self.run_publish(extra_env={'FAIL_INSTALL': '1'})
@@ -411,7 +413,7 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
     self.assertTrue(all(call[-2] == 'comma@test' for call in calls if call[0] == 'ssh'))
 
   def test_fixture_ignores_parent_fault_injection_settings(self):
-    parent_environment = {'FAIL_FORK': '1', 'FAIL_TRANSFER': '1', 'FAIL_PREPARE': '1', 'FAIL_POSTBOOT': '1',
+    parent_environment = {'FAIL_GITCODE': '1', 'FAIL_TRANSFER': '1', 'FAIL_PREPARE': '1', 'FAIL_POSTBOOT': '1',
                           'SOURCE_OUTPUT': 'unexpected parent stdout', 'WORKER_PHASE': 'failed'}
     with patch.dict(os.environ, parent_environment):
       for local in (False, True):
@@ -419,20 +421,21 @@ if os.environ.get('FAIL_TRANSFER'): sys.exit(2)
           result, _ = self.run_publish(local=local)
           self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-  def test_default_fork_failure_retries_three_times_and_never_deploys(self):
-    result, calls = self.run_publish(extra_env={'FAIL_FORK': '1'})
+  def test_default_gitcode_failure_retries_three_times_and_never_deploys(self):
+    result, calls = self.run_publish(extra_env={'FAIL_GITCODE': '1'})
     self.assertNotEqual(result.returncode, 0)
-    pushes = [call for call in calls if call[:4] == ['git', 'push', '-f', 'fork']]
+    pushes = [call for call in calls if call[:4] == ['git', 'push', '-f', 'gitcode']]
     self.assertEqual(len(pushes), 3)
     self.assertFalse(any(call[0] == 'ssh' and 'reboot' in call[-1] for call in calls))
+    self.assertFalse(any(call[0] == 'ssh' and 'git remote set-url origin' in call[-1] for call in calls))
 
-  def test_default_custom_release_branch_still_skips_gitee(self):
+  def test_custom_release_branch_pushes_gitcode(self):
     result, calls = self.run_publish(extra_env={'SRC_BRANCH': 'big-uplink', 'RELEASE_BRANCH': 'big-release'})
     self.assertEqual(result.returncode, 0, result.stderr)
     launch = next(call[-1] for call in calls if call[0] == 'ssh' and 'nohup' in call[-1])
     self.assertIn('SRC_BRANCH=big-uplink RELEASE_BRANCH=big-release', launch)
-    self.assertTrue(any(call[:4] == ['git', 'push', '-f', 'fork'] for call in calls))
-    self.assertFalse(any(call[:4] == ['git', 'push', '-f', 'gitee'] for call in calls))
+    self.assertTrue(any(call == ['git', 'push', '-f', 'gitcode', 'refs/temp/device-release:refs/heads/big-release'] for call in calls))
+    self.assertFalse(any(call[:4] in (['git', 'push', '-f', 'fork'], ['git', 'push', '-f', 'gitee']) for call in calls))
 
   def test_local_transfer_failure_never_starts_device_release(self):
     result, calls = self.run_publish(local=True, extra_env={'FAIL_TRANSFER': '1'})

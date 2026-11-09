@@ -39,7 +39,7 @@ class DeviceSwitchTests(unittest.TestCase):
     self.addCleanup(self.temporary.cleanup)
     self.root = Path(self.temporary.name)
     self.live, self.stage = self.root / 'live', self.root / 'stage'
-    self.old = make_repo(self.live, 'lean-release')
+    self.old = make_repo(self.live, 'c4-release')
     self.source = 'a' * 40
     self.payload = self.root / 'payload'
     self.payload.mkdir()
@@ -171,7 +171,7 @@ class DeviceSwitchTests(unittest.TestCase):
     self.prepare()
     self.switch()
     self.assertEqual(git(self.live, 'rev-parse', 'HEAD'), self.release)
-    self.assertEqual(git(self.live, 'rev-parse', 'refs/heads/lean-release'), self.old)
+    self.assertEqual(git(self.live, 'rev-parse', 'refs/heads/c4-release'), self.old)
     self.assertEqual(self.flag.read(), b'1')
     self.assertEqual(self.events[-1], ('sudo', 'reboot'))
 

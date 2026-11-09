@@ -31,7 +31,7 @@ BODY_FONT_SIZE = 80
 BUTTON_HEIGHT = 160
 BUTTON_SPACING = 50
 
-# 默认安装：自建分发服务（装 lochuan/lean-mici @ lean-release-c3x），见 all-in-one/installer/README.md。
+# 默认安装：自建分发服务（装 GitCode lochuan/toyopilot-c3 @ c3-release），见 all-in-one/installer/README.md。
 TOYOPILOT_INSTALLER_URL = "https://tp.diaperastiko.top/c3x"
 USER_AGENT = f"AGNOSSetup-{HARDWARE.get_os_version()}"
 
