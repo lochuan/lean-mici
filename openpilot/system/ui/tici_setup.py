@@ -10,7 +10,6 @@ from enum import IntEnum
 
 import pyray as rl
 
-from openpilot.cereal import log
 from openpilot.common.hardware import HARDWARE
 from openpilot.system.ui.lib.scroll_panel import GuiScrollPanel
 from openpilot.system.ui.lib.application import gui_app, FontWeight, FONT_SCALE, TextAlignment, TextAlignmentVertical
@@ -20,8 +19,6 @@ from openpilot.system.ui.widgets.keyboard import Keyboard
 from openpilot.system.ui.widgets.label import Label
 from openpilot.system.ui.lib.wifi_manager import ConnectStatus
 from openpilot.system.ui.widgets.network import WifiManagerUI, WifiManager
-
-NetworkType = log.DeviceState.NetworkType
 
 MARGIN = 50
 TITLE_FONT_SIZE = 90
@@ -54,10 +51,6 @@ class Setup(Widget):
   def __init__(self):
     super().__init__()
     self.state = SetupState.GETTING_STARTED
-    self.network_check_thread = None
-    self.network_connected = threading.Event()
-    self.wifi_connected = threading.Event()
-    self.stop_network_check_thread = threading.Event()
     self.failed_url = ""
     self.failed_reason = ""
     self.download_url = ""
@@ -98,9 +91,8 @@ class Setup(Widget):
     self._download_failed_body_label = Label("", BODY_FONT_SIZE, text_alignment=TextAlignment.LEFT, text_padding=20)
 
     self._network_setup_back_button = Button("Back", self._network_setup_back_button_callback)
-    self._network_setup_continue_button = Button("Waiting for internet", self._network_setup_continue_button_callback,
+    self._network_setup_continue_button = Button("Continue without Wi-Fi", self._network_setup_continue_button_callback,
                                                  button_style=ButtonStyle.PRIMARY)
-    self._network_setup_continue_button.set_enabled(False)
     self._network_setup_title_label = Label("Connect to Wi-Fi", TITLE_FONT_SIZE, FontWeight.BOLD, TextAlignment.LEFT, text_padding=20)
 
     self._custom_software_warning_continue_button = Button("Scroll to continue", self._custom_software_warning_continue_button_callback,
@@ -162,8 +154,6 @@ class Setup(Widget):
 
   def _custom_software_warning_continue_button_callback(self):
     self.state = SetupState.NETWORK_SETUP
-    self.stop_network_check_thread.clear()
-    self.start_network_check()
 
   def _getting_started_button_callback(self):
     self.state = SetupState.SOFTWARE_SELECTION
@@ -174,8 +164,6 @@ class Setup(Widget):
   def _software_selection_continue_button_callback(self):
     if self._software_selection_openpilot_button.selected:
       self.state = SetupState.NETWORK_SETUP
-      self.stop_network_check_thread.clear()
-      self.start_network_check()
     else:
       self.state = SetupState.CUSTOM_SOFTWARE_WARNING
 
@@ -186,7 +174,6 @@ class Setup(Widget):
     self.state = SetupState.SOFTWARE_SELECTION
 
   def _network_setup_continue_button_callback(self):
-    self.stop_network_check_thread.set()
     if self._software_selection_openpilot_button.selected:
       self.download(TOYOPILOT_INSTALLER_URL)
     else:
@@ -213,34 +200,6 @@ class Setup(Widget):
     triangle = gui_app.texture("images/button_continue_triangle.png", 54, int(btn_rect.height))
     rl.draw_texture_v(triangle, rl.Vector2(btn_rect.x + btn_rect.width / 2 - triangle.width / 2, btn_rect.height / 2 - triangle.height / 2), rl.WHITE)
 
-  def check_network_connectivity(self):
-    while not self.stop_network_check_thread.is_set():
-      if self.state == SetupState.NETWORK_SETUP:
-        # 同 mici_setup.NetworkConnectivityMonitor：有默认路由就算联网，不发请求探测外网
-        try:
-          network_type = HARDWARE.get_network_type()
-        except Exception:
-          network_type = NetworkType.none
-        if network_type == NetworkType.none:
-          self.network_connected.clear()
-        else:
-          self.network_connected.set()
-        if network_type == NetworkType.wifi:
-          self.wifi_connected.set()
-        else:
-          self.wifi_connected.clear()
-      time.sleep(1.0)
-
-  def start_network_check(self):
-    if self.network_check_thread is None or not self.network_check_thread.is_alive():
-      self.network_check_thread = threading.Thread(target=self.check_network_connectivity, daemon=True)
-      self.network_check_thread.start()
-
-  def close(self):
-    if self.network_check_thread is not None:
-      self.stop_network_check_thread.set()
-      self.network_check_thread.join()
-
   def render_network_setup(self, rect: rl.Rectangle):
     self._network_setup_title_label.render(rl.Rectangle(rect.x + MARGIN, rect.y + MARGIN, rect.width - MARGIN * 2, TITLE_FONT_SIZE * FONT_SCALE))
 
@@ -255,13 +214,8 @@ class Setup(Widget):
 
     self._network_setup_back_button.render(rl.Rectangle(rect.x + MARGIN, button_y, button_width, BUTTON_HEIGHT))
 
-    # Check network connectivity status
-    # Wi-Fi 已连上也放行（同 mici_setup.NetworkSetupPageBase._has_internet）
-    wifi_connected = self.wifi_connected.is_set() or self._wifi_manager.wifi_state.status == ConnectStatus.CONNECTED
-    continue_enabled = self.network_connected.is_set() or wifi_connected
-    self._network_setup_continue_button.set_enabled(continue_enabled)
-    continue_text = ("Continue" if wifi_connected else "Continue without Wi-Fi") if continue_enabled else "Waiting for internet"
-    self._network_setup_continue_button.set_text(continue_text)
+    wifi_connected = self._wifi_manager.wifi_state.status == ConnectStatus.CONNECTED
+    self._network_setup_continue_button.set_text("Continue" if wifi_connected else "Continue without Wi-Fi")
     self._network_setup_continue_button.render(rl.Rectangle(rect.x + MARGIN + button_width + BUTTON_SPACING, button_y, button_width, BUTTON_HEIGHT))
 
   def render_software_selection(self, rect: rl.Rectangle):
@@ -434,7 +388,6 @@ def main():
     gui_app.push_widget(setup)
     for _ in gui_app.render():
       pass
-    setup.close()
   except Exception as e:
     print(f"Setup error: {e}")
   finally:

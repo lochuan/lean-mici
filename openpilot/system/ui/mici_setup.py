@@ -20,7 +20,7 @@ from openpilot.system.ui.lib.wifi_manager import WifiManager, ConnectStatus
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.nav_widget import NavWidget
 from openpilot.system.ui.widgets.label import UnifiedLabel
-from openpilot.system.ui.widgets.scroller import Scroller, NavScroller, ITEM_SPACING
+from openpilot.system.ui.widgets.scroller import Scroller, NavScroller
 from openpilot.system.ui.widgets.slider import LargerSlider
 from openpilot.selfdrive.ui.mici.layouts.settings.network import WifiNetworkButton
 from openpilot.selfdrive.ui.mici.layouts.settings.network.wifi_ui import WifiUIMici
@@ -301,16 +301,6 @@ class NetworkSetupPageBase(Scroller):
     self._prev_wifi_connected = False
     self._pending_has_internet_scroll: float | None = None  # stores time to use as delay
     self._pending_continue_grow_animation = False
-    self._pending_wifi_grow_animation = False
-
-    def on_waiting_click():
-      offset = (self._wifi_button.rect.x + self._wifi_button.rect.width / 2) - (self._rect.x + self._rect.width / 2)
-      self._scroller.scroll_to(offset, smooth=True, block_interrupt=True, block_widget_interaction=True)
-      # trigger grow when wifi button in view
-      self._pending_wifi_grow_animation = True
-
-    self._waiting_button = BigPillButton("connect to\ncontinue", disabled_background=True)
-    self._waiting_button.set_click_callback(on_waiting_click)
     self._continue_button = BigPillButton("install ToyoPilot", green=True)
     self._continue_button.set_click_callback(lambda: continue_callback(self._custom_software))
 
@@ -318,7 +308,6 @@ class NetworkSetupPageBase(Scroller):
       self._connect_button,
       self._wifi_button,
       self._continue_button,
-      self._waiting_button,
     ])
 
     gui_app.add_nav_stack_tick(self._nav_stack_tick)
@@ -331,7 +320,6 @@ class NetworkSetupPageBase(Scroller):
     self._prev_wifi_connected = self._wifi_manager.wifi_state.status == ConnectStatus.CONNECTED
     self._pending_has_internet_scroll = None
     self._pending_continue_grow_animation = False
-    self._pending_wifi_grow_animation = False
 
     if self._prev_has_internet or self._prev_wifi_connected:
       self.set_shown_callback(lambda: self._scroll_to_end_and_grow())
@@ -359,14 +347,6 @@ class NetworkSetupPageBase(Scroller):
     # is still set on the frame the forgotten callback fires
     has_internet = self._has_internet
     wifi_connected = self._wifi_manager.wifi_state.status == ConnectStatus.CONNECTED
-
-    self._continue_button.set_visible(has_internet)
-    self._waiting_button.set_visible(not has_internet)
-
-    # TODO: fire show/hide events on visibility changes
-    if not has_internet:
-      self._pending_continue_grow_animation = False
-      self._waiting_button.set_text("waiting for\ninternet..." if wifi_connected else "connect to\ncontinue")
 
     self._wifi_manager.process_callbacks()
 
@@ -407,10 +387,6 @@ class NetworkSetupPageBase(Scroller):
       if btn_right < visible_right + 50:
         self._pending_continue_grow_animation = False
         self._continue_button.trigger_grow_animation()
-
-    if self._pending_wifi_grow_animation and abs(self._wifi_button.rect.x - ITEM_SPACING) < 50:
-      self._pending_wifi_grow_animation = False
-      self._wifi_button.trigger_grow_animation()
 
 
 class NetworkSetupPage(NetworkSetupPageBase, NavScroller):

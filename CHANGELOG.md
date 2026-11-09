@@ -1,3 +1,7 @@
+Unreleased
+==========
+* Factory setup and the system updater can continue without waiting for a connectivity check; downloading software still requires network access.
+
 sunnypilot Version 2026.002.000 (2026-06-28)
 ========================
 * What's Changed (sunnypilot/sunnypilot)
