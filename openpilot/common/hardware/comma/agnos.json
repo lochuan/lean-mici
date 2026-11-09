@@ -56,24 +56,24 @@
   },
   {
     "name": "boot",
-    "url": "https://dl.diaperastiko.top/agnos/20.3/boot-9b2491ecd8e200191fa5be5927ce855414df561b3c76e519686d51b84da46f50.img.xz",
-    "hash": "9b2491ecd8e200191fa5be5927ce855414df561b3c76e519686d51b84da46f50",
-    "hash_raw": "9b2491ecd8e200191fa5be5927ce855414df561b3c76e519686d51b84da46f50",
+    "url": "https://dl.diaperastiko.top/agnos/20.4/boot-bad8dad2311c7806eac0db5157dba56cd86fe43549002168cce0075d7972171c.img.xz",
+    "hash": "bad8dad2311c7806eac0db5157dba56cd86fe43549002168cce0075d7972171c",
+    "hash_raw": "bad8dad2311c7806eac0db5157dba56cd86fe43549002168cce0075d7972171c",
     "size": 47925248,
     "sparse": false,
     "full_check": true,
     "has_ab": true,
-    "ondevice_hash": "70ca7b3656c106b29e23700b3ec60a77854bc8642ac3913fcc4b170e0a972cf8"
+    "ondevice_hash": "030aa5ac96956623f702279df4df3373debeeb0fea7aa5cab51177a5d4f75c17"
   },
   {
     "name": "system",
-    "url": "https://dl.diaperastiko.top/agnos/20.3/system-2e3d2d9d15c84d0117eeaa93c96858dd34e5de5996e0548585184a8eb1d88605.img.xz",
-    "hash": "5cbcb1ce926a22886ad57da76d2e92572416a8890664a4c1f11384c928c75db0",
-    "hash_raw": "2e3d2d9d15c84d0117eeaa93c96858dd34e5de5996e0548585184a8eb1d88605",
+    "url": "https://dl.diaperastiko.top/agnos/20.4/system-4f20bc6f0ccfe02aeba593e6d669ee1de4eb87b666ec75de0a1b8b98531e6551.img.xz",
+    "hash": "cf677f789a3c3a3081baeab1df448550b032707ed0179b42a3c4e342f1b8832f",
+    "hash_raw": "4f20bc6f0ccfe02aeba593e6d669ee1de4eb87b666ec75de0a1b8b98531e6551",
     "size": 2147483648,
     "sparse": true,
     "full_check": false,
     "has_ab": true,
-    "ondevice_hash": "999cd52471c0d806ad194db09df8e98ef9b5d7181c8dce693680aacbdc9a12b3"
+    "ondevice_hash": "f2b887da839299e79fe160c8295056cdce990cad933aea14285d4b34db32a299"
   }
 ]
