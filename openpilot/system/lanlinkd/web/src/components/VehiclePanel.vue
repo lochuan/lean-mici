@@ -17,6 +17,8 @@ import type { VehicleState } from "@/lib/schema";
 
 const state = ref<VehicleState | null>(null);
 const loading = ref(true);
+const loadError = ref("");
+const updatedAt = ref("");
 const picking = ref(false);
 const saving = ref(false);
 const query = ref("");
@@ -25,8 +27,10 @@ async function load(): Promise<void> {
   loading.value = true;
   try {
     state.value = await api.vehicle();
+    loadError.value = "";
+    updatedAt.value = new Date().toLocaleTimeString();
   } catch (e) {
-    toast(e instanceof Error ? e.message : "读取车辆信息失败", "error");
+    loadError.value = e instanceof Error ? e.message : "读取车辆信息失败";
   } finally {
     loading.value = false;
   }
@@ -104,8 +108,24 @@ async function choose(name: string): Promise<void> {
     <h2 class="mb-1 text-[13px] font-medium uppercase tracking-wide text-sl-text-3">车辆</h2>
     <p class="mb-3 text-[13px] text-sl-text-3">指纹识别与平台选择</p>
 
+    <div v-if="loadError" role="status" class="mb-3 flex flex-wrap items-center gap-3 rounded-lg bg-sl-danger/10 px-4 py-3 ring-1 ring-inset ring-sl-danger/25">
+      <div class="min-w-0 flex-1 text-[13px]">
+        <p class="text-sl-danger">{{ state ? "车辆信息更新失败" : "无法读取车辆信息" }}：{{ loadError }}</p>
+        <p v-if="updatedAt" class="mt-1 text-sl-text-2">显示上次数据，可能已过期 · 上次更新 {{ updatedAt }}</p>
+      </div>
+      <Button size="sm" :disabled="loading || saving" @click="load">
+        <Loader2 v-if="loading" class="animate-spin" />重试
+      </Button>
+    </div>
+    <div v-else-if="state" class="mb-3 flex items-center justify-between gap-3">
+      <p class="text-[12px] text-sl-text-2">上次更新 {{ updatedAt }}</p>
+      <Button size="sm" :disabled="loading || saving" @click="load">
+        <Loader2 v-if="loading" class="animate-spin" />刷新
+      </Button>
+    </div>
+
     <div class="rounded-xl border border-sl-border bg-sl-surface">
-      <div v-if="loading" class="grid h-24 place-items-center">
+      <div v-if="loading && !state" class="grid h-24 place-items-center">
         <Loader2 class="size-5 animate-spin text-sl-text-3" />
       </div>
 

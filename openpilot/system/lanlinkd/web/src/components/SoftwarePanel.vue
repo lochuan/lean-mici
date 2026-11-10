@@ -17,18 +17,24 @@ import Button from "./ui/Button.vue";
 const status = ref<SoftwareStatus | null>(null);
 const loading = ref(true);
 const pollError = ref("");
+const refreshing = ref(false);
+const updatedAt = ref("");
 const busy = ref("");
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
 async function poll(): Promise<void> {
+  if (refreshing.value) return;
+  refreshing.value = true;
   try {
     status.value = await api.software();
     pollError.value = "";
+    updatedAt.value = new Date().toLocaleTimeString();
   } catch (e) {
     pollError.value = e instanceof Error ? e.message : String(e);
   } finally {
     loading.value = false;
+    refreshing.value = false;
   }
 }
 
@@ -58,21 +64,26 @@ onUnmounted(() => {
 
 <template>
   <div class="flex flex-col gap-4">
+    <div v-if="pollError" role="status" class="flex flex-wrap items-center gap-3 rounded-lg bg-sl-danger/10 px-4 py-3 ring-1 ring-inset ring-sl-danger/25">
+      <div class="min-w-0 flex-1 text-[13px]">
+        <p class="text-sl-danger">{{ status ? "软件信息更新失败" : "无法读取软件信息" }}：{{ pollError }}</p>
+        <p v-if="updatedAt" class="mt-1 text-sl-text-2">显示上次数据，可能已过期 · 上次更新 {{ updatedAt }}</p>
+      </div>
+      <Button size="sm" :disabled="refreshing" @click="poll">
+        <Loader2 v-if="refreshing" class="animate-spin" />重试
+      </Button>
+    </div>
+    <p v-else-if="updatedAt" class="text-[12px] text-sl-text-2">上次更新 {{ updatedAt }}</p>
     <div v-if="loading" class="grid h-40 place-items-center">
       <Loader2 class="size-6 animate-spin text-sl-text-3" />
     </div>
 
     <template v-else-if="status">
-      <!-- 故障提示 -->
-      <p
-        v-if="pollError"
-        class="rounded-lg bg-sl-danger/10 px-4 py-2.5 text-[13px] text-sl-danger ring-1 ring-inset ring-sl-danger/25"
-      >
-        软件服务不可用：{{ pollError }}
-      </p>
-
       <!-- 版本 -->
       <section class="sl-card px-5 py-4">
+        <p v-if="!status.version && !status.branch && !status.commit" class="mb-3 text-[13px] text-sl-text-2">
+          设备尚未提供版本信息。
+        </p>
         <dl class="grid grid-cols-[56px_1fr] gap-x-3 gap-y-1 text-[13px]">
           <dt class="text-sl-text-3">版本</dt><dd>{{ status.version || "-" }}</dd>
           <dt class="text-sl-text-3">分支</dt><dd>{{ status.branch || "-" }}<span v-if="status.commit"> · {{ status.commit }}</span></dd>
@@ -92,7 +103,7 @@ onUnmounted(() => {
           <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
             <RefreshCw
               class="size-5 text-sl-text-2"
-              :class="{ 'animate-spin': busy === 'check' || status.updaterState !== 'idle' }"
+              :class="{ 'animate-spin': busy === 'check' || (!pollError && status.updaterState !== 'idle') }"
             />
           </div>
           <div class="min-w-0 flex-1">
@@ -103,7 +114,7 @@ onUnmounted(() => {
           </div>
           <Button variant="accent" :disabled="!status.offroad || !!busy" class="min-w-20 justify-center"
                   @click="action('check')">
-            <Loader2 v-if="busy === 'check' || status.updaterState !== 'idle'" class="mr-2 size-4 animate-spin" />
+            <Loader2 v-if="busy === 'check' || (!pollError && status.updaterState !== 'idle')" class="mr-2 size-4 animate-spin" />
             检查
           </Button>
         </div>
@@ -130,7 +141,7 @@ onUnmounted(() => {
           <Button variant="accent" :disabled="!status.offroad || !!busy"
                   class="min-w-20 justify-center"
                   @click="action('download')">
-            <Loader2 v-if="busy === 'download' || status.updaterState !== 'idle'" class="mr-2 size-4 animate-spin" />
+            <Loader2 v-if="busy === 'download' || (!pollError && status.updaterState !== 'idle')" class="mr-2 size-4 animate-spin" />
             DOWNLOAD
           </Button>
         </div>

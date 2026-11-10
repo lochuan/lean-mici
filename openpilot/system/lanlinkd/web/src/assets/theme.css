@@ -18,8 +18,9 @@
   --color-sl-border-strong: #3a3a3a;
 
   --color-sl-text-1: #ececec;
-  --color-sl-text-2: #a3a3a3;
-  --color-sl-text-3: #6e6e6e;
+  --color-sl-text-2: #b0b0b0;
+  /* 三级文字：#6e6e6e 在 surface 上只有约 3.4:1，提到约 5.5:1 以满足小字可读 */
+  --color-sl-text-3: #8f8f8f;
 
   /* accent：青绿，极客感且与危险色（红/黄）区分度高 */
   --color-sl-accent: #4ade80;
@@ -137,6 +138,26 @@
   .sl-tabular {
     font-variant-numeric: tabular-nums;
     font-family: var(--font-mono);
+  }
+
+  /* 按压反馈：指针按下轻缩放，松开 140ms 回弹；键盘触发（focus-visible）即时且不缩放，
+   * 减少动效时不缩放。与 transition-colors 互斥，用了它就不要再叠 Tailwind 的 transition-* */
+  .sl-press {
+    transition-property: color, background-color, border-color, outline-color, box-shadow, transform;
+    transition-duration: 140ms;
+    transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  .sl-press:active:not(:disabled):not(:focus-visible) {
+    transform: scale(0.97);
+  }
+  .sl-press:focus-visible {
+    transition: none;
+    transform: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sl-press:active:not(:disabled):not(:focus-visible) {
+      transform: none;
+    }
   }
 
   .sl-glow {

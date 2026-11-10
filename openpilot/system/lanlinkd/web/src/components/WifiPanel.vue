@@ -18,6 +18,8 @@ import Dialog from "./ui/Dialog.vue";
 const status = ref<WifiStatus | null>(null);
 const loading = ref(true);
 const pollError = ref("");
+const refreshing = ref(false);
+const updatedAt = ref("");
 const busy = ref("");
 
 /** 连接弹层：目标网络 + 密码（永远 DHCP） */
@@ -34,14 +36,18 @@ const advDns = ref("");
 let timer: ReturnType<typeof setInterval> | undefined;
 
 async function poll(): Promise<void> {
+  if (refreshing.value) return;
+  refreshing.value = true;
   try {
     status.value = await api.wifi();
     pollError.value = "";
+    updatedAt.value = new Date().toLocaleTimeString();
   } catch (e) {
-    // 保留上一帧；首次进入失败也仍让面板可用（显示降级态）
+    // 失败保留上一帧，首次失败由独立错误提示提供重试入口。
     pollError.value = e instanceof Error ? e.message : String(e);
   } finally {
     loading.value = false;
+    refreshing.value = false;
   }
 }
 
@@ -176,7 +182,7 @@ function freezeIpCard(): void {
 }
 
 /** 网络切换全程：提交后 busy 起步，直到后端状态落到新连接（或失败复位） */
-const switching = computed(() => !!busy.value || (!!status.value?.connecting && status.value?.connecting !== status.value?.connected));
+const switching = computed(() => !!busy.value || (!pollError.value && !!status.value?.connecting && status.value?.connecting !== status.value?.connected));
 
 // 切换结束（成功或失败复位）→ 解冻，卡片一次性刷新到新状态
 watch(switching, (v) => {
@@ -204,6 +210,16 @@ const cardText = computed(() => {
 
 <template>
   <div class="flex flex-col gap-4">
+    <div v-if="pollError" role="status" class="flex flex-wrap items-center gap-3 rounded-lg bg-sl-danger/10 px-4 py-3 ring-1 ring-inset ring-sl-danger/25">
+      <div class="min-w-0 flex-1 text-[13px]">
+        <p class="text-sl-danger">{{ status ? "网络信息更新失败" : "无法读取网络信息" }}：{{ pollError }}</p>
+        <p v-if="updatedAt" class="mt-1 text-sl-text-2">显示上次数据，可能已过期 · 上次更新 {{ updatedAt }}</p>
+      </div>
+      <Button size="sm" :disabled="refreshing" @click="poll">
+        <Loader2 v-if="refreshing" class="animate-spin" />重试
+      </Button>
+    </div>
+    <p v-else-if="updatedAt" class="text-[12px] text-sl-text-2">上次更新 {{ updatedAt }}</p>
     <div v-if="loading" class="grid h-40 place-items-center">
       <Loader2 class="size-6 animate-spin text-sl-text-3" />
     </div>
@@ -220,7 +236,7 @@ const cardText = computed(() => {
         </div>
         <div class="flex items-center gap-3">
           <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-sl-surface-2">
-            <Loader2 v-if="!status.connected || switching" class="size-5 animate-spin text-sl-text-3" />
+            <Loader2 v-if="switching" class="size-5 animate-spin text-sl-text-3" />
             <Wifi v-else class="size-5 text-sl-text-2" />
           </div>
           <div class="min-w-0 flex-1">
@@ -268,16 +284,10 @@ const cardText = computed(() => {
       </section>
 
       <p
-        v-if="status.error"
+        v-if="status.error && !pollError"
         class="rounded-lg bg-sl-danger/10 px-4 py-2.5 text-[13px] text-sl-danger ring-1 ring-inset ring-sl-danger/25"
       >
         {{ status.error }}
-      </p>
-      <p
-        v-else-if="pollError"
-        class="rounded-lg bg-sl-danger/10 px-4 py-2.5 text-[13px] text-sl-danger ring-1 ring-inset ring-sl-danger/25"
-      >
-        网络服务不可用：{{ pollError }}
       </p>
 
       <!-- 网络列表 -->

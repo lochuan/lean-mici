@@ -159,7 +159,7 @@ function coreBarClass(load: number): string {
 
       <div class="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
         <div v-for="f in fields" :key="f.label" class="min-w-0">
-          <div class="text-[10px] font-semibold uppercase tracking-wider text-sl-text-3">
+          <div class="text-[12px] font-medium text-sl-text-3">
             {{ f.label }}
           </div>
           <div class="sl-tabular mt-0.5 truncate text-[13px] text-sl-text-1">
@@ -170,13 +170,13 @@ function coreBarClass(load: number): string {
 
       <!-- CPU 按核负载：细条形，一眼看出有没有单核打满 -->
       <div v-if="cpuCores.length" class="mt-4 border-t border-sl-border pt-3">
-        <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sl-text-3">
+        <div class="mb-1.5 text-[12px] font-medium text-sl-text-3">
           CPU 负载（按核，{{ cpuCores.length }} 核）
         </div>
         <div class="flex items-center gap-1">
           <div v-for="(load, i) in cpuCores" :key="i" class="h-4 flex-1 overflow-hidden rounded-sm bg-sl-surface-3">
             <div
-              class="h-full transition-[width] duration-700"
+              class="h-full"
               :class="coreBarClass(load)"
               :style="{ width: `${Math.min(100, Math.max(0, load))}%` }"
             />
@@ -204,7 +204,7 @@ function coreBarClass(load: number): string {
             :class="f === 1 ? 'bg-sl-accent' : 'bg-sl-info'"
           />
         </div>
-        <div class="sl-tabular mt-1.5 text-[11px] text-sl-text-3">
+        <div class="sl-tabular mt-1.5 text-[12px] text-sl-text-3">
           最近 {{ modelFrames.length }} 帧：
           <span class="mr-0.5 inline-block size-2 rounded-sm bg-sl-accent align-baseline" />大模型 {{ bigCount }} ·
           <span class="mr-0.5 inline-block size-2 rounded-sm bg-sl-info align-baseline" />小模型 {{ modelFrames.length - bigCount }}（左旧右新）
@@ -213,7 +213,7 @@ function coreBarClass(load: number): string {
       <div v-if="!modelFrames.length" class="mt-3 text-[13px] text-sl-text-3">暂无模型帧（未行驶或 modeld 未运行）</div>
 
       <div v-if="model?.bigEnabled && timing?.window" class="mt-4 border-t border-sl-border pt-3">
-        <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sl-text-3">
+        <div class="mb-1.5 text-[12px] font-medium text-sl-text-3">
           C4 分段耗时（最近 {{ timing.window }} 帧，p50 / p90 ms）
           <span v-if="timing.deadlineMs != null" class="normal-case tracking-normal">· 截止 {{ timing.deadlineMs.toFixed(1) }}</span>
         </div>
@@ -228,7 +228,7 @@ function coreBarClass(load: number): string {
           </tbody>
         </table>
         <div v-else class="text-[12px] text-sl-text-3">窗口内没有收到 REPLY</div>
-        <div class="sl-tabular mt-2 text-[11px] text-sl-text-3">
+        <div class="sl-tabular mt-2 text-[12px] text-sl-text-3">
           小模型原因：
           <template v-for="(r, i) in SOURCE_ROWS" :key="r.key">{{ i ? " · " : "" }}{{ r.label }} {{ timing.sources[r.key] }}</template>
         </div>
@@ -249,16 +249,16 @@ function coreBarClass(load: number): string {
       <template v-if="torqueLearned && torqueApplicable">
         <div class="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
           <div v-for="f in torqueFields" :key="f.label" class="min-w-0">
-            <div class="text-[10px] font-semibold uppercase tracking-wider text-sl-text-3">
+            <div class="text-[12px] font-medium text-sl-text-3">
               {{ f.label }}
             </div>
             <div class="sl-tabular mt-0.5 truncate text-[13px] text-sl-text-1">{{ f.value }}</div>
-            <div v-if="f.sub" class="sl-tabular truncate text-[11px] text-sl-text-3">{{ f.sub }}</div>
+            <div v-if="f.sub" class="sl-tabular truncate text-[12px] text-sl-text-3">{{ f.sub }}</div>
           </div>
         </div>
 
         <div v-if="torqueBins.length || torqueHint" class="mt-4 border-t border-sl-border pt-3">
-          <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sl-text-3">
+          <div class="mb-1.5 text-[12px] font-medium text-sl-text-3">
             按车速分段
             <span class="normal-case tracking-normal">
               · {{ torque?.toggles.SpeedDependentTorqueToggle ? "已开启" : "未开启" }}
@@ -267,7 +267,7 @@ function coreBarClass(load: number): string {
           <div v-if="torqueHint" class="mb-2 text-[12px] text-sl-text-3">{{ torqueHint }}</div>
           <table v-if="torqueBins.length" class="sl-tabular w-full text-[12px]">
             <thead>
-              <tr class="text-left text-[10px] uppercase tracking-wider text-sl-text-3">
+              <tr class="text-left text-[12px] text-sl-text-3">
                 <th class="py-1 font-semibold">km/h</th>
                 <th class="py-1 text-right font-semibold">系数</th>
                 <th class="hidden py-1 text-right font-semibold sm:table-cell">较全局</th>
@@ -285,12 +285,12 @@ function coreBarClass(load: number): string {
                   <div class="flex items-center gap-2">
                     <div class="h-1.5 flex-1 overflow-hidden rounded-sm bg-sl-surface-3">
                       <div
-                        class="h-full transition-[width] duration-700"
+                        class="h-full"
                         :class="r.tone === 'accent' ? 'bg-sl-accent' : 'bg-sl-warn'"
                         :style="{ width: `${r.progress ?? 0}%` }"
                       />
                     </div>
-                    <span class="w-[5.5em] shrink-0 text-right text-[11px]" :class="r.tone === 'accent' ? 'text-sl-accent' : 'text-sl-text-3'">
+                    <span class="w-[5.5em] shrink-0 text-right text-[12px]" :class="r.tone === 'accent' ? 'text-sl-accent' : 'text-sl-text-3'">
                       {{ r.state }}
                     </span>
                   </div>
@@ -298,7 +298,7 @@ function coreBarClass(load: number): string {
               </tr>
             </tbody>
           </table>
-          <div v-if="torqueBins.length" class="mt-1.5 text-[11px] text-sl-text-3">
+          <div v-if="torqueBins.length" class="mt-1.5 text-[12px] text-sl-text-3">
             学习中的档实际使用全局值；已生效的档在行驶中按车速插值使用。
           </div>
         </div>

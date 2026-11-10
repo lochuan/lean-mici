@@ -1,6 +1,8 @@
 Unreleased
 ==========
 * Factory setup and the system updater can continue without waiting for a connectivity check; downloading software still requires network access.
+* LANLink groups navigation by task, adds descriptive feature tiles, and improves mobile spacing, text contrast, and keyboard-accessible menus.
+* LANLink shows retryable loading errors and stale-data timestamps, updates telemetry without delayed bar animations, and respects keyboard and reduced-motion preferences for press feedback.
 
 sunnypilot Version 2026.002.000 (2026-06-28)
 ========================

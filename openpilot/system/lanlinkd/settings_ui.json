@@ -399,8 +399,8 @@
          "title_param_suffix": {
           "param": "TorqueParamsOverrideEnabled",
           "values": {
-           "true": "(Real-Time & Offline)",
-           "false": "(Offline Only)"
+           "true": "（实时与离线）",
+           "false": "（仅离线）"
           }
          },
          "min": 0.1,
@@ -435,8 +435,8 @@
          "title_param_suffix": {
           "param": "TorqueParamsOverrideEnabled",
           "values": {
-           "true": "(Real-Time & Offline)",
-           "false": "(Offline Only)"
+           "true": "（实时与离线）",
+           "false": "（仅离线）"
           }
          },
          "min": 0.0,
@@ -499,7 +499,7 @@
        "key": "AutoLaneChangeTimer",
        "widget": "option",
        "title": "转向灯自动变道",
-       "details": "Please use caution when using this feature. Only use the blinker when traffic and road conditions permit.",
+       "details": "使用此功能时请保持谨慎，仅在交通和路况允许时才打转向灯变道。",
        "options": [
         {
          "value": -1,
@@ -1757,6 +1757,7 @@
    "label": "软件",
    "icon": "software",
    "order": 11,
+   "description": "查看当前版本，检查并安装更新",
    "sections": [
     {
      "id": "updates",
@@ -1786,6 +1787,7 @@
    "label": "车辆",
    "icon": "vehicle",
    "order": 12,
+   "description": "车型识别、指纹状态与手动选择车型",
    "sections": [
     {
      "title": "车辆",

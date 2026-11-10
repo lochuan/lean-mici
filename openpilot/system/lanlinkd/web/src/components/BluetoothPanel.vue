@@ -21,6 +21,8 @@ const status = ref<BluetoothStatus | null>(null);
 const loading = ref(true);
 /** 传输层错误（503 等）；成功一帧即清空，与 status.error（daemon 报的）分开展示 */
 const pollError = ref("");
+const refreshing = ref(false);
+const updatedAt = ref("");
 /** 操作锁：同一时刻只放一个操作在飞，按钮按 operation 名细分禁用 */
 const busy = ref("");
 const pairValue = ref("");
@@ -30,14 +32,18 @@ const nowTick = ref(Date.now());
 let timer: ReturnType<typeof setInterval> | undefined;
 
 async function poll(): Promise<void> {
+  if (refreshing.value) return;
+  refreshing.value = true;
   try {
     status.value = await api.bluetooth();
     pollError.value = "";
+    updatedAt.value = new Date().toLocaleTimeString();
   } catch (e) {
     // 失败保留上一帧，配对流程不因一次超时被打断
     pollError.value = e instanceof Error ? e.message : String(e);
   } finally {
     loading.value = false;
+    refreshing.value = false;
   }
 }
 
@@ -116,6 +122,16 @@ function respondPairing(accepted: boolean): void {
 
 <template>
   <div class="flex flex-col gap-4">
+    <div v-if="pollError" role="status" class="flex flex-wrap items-center gap-3 rounded-lg bg-sl-danger/10 px-4 py-3 ring-1 ring-inset ring-sl-danger/25">
+      <div class="min-w-0 flex-1 text-[13px]">
+        <p class="text-sl-danger">{{ status ? "蓝牙信息更新失败" : "无法读取蓝牙信息" }}：{{ pollError }}</p>
+        <p v-if="updatedAt" class="mt-1 text-sl-text-2">显示上次数据，可能已过期 · 上次更新 {{ updatedAt }}</p>
+      </div>
+      <Button size="sm" :disabled="refreshing" @click="poll">
+        <Loader2 v-if="refreshing" class="animate-spin" />重试
+      </Button>
+    </div>
+    <p v-else-if="updatedAt" class="text-[12px] text-sl-text-2">上次更新 {{ updatedAt }}</p>
     <div v-if="loading" class="grid h-40 place-items-center">
       <Loader2 class="size-6 animate-spin text-sl-text-3" />
     </div>
@@ -154,18 +170,12 @@ function respondPairing(accepted: boolean): void {
         </p>
       </section>
 
-      <!-- 错误：daemon 报的（配对失败等）与传输层失败（503）分两条 -->
+      <!-- 服务报告的操作错误仅在数据仍为最新时展示 -->
       <p
-        v-if="status.error"
+        v-if="status.error && !pollError"
         class="rounded-lg bg-sl-danger/10 px-4 py-2.5 text-[13px] text-sl-danger ring-1 ring-inset ring-sl-danger/25"
       >
         {{ status.error }}
-      </p>
-      <p
-        v-else-if="pollError"
-        class="rounded-lg bg-sl-danger/10 px-4 py-2.5 text-[13px] text-sl-danger ring-1 ring-inset ring-sl-danger/25"
-      >
-        蓝牙服务不可用：{{ pollError }}
       </p>
 
       <!-- 配对请求（bluez agent） -->

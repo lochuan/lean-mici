@@ -19,7 +19,11 @@ import { cn, resolveUnit } from "@/lib/utils";
 import { pickControl } from "@/lib/control";
 import type { Item } from "@/lib/schema";
 
-const props = withDefaults(defineProps<{ item: Item; depth?: number }>(), { depth: 0 });
+/** compact：所在分区只有这一行时，手机上收紧上下留白（见 SettingSection） */
+const props = withDefaults(defineProps<{ item: Item; depth?: number; compact?: boolean }>(), {
+  depth: 0,
+  compact: false,
+});
 
 const ctx = computed(() => ({ params: store.params, caps: store.caps }));
 const st = computed(() => itemState(props.item, ctx.value));
@@ -56,7 +60,8 @@ const current = computed(() => rawValue(props.item.key) ?? "");
     <div
       :class="
         cn(
-          'flex items-start justify-between gap-4 py-3.5',
+          'flex items-start justify-between gap-4',
+          props.compact ? 'py-2.5 md:py-3.5' : 'py-3.5',
           props.depth > 0 && 'pl-4 border-l border-sl-border/60',
         )
       "

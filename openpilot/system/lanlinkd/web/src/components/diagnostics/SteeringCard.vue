@@ -89,15 +89,15 @@ const details = computed(() => {
       <div v-if="view.usage" class="mt-4 border-t border-sl-border pt-3">
         <div class="mb-2 text-[12px] font-semibold text-sl-text-2">转向力使用分布（占可用力的比例）</div>
         <div class="flex flex-col gap-1.5">
-          <div v-for="(b, i) in view.usage" :key="b.label" class="sl-tabular flex items-center gap-2 text-[11px]">
+          <div v-for="(b, i) in view.usage" :key="b.label" class="sl-tabular flex items-center gap-2 text-[12px]">
             <span class="w-[4.5em] shrink-0 text-sl-text-3">{{ b.label }}</span>
             <div class="h-2.5 flex-1 overflow-hidden rounded-sm bg-sl-surface-3">
-              <div class="h-full transition-[width] duration-700" :class="i === 4 ? 'bg-sl-warn' : 'bg-sl-info'" :style="{ width: `${b.pct}%` }" />
+              <div class="h-full" :class="i === 4 ? 'bg-sl-warn' : 'bg-sl-info'" :style="{ width: `${b.pct}%` }" />
             </div>
             <span class="w-[3em] shrink-0 text-right text-sl-text-2">{{ b.pct }}%</span>
           </div>
         </div>
-        <div class="mt-1.5 text-[11px] text-sl-text-3">60% 以上两档占比越高，说明转向越吃力</div>
+        <div class="mt-1.5 text-[12px] text-sl-text-3">60% 以上两档占比越高，说明转向越吃力</div>
       </div>
     </template>
   </DiagCard>

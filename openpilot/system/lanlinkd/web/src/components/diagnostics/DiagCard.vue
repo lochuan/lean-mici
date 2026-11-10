@@ -30,7 +30,7 @@ defineProps<{
 
     <div v-if="progress" class="mt-3">
       <div class="h-1.5 overflow-hidden rounded-sm bg-sl-surface-3">
-        <div class="h-full bg-sl-info transition-[width] duration-700" :style="{ width: `${progress.pct}%` }" />
+        <div class="h-full bg-sl-info" :style="{ width: `${progress.pct}%` }" />
       </div>
       <div class="mt-1 text-[12px] text-sl-text-3">{{ progress.text }}</div>
     </div>

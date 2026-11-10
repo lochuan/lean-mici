@@ -32,7 +32,7 @@ const showBrand = computed(() => brandSettings.value && props.panel.id === "togg
 </script>
 
 <template>
-  <div class="mx-auto flex w-full max-w-[768px] flex-col gap-4 px-6 py-6">
+  <div class="mx-auto flex w-full max-w-[768px] flex-col gap-4 px-4 py-4 md:px-6 md:py-6">
     <header class="flex flex-col gap-1">
       <div class="flex items-center gap-2">
         <h1 class="text-[22px] font-semibold tracking-tight text-sl-text-1">{{ panel.label }}</h1>
